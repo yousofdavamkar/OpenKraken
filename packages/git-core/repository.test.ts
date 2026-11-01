@@ -176,3 +176,26 @@ test('abort terminates a spawned descendant, not just the parent', async () => {
       })
       .toBe(true);
 });
+
+test('shallow, sparse, submodule and SHA-256 repositories', async () => {
+  const source = createFixture(join(root, 'source-variants'));
+  const shallow = join(root, 'shallow');
+  const { pathToFileURL } = await import('node:url');
+  fixtureGit(root, ['clone', '--depth=2', pathToFileURL(source).href, shallow]);
+  const shallowRepo = await service.open(shallow);
+  expect(shallowRepo.isShallow).toBe(true);
+  expect((await service.snapshot(shallowRepo.id)).commits).toHaveLength(2);
+  fixtureGit(source, ['sparse-checkout', 'init', '--cone']);
+  expect((await service.open(source)).isSparse).toBe(true);
+  const parent = createFixture(join(root, 'submodule-parent'));
+  fixtureGit(parent, ['-c', 'protocol.file.allow=always', 'submodule', 'add', source, 'child']);
+  const submodule = await service.open(join(parent, 'child'));
+  expect(submodule.gitDir).toContain('modules');
+  const sha = join(root, 'sha256');
+  mkdirSync(sha);
+  fixtureGit(sha, ['init', '-b', 'main', '--object-format=sha256']);
+  fixtureGit(sha, ['commit', '--allow-empty', '-m', 'SHA-256 commit']);
+  const shaRepo = await service.open(sha);
+  expect(shaRepo.head.oid).toHaveLength(64);
+  expect((await service.snapshot(shaRepo.id)).commits[0]?.oid).toHaveLength(64);
+});

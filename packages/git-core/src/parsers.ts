@@ -72,7 +72,7 @@ export class StatusParser {
       record,
       type === '1' ? 8 : type === '2' ? 9 : type === 'u' ? 10 : 1,
     );
-    const xy = fields[1] ?? '??';
+    const xy = fields[1] ?? (type === '!' ? '!!' : '??');
     const entry: StatusEntry = {
       path: path.toString('utf8'),
       pathBytes: path.toString('base64'),
