@@ -7,11 +7,10 @@ import { commitSchema, type Commit } from '@openkraken/ipc-contract';
 import type { HistorySeed } from './history.js';
 const tailNames = ['tail-0.json', 'tail-1.json', 'tail-2.json'];
 const cacheNames = ['prefix.json', ...tailNames];
-const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 const pageSchema = z.object({
   key: z.string(),
   offset: z.number().int().nonnegative(),
-  commits: z.array(commitSchema).max(17000),
+  commits: z.array(z.unknown()).max(17000),
   hasMore: z.boolean(),
   digest: z.string(),
 });
@@ -39,16 +38,23 @@ export class HistoryCache {
       const path = join(this.directory, name);
       if ((await stat(path)).size > maxBytes) return;
       const result = pageSchema.safeParse(JSON.parse(await readFile(path, 'utf8')));
-      if (
-        result.success &&
-        result.data.key === this.key &&
-        result.data.digest ===
-          digest(
-            JSON.stringify({ offset: result.data.offset, hasMore: result.data.hasMore }) +
-              JSON.stringify(result.data.commits),
-          )
-      )
-        return result.data;
+      if (!result.success || result.data.key !== this.key) return;
+      const page = result.data,
+        commits: Commit[] = [];
+      const hash = createHash('sha256')
+        .update(JSON.stringify({ offset: page.offset, hasMore: page.hasMore }))
+        .update('[');
+      // Do not let validation of later disk pages monopolize the service while
+      // the UI is requesting a prefix that has already been decoded.
+      for (let i = 0; i < page.commits.length; i += 100) {
+        const batch = z.array(commitSchema).safeParse(page.commits.slice(i, i + 100));
+        if (!batch.success) return;
+        if (i) hash.update(',');
+        hash.update(JSON.stringify(batch.data).slice(1, -1));
+        commits.push(...batch.data);
+        await yieldTurn();
+      }
+      if (hash.update(']').digest('hex') === page.digest) return { ...page, commits };
     } catch {
       /* A cache miss always falls back to the real Git stream. */
     }
