@@ -118,7 +118,21 @@ const historyRequests = [
     .strict(),
 ] as const;
 const repoIdSchema = z.string().regex(/^[0-9a-f]{64}$/);
+export const commitOptionsSchema = z
+  .object({
+    message: z.string().min(1).max(65536),
+    revision: z.string().regex(/^[0-9a-f]{64}$/),
+    amend: z.boolean().optional(),
+    sign: z.boolean().optional(),
+  })
+  .strict();
+export type CommitOptions = z.infer<typeof commitOptionsSchema>;
 export const workingStateSchema = z.object({
+  revision: z.string().regex(/^[0-9a-f]{64}$/),
+  messageTemplate: z.string().optional(),
+  amendMessage: z.string().optional(),
+  signing: z.boolean().optional(),
+  commitWarning: z.string().optional(),
   status: statusSchema,
   head: headSchema,
   undo: z.object({ id: requestId, label: z.string() }).optional(),
@@ -131,6 +145,14 @@ const pathBytesSchema = z
   .max(65536)
   .regex(/^[A-Za-z0-9+/]+={0,2}$/);
 const workingRequests = [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('commit'),
+      repoId: repoIdSchema,
+      options: commitOptionsSchema,
+    })
+    .strict(),
   z.object({ id: requestId, method: z.literal('workingState'), repoId: repoIdSchema }).strict(),
   z
     .object({

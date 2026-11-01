@@ -6,6 +6,9 @@ import { createFixture, fixtureGit } from '../../packages/test-fixtures/src/inde
 test('working-tree buttons stage, unstage, undo and redo through the real Git service', async () => {
   const root = mkdtempSync(join(tmpdir(), 'openkraken-working-e2e-'));
   const repo = createFixture(join(root, 'repo'));
+  fixtureGit(repo, ['config', 'user.name', 'Test Author']);
+  fixtureGit(repo, ['config', 'user.email', 'test@example.test']);
+  fixtureGit(repo, ['config', 'commit.gpgSign', 'false']);
   writeFileSync(join(repo, 'tracked.txt'), 'working edit\n');
   writeFileSync(join(repo, 'new.txt'), 'new content\n');
   const app = await electron.launch({
@@ -35,6 +38,24 @@ test('working-tree buttons stage, unstage, undo and redo through the real Git se
       page.getByRole('button', { name: 'Stage tracked.txt', exact: true }),
     ).toBeEnabled();
     expect(fixtureGit(repo, ['diff', '--cached', '--name-only'])).toBe('');
+    await page.getByRole('button', { name: 'Stage all', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Unstage new.txt', exact: true })).toBeEnabled();
+    await page
+      .getByRole('textbox', { name: 'Commit message', exact: true })
+      .fill('Committed in the desktop\n\nBody\n');
+    await page.getByRole('button', { name: 'Commit staged changes', exact: true }).click();
+    await expect(page.getByText('Working tree clean', { exact: true })).toBeVisible();
+    expect(fixtureGit(repo, ['log', '-1', '--format=%s'])).toBe('Committed in the desktop');
+    await page.getByRole('checkbox', { name: 'Amend last commit', exact: true }).check();
+    await expect(page.getByRole('textbox', { name: 'Commit message', exact: true })).toHaveValue(
+      'Committed in the desktop\n\nBody\n',
+    );
+    await page
+      .getByRole('textbox', { name: 'Commit message', exact: true })
+      .fill('Amended in the desktop\n');
+    await page.getByRole('button', { name: 'Amend commit', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeEnabled();
+    expect(fixtureGit(repo, ['log', '-1', '--format=%s'])).toBe('Amended in the desktop');
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

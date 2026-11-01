@@ -605,3 +605,31 @@ footer {
 .working-file .status-entry {
   margin-bottom: 5px;
 }
+
+.commit-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #354153;
+}
+.commit-form textarea,
+.commit-form select {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  border: 1px solid #354153;
+  border-radius: 5px;
+  background: #10151e;
+  color: #dce3ed;
+  padding: 7px;
+  font: inherit;
+}
+.commit-form textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+.commit-form textarea:focus-visible,
+.commit-form select:focus-visible {
+  outline: 2px solid #6bdfc2;
+}

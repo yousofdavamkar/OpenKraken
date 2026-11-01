@@ -56,15 +56,18 @@ function startService() {
 function callService(request: ServiceRequest): Promise<Result> {
   const child = service ?? startService();
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      child.postMessage({ id: request.id });
-      pending.delete(request.id);
-      resolve({
-        kind: 'error',
-        code: 'SERVICE_TIMEOUT',
-        message: 'The Git service did not respond in time.',
-      });
-    }, 60000);
+    const timer = setTimeout(
+      () => {
+        child.postMessage({ id: request.id });
+        pending.delete(request.id);
+        resolve({
+          kind: 'error',
+          code: 'SERVICE_TIMEOUT',
+          message: 'The Git service did not respond in time.',
+        });
+      },
+      request.method === 'commit' ? 180000 : 60000,
+    );
     pending.set(request.id, { resolve, timer });
     child.postMessage(request);
   });

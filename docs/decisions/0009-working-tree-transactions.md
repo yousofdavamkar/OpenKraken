@@ -11,3 +11,11 @@ Undo and redo compare HEAD and semantic index fingerprints before restoring anyt
 The UI presents staged/unstaged lists with per-file and all-file controls, plus Undo/Redo. Operations use the typed bridge and the common-directory write queue; the renderer never supplies command lines or absolute filesystem paths.
 
 References: [Git add](https://git-scm.com/docs/git-add), [Git restore](https://git-scm.com/docs/git-restore), [Git update-index](https://git-scm.com/docs/git-update-index).
+
+## Commit and amend
+
+Use native `git commit --file=- --cleanup=verbatim`; hooks, `core.hooksPath`, filters and configured GPG/SSH signing remain Git's responsibility. Expose inherit/on/off signing choices and preload the configured message template or current commit message for amend. Refuse stale HEAD/index revisions, empty messages, and in-progress merge/rebase operations (their completion UI belongs to M4). Preserve drafts after errors. Git gets 120 seconds for hooks/pinentry; the main-process deadline is 180 seconds.
+
+Undo/redo for commit and amend uses compare-and-swap `update-ref`, preserving independent worktree changes and staging state. An initial commit can return to an unborn branch. If cancellation arrives after Git moves HEAD, finish the journal/index bookkeeping before reporting cancellation so Undo remains available. Missing Git objects cause undo to fail before changing the real index or HEAD.
+
+Verification covers exact trailing newlines, native hook rejection, stale staged revisions, cancellation during a post-commit hook, and an SSH-signed commit accepted by `git verify-commit`. Signing uses a temporary test key; no personal credentials are accessed.

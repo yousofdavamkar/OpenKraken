@@ -1,7 +1,13 @@
 import { createHash } from 'node:crypto';
 import { access, readdir, realpath, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Commit, GraphView, Repository, Snapshot } from '@openkraken/ipc-contract';
+import type {
+  Commit,
+  CommitOptions,
+  GraphView,
+  Repository,
+  Snapshot,
+} from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { HistoryParser, RefsParser, StatusParser, HISTORY_FORMAT, REF_FORMAT } from './parsers.js';
 import { HistoryCache } from './history-cache.js';
@@ -432,6 +438,10 @@ export class RepositoryService {
       () => work.files(action, paths, signal),
       signal,
     );
+  }
+  commit(id: string, options: CommitOptions, signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(true, () => work.commit(options, signal), signal);
   }
   undo(id: string, redo = false, signal?: AbortSignal) {
     const work = this.working(id);

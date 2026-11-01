@@ -2,6 +2,7 @@ import { afterAll, expect, test } from 'vitest';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
 import { RepositoryService } from './src/repository.js';
 import { WorkingTree } from './src/working-tree.js';
@@ -67,3 +68,113 @@ test('unstaging on unborn HEAD keeps working files, including edits made after s
   await work.undo();
   expect(fixtureGit(path, ['show', ':new.txt'])).toBe('initial');
 });
+test('commit and amend preserve messages, run native hooks, and undo/redo only owned HEAD/index state', async () => {
+  const { path, work } = await setup('commit');
+  fixtureGit(path, ['config', 'user.name', 'Test Author']);
+  fixtureGit(path, ['config', 'user.email', 'test@example.test']);
+  fixtureGit(path, ['config', 'commit.gpgSign', 'false']);
+  await writeFile(join(path, 'tracked.txt'), 'commit me\n');
+  await work.files('stage', [bytes('tracked.txt')]);
+  const before = fixtureGit(path, ['rev-parse', 'HEAD']);
+  const message = 'First commit\n\nBody with space  \n\n';
+  await work.commit({ message, revision: (await work.state()).revision });
+  const first = fixtureGit(path, ['rev-parse', 'HEAD']);
+  const raw = (await import('./src/runner.js')).runGit;
+  expect(
+    (await raw('git', ['cat-file', 'commit', first], { cwd: path })).stdout
+      .toString()
+      .split('\n\n')
+      .slice(1)
+      .join('\n\n'),
+  ).toBe(message);
+  await work.commit({ message: 'Amended\n', amend: true, revision: (await work.state()).revision });
+  const amended = fixtureGit(path, ['rev-parse', 'HEAD']);
+  expect(amended).not.toBe(first);
+  await work.undo();
+  expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(first);
+  await work.undo();
+  expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(before);
+  expect(await readFile(join(path, 'tracked.txt'), 'utf8')).toBe('commit me\n');
+  await work.undo(true);
+  expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(first);
+  const hook = join(path, '.git/hooks/pre-commit');
+  await writeFile(hook, '#!/bin/sh\necho "Blocked by test hook" >&2\nexit 1\n', { mode: 0o755 });
+  await expect(
+    work.commit({ message: 'Blocked\n', amend: true, revision: (await work.state()).revision }),
+  ).rejects.toThrow('Blocked by test hook');
+  expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(first);
+});
+test('commit refuses stale staged content and loads the configured message template', async () => {
+  const { path, work } = await setup('commit-stale');
+  fixtureGit(path, ['config', 'user.name', 'Test Author']);
+  fixtureGit(path, ['config', 'user.email', 'test@example.test']);
+  await writeFile(join(path, 'template.txt'), 'Subject\n\nBody template\n');
+  fixtureGit(path, ['config', 'commit.template', 'template.txt']);
+  const state = await work.state();
+  expect(state.messageTemplate).toBe('Subject\n\nBody template\n');
+  await writeFile(join(path, 'tracked.txt'), 'external stage\n');
+  fixtureGit(path, ['add', 'tracked.txt']);
+  const head = fixtureGit(path, ['rev-parse', 'HEAD']);
+  await expect(
+    work.commit({ message: 'Old review\n', revision: state.revision }),
+  ).rejects.toMatchObject({ code: 'STALE_COMMIT' });
+  expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(head);
+  expect(fixtureGit(path, ['show', ':tracked.txt'])).toBe('external stage');
+});
+test('cancellation after Git moved HEAD still records a usable undo entry', async () => {
+  if (process.platform === 'win32') return;
+  const { path, work } = await setup('cancel-after-commit');
+  fixtureGit(path, ['config', 'user.name', 'Test Author']);
+  fixtureGit(path, ['config', 'user.email', 'test@example.test']);
+  fixtureGit(path, ['config', 'commit.gpgSign', 'false']);
+  await writeFile(join(path, 'tracked.txt'), 'committed before cancellation\n');
+  await work.files('stage', [bytes('tracked.txt')]);
+  const before = fixtureGit(path, ['rev-parse', 'HEAD']);
+  await writeFile(
+    join(path, '.git/hooks/post-commit'),
+    '#!/bin/sh\nprintf done > hook-started\nsleep 30\n',
+    { mode: 0o755 },
+  );
+  const controller = new AbortController();
+  const result = work
+    .commit({ message: 'Completed\n', revision: (await work.state()).revision }, controller.signal)
+    .catch((e: unknown) => e);
+  await expect
+    .poll(() => readFile(join(path, 'hook-started'), 'utf8').catch(() => ''), { timeout: 5000 })
+    .toBe('done');
+  controller.abort();
+  expect(await result).toMatchObject({ code: 'CANCELLED' });
+  expect(fixtureGit(path, ['rev-parse', 'HEAD'])).not.toBe(before);
+  await work.undo();
+  expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(before);
+  expect(fixtureGit(path, ['show', ':tracked.txt'])).toBe('committed before cancellation');
+});
+
+test.skipIf(!!spawnSync('ssh-keygen', ['-V']).error)(
+  'Git SSH signing creates a commit that verify-commit accepts',
+  async () => {
+    const { path, work } = await setup('signed');
+    const key = join(root, 'signing-key');
+    execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key]);
+    const publicKey = (await readFile(`${key}.pub`, 'utf8')).trim();
+    const allowed = join(root, 'allowed-signers');
+    await writeFile(allowed, `test@example.test ${publicKey}\n`);
+    for (const [name, value] of [
+      ['user.name', 'Test Author'],
+      ['user.email', 'test@example.test'],
+      ['gpg.format', 'ssh'],
+      ['user.signingKey', key],
+      ['gpg.ssh.allowedSignersFile', allowed],
+    ])
+      fixtureGit(path, ['config', name!, value!]);
+    await writeFile(join(path, 'tracked.txt'), 'signed content\n');
+    await work.files('stage', [bytes('tracked.txt')]);
+    await work.commit({
+      message: 'Signed through Git\n',
+      sign: true,
+      revision: (await work.state()).revision,
+    });
+    fixtureGit(path, ['verify-commit', 'HEAD']);
+    expect(fixtureGit(path, ['log', '-1', '--format=%s'])).toBe('Signed through Git');
+  },
+);

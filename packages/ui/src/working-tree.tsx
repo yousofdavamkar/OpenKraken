@@ -1,9 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Request, WorkingState } from '@openkraken/ipc-contract';
 import { useRepository } from './store.js';
 export function WorkingTreePanel() {
   const { snapshot, busy } = useRepository();
   const [state, setState] = useState<WorkingState>();
+  const [message, setMessage] = useState('');
+  const [amendText, setAmendText] = useState('');
+  const [amend, setAmend] = useState(false);
+  const [amendHead, setAmendHead] = useState<string>();
+  const [sign, setSign] = useState('default');
+  const templateLoaded = useRef(false);
+  useEffect(() => {
+    if (state && !templateLoaded.current) {
+      templateLoaded.current = true;
+      setMessage((draft) => draft || state.messageTemplate || '');
+    }
+  }, [state]);
   const [error, setError] = useState<string>();
   const repoId = snapshot?.repository.id,
     cursor = snapshot?.cursor;
@@ -26,13 +38,17 @@ export function WorkingTreePanel() {
   }, [repoId, cursor]);
   if (!snapshot || !repoId) return null;
   const mutate = async (request: Request) => {
-    if (useRepository.getState().busy) return;
+    if (useRepository.getState().busy) return false;
+    let success = false;
     useRepository.setState({ busy: request.id });
     setError(undefined);
     try {
       const result = await window.openkraken.request(request);
       if (result.kind === 'error') throw new Error(result.message);
-      if (result.kind === 'workingState') setState(result.state);
+      if (result.kind === 'workingState') {
+        setState(result.state);
+        success = true;
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -40,6 +56,7 @@ export function WorkingTreePanel() {
       if (useRepository.getState().snapshot?.repository.id === repoId)
         await useRepository.getState().run({ id: crypto.randomUUID(), method: 'refresh', repoId });
     }
+    return success;
   };
   const status = state?.status ?? snapshot.status;
   const staged = status.entries.filter((e) => e.kind !== 'untracked' && e.index !== '.');
@@ -124,6 +141,83 @@ export function WorkingTreePanel() {
               ))}
             </section>
           ))}
+          <form
+            className="commit-form"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (!state) return;
+              const success = await mutate({
+                id: crypto.randomUUID(),
+                method: 'commit',
+                repoId,
+                options: {
+                  message: amend ? amendText : message,
+                  revision: state.revision,
+                  amend,
+                  ...(sign === 'default' ? {} : { sign: sign === 'on' }),
+                },
+              });
+              if (success) {
+                setMessage('');
+                setAmendText('');
+                setAmend(false);
+              }
+            }}
+          >
+            <label>
+              Commit message
+              <textarea
+                rows={5}
+                aria-label="Commit message"
+                maxLength={65536}
+                value={amend ? amendText : message}
+                onChange={(event) => (amend ? setAmendText : setMessage)(event.target.value)}
+              />
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={amend}
+                disabled={!!busy || !state?.head.oid}
+                onChange={(event) => {
+                  setAmend(event.target.checked);
+                  if (event.target.checked) {
+                    setAmendText(state?.amendMessage ?? '');
+                    setAmendHead(state?.head.oid);
+                  }
+                }}
+              />{' '}
+              Amend last commit
+            </label>
+            {amend && amendHead !== state?.head.oid && (
+              <p role="alert">HEAD changed. Turn Amend off and on to review the current commit.</p>
+            )}
+            <label>
+              Signing
+              <select
+                aria-label="Signing"
+                value={sign}
+                onChange={(event) => setSign(event.target.value)}
+              >
+                <option value="default">Git setting ({state?.signing ? 'on' : 'off'})</option>
+                <option value="on">Sign with configured agent</option>
+                <option value="off">Do not sign</option>
+              </select>
+            </label>
+            {state?.commitWarning && <p role="alert">{state.commitWarning}</p>}
+            <button
+              className="primary"
+              disabled={
+                !!busy ||
+                !state ||
+                !(amend ? amendText : message).trim() ||
+                (!amend && !staged.length) ||
+                (amend && amendHead !== state.head.oid)
+              }
+            >
+              {amend ? 'Amend commit' : 'Commit staged changes'}
+            </button>
+          </form>
           {!status.entries.length && (
             <div className="clean">
               <span>✓</span>

@@ -13,6 +13,11 @@ function getService() {
 }
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
   const git = await getService();
+  if (request.method === 'commit')
+    return {
+      kind: 'workingState',
+      state: await git.commit(request.repoId, request.options, signal),
+    };
   if (request.method === 'workingState')
     return { kind: 'workingState', state: await git.workingState(request.repoId, signal) };
   if (request.method === 'files')
