@@ -1,11 +1,12 @@
 import { _electron as electron, expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus, release, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 // Opt-in, read-only benchmark against an existing repository. Never fetches or mutates it.
 const repository = process.env.OPENKRAKEN_BENCH_REPO;
+const warm = process.env.OPENKRAKEN_BENCH_WARM === '1';
 test('real-repository first paint, paging and scrolling budgets', async ({
   browserName: _browserName,
 }, testInfo) => {
@@ -13,10 +14,27 @@ test('real-repository first paint, paging and scrolling budgets', async ({
   test.setTimeout(120000);
   const path = resolve(repository!);
   const profile = mkdtempSync(join(tmpdir(), 'openkraken-bench-'));
-  const app = await electron.launch({
-    args: [resolve('apps/desktop'), `--user-data-dir=${profile}`],
-  });
+  const args = [resolve('apps/desktop'), `--user-data-dir=${profile}`];
+  let app = await electron.launch({ args });
   try {
+    if (warm) {
+      const prime = await app.firstWindow();
+      await app.evaluate(({ dialog }, folder) => {
+        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
+      }, path);
+      await prime.getByRole('button', { name: 'Open a repository', exact: true }).click();
+      await expect(prime.getByTestId('commit-count')).toHaveText('2,000 commits · more available', {
+        timeout: 60000,
+      });
+      for (const count of [7000, 12000, 17000]) {
+        await prime.getByRole('button', { name: 'Load more commits', exact: true }).click();
+        await expect(prime.getByTestId('commit-count')).toHaveText(
+          `${count.toLocaleString('en-US')} commits · more available`,
+        );
+      }
+      await app.close();
+      app = await electron.launch({ args });
+    }
     const page = await app.firstWindow();
     await page.getByRole('button', { name: 'Open a repository', exact: true }).waitFor();
     await app.evaluate(({ dialog }, folder) => {
@@ -65,6 +83,18 @@ test('real-repository first paint, paging and scrolling budgets', async ({
     pages.push(
       await page.evaluate(() => performance.getEntriesByName('history-page').at(-1)!.duration),
     );
+    const pagingPhases = await page.evaluate(() => {
+      const marks = (name: string) => performance.getEntriesByName(name).map((m) => m.startTime);
+      const starts = marks('history-page-start'),
+        responses = marks('history-page-response'),
+        workers = marks('history-page-worker'),
+        loaded = marks('history-page-loaded');
+      return starts.map((start, i) => ({
+        serviceMs: responses[i]! - start,
+        workerMs: workers[i]! - responses[i]!,
+        publishMs: loaded[i]! - workers[i]!,
+      }));
+    });
     const memory = await app.evaluate(({ app }) =>
       app.getAppMetrics().map((m) => ({
         type: m.type,
@@ -83,11 +113,29 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       cpu: cpus()[0]?.model,
       firstPaintMs,
       page5000Ms: pages,
+      pagingPhases,
       scrollingRows: 12000,
       p95FrameMs,
       mountedRows,
       electronMemory: memory,
-      cache: 'OS cache not cleared; includes startup of a fresh app process',
+      cache: {
+        os: 'Not cleared',
+        profile: warm
+          ? 'Reopened after caching 17,000 commits and a complete app restart'
+          : 'Fresh profile',
+        gitCommitGraph:
+          existsSync(
+            git('rev-parse', '--path-format=absolute', '--git-path', 'objects/info/commit-graph'),
+          ) ||
+          existsSync(
+            git(
+              'rev-parse',
+              '--path-format=absolute',
+              '--git-path',
+              'objects/info/commit-graphs/commit-graph-chain',
+            ),
+          ),
+      },
     };
     console.log(JSON.stringify(measurement, null, 2));
     const metricsPath = testInfo.outputPath('metrics.json');
