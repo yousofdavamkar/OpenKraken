@@ -2,7 +2,7 @@
 
 An independent desktop Git client built from the reconstruction specification in `analysis/gitkraken/10-reconstruction-blueprint.md` and public Git/Electron documentation. No proprietary application code or assets are included.
 
-M0's secure shell and Git service now support a Canvas commit graph with worker-based layout, append-only history paging, search, and keyboard navigation. The graph includes branch/tag badges and WIP/conflict rows, while text cells remain virtualized and accessible. React 19.3.1 and TypeScript 7.0.2 remain pinned.
+M0's secure shell and Git service now support a Canvas commit graph with worker-based layout, append-only history paging, search, and keyboard navigation. The graph includes branch/tag badges and WIP/conflict rows, while text cells remain virtualized and accessible. Hide/solo/pin controls select Git traversal roots, and refresh reuses unchanged layout checkpoints. React 19.3.1 and TypeScript 7.0.2 remain pinned.
 
 ## Run
 
@@ -28,13 +28,26 @@ pnpm package
 pnpm smoke:package
 ```
 
-See the [M0 report](docs/verification/m0.md) and [M1 graph report](docs/verification/m1.md) for recorded results and limits.
+See the [M0 report](docs/verification/m0.md), [M1 graph report](docs/verification/m1.md), and [ref-view follow-up](docs/verification/m1-views.md) for recorded results and limits.
 
 On headless Linux, use `xvfb-run -a pnpm test:e2e`. No `--no-sandbox` flag is needed or configured. E2E uses the developer Electron executable for Playwright inspection, checks actual renderer isolation/CSP, opens a deterministic repository through the native picker, and measures a <500 ms first paint for 2,000 commits. The gate includes Git service IPC and rendering, excludes human time in the picker, and verifies fewer than 100 mounted history rows. The M1 suite also gates 5,000-commit pages at <300 ms, compares six Canvas goldens, and records scrolling frame intervals on a 12,000-commit fixture. Results and screenshots are saved under `test-results/`.
 
 `pnpm package` produces a local unsigned platform bundle under `release/`, enables ASAR integrity/ASAR-only loading, disables RunAsNode/Node options/Node CLI inspection, and reads the fuse bytes back to verify them. Release installers, signing and update distribution remain M8 work. macOS/Windows execution is configured in CI but requires those runners to establish platform-specific evidence.
 
 Generate sample repositories with `pnpm fixtures [output-directory]`. They include six graph topologies and a 2,200-commit performance fixture. Tests generate isolated temporary repositories and clean up afterward.
+
+## Benchmark a real repository
+
+The opt-in benchmark is read-only and needs an existing repository with more than 17,000 reachable commits. It measures first paint, three 5,000-commit pages, scrolling with 12,000 loaded rows, mounted DOM rows and Electron process memory. It records repository HEAD, total reachable commit count, CPU, Git version and cache conditions alongside the measurements.
+
+```sh
+pnpm build
+OPENKRAKEN_BENCH_REPO=/path/to/linux.git pnpm benchmark:graph
+# Headless Linux:
+OPENKRAKEN_BENCH_REPO=/path/to/linux.git xvfb-run -a pnpm benchmark:graph
+```
+
+Results and a screenshot are attached under `test-results/benchmark/`. This benchmark skips during the normal suite unless the environment variable is set. It does not clone, fetch or change the selected repository.
 
 ## Packages
 
@@ -52,6 +65,8 @@ Generate sample repositories with `pnpm fixtures [output-directory]`. They inclu
 
 The first page contains 2,000 commits. Scroll near the bottom or choose **Load more commits** to append up to 5,000 more from the same Git stream. Refresh starts a new history generation; cancellation closes the current stream, so refresh before resuming it.
 
+**Hide** removes a ref as a history start point; shared ancestry remains if another visible ref reaches it. **Solo** shows one ref’s ancestry. **Pin** keeps its first-parent chain in column zero and makes that ref visible. **Reset graph view** clears these choices. Views, selection and search survive Refresh; view preferences currently last for the active repository session. Refresh reloads the first 2,000 commits and reuses unchanged layout rows.
+
 Search loaded history with **Ctrl/Cmd+F**. Token-prefix matches cover commit messages, bodies, authors, emails and hashes; non-matches dim without moving. **Search all history** performs a separate literal message/author search (or hexadecimal hash lookup) and lets you open details for commits not loaded in the graph. Results are capped at 100 and labeled when truncated.
 
 | Control                              | Action                               |
@@ -66,6 +81,6 @@ Search loaded history with **Ctrl/Cmd+F**. Token-prefix matches cover commit mes
 
 ## Remaining M1 work
 
-Hide/solo/pin controls, optional network avatars, checkpoint-based refresh reuse and benchmarks on linux.git remain. Refresh currently uses a correct full reset in the worker. Watchers, staging, commits, credentials and an undo journal outside repositories belong to subsequent milestones. Diff viewing remains M5.
+Optional network avatars, disk persistence for per-repository view preferences, and full performance qualification on real repositories remain. An 87k-commit shallow Linux benchmark passes paging and scrolling gates, but first paint still misses the 500 ms target; see the verification report. Watchers, staging, commits, credentials and an undo journal outside repositories belong to subsequent milestones. Diff viewing remains M5.
 
 Public references: [Git status](https://git-scm.com/docs/git-status), [for-each-ref](https://git-scm.com/docs/git-for-each-ref), [rev-list](https://git-scm.com/docs/git-rev-list), [Electron security](https://www.electronjs.org/docs/latest/tutorial/security), [utilityProcess](https://www.electronjs.org/docs/latest/api/utility-process).

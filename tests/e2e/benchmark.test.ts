@@ -1,6 +1,6 @@
 import { _electron as electron, expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus, release, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -90,8 +90,10 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       cache: 'OS cache not cleared; includes startup of a fresh app process',
     };
     console.log(JSON.stringify(measurement, null, 2));
+    const metricsPath = testInfo.outputPath('metrics.json');
+    writeFileSync(metricsPath, JSON.stringify(measurement, null, 2) + '\n');
     await testInfo.attach('real-repository-benchmark.json', {
-      body: JSON.stringify(measurement, null, 2),
+      path: metricsPath,
       contentType: 'application/json',
     });
     await page.screenshot({ path: testInfo.outputPath('real-repository.png') });

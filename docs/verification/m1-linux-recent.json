@@ -1,0 +1,37 @@
+{
+  "repository": "/home/yousof/Projects/OpenKraken/.test-fixtures/linux-recent.git",
+  "head": "46fec1c3029b552ec63b2d01af9d43a386f043ea",
+  "commits": 87206,
+  "shallow": "true",
+  "git": "git version 2.53.0",
+  "platform": "linux x64 7.0.0-42-generic",
+  "cpu": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+  "firstPaintMs": 1205.8999999994412,
+  "page5000Ms": [290.40000000037253, 252.29999999981374, 249.29999999981374],
+  "scrollingRows": 12000,
+  "p95FrameMs": 16.799999999999272,
+  "mountedRows": 35,
+  "electronMemory": [
+    {
+      "type": "Browser",
+      "workingSetKiB": 292652
+    },
+    {
+      "type": "GPU",
+      "workingSetKiB": 199700
+    },
+    {
+      "type": "Utility",
+      "workingSetKiB": 96600
+    },
+    {
+      "type": "Tab",
+      "workingSetKiB": 508316
+    },
+    {
+      "type": "Utility",
+      "workingSetKiB": 166812
+    }
+  ],
+  "cache": "OS cache not cleared; includes startup of a fresh app process"
+}
