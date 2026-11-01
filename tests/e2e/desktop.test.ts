@@ -63,12 +63,12 @@ test('sandbox, native folder open, real utility service and 2000-commit first pa
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
     }, repository);
     await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
-    await expect(page.getByTestId('commit-count')).toHaveText('2,000 commits · first page');
+    await expect(page.getByTestId('commit-count')).toHaveText('2,000 commits · more available');
     await expect(page.getByTestId('head')).toHaveText('main');
     await expect(page.getByText('↑1 ↓0', { exact: true })).toBeVisible();
     await expect(page.getByText('tracked.txt', { exact: true })).toBeVisible();
     await expect(page.getByText('new file.txt', { exact: true })).toBeVisible();
-    await expect(page.getByText('annotated', { exact: true })).toBeVisible();
+    await expect(page.locator('.refs').getByText('annotated', { exact: true })).toBeVisible();
     await expect
       .poll(() =>
         page.evaluate(() => performance.getEntriesByName('repository-first-paint').length),
@@ -96,10 +96,11 @@ test('sandbox, native folder open, real utility service and 2000-commit first pa
     });
     expect(duration).toBeLessThan(500);
     expect(await page.getByRole('row').count()).toBeLessThan(100);
-    await page.getByRole('table').evaluate((element) => {
+    await page.getByRole('grid').evaluate((element) => {
       element.scrollTop = element.scrollHeight;
     });
     await expect(page.getByText('Commit 201 — linear', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('commit-count')).toHaveText('2,200 commits');
     await page.screenshot({ path: 'test-results/repository.png' });
     expect(errors).toEqual([]);
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
