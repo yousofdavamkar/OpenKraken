@@ -28,7 +28,7 @@ pnpm package
 pnpm smoke:package
 ```
 
-See the [M0 report](docs/verification/m0.md), [M1 graph report](docs/verification/m1.md), and [ref-view follow-up](docs/verification/m1-views.md) for recorded results and limits.
+See the [M0 report](docs/verification/m0.md), [M1 graph report](docs/verification/m1.md), [ref-view follow-up](docs/verification/m1-views.md), and [M1 completion report](docs/verification/m1-completion.md) for recorded results and limits.
 
 On headless Linux, use `xvfb-run -a pnpm test:e2e`. No `--no-sandbox` flag is needed or configured. E2E uses the developer Electron executable for Playwright inspection, checks actual renderer isolation/CSP, opens a deterministic repository through the native picker, and measures a <500 ms first paint for 2,000 commits. The gate includes Git service IPC and rendering, excludes human time in the picker, and verifies fewer than 100 mounted history rows. The M1 suite also gates 5,000-commit pages at <300 ms, compares six Canvas goldens, and records scrolling frame intervals on a 12,000-commit fixture. Results and screenshots are saved under `test-results/`.
 
@@ -46,6 +46,8 @@ OPENKRAKEN_BENCH_REPO=/path/to/linux.git pnpm benchmark:graph
 # Headless Linux:
 OPENKRAKEN_BENCH_REPO=/path/to/linux.git xvfb-run -a pnpm benchmark:graph
 ```
+
+To measure a cached reopen after a complete app restart, set `OPENKRAKEN_BENCH_WARM=1` as well. The harness primes 17,000 commits before the measured launch and labels that condition in its JSON. The default always uses a fresh profile; it records whether the repository already has a Git commit-graph. It never creates one.
 
 Results and a screenshot are attached under `test-results/benchmark/`. This benchmark skips during the normal suite unless the environment variable is set. It does not clone, fetch or change the selected repository.
 
@@ -65,7 +67,7 @@ Results and a screenshot are attached under `test-results/benchmark/`. This benc
 
 The first page contains 2,000 commits. Scroll near the bottom or choose **Load more commits** to append up to 5,000 more from the same Git stream. Refresh starts a new history generation; cancellation closes the current stream, so refresh before resuming it.
 
-**Hide** removes a ref as a history start point; shared ancestry remains if another visible ref reaches it. **Solo** shows one ref’s ancestry. **Pin** keeps its first-parent chain in column zero and makes that ref visible. **Reset graph view** clears these choices. Views, selection and search survive Refresh; view preferences currently last for the active repository session. Refresh reloads the first 2,000 commits and reuses unchanged layout rows.
+**Hide** removes a ref as a history start point; shared ancestry remains if another visible ref reaches it. **Solo** shows one ref’s ancestry. **Pin** keeps its first-parent chain in column zero and makes that ref visible. **Reset graph view** clears these choices. Views, selection and search survive Refresh. Hidden, solo and pinned refs are saved per repository and survive app restarts. Refresh reloads the first 2,000 commits and reuses unchanged layout rows.
 
 Search loaded history with **Ctrl/Cmd+F**. Token-prefix matches cover commit messages, bodies, authors, emails and hashes; non-matches dim without moving. **Search all history** performs a separate literal message/author search (or hexadecimal hash lookup) and lets you open details for commits not loaded in the graph. Results are capped at 100 and labeled when truncated.
 
@@ -79,8 +81,14 @@ Search loaded history with **Ctrl/Cmd+F**. Token-prefix matches cover commit mes
 | Ctrl/Cmd+A / Escape                  | Select loaded rows / clear selection |
 | Enter / double-click                 | Open commit details                  |
 
-## Remaining M1 work
+Enable **Author photos** to request Gravatar images for visible authors. This is off by default; enabling it sends hashed email addresses to Gravatar. Photos are cached locally and remain available offline. Disabling the option cancels requests and restores initials.
 
-Optional network avatars, disk persistence for per-repository view preferences, and full performance qualification on real repositories remain. An 87k-commit shallow Linux benchmark passes paging and scrolling gates, but first paint still misses the 500 ms target; see the verification report. Watchers, staging, commits, credentials and an undo journal outside repositories belong to subsequent milestones. Diff viewing remains M5.
+## M1 status and limits
+
+M1 is implemented: Canvas graph, append-only paging, search, keyboard/selection controls, persisted hide/solo/pin views, checkpoint refresh and cached author photos. The full 1.5-million-commit Linux fixture passes the performance gates with a pre-existing Git commit-graph and a fresh app profile. Cached reopen also passes on the shallow Linux fixture; see the [completion report](docs/verification/m1-completion.md) for exact conditions and evidence.
+
+An uncached shallow repository can still exceed the 500 ms first-paint target. The profile cache accelerates subsequent opens without modifying repositories. Refresh reloads the initial 2,000-commit window. macOS/Windows execution remains to be verified on their runners.
+
+Watchers, staging, commits, credentials and an undo journal outside repositories belong to subsequent milestones. Diff viewing remains M5.
 
 Public references: [Git status](https://git-scm.com/docs/git-status), [for-each-ref](https://git-scm.com/docs/git-for-each-ref), [rev-list](https://git-scm.com/docs/git-rev-list), [Electron security](https://www.electronjs.org/docs/latest/tutorial/security), [utilityProcess](https://www.electronjs.org/docs/latest/api/utility-process).

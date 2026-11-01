@@ -1,5 +1,7 @@
 # M1 ref views and checkpoint refresh verification
 
+Historical increment report. The [M1 completion report](m1-completion.md) records the subsequent persistence, avatar and performance work.
+
 Verified locally on Linux x64, 2026-11-01. React 19.3.1, TypeScript 7.0.2 and Electron 45.2.1 remain pinned. This continues the [Canvas and paging increment](m1.md).
 
 ## Delivered
