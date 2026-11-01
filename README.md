@@ -13,7 +13,7 @@ pnpm install --frozen-lockfile
 pnpm start
 ```
 
-Open a repository with the toolbar or initialize an empty folder. Refresh rereads external changes. Cancel aborts pending Git work. `OPENKRAKEN_GIT` optionally selects a Git executable; system Git is the fallback. Initialization is the only repository mutation in this milestone.
+Open a repository with the toolbar or initialize an empty folder. External changes refresh automatically, with polling fallback and configurable refresh on focus. Cancel aborts pending Git work. `OPENKRAKEN_GIT` optionally selects a Git executable; system Git is the fallback. The working-tree panel supports file/hunk/line staging, commit/amend, reviewed discard, and persistent undo/redo.
 
 React and React DOM are pinned to **19.3.1**, TypeScript to **7.0.2**, and Electron to **45.2.1**. TypeScript 7 checks all runtime packages, tests and tool configurations through project references.
 
@@ -28,7 +28,7 @@ pnpm package
 pnpm smoke:package
 ```
 
-See the [M0 report](docs/verification/m0.md), [M1 graph report](docs/verification/m1.md), [ref-view follow-up](docs/verification/m1-views.md), and [M1 completion report](docs/verification/m1-completion.md) for recorded results and limits.
+See the [M0 report](docs/verification/m0.md), [M1 graph report](docs/verification/m1.md), [ref-view follow-up](docs/verification/m1-views.md), and [M1 completion report](docs/verification/m1-completion.md), and [M2 completion report](docs/verification/m2-completion.md) for recorded results and limits.
 
 On headless Linux, use `xvfb-run -a pnpm test:e2e`. No `--no-sandbox` flag is needed or configured. E2E uses the developer Electron executable for Playwright inspection, checks actual renderer isolation/CSP, opens a deterministic repository through the native picker, and measures a <500 ms first paint for 2,000 commits. The gate includes Git service IPC and rendering, excludes human time in the picker, and verifies fewer than 100 mounted history rows. The M1 suite also gates 5,000-commit pages at <300 ms, compares six Canvas goldens, and records scrolling frame intervals on a 12,000-commit fixture. Results and screenshots are saved under `test-results/`.
 
@@ -38,7 +38,7 @@ Generate sample repositories with `pnpm fixtures [output-directory]`. They inclu
 
 ## Benchmark a real repository
 
-The opt-in benchmark is read-only and needs an existing repository with more than 17,000 reachable commits. It measures first paint, three 5,000-commit pages, scrolling with 12,000 loaded rows, mounted DOM rows and Electron process memory. It records repository HEAD, total reachable commit count, CPU, Git version and cache conditions alongside the measurements.
+The opt-in benchmark needs an existing repository with more than 17,000 reachable commits. It measures first paint, three 5,000-commit pages, scrolling with 12,000 loaded rows, mounted DOM rows and Electron process memory. It records repository HEAD, total reachable commit count, CPU, Git version and cache conditions alongside the measurements.
 
 ```sh
 pnpm build
@@ -49,7 +49,7 @@ OPENKRAKEN_BENCH_REPO=/path/to/linux.git xvfb-run -a pnpm benchmark:graph
 
 To measure a cached reopen after a complete app restart, set `OPENKRAKEN_BENCH_WARM=1` as well. The harness primes 17,000 commits before the measured launch and labels that condition in its JSON. The default always uses a fresh profile; it records whether the repository already has a Git commit-graph. It never creates one.
 
-Results and a screenshot are attached under `test-results/benchmark/`. This benchmark skips during the normal suite unless the environment variable is set. It does not clone, fetch or change the selected repository.
+Results and a screenshot are attached under `test-results/benchmark/`. This benchmark skips during the normal suite unless the environment variable is set. It does not clone, fetch or change Git refs, objects, the index or working files. The watcher self-test briefly creates and removes a private probe in the Git directory.
 
 ## Packages
 
@@ -92,3 +92,9 @@ An uncached shallow repository can still exceed the 500 ms first-paint target. T
 Watchers, staging, commits, credentials and an undo journal outside repositories belong to subsequent milestones. Diff viewing remains M5.
 
 Public references: [Git status](https://git-scm.com/docs/git-status), [for-each-ref](https://git-scm.com/docs/git-for-each-ref), [rev-list](https://git-scm.com/docs/git-rev-list), [Electron security](https://www.electronjs.org/docs/latest/tutorial/security), [utilityProcess](https://www.electronjs.org/docs/latest/api/utility-process).
+
+## Working tree
+
+Use **Stage** or **Unstage** for an entire file, or **View** to select individual hunks and lines. Commit drafts remain available after a hook or signing failure. **Amend last commit** loads the existing message; signing uses your Git configuration or the explicit selection in the form. Native hooks and configured signing agents run normally.
+
+**Discard** first shows the affected file and backup size. Tracked files return to their staged version; untracked files move to recoverable application trash. **Undo** and **Redo** refuse to overwrite edits or index/HEAD changes made after the recorded action. Backups live in the application profile, not the repository. See the M2 report for limits and recovery details.
