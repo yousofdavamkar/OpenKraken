@@ -22,7 +22,7 @@ const pending = new Map<
 const inFlight = new Set<string>();
 const cancelled = new Set<string>();
 function startService() {
-  const child = utilityProcess.fork(join(__dirname, 'git-service.cjs'), [], {
+  const child = utilityProcess.fork(join(__dirname, 'git-service.cjs'), [app.getPath('userData')], {
     serviceName: 'OpenKraken Git',
     stdio: 'pipe',
   });

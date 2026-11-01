@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Commit, GraphView, Repository, Snapshot } from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { HistoryParser, RefsParser, StatusParser, HISTORY_FORMAT, REF_FORMAT } from './parsers.js';
+import { RepositoryPreferences } from './preferences.js';
 import { HistoryCursor } from './history.js';
 import { RepositoryQueue } from './queue.js';
 
@@ -20,7 +21,13 @@ export class RepositoryService {
   private queues = new Map<string, RepositoryQueue>();
   private histories = new Map<string, HistoryCursor>();
   private processPool = new RepositoryQueue(3);
-  constructor(private git: string) {}
+  private preferences: RepositoryPreferences;
+  constructor(
+    private git: string,
+    options: { dataDir?: string } = {},
+  ) {
+    this.preferences = new RepositoryPreferences(options.dataDir);
+  }
   private run(args: string[], options: RunOptions) {
     return this.processPool.run(
       options.readOnly === false,
@@ -163,7 +170,7 @@ export class RepositoryService {
     id: string,
     signal?: AbortSignal,
     refresh = true,
-    view: GraphView = { hiddenRefs: [] },
+    requestedView?: GraphView,
   ): Promise<Snapshot> {
     const known = this.repositories.get(id);
     if (!known) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
@@ -171,6 +178,7 @@ export class RepositoryService {
     return this.queue(known.commonDir).run(
       false,
       async () => {
+        const view = requestedView ?? (await this.preferences.load(id));
         const repository = refresh ? await this.open(known.path, signal) : known;
         const refsParser = new RefsParser(),
           statusParser = new StatusParser();
@@ -244,6 +252,7 @@ export class RepositoryService {
         const history = new HistoryCursor(this.git, repository.path, [...starts], stashCommits);
         this.histories.set(id, history);
         const page = await history.page(0, 2000, signal);
+        if (requestedView) await this.preferences.save(id, requestedView);
         return {
           repository,
           view,

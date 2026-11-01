@@ -8,7 +8,7 @@ const active = new Map<string, AbortController>();
 let service: Promise<RepositoryService> | undefined;
 function getService() {
   return (service ??= locateGit(process.env.OPENKRAKEN_GIT).then(
-    (git) => new RepositoryService(git.path),
+    (git) => new RepositoryService(git.path, { dataDir: process.argv[2] }),
   ));
 }
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
