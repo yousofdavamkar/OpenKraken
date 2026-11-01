@@ -5,11 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFixture, fixtureKinds } from '../test-fixtures/src/index.js';
 import { RepositoryService } from '../git-core/src/index.js';
-import { allocateLanes, type GraphCommit } from './src/index.js';
+import { allocateLanes, emptyCheckpoint, type GraphCommit } from './src/index.js';
 const root = mkdtempSync(join(tmpdir(), 'openkraken-graph-'));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
-function invariants(commits: GraphCommit[]) {
-  const { rows } = allocateLanes(commits);
+function invariants(commits: GraphCommit[], pinnedOid?: string) {
+  const { rows } = allocateLanes(commits, emptyCheckpoint(pinnedOid));
   expect(new Set(rows.map((r) => `${r.rowIndex}:${r.column}`)).size).toBe(rows.length);
   const positions = new Map(rows.map((r, i) => [r.oid, i]));
   commits.forEach((commit, index) => {
@@ -64,6 +64,19 @@ test('random DAG paths connect and paging preserves every earlier row', () => {
         }));
         invariants(commits);
         const at = cut % commits.length;
+        const pin = commits[at]!.oid;
+        invariants(commits, pin);
+        const pinned = allocateLanes(commits, emptyCheckpoint(pin));
+        let ancestor: string | undefined = pin;
+        while (ancestor) {
+          expect(pinned.rows.find((r) => r.oid === ancestor)?.column).toBe(0);
+          ancestor = commits.find((c) => c.oid === ancestor)?.parents[0];
+        }
+        const pinnedPage = allocateLanes(commits.slice(0, at), emptyCheckpoint(pin));
+        expect([
+          ...pinnedPage.rows,
+          ...allocateLanes(commits.slice(at), pinnedPage.checkpoint).rows,
+        ]).toEqual(pinned.rows);
         const first = allocateLanes(commits.slice(0, at));
         const saved = structuredClone(first);
         const second = allocateLanes(commits.slice(at), first.checkpoint);

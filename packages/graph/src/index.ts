@@ -7,6 +7,7 @@ export interface Lane {
   target: string;
   color: number;
   dashed: boolean;
+  pending?: boolean;
 }
 export interface GraphEdge {
   from: number;
@@ -24,16 +25,18 @@ export interface GraphRow {
   edges: GraphEdge[];
 }
 export interface Checkpoint {
+  pinned?: true;
   lanes: (Lane | null)[];
   nextColor: number;
   nextRow: number;
   maxColumns: number;
 }
-export const emptyCheckpoint = (): Checkpoint => ({
-  lanes: [],
-  nextColor: 0,
+export const emptyCheckpoint = (pinnedOid?: string): Checkpoint => ({
+  ...(pinnedOid ? { pinned: true as const } : {}),
+  lanes: pinnedOid ? [{ target: pinnedOid, color: 0, dashed: false, pending: true }] : [],
+  nextColor: pinnedOid ? 1 : 0,
   nextRow: 0,
-  maxColumns: 0,
+  maxColumns: pinnedOid ? 1 : 0,
 });
 /** Blueprint §4.2. Incoming edges occupy the upper half; parent edges the lower half. */
 export function allocateLanes(commits: readonly GraphCommit[], previous = emptyCheckpoint()) {
@@ -52,12 +55,12 @@ export function allocateLanes(commits: readonly GraphCommit[], previous = emptyC
   };
   for (const commit of commits) {
     let column = state.lanes.findIndex((lane) => lane?.target === commit.oid);
-    const incoming = column >= 0;
-    if (!incoming) column = reserve(commit.oid, 0, commit.isStash);
+    const incoming = column >= 0 && !state.lanes[column]?.pending;
+    if (column < 0) column = reserve(commit.oid, 0, commit.isStash);
     const colorIndex = state.lanes[column]!.color;
     const edges: GraphEdge[] = [];
     state.lanes.forEach((lane, i) => {
-      if (!lane) return;
+      if (!lane || lane.pending) return;
       if (lane.target === commit.oid) {
         if (i !== column || incoming)
           edges.push({
@@ -83,11 +86,14 @@ export function allocateLanes(commits: readonly GraphCommit[], previous = emptyC
     const parents = [...new Set(commit.isStash ? commit.parents.slice(0, 1) : commit.parents)];
     parents.forEach((parent, i) => {
       let destination = state.lanes.findIndex((lane) => lane?.target === parent);
-      const existing = destination >= 0;
+      // A pinned first parent stays in lane zero even when another lane awaits it.
+      // That other lane converges at the parent, preserving its incoming edges.
+      const existing = destination >= 0 && !(state.pinned && column === 0 && i === 0);
       if (!existing && i === 0) {
         destination = column;
         state.lanes[column] = { target: parent, color: colorIndex, dashed: !!commit.isStash };
       } else if (!existing) destination = reserve(parent, column + 1, commit.isStash);
+      delete state.lanes[destination]!.pending;
       edges.push({
         from: column,
         to: destination,

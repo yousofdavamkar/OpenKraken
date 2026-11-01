@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { GraphEngine, type GraphDocument } from './src/engine.js';
-import { allocateLanes } from './src/index.js';
+import { allocateLanes, emptyCheckpoint } from './src/index.js';
 import { rowSegments, paintGraph } from './src/canvas.js';
 const documents = (count: number): GraphDocument[] =>
   Array.from({ length: count }, (_, i) => ({
@@ -92,4 +92,118 @@ test('canvas work and pixel buffer are bounded by viewport, including DPR and pa
   paintGraph(context, rows, { width: 120, height: 560, scrollTop: 2807, dpr: 2 });
   expect(nodes).toBe(21);
   expect(context.canvas).toMatchObject({ width: 240, height: 1120 });
+});
+
+test('pin reserves lane zero for the first-parent chain across pages and converging branches', () => {
+  const commits = [
+    { oid: 'other', parents: ['shared'] },
+    { oid: 'pin', parents: ['middle', 'side'] },
+    { oid: 'side', parents: ['shared'] },
+    { oid: 'middle', parents: ['shared'] },
+    { oid: 'shared', parents: ['root'] },
+    { oid: 'root', parents: [] },
+  ];
+  const all = allocateLanes(commits, emptyCheckpoint('pin'));
+  expect(
+    all.rows
+      .filter((r) => ['pin', 'middle', 'shared', 'root'].includes(r.oid))
+      .every((r) => r.column === 0),
+  ).toBe(true);
+  expect(all.rows[0]?.column).toBe(1);
+  expect(all.rows[0]?.edges.some((e) => e.from === 0)).toBe(false);
+  const first = allocateLanes(commits.slice(0, 3), emptyCheckpoint('pin'));
+  const second = allocateLanes(commits.slice(3), first.checkpoint);
+  expect([...first.rows, ...second.rows]).toEqual(all.rows);
+  expect(all.rows[4]?.edges.filter((e) => e.kind === 'end').map((e) => e.from)).toEqual([0, 1]);
+  expect(all.checkpoint.lanes).toEqual([]);
+});
+
+test('refresh reuses a stable prefix and converged suffix, then appends from the right state', () => {
+  const engine = new GraphEngine(),
+    commits = documents(2000);
+  const first = engine.handle({ id: 1, generation: 'a', method: 'reset', offset: 0, commits });
+  if (first.kind !== 'layout') throw new Error('Expected layout');
+  const changed = structuredClone(commits);
+  // Replace one node and its incoming reference; continuation converges below it.
+  changed[749]!.parents = ['replacement'];
+  changed[750]!.oid = 'replacement';
+  const refresh = engine.handle({
+    id: 2,
+    generation: 'b',
+    baseGeneration: 'a',
+    method: 'refresh',
+    offset: 0,
+    commits: changed,
+  });
+  if (refresh.kind !== 'layout') throw new Error('Expected layout');
+  expect(refresh.offset).toBe(500);
+  expect(refresh.reusedTail).toBe(1000);
+  const patched = [
+    ...first.rows.slice(0, refresh.offset),
+    ...refresh.rows,
+    ...first.rows.slice(changed.length - refresh.reusedTail),
+  ];
+  expect(patched).toEqual(allocateLanes(changed).rows);
+  const appended = engine.handle({
+    id: 3,
+    generation: 'b',
+    method: 'append',
+    offset: 2000,
+    commits: [{ ...commits[0]!, oid: 'new orphan', parents: [] }],
+  });
+  if (appended.kind !== 'layout') throw new Error('Expected layout');
+  expect([...patched, ...appended.rows]).toEqual(
+    allocateLanes([...changed, { oid: 'new orphan', parents: [] }]).rows,
+  );
+});
+
+test('refresh handles metadata-only changes, insertions, truncation, repinning and stale generations', () => {
+  const engine = new GraphEngine();
+  let commits = documents(1200),
+    generation = '0';
+  let response = engine.handle({ id: 1, generation, method: 'reset', offset: 0, commits });
+  if (response.kind !== 'layout') throw new Error('Expected layout');
+  let rows = response.rows;
+  const update = (next: GraphDocument[], pinnedOid?: string) => {
+    response = engine.handle({
+      id: 2,
+      generation: String(+generation + 1),
+      baseGeneration: generation,
+      method: 'refresh',
+      offset: 0,
+      commits: next,
+      pinnedOid,
+    });
+    generation = String(+generation + 1);
+    if (response.kind !== 'layout') throw new Error('Expected layout');
+    rows = [
+      ...rows.slice(0, response.offset),
+      ...response.rows,
+      ...rows.slice(next.length - response.reusedTail, next.length),
+    ];
+    expect(rows).toEqual(allocateLanes(next, emptyCheckpoint(pinnedOid)).rows);
+    commits = next;
+    return response;
+  };
+  const metadata = structuredClone(commits);
+  metadata[3]!.body = 'Replacement text';
+  expect(update(metadata)).toMatchObject({ offset: 1200, rows: [] });
+  expect(
+    engine.handle({ id: 3, generation, method: 'search', query: 'Replacement' }),
+  ).toMatchObject({ oids: ['3'] });
+  update([{ ...commits[0]!, oid: 'new', parents: ['0'] }, ...commits]);
+  update(commits.slice(0, 750));
+  update(commits, '500');
+  expect(
+    engine.handle({
+      id: 4,
+      generation: 'bad',
+      baseGeneration: 'stale',
+      method: 'refresh',
+      offset: 0,
+      commits: [],
+    }).kind,
+  ).toBe('error');
+  update(commits, '500');
+  update([]);
 });
