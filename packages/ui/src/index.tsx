@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { AvatarSettings } from './avatars.js';
 import { History } from './history.js';
 import { RefControls } from './ref-controls.js';
 import { useRepository } from './store.js';
@@ -21,6 +22,7 @@ function App() {
           OpenKraken <span className="edition">LOCAL GIT CLIENT</span>
         </div>
         <div className="toolbar">
+          <AvatarSettings />
           <button onClick={open} disabled={!!busy}>
             Open repository
           </button>

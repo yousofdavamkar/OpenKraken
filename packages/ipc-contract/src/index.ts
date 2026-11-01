@@ -118,6 +118,20 @@ const historyRequests = [
     .strict(),
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('appearance'),
+      remoteAvatars: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('avatars'),
+      emails: z.array(z.string().max(320)).max(100),
+    })
+    .strict(),
   ...historyRequests,
   z.object({ id: requestId, method: z.literal('open') }).strict(),
   z
@@ -157,6 +171,18 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('appearance'), remoteAvatars: z.boolean() }),
+  z.object({
+    kind: z.literal('avatars'),
+    images: z.record(
+      z.string(),
+      z
+        .string()
+        .max(100000)
+        .regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/)
+        .nullable(),
+    ),
+  }),
   z.object({
     kind: z.literal('page'),
     cursor: z.string().uuid(),

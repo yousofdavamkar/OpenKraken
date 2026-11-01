@@ -10,11 +10,14 @@ import {
   serviceResponseSchema,
 } from '@openkraken/ipc-contract';
 import type { Result, ServiceRequest } from '@openkraken/ipc-contract';
+import { AvatarCache } from './avatars.js';
+import { fetchAvatar } from './avatar-provider.js';
 import { isTrustedDocument, windowPreferences } from './security.js';
 const htmlPath = join(__dirname, 'renderer', 'index.html');
 const documentUrl = pathToFileURL(htmlPath).href;
 let window: BrowserWindow | undefined;
 let service: UtilityProcess | undefined;
+let avatars: AvatarCache | undefined;
 const pending = new Map<
   string,
   { resolve: (result: Result) => void; timer: ReturnType<typeof setTimeout> }
@@ -118,6 +121,14 @@ else {
         return { kind: 'error', code: 'BUSY', message: 'Too many pending operations' };
       inFlight.add(request.id);
       try {
+        avatars ??= new AvatarCache(app.getPath('userData'), fetchAvatar);
+        if (request.method === 'appearance')
+          return {
+            kind: 'appearance',
+            remoteAvatars: await avatars.appearance(request.remoteAvatars),
+          };
+        if (request.method === 'avatars')
+          return { kind: 'avatars', images: await avatars.images(request.emails) };
         let path: string | undefined;
         if (
           request.method === 'open' ||
@@ -175,6 +186,7 @@ else {
   });
   let quitting = false;
   app.on('before-quit', (event) => {
+    avatars?.close();
     if (!service || quitting) return;
     event.preventDefault();
     quitting = true;

@@ -550,3 +550,30 @@ footer {
 .view-summary p {
   margin: 4px 0;
 }
+
+.avatar-setting {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #aab8ca;
+  font-size: 11px;
+}
+.author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.author-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: 50%;
+}
+.author-avatar.initials {
+  background: #2a384b;
+  color: #b8c9da;
+  font-size: 8px;
+}

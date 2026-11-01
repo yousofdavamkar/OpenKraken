@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { passageBuckets } from '@openkraken/graph';
 import { paintGraph, ROW_HEIGHT, LANE_WIDTH, GRAPH_PADDING } from '@openkraken/graph/canvas';
 import { navigationTarget, refBadges, refNavigationTargets } from './history-model.js';
+import { AuthorAvatar, useVisibleAvatars } from './avatars.js';
 import { useRepository } from './store.js';
 const dateFormatter = new Intl.DateTimeFormat();
 export function History() {
@@ -36,6 +37,7 @@ export function History() {
     estimateSize: () => ROW_HEIGHT,
     overscan: 10,
   });
+  useVisibleAvatars(virtual.getVirtualItems().map((item) => rows[item.index]!.author.email));
   const buckets = useMemo(() => passageBuckets(passages), [passages]);
   const selected = useMemo(() => new Set(selection.selected), [selection.selected]);
   const matching = useMemo(() => (matches ? new Set(matches) : undefined), [matches]);
@@ -308,7 +310,8 @@ export function History() {
                     {commit.isStash && <b className="badge">stash</b>}
                     {commit.summary || '(empty message)'}
                   </span>
-                  <span role="gridcell" className="author">
+                  <span role="gridcell" className="author" title={commit.author.email}>
+                    <AuthorAvatar name={commit.author.name} email={commit.author.email} />
                     {commit.author.name}
                   </span>
                   <time role="gridcell">
