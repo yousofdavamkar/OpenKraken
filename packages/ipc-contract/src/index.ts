@@ -358,6 +358,31 @@ export type Result = z.infer<typeof resultSchema>;
 export interface DesktopApi {
   request(request: Request): Promise<Result>;
   cancel(id: string): Promise<void>;
+  subscribe(listener: (event: RepositoryEvent) => void): () => void;
 }
 
 export const shutdownSchema = z.object({ shutdown: z.literal(true) }).strict();
+
+export const repositoryEventSchema = z
+  .object({
+    type: z.literal('repositoryChanged'),
+    repoId: z.string().regex(/^[0-9a-f]{64}$/),
+    domains: z
+      .array(
+        z.enum([
+          'status',
+          'refs',
+          'graph',
+          'stash',
+          'worktrees',
+          'operationState',
+          'config',
+          'remotes',
+        ]),
+      )
+      .max(8),
+    mode: z.enum(['native', 'polling']),
+  })
+  .strict();
+export type RepositoryEvent = z.infer<typeof repositoryEventSchema>;
+export const EVENT_CHANNEL = 'openkraken:repository-event';

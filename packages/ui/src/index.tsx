@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AvatarSettings } from './avatars.js';
+import { RepositorySync } from './repository-sync.js';
 import { WorkingTreePanel } from './working-tree.js';
 import { History } from './history.js';
 import { RefControls } from './ref-controls.js';
@@ -87,6 +88,7 @@ function App() {
               {!head?.oid && ' · unborn'}
             </span>
           </div>
+          <RepositorySync />
           <main>
             <aside className="refs">
               <h2>

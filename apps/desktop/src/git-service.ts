@@ -1,15 +1,30 @@
 import { serviceRequestSchema, shutdownSchema, cancelSchema } from '@openkraken/ipc-contract';
-import type { Result, ServiceRequest } from '@openkraken/ipc-contract';
-import { GitError, locateGit, RepositoryService } from '@openkraken/git-core';
+import type { Result, ServiceRequest, Repository } from '@openkraken/ipc-contract';
+import { GitError, locateGit, RepositoryService, RepositoryWatcher } from '@openkraken/git-core';
 const parent = process.parentPort;
 if (!parent) throw new Error('Git service requires a parent port');
 let shuttingDown = false;
 const active = new Map<string, AbortController>();
 let service: Promise<RepositoryService> | undefined;
+let gitPath = '';
+let watcher: RepositoryWatcher | undefined;
+let watchStart: ReturnType<typeof setTimeout> | undefined;
+async function prepareWatcher(repo: Repository) {
+  if (watcher?.repo.id === repo.id) return;
+  clearTimeout(watchStart);
+  await watcher?.close();
+  watcher = new RepositoryWatcher(gitPath, repo, (event) =>
+    parent!.postMessage({ type: 'repositoryChanged', ...event }),
+  );
+  // Establish a baseline before the snapshot, then subscribe after delivering history.
+  await watcher.check();
+}
+
 function getService() {
-  return (service ??= locateGit(process.env.OPENKRAKEN_GIT).then(
-    (git) => new RepositoryService(git.path, { dataDir: process.argv[2] }),
-  ));
+  return (service ??= locateGit(process.env.OPENKRAKEN_GIT).then((git) => {
+    gitPath = git.path;
+    return new RepositoryService(git.path, { dataDir: process.argv[2] });
+  }));
 }
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
   const git = await getService();
@@ -65,6 +80,7 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
       : request.method === 'init'
         ? await git.init(request.path, request.branch, signal)
         : await git.open(request.path, signal);
+  if ('path' in repo) await prepareWatcher(repo);
   return {
     kind: 'snapshot',
     snapshot: await git.snapshot(
@@ -94,9 +110,19 @@ parent.on('message', (event) => {
   if (active.has(request.id)) return;
   const controller = new AbortController();
   active.set(request.id, controller);
+  const writing = ['files', 'patch', 'discard', 'commit', 'undo'].includes(request.method);
+  const observed = watcher;
+  if (writing) observed?.pause();
   execute(request, controller.signal)
     .then((result) => {
       parent.postMessage({ id: request.id, result });
+      if (result.kind === 'snapshot' && request.method !== 'refresh') {
+        const current = watcher;
+        clearTimeout(watchStart);
+        watchStart = setTimeout(() => {
+          if (!shuttingDown && watcher === current) void current?.start();
+        }, 200);
+      }
     })
     .catch((error: unknown) => {
       const result: Result =
@@ -110,6 +136,7 @@ parent.on('message', (event) => {
       parent.postMessage({ id: request.id, result });
     })
     .finally(() => {
+      if (writing) observed?.resume();
       controller.abort();
       active.delete(request.id);
       if (shuttingDown && !active.size) void shutdown();
@@ -118,6 +145,8 @@ parent.on('message', (event) => {
 
 async function shutdown() {
   try {
+    clearTimeout(watchStart);
+    await watcher?.close();
     await (await service)?.dispose();
   } finally {
     process.exit(0);

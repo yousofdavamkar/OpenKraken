@@ -5,6 +5,8 @@ import { pathToFileURL } from 'node:url';
 import {
   CHANNEL,
   CANCEL_CHANNEL,
+  EVENT_CHANNEL,
+  repositoryEventSchema,
   requestSchema,
   cancelSchema,
   serviceResponseSchema,
@@ -31,6 +33,12 @@ function startService() {
   });
   service = child;
   child.on('message', (message) => {
+    const event = repositoryEventSchema.safeParse(message);
+    if (event.success) {
+      if (service === child && window && !window.isDestroyed())
+        window.webContents.send(EVENT_CHANNEL, event.data);
+      return;
+    }
     const parsed = serviceResponseSchema.safeParse(message);
     if (!parsed.success) return;
     const request = pending.get(parsed.data.id);

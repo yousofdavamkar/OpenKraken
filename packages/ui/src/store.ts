@@ -1,7 +1,14 @@
 import { create } from 'zustand';
 import { freeze } from 'immer';
 import { immer } from 'zustand/middleware/immer';
-import type { Commit, DesktopApi, GraphView, Request, Snapshot } from '@openkraken/ipc-contract';
+import type {
+  Commit,
+  DesktopApi,
+  GraphView,
+  Request,
+  Snapshot,
+  WorkingState,
+} from '@openkraken/ipc-contract';
 import { patchPassages } from '@openkraken/graph';
 import type { GraphRow, GraphPassage } from '@openkraken/graph';
 import { GraphClient } from './graph-client.js';
@@ -17,6 +24,9 @@ const graph = () => (client ??= new GraphClient());
 let querySequence = 0;
 interface State {
   snapshot?: Snapshot;
+  workingState?: WorkingState;
+  watcherMode?: 'native' | 'polling';
+  refreshStatus: () => Promise<void>;
   rows: DisplayCommit[];
   layout: GraphRow[];
   passages: GraphPassage[];
@@ -50,6 +60,91 @@ export const useRepository = create<State>()(
     query: '',
     searchTruncated: false,
     selection: { selected: [] },
+    refreshStatus: async () => {
+      const previous = get(),
+        snapshot = previous.snapshot;
+      if (!snapshot || previous.busy || previous.paging) return;
+      const id = crypto.randomUUID();
+      set((s) => {
+        s.busy = id;
+      });
+      let fullRefresh = false;
+      try {
+        const result = await window.openkraken.request({
+          id,
+          method: 'workingState',
+          repoId: snapshot.repository.id,
+        });
+        if (get().busy !== id || get().snapshot?.cursor !== snapshot.cursor) return;
+        if (result.kind === 'error') throw new Error(result.message);
+        if (result.kind !== 'workingState') return;
+        if (JSON.stringify(snapshot.repository.head) !== JSON.stringify(result.state.head)) {
+          fullRefresh = true;
+          return;
+        }
+        if (JSON.stringify(snapshot.status) === JSON.stringify(result.state.status)) {
+          set((s) => {
+            s.workingState = result.state;
+          });
+          return;
+        }
+        const next = { ...snapshot, status: result.state.status };
+        const rows = projectCommits(next.commits, next, true);
+        const layout = await graph().request({
+          method: 'refresh',
+          generation: snapshot.cursor,
+          baseGeneration: snapshot.cursor,
+          commits: rows,
+          offset: 0,
+          pinnedOid: snapshot.pinnedOid,
+        });
+        if (layout.kind !== 'layout') throw new Error('Invalid graph response');
+        const nextLayout = [
+          ...previous.layout.slice(0, layout.offset),
+          ...layout.rows,
+          ...previous.layout.slice(rows.length - layout.reusedTail, rows.length),
+        ];
+        freeze(nextLayout, true);
+        const passages = patchPassages(
+          previous.passages,
+          layout.offset,
+          layout.offset + layout.rows.length,
+          rows.length,
+          layout.passages,
+        );
+        freeze(passages, true);
+        querySequence++;
+        set((s) => {
+          s.snapshot = next;
+          s.workingState = result.state;
+          s.rows = rows;
+          s.layout = nextLayout;
+          s.passages = passages;
+          s.maxColumns = layout.maxColumns;
+          const available = new Set(rows.map((r) => r.oid));
+          s.selection.selected = s.selection.selected.filter((oid) => available.has(oid));
+          if (s.selection.focus && !available.has(s.selection.focus))
+            s.selection.focus = rows[0]?.oid;
+          if (s.selection.anchor && !available.has(s.selection.anchor))
+            s.selection.anchor = s.selection.focus;
+        });
+        if (get().query) await get().search(get().query);
+      } catch (error) {
+        set((s) => {
+          s.error = error instanceof Error ? error.message : String(error);
+        });
+      } finally {
+        set((s) => {
+          if (s.busy === id) s.busy = undefined;
+        });
+        if (fullRefresh)
+          await get().run({
+            id: crypto.randomUUID(),
+            method: 'refresh',
+            repoId: snapshot.repository.id,
+          });
+      }
+    },
     run: async (request) => {
       if (get().busy) return;
       const previousPage = get().paging,
@@ -109,6 +204,8 @@ export const useRepository = create<State>()(
           const query = sameRepository ? previous.query : '';
           set((s) => {
             s.snapshot = result.snapshot;
+            s.workingState = undefined;
+            if (!sameRepository) s.watcherMode = undefined;
             s.rows = rows;
             s.layout = nextLayout;
             s.passages = nextPassages;

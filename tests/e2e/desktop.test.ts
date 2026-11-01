@@ -34,7 +34,11 @@ test('sandbox, native folder open, real utility service and 2000-commit first pa
         process: typeof Reflect.get(window, 'process'),
         api: Object.keys(window.openkraken).sort(),
       })),
-    ).toEqual({ require: 'undefined', process: 'undefined', api: ['cancel', 'request'] });
+    ).toEqual({
+      require: 'undefined',
+      process: 'undefined',
+      api: ['cancel', 'request', 'subscribe'],
+    });
     const prefs = await app.evaluate(({ BrowserWindow }) => {
       const contents = BrowserWindow.getAllWindows()[0]!.webContents as Electron.WebContents & {
         getLastWebPreferences(): Record<string, unknown>;
@@ -104,7 +108,7 @@ test('sandbox, native folder open, real utility service and 2000-commit first pa
     await page.screenshot({ path: 'test-results/repository.png' });
     expect(errors).toEqual([]);
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-    await expect(page.getByRole('status')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

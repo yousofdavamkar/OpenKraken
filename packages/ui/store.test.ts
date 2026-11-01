@@ -187,3 +187,53 @@ test('changing views sends explicit roots and only applies the returned snapshot
   expect(useRepository.getState().layout).toEqual([]);
   expect(useRepository.getState().selection.selected).toEqual([]);
 });
+test('status refresh preserves the append-only history cursor, loaded commits and selection', async () => {
+  const snapshot = fixture();
+  await open(snapshot);
+  request.mockResolvedValueOnce({
+    kind: 'page',
+    cursor: snapshot.cursor,
+    offset: 1,
+    commits: [{ ...snapshot.commits[0]!, oid: 'b'.repeat(40), parents: [], summary: 'Second' }],
+    hasMore: true,
+  });
+  await useRepository.getState().loadMore();
+  useRepository.getState().select('b'.repeat(40));
+  request.mockResolvedValueOnce({
+    kind: 'workingState',
+    state: {
+      head: snapshot.repository.head,
+      revision: '0'.repeat(64),
+      status: {
+        entries: [
+          {
+            path: 'a.txt',
+            pathBytes: 'YS50eHQ=',
+            kind: 'untracked',
+            index: '?',
+            worktree: '?',
+            submodule: 'N...',
+          },
+        ],
+        ahead: 0,
+        behind: 0,
+      },
+    },
+  });
+  await useRepository.getState().refreshStatus();
+  const updated = useRepository.getState();
+  expect(updated.snapshot?.cursor).toBe(snapshot.cursor);
+  expect(updated.snapshot?.commits).toHaveLength(2);
+  expect(updated.rows.map((r) => r.kind)).toEqual(['wip', 'commit', 'commit']);
+  expect(updated.selection.focus).toBe('b'.repeat(40));
+  request.mockResolvedValueOnce({
+    kind: 'page',
+    cursor: snapshot.cursor,
+    offset: 2,
+    commits: [],
+    hasMore: false,
+  });
+  await useRepository.getState().loadMore();
+  expect(useRepository.getState().error).toBeUndefined();
+  expect(useRepository.getState().rows).toHaveLength(3);
+});

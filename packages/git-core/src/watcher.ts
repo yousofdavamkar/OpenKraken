@@ -285,5 +285,6 @@ export class RepositoryWatcher {
     this.probe?.observed();
     await Promise.allSettled(this.subscriptions.splice(0).map((s) => s.unsubscribe()));
     await this.checking;
+    await this.starting;
   }
 }

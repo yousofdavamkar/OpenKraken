@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus, release, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-// Opt-in, read-only benchmark against an existing repository. Never fetches or mutates it.
+// Opt-in benchmark: no Git writes. The observer creates/removes its private self-test probe.
 const repository = process.env.OPENKRAKEN_BENCH_REPO;
 const warm = process.env.OPENKRAKEN_BENCH_WARM === '1';
 test('real-repository first paint, paging and scrolling budgets', async ({

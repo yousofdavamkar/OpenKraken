@@ -4,12 +4,12 @@ import { DiscardDialog } from './discard-dialog.js';
 import { WorkingDiffDialog } from './working-diff.js';
 import { useRepository } from './store.js';
 export function WorkingTreePanel() {
-  const { snapshot, busy } = useRepository();
+  const { snapshot, busy, workingState: state } = useRepository();
   const [discard, setDiscard] = useState<{ preview: DiscardPreview; paths: string[] }>();
   const [preview, setPreview] = useState<WorkingDiff>();
   const [previewBusy, setPreviewBusy] = useState(false);
   const previewSequence = useRef(0);
-  const [state, setState] = useState<WorkingState>();
+  const setState = (state: WorkingState) => useRepository.setState({ workingState: state });
   const [message, setMessage] = useState('');
   const [amendText, setAmendText] = useState('');
   const [amend, setAmend] = useState(false);
@@ -60,7 +60,7 @@ export function WorkingTreePanel() {
     } finally {
       useRepository.setState({ busy: undefined });
       if (useRepository.getState().snapshot?.repository.id === repoId)
-        await useRepository.getState().run({ id: crypto.randomUUID(), method: 'refresh', repoId });
+        await useRepository.getState().refreshStatus();
     }
     return success;
   };

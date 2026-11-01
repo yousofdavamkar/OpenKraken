@@ -129,3 +129,53 @@ test('discard requires a reviewed confirmation and Undo restores the file', asyn
     rmSync(root, { recursive: true, force: true });
   }
 });
+test('external edits, git add and git commit update the desktop within 1.5 seconds', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-watch-e2e-'));
+  const repo = createFixture(join(root, 'repo'));
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, repo);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await expect(page.getByText('Watching for changes', { exact: true })).toBeVisible();
+    const editStart = performance.now();
+    writeFileSync(join(repo, 'tracked.txt'), 'external edit\n');
+    await expect(page.getByRole('button', { name: 'Stage tracked.txt', exact: true })).toBeEnabled({
+      timeout: 1400,
+    });
+    const editMs = performance.now() - editStart;
+    expect(editMs).toBeLessThan(1500);
+    const stageStart = performance.now();
+    fixtureGit(repo, ['add', 'tracked.txt']);
+    await expect(
+      page.getByRole('button', { name: 'Unstage tracked.txt', exact: true }),
+    ).toBeEnabled({ timeout: 1400 });
+    const stageMs = performance.now() - stageStart;
+    expect(stageMs).toBeLessThan(1500);
+    const commitStart = performance.now();
+    fixtureGit(repo, ['commit', '-m', 'Commit made externally']);
+    await expect(page.getByText('Working tree clean', { exact: true })).toBeVisible({
+      timeout: 1400,
+    });
+    await expect(page.getByRole('row', { name: /Commit made externally/ })).toBeVisible({
+      timeout: 1400,
+    });
+    const commitMs = performance.now() - commitStart;
+    expect(commitMs).toBeLessThan(1500);
+    await test.info().attach('watcher-latency.json', {
+      body: JSON.stringify({ editMs, stageMs, commitMs }),
+      contentType: 'application/json',
+    });
+    await page.getByRole('checkbox', { name: 'Refresh on focus' }).uncheck();
+    await page.reload();
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await expect(page.getByRole('checkbox', { name: 'Refresh on focus' })).not.toBeChecked();
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

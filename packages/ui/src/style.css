@@ -727,3 +727,14 @@ footer {
   color: #ffadb5;
   border-color: #784450;
 }
+
+.repository-sync {
+  height: 32px;
+  flex: 0 0 32px;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  padding: 0 1rem;
+  color: #8d9cb1;
+  font-size: 0.75rem;
+}
