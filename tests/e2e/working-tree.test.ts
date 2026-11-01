@@ -61,3 +61,37 @@ test('working-tree buttons stage, unstage, undo and redo through the real Git se
     rmSync(root, { recursive: true, force: true });
   }
 });
+test('diff dialog stages a chosen hunk and leaves neighboring edits unstaged', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-partial-e2e-'));
+  const repo = createFixture(join(root, 'repo'));
+  writeFileSync(join(repo, 'tracked.txt'), 'first\nanchor\nsecond\n');
+  fixtureGit(repo, ['add', 'tracked.txt']);
+  fixtureGit(repo, ['commit', '-m', 'Base']);
+  writeFileSync(join(repo, 'tracked.txt'), 'FIRST\nanchor\nSECOND\n');
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, repo);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('button', { name: 'View unstaged tracked.txt', exact: true }).click();
+    const diff = page.getByRole('dialog', { name: 'Working file changes' });
+    await expect(diff).toBeVisible();
+    await diff.getByRole('checkbox', { name: 'Remove line 1', exact: true }).check();
+    await diff.getByRole('checkbox', { name: 'Add line 1', exact: true }).check();
+    await diff.getByRole('button', { name: 'Stage selected lines', exact: true }).click();
+    await expect.poll(async () => ((await diff.count()) ? await diff.innerText() : '')).toBe('');
+    expect(fixtureGit(repo, ['show', ':tracked.txt'])).toBe('FIRST\nanchor\nsecond');
+    await page.getByRole('button', { name: 'View staged tracked.txt', exact: true }).click();
+    await diff.getByRole('button', { name: 'Select hunk 1', exact: true }).click();
+    await diff.getByRole('button', { name: 'Unstage selected lines', exact: true }).click();
+    await expect(diff).toHaveCount(0);
+    expect(fixtureGit(repo, ['diff', '--cached'])).toBe('');
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

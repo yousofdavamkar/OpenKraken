@@ -9,12 +9,20 @@ import {
   copyFile,
   stat,
   readdir,
+  utimes,
 } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
-import { headSchema, type WorkingState, type Repository } from '@openkraken/ipc-contract';
+import {
+  headSchema,
+  type WorkingState,
+  type WorkingDiff,
+  type PatchOptions,
+  type Repository,
+} from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { RepositoryQueue } from './queue.js';
+import { parsePatch, selectPatch } from './patch.js';
 import { StatusParser } from './parsers.js';
 const MAX_INDEX = 32 * 1024 * 1024;
 const savedSchema = z.object({
@@ -46,6 +54,13 @@ async function atomic(path: string, data: string) {
     await rm(temp, { force: true });
   }
 }
+async function copyIndex(source: string, target: string) {
+  const metadata = await stat(source);
+  await copyFile(source, target);
+  // A fresh timestamp would make a copied index trust racy cached file stats.
+  // Round down to retain the source index's conservative content checks.
+  await utimes(target, metadata.atime, new Date(Math.floor(metadata.mtimeMs / 1000) * 1000));
+}
 /** Git writes are serialized by RepositoryService and protected from external index writers. */
 export class WorkingTree {
   private directory: string;
@@ -59,7 +74,11 @@ export class WorkingTree {
     this.directory = join(dataDir, 'undo', repo.id);
   }
   private run(args: string[], options: RunOptions = {}) {
-    return runGit(this.git, ['--literal-pathspecs', ...args], { cwd: this.repo.path, ...options });
+    return this.processes.run(
+      false,
+      () => runGit(this.git, ['--literal-pathspecs', ...args], { cwd: this.repo.path, ...options }),
+      options.signal,
+    );
   }
   private async head(signal?: AbortSignal): Promise<Repository['head']> {
     const [ref, oid] = await Promise.all([
@@ -197,7 +216,7 @@ export class WorkingTree {
     try {
       if (signal?.aborted) throw new GitError('CANCELLED', 'Operation cancelled');
       try {
-        await copyFile(join(this.repo.gitDir, 'index'), index);
+        await copyIndex(join(this.repo.gitDir, 'index'), index);
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
         await this.run(['read-tree', '--empty'], { indexFile: index, readOnly: false, signal });
@@ -296,6 +315,109 @@ export class WorkingTree {
           readOnly: false,
           signal,
         });
+      },
+      signal,
+    );
+  }
+  async diff(
+    pathBytes: string,
+    side: 'worktree' | 'index',
+    signal?: AbortSignal,
+    sourceIndex?: string,
+  ): Promise<WorkingDiff> {
+    const stdin = await this.paths([pathBytes], signal);
+    const bytes = Buffer.from(pathBytes, 'base64'),
+      path = bytes.toString('utf8');
+    const state = await this.state(signal),
+      entry = state.status.entries.find((e) => e.pathBytes === pathBytes)!;
+    const unsupported = (reason: string): WorkingDiff => ({
+      ...parsePatch('', path),
+      pathBytes,
+      side,
+      token: hash(reason + pathBytes + side),
+      partialReason: reason,
+    });
+    if (!Buffer.from(path).equals(bytes))
+      return unsupported('Use whole-file controls for filenames that are not UTF-8');
+    if (entry.kind === 'rename' || entry.kind === 'conflict')
+      return unsupported('Use whole-file controls for renames and unresolved conflicts');
+    let temporary: string | undefined,
+      indexFile = sourceIndex;
+    try {
+      if (entry.kind === 'untracked' && side === 'worktree') {
+        await mkdir(this.directory, { recursive: true, mode: 0o700 });
+        temporary = join(this.directory, `preview-${randomUUID()}`);
+        indexFile = temporary;
+        try {
+          await copyIndex(sourceIndex ?? join(this.repo.gitDir, 'index'), temporary);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          await this.run(['read-tree', '--empty'], { indexFile, readOnly: false, signal });
+        }
+        await this.run(
+          ['add', '--intent-to-add', '--pathspec-from-file=-', '--pathspec-file-nul'],
+          { indexFile, stdin, readOnly: false, signal },
+        );
+      }
+      const output = (
+        await this.run(
+          [
+            'diff',
+            ...(side === 'index' ? ['--cached'] : []),
+            '--no-ext-diff',
+            '--no-textconv',
+            '--no-renames',
+            '--no-color',
+            '--src-prefix=a/',
+            '--dst-prefix=b/',
+            '--unified=3',
+            '--',
+            path,
+          ],
+          { indexFile, signal, maxBytes: 2 * 1024 * 1024 },
+        )
+      ).stdout;
+      const raw = output.toString('utf8');
+      if (!Buffer.from(raw).equals(output))
+        return unsupported('Non-UTF-8 diff content requires whole-file controls');
+      if (raw.split('\n').length > 10000)
+        return unsupported('Diff exceeds 10,000 lines; use whole-file controls');
+      const file = parsePatch(raw, path);
+      const partialReason = file.binary
+        ? 'Binary content requires whole-file controls'
+        : !/^100(?:644|755)$/.test(side === 'index' ? file.newMode : file.oldMode)
+          ? 'Links and type changes require whole-file controls'
+          : !file.hunks.length
+            ? 'No selectable text changes; use whole-file controls for mode-only changes'
+            : undefined;
+      return { ...file, pathBytes, side, token: hash(raw + pathBytes + side), partialReason };
+    } catch (error) {
+      if (error instanceof GitError && error.code === 'OUTPUT_LIMIT')
+        return unsupported('Diff exceeds 2 MiB; use whole-file controls');
+      throw error;
+    } finally {
+      if (temporary) {
+        await rm(temporary, { force: true });
+        await rm(`${temporary}.lock`, { force: true });
+      }
+    }
+  }
+  async patch(options: PatchOptions, signal?: AbortSignal) {
+    return this.transaction(
+      options.side === 'index' ? 'Unstage lines' : 'Stage lines',
+      async (indexFile) => {
+        const diff = await this.diff(options.pathBytes, options.side, signal, indexFile);
+        if (diff.token !== options.token)
+          throw new GitError(
+            'STALE_DIFF',
+            'The file changed since this preview. Reopen it before selecting lines.',
+          );
+        if (diff.partialReason) throw new GitError('PARTIAL_UNSUPPORTED', diff.partialReason);
+        const patch = selectPatch(diff, options.lines, options.side === 'index');
+        await this.run(
+          ['apply', '--cached', '--recount', '--unidiff-zero', '--whitespace=nowarn', '-'],
+          { indexFile, stdin: patch, signal, readOnly: false },
+        );
       },
       signal,
     );

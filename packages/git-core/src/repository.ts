@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type {
   Commit,
   CommitOptions,
+  PatchOptions,
   GraphView,
   Repository,
   Snapshot,
@@ -438,6 +439,18 @@ export class RepositoryService {
       () => work.files(action, paths, signal),
       signal,
     );
+  }
+  diff(id: string, pathBytes: string, side: 'worktree' | 'index', signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(
+      false,
+      () => work.diff(pathBytes, side, signal),
+      signal,
+    );
+  }
+  patch(id: string, options: PatchOptions, signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(true, () => work.patch(options, signal), signal);
   }
   commit(id: string, options: CommitOptions, signal?: AbortSignal) {
     const work = this.working(id);

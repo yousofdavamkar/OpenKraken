@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Request, WorkingState } from '@openkraken/ipc-contract';
+import type { Request, WorkingState, WorkingDiff } from '@openkraken/ipc-contract';
+import { WorkingDiffDialog } from './working-diff.js';
 import { useRepository } from './store.js';
 export function WorkingTreePanel() {
   const { snapshot, busy } = useRepository();
+  const [preview, setPreview] = useState<WorkingDiff>();
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const previewSequence = useRef(0);
   const [state, setState] = useState<WorkingState>();
   const [message, setMessage] = useState('');
   const [amendText, setAmendText] = useState('');
@@ -58,6 +62,27 @@ export function WorkingTreePanel() {
     }
     return success;
   };
+  const showDiff = async (pathBytes: string, side: 'worktree' | 'index') => {
+    const sequence = ++previewSequence.current;
+    setPreviewBusy(true);
+    setError(undefined);
+    try {
+      const result = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'diff',
+        repoId,
+        pathBytes,
+        side,
+      });
+      if (sequence !== previewSequence.current) return;
+      if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'diff') setPreview(result.diff);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (sequence === previewSequence.current) setPreviewBusy(false);
+    }
+  };
   const status = state?.status ?? snapshot.status;
   const staged = status.entries.filter((e) => e.kind !== 'untracked' && e.index !== '.');
   const unstaged = status.entries.filter((e) => e.kind === 'untracked' || e.worktree !== '.');
@@ -65,6 +90,30 @@ export function WorkingTreePanel() {
     void mutate({ id: crypto.randomUUID(), method: 'files', repoId, action, paths });
   return (
     <section aria-label="Working tree">
+      {preview && (
+        <WorkingDiffDialog
+          key={preview.token}
+          diff={preview}
+          busy={!!busy}
+          error={error}
+          onClose={() => setPreview(undefined)}
+          onApply={(lines) => {
+            void mutate({
+              id: crypto.randomUUID(),
+              method: 'patch',
+              repoId,
+              options: {
+                pathBytes: preview.pathBytes,
+                side: preview.side,
+                token: preview.token,
+                lines,
+              },
+            }).then((ok) => {
+              if (ok) setPreview(undefined);
+            });
+          }}
+        />
+      )}
       <h2>
         Working tree <span>{status.entries.length}</span>
       </h2>
@@ -130,6 +179,15 @@ export function WorkingTreePanel() {
                       {entry.origPath && <small>from {entry.origPath}</small>}
                     </span>
                   </div>
+                  <button
+                    disabled={!!busy || previewBusy}
+                    aria-label={`View ${action === 'stage' ? 'unstaged' : 'staged'} ${entry.path}`}
+                    onClick={() =>
+                      void showDiff(entry.pathBytes, action === 'stage' ? 'worktree' : 'index')
+                    }
+                  >
+                    View changes
+                  </button>{' '}
                   <button
                     disabled={!!busy}
                     aria-label={`${action === 'stage' ? 'Stage' : 'Unstage'} ${entry.path}`}

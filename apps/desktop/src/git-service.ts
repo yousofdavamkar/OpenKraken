@@ -13,6 +13,16 @@ function getService() {
 }
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
   const git = await getService();
+  if (request.method === 'diff')
+    return {
+      kind: 'diff',
+      diff: await git.diff(request.repoId, request.pathBytes, request.side, signal),
+    };
+  if (request.method === 'patch')
+    return {
+      kind: 'workingState',
+      state: await git.patch(request.repoId, request.options, signal),
+    };
   if (request.method === 'commit')
     return {
       kind: 'workingState',

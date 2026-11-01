@@ -633,3 +633,79 @@ footer {
 .commit-form select:focus-visible {
   outline: 2px solid #6bdfc2;
 }
+
+.working-diff {
+  width: min(1000px, 94vw);
+  max-height: 90vh;
+  padding: 20px;
+  border: 1px solid #46556b;
+  border-radius: 8px;
+  background: #141b26;
+  color: #dce3ed;
+}
+.working-diff::backdrop {
+  background: #0009;
+}
+.diff-heading,
+.diff-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  justify-content: space-between;
+}
+.diff-heading h2 {
+  margin: 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.diff-heading p,
+.diff-note {
+  color: #91a0b5;
+  font-size: 12px;
+}
+.diff-scroll {
+  height: 55vh;
+  overflow: auto;
+  border: 1px solid #354153;
+}
+.diff-row {
+  display: flex;
+  align-items: center;
+  font:
+    12px ui-monospace,
+    monospace;
+}
+.diff-row.add {
+  background: #16372d;
+}
+.diff-row.del {
+  background: #3a222d;
+}
+.diff-row.hunk {
+  background: #213145;
+  gap: 12px;
+  padding: 4px 8px;
+}
+.diff-row.hunk button {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+.diff-check {
+  width: 28px;
+  flex-shrink: 0;
+  text-align: center;
+}
+.line-number {
+  width: 42px;
+  flex-shrink: 0;
+  text-align: right;
+  padding-right: 10px;
+  color: #91a0b5;
+}
+.diff-text {
+  white-space: pre;
+  padding-right: 15px;
+}
+.no-newline {
+  color: #e1bb78;
+}

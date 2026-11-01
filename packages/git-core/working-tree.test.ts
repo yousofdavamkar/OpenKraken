@@ -178,3 +178,109 @@ test.skipIf(!!spawnSync('ssh-keygen', ['-V']).error)(
     expect(fixtureGit(path, ['log', '-1', '--format=%s'])).toBe('Signed through Git');
   },
 );
+test('reviewed line selections stage/unstage through Git, reject stale previews, and undo', async () => {
+  const { path, work } = await setup('partial');
+  await writeFile(join(path, 'tracked.txt'), 'first\nanchor\nsecond\n');
+  await work.files('stage', [bytes('tracked.txt')]);
+  fixtureGit(path, ['commit', '-m', 'Base']);
+  await writeFile(join(path, 'tracked.txt'), 'FIRST\nanchor\nSECOND\n');
+  const preview = await work.diff(bytes('tracked.txt'), 'worktree');
+  const lines = preview.hunks
+    .flatMap((h) => h.lines)
+    .filter((l) => ['first', 'FIRST'].includes(l.text))
+    .map((l) => l.id);
+  await work.patch({
+    pathBytes: bytes('tracked.txt'),
+    side: 'worktree',
+    token: preview.token,
+    lines,
+  });
+  expect(fixtureGit(path, ['show', ':tracked.txt'])).toBe('FIRST\nanchor\nsecond');
+  await expect(
+    work.patch({ pathBytes: bytes('tracked.txt'), side: 'worktree', token: preview.token, lines }),
+  ).rejects.toMatchObject({ code: 'STALE_DIFF' });
+  await work.undo();
+  expect(fixtureGit(path, ['show', ':tracked.txt'])).toBe('first\nanchor\nsecond');
+  const newFile = bytes('new.txt');
+  await writeFile(join(path, 'new.txt'), 'one\ntwo\n');
+  const added = await work.diff(newFile, 'worktree');
+  await work.patch({
+    pathBytes: newFile,
+    side: 'worktree',
+    token: added.token,
+    lines: added.hunks
+      .flatMap((h) => h.lines)
+      .filter((l) => l.text === 'two')
+      .map((l) => l.id),
+  });
+  expect(fixtureGit(path, ['show', ':new.txt'])).toBe('two');
+  const staged = await work.diff(newFile, 'index');
+  await work.patch({
+    pathBytes: newFile,
+    side: 'index',
+    token: staged.token,
+    lines: staged.hunks
+      .flatMap((h) => h.lines)
+      .filter((l) => l.kind !== 'context')
+      .map((l) => l.id),
+  });
+  expect(fixtureGit(path, ['ls-files', 'new.txt'])).toBe('');
+  expect(await readFile(join(path, 'new.txt'), 'utf8')).toBe('one\ntwo\n');
+});
+test('partial staging respects Git clean filters and refuses lossy non-UTF-8 previews', async () => {
+  const { path, work } = await setup('filtered');
+  if (process.platform !== 'win32') {
+    await writeFile(join(path, '.gitattributes'), 'new.txt filter=upper\n');
+    fixtureGit(path, ['config', 'filter.upper.clean', 'tr a-z A-Z']);
+    fixtureGit(path, ['config', 'filter.upper.required', 'true']);
+    await writeFile(join(path, 'new.txt'), 'hello\nworld\n');
+    const diff = await work.diff(bytes('new.txt'), 'worktree');
+    expect(diff.partialReason).toBeUndefined();
+    await work.patch({
+      pathBytes: bytes('new.txt'),
+      side: 'worktree',
+      token: diff.token,
+      lines: diff.hunks
+        .flatMap((h) => h.lines)
+        .filter((l) => l.text === 'HELLO')
+        .map((l) => l.id),
+    });
+    expect(fixtureGit(path, ['show', ':new.txt'])).toBe('HELLO');
+    expect(await readFile(join(path, 'new.txt'), 'utf8')).toBe('hello\nworld\n');
+  }
+  await writeFile(join(path, 'latin.txt'), Buffer.from([0xe9, 0x0a]));
+  const latin = await work.diff(bytes('latin.txt'), 'worktree');
+  expect(latin.partialReason).toContain('Non-UTF-8');
+  expect(fixtureGit(path, ['ls-files', 'latin.txt'])).toBe('');
+  await work.files('stage', [bytes('latin.txt')]);
+  const { runGit } = await import('./src/runner.js');
+  expect((await runGit('git', ['show', ':latin.txt'], { cwd: path })).stdout).toEqual(
+    Buffer.from([0xe9, 0x0a]),
+  );
+});
+test('copying the index preserves Git’s conservative checks for files with racy cached timestamps', async () => {
+  const { path, work } = await setup('racy-index');
+  const { utimes } = await import('node:fs/promises');
+  const file = join(path, 'tracked.txt'),
+    timestamp = new Date(Math.floor(Date.now() / 1000) * 1000 - 30000);
+  fixtureGit(path, ['config', 'core.trustctime', 'false']);
+  await writeFile(file, 'before\n');
+  await utimes(file, timestamp, timestamp);
+  fixtureGit(path, ['add', 'tracked.txt']);
+  fixtureGit(path, ['commit', '-m', 'Racy base']);
+  await utimes(join(path, '.git/index'), timestamp, timestamp);
+  await writeFile(file, 'AFTER!\n');
+  await utimes(file, timestamp, timestamp);
+  const diff = await work.diff(bytes('tracked.txt'), 'worktree');
+  expect(diff.hunks).toHaveLength(1);
+  await work.patch({
+    pathBytes: bytes('tracked.txt'),
+    side: 'worktree',
+    token: diff.token,
+    lines: diff.hunks
+      .flatMap((h) => h.lines)
+      .filter((l) => l.kind !== 'context')
+      .map((l) => l.id),
+  });
+  expect(fixtureGit(path, ['show', ':tracked.txt'])).toBe('AFTER!');
+});

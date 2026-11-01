@@ -144,7 +144,66 @@ const pathBytesSchema = z
   .min(1)
   .max(65536)
   .regex(/^[A-Za-z0-9+/]+={0,2}$/);
+export const diffSideSchema = z.enum(['worktree', 'index']);
+export const patchOptionsSchema = z
+  .object({
+    pathBytes: pathBytesSchema,
+    side: diffSideSchema,
+    token: z.string().regex(/^[0-9a-f]{64}$/),
+    lines: z.array(z.number().int().nonnegative()).min(1).max(10000),
+  })
+  .strict();
+export type PatchOptions = z.infer<typeof patchOptionsSchema>;
+export const workingDiffSchema = z.object({
+  path: z.string(),
+  pathBytes: pathBytesSchema,
+  side: diffSideSchema,
+  token: z.string().regex(/^[0-9a-f]{64}$/),
+  oldExists: z.boolean(),
+  newExists: z.boolean(),
+  oldMode: z.string(),
+  newMode: z.string(),
+  binary: z.boolean(),
+  partialReason: z.string().optional(),
+  hunks: z.array(
+    z.object({
+      oldStart: z.number(),
+      oldLines: z.number(),
+      newStart: z.number(),
+      newLines: z.number(),
+      header: z.string(),
+      lines: z.array(
+        z.object({
+          id: z.number().int(),
+          kind: z.enum(['context', 'add', 'del']),
+          text: z.string(),
+          oldNo: z.number().optional(),
+          newNo: z.number().optional(),
+          noNewline: z.boolean().optional(),
+        }),
+      ),
+    }),
+  ),
+});
+export type WorkingDiff = z.infer<typeof workingDiffSchema>;
 const workingRequests = [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('diff'),
+      repoId: repoIdSchema,
+      pathBytes: pathBytesSchema,
+      side: diffSideSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('patch'),
+      repoId: repoIdSchema,
+      options: patchOptionsSchema,
+    })
+    .strict(),
   z
     .object({
       id: requestId,
@@ -228,6 +287,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('diff'), diff: workingDiffSchema }),
   z.object({ kind: z.literal('workingState'), state: workingStateSchema }),
   z.object({ kind: z.literal('appearance'), remoteAvatars: z.boolean() }),
   z.object({
