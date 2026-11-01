@@ -38,12 +38,18 @@ export class HistoryCursor {
   ) {
     this.starts = [...starts];
     const byBase = new Map<string, Commit[]>();
-    for (const stash of stashes) {
+    const stashIds = new Set(stashes.map((c) => c.oid));
+    const emittedStashes = new Set<string>();
+    for (const stash of new Map(stashes.map((c) => [c.oid, c])).values()) {
       const base = stash.parents[0];
       if (base) byBase.set(base, [...(byBase.get(base) ?? []), stash]);
     }
     const parser = new HistoryParser((commit) => {
-      const records = [...(byBase.get(commit.oid) ?? []), commit];
+      // If a branch reaches a stash object, its real DAG takes precedence over the overlay.
+      if (stashIds.has(commit.oid)) emittedStashes.add(commit.oid);
+      const overlay = (byBase.get(commit.oid) ?? []).filter((c) => !emittedStashes.has(c.oid));
+      overlay.forEach((c) => emittedStashes.add(c.oid));
+      const records = [...overlay, commit];
       for (const record of records) this.bufferedBytes += this.size(record);
       if (this.bufferedBytes > 64 * 1024 * 1024)
         throw new GitError('OUTPUT_LIMIT', 'Buffered history exceeded 64 MiB; use a smaller page');

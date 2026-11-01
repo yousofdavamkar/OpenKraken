@@ -282,7 +282,7 @@ export class RepositoryService {
       ),
     );
     let commits = [
-      ...new Map([...messages, ...authors, ...stashes].map((c) => [c.oid, c])).values(),
+      ...new Map([...stashes, ...messages, ...authors].map((c) => [c.oid, c])).values(),
     ];
     if (/^[0-9a-f]{7,64}$/i.test(query)) {
       const resolved = await this.text(

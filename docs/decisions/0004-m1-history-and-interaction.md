@@ -15,3 +15,5 @@ ArrowUp/Down move one row; Shift+Down follows the first parent and Shift+Up choo
 This delivery does not add hide/solo/pin, network avatars, tabs, or full M1 release certification on linux.git. Existing synthetic fixture and security checks remain required; new tests cover retained paging, stale/cancelled requests, worker/search state, Canvas geometry, interaction, and Electron rendering/performance.
 
 Responses are validated once at the utility-to-main trust boundary with the shared Zod result schema. Main and preload then forward the typed result without additional parse-and-copy passes. Page arrays are frozen before a single store assignment, avoiding thousands of Immer proxy writes while preserving previous row identities.
+
+If a normal branch reaches a stash object, its actual commit DAG takes precedence: it is displayed once as an ordinary merge, rather than adding a duplicate projected stash row. Standalone stash overlay rows still link only to their base. Duplicate reflog entries for the same stash OID produce one overlay node.

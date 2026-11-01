@@ -118,3 +118,17 @@ test('all-history search includes stash messages without exposing implementation
   expect(result.commits[0]?.isStash).toBe(true);
   expect(result.commits[0]?.parents).toHaveLength(1);
 });
+
+test('a branch pointing at a stash object keeps its actual DAG without duplicate overlay nodes', async () => {
+  const path = createFixture(join(root, 'stash-branch'), 'stash');
+  fixtureGit(path, ['branch', 'recovery', 'refs/stash']);
+  const snapshot = await service.snapshot((await service.open(path)).id);
+  expect(new Set(snapshot.commits.map((c) => c.oid)).size).toBe(snapshot.commits.length);
+  expect(snapshot.commits.map((c) => c.oid).sort()).toEqual(
+    fixtureGit(path, ['rev-list', '--all']).split('\n').sort(),
+  );
+  const stashOid = fixtureGit(path, ['rev-parse', 'refs/stash']);
+  expect(snapshot.commits.find((c) => c.oid === stashOid)?.parents.length).toBeGreaterThan(1);
+  const result = await service.search(snapshot.repository.id, snapshot.cursor, 'Fixture stash');
+  expect(result.commits.find((c) => c.oid === stashOid)?.parents.length).toBeGreaterThan(1);
+});
