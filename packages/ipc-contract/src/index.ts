@@ -76,7 +76,17 @@ export const repositorySchema = z.object({
     'applying-mailbox',
   ]),
 });
+export const graphViewSchema = z
+  .object({
+    hiddenRefs: z.array(z.string().min(1).max(1024)).max(10000),
+    soloRef: z.string().min(1).max(1024).optional(),
+    pinnedRef: z.string().min(1).max(1024).optional(),
+  })
+  .strict();
+export type GraphView = z.infer<typeof graphViewSchema>;
 export const snapshotSchema = z.object({
+  view: graphViewSchema,
+  pinnedOid: oidSchema.optional(),
   repository: repositorySchema,
   refs: z.array(refSchema),
   status: statusSchema,
@@ -117,6 +127,7 @@ export const requestSchema = z.discriminatedUnion('method', [
     .object({
       id: requestId,
       method: z.literal('refresh'),
+      view: graphViewSchema.optional(),
       repoId: z.string().regex(/^[0-9a-f]{64}$/),
     })
     .strict(),
@@ -138,6 +149,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
     .object({
       id: requestId,
       method: z.literal('refresh'),
+      view: graphViewSchema.optional(),
       repoId: z.string().regex(/^[0-9a-f]{64}$/),
     })
     .strict(),

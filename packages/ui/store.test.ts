@@ -16,6 +16,7 @@ function fixture(cursor = crypto.randomUUID()): Snapshot {
   const oid = 'a'.repeat(40),
     signature = { name: 'Author', email: 'author@example.test', time: 1, tzOffsetMin: 0 };
   return {
+    view: { hiddenRefs: [] },
     cursor,
     repository: {
       id: 'a'.repeat(64),

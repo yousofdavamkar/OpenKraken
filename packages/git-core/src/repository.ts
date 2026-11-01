@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { access, readdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Commit, Repository, Snapshot } from '@openkraken/ipc-contract';
+import type { Commit, GraphView, Repository, Snapshot } from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { HistoryParser, RefsParser, StatusParser, HISTORY_FORMAT, REF_FORMAT } from './parsers.js';
 import { HistoryCursor } from './history.js';
@@ -159,7 +159,12 @@ export class RepositoryService {
     await walk(await realpath(path), depth);
     return [...found].sort();
   }
-  async snapshot(id: string, signal?: AbortSignal, refresh = true): Promise<Snapshot> {
+  async snapshot(
+    id: string,
+    signal?: AbortSignal,
+    refresh = true,
+    view: GraphView = { hiddenRefs: [] },
+  ): Promise<Snapshot> {
     const known = this.repositories.get(id);
     if (!known) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
     const start = performance.now();
@@ -191,18 +196,34 @@ export class RepositoryService {
         ]);
         const refs = refsParser.finish(),
           status = statusParser.finish();
+        // Keep missing ref preferences: a deleted solo ref must not silently reveal all history.
+        const visible = refs.filter((r) =>
+          view.soloRef ? r.name === view.soloRef : !view.hiddenRefs.includes(r.name),
+        );
+        const pinned = visible.find(
+          (r) =>
+            r.name === view.pinnedRef &&
+            r.kind !== 'stash' &&
+            (r.objectType === 'commit' || r.peeledType === 'commit'),
+        );
         // Filter non-commit tags. Explicit OIDs on stdin avoid ref/option ambiguity.
         const starts = new Set(
-          refs
+          visible
             .filter(
               (r) => r.kind !== 'stash' && (r.objectType === 'commit' || r.peeledType === 'commit'),
             )
             .map((r) => r.peeled ?? r.target),
         );
-        if (repository.head.oid) starts.add(repository.head.oid);
+        const head = repository.head;
+        if (
+          head.oid &&
+          !view.soloRef &&
+          (head.kind === 'detached' || !view.hiddenRefs.includes(head.ref))
+        )
+          starts.add(head.oid);
         // Walk stash bases with normal history, but hide index/untracked parents.
         let stashCommits: Commit[] = [];
-        if (refs.some((r) => r.kind === 'stash')) {
+        if (visible.some((r) => r.kind === 'stash')) {
           const stashes = new HistoryParser();
           await this.run(
             ['log', '-g', '--max-count=200', `--format=commit %H%n${HISTORY_FORMAT}`, 'refs/stash'],
@@ -225,6 +246,8 @@ export class RepositoryService {
         const page = await history.page(0, 2000, signal);
         return {
           repository,
+          view,
+          pinnedOid: pinned ? (pinned.peeled ?? pinned.target) : undefined,
           refs,
           status,
           commits: page.commits,
@@ -291,7 +314,21 @@ export class RepositoryService {
         signal,
         [0, 1],
       );
-      if (resolved) {
+      // Hash lookup must obey the same traversal as message/author search.
+      let reachable = false;
+      if (resolved)
+        for (const tip of history.starts) {
+          const result = await this.run(['merge-base', '--is-ancestor', resolved, tip], {
+            cwd: repo.path,
+            signal,
+            allowedExitCodes: [0, 1],
+          });
+          if (result.exitCode === 0) {
+            reachable = true;
+            break;
+          }
+        }
+      if (reachable) {
         const parser = new HistoryParser();
         await this.run(['log', '-1', `--format=commit %H%n${HISTORY_FORMAT}`, resolved, '--'], {
           cwd: repo.path,

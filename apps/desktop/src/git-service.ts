@@ -33,7 +33,12 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
         : await git.open(request.path, signal);
   return {
     kind: 'snapshot',
-    snapshot: await git.snapshot(repo.id, signal, request.method === 'refresh'),
+    snapshot: await git.snapshot(
+      repo.id,
+      signal,
+      request.method === 'refresh',
+      request.method === 'refresh' ? request.view : undefined,
+    ),
   };
 }
 parent.on('message', (event) => {

@@ -132,3 +132,62 @@ test('a branch pointing at a stash object keeps its actual DAG without duplicate
   const result = await service.search(snapshot.repository.id, snapshot.cursor, 'Fixture stash');
   expect(result.commits.find((c) => c.oid === stashOid)?.parents.length).toBeGreaterThan(1);
 });
+
+test('hide and solo select traversal roots, including HEAD, tags, and scoped hash search', async () => {
+  const path = createFixture(join(root, 'views'), 'linear', 20);
+  const repo = await service.open(path);
+  const main = fixtureGit(path, ['symbolic-ref', 'HEAD']);
+  const hiddenRefs = [main, 'refs/tags/v0.1.0', 'refs/tags/annotated', 'refs/remotes/origin/main'];
+  const tip = fixtureGit(path, ['rev-parse', 'HEAD']);
+  const base = fixtureGit(path, ['rev-parse', 'HEAD~10']);
+  const side = fixtureGit(path, ['commit-tree', 'HEAD^{tree}', '-p', base, '-m', 'Side exclusive']);
+  fixtureGit(path, ['update-ref', 'refs/heads/side', side]);
+  const hidden = await service.snapshot(repo.id, undefined, true, { hiddenRefs });
+  const expected = fixtureGit(path, ['rev-list', '--date-order', 'side']).split('\n');
+  expect(hidden.commits.map((c) => c.oid)).toEqual(expected);
+  expect(hidden.refs.some((r) => r.name === main)).toBe(true);
+  expect((await service.search(repo.id, hidden.cursor, tip.slice(0, 9))).commits).toEqual([]);
+  expect((await service.search(repo.id, hidden.cursor, side.slice(0, 9))).commits[0]?.oid).toBe(
+    side,
+  );
+  const solo = await service.snapshot(repo.id, undefined, true, {
+    hiddenRefs: ['refs/heads/side'],
+    soloRef: 'refs/heads/side',
+    pinnedRef: 'refs/heads/side',
+  });
+  expect(solo.commits.map((c) => c.oid)).toEqual(expected);
+  expect(solo.pinnedOid).toBe(side);
+  fixtureGit(path, ['tag', '-a', 'release', '-m', 'release', tip]);
+  const shared = await service.snapshot(repo.id, undefined, true, { hiddenRefs });
+  expect(shared.commits.some((c) => c.oid === tip)).toBe(true);
+  const tag = await service.snapshot(repo.id, undefined, true, {
+    hiddenRefs: [],
+    soloRef: 'refs/tags/release',
+    pinnedRef: 'refs/tags/release',
+  });
+  expect(tag.pinnedOid).toBe(tip);
+  expect(tag.commits.map((c) => c.oid)).toEqual(fixtureGit(path, ['rev-list', main]).split('\n'));
+  const missing = await service.snapshot(repo.id, undefined, true, {
+    hiddenRefs: [],
+    soloRef: 'refs/heads/deleted',
+  });
+  expect(missing.commits).toEqual([]);
+  expect(missing.hasMore).toBe(false);
+});
+
+test('stash filters remove overlay nodes and detached HEAD remains an independent visible root', async () => {
+  const path = createFixture(join(root, 'view-stash'), 'stash');
+  const repo = await service.open(path);
+  const hidden = await service.snapshot(repo.id, undefined, true, { hiddenRefs: ['refs/stash'] });
+  expect(hidden.commits.some((c) => c.isStash)).toBe(false);
+  const solo = await service.snapshot(repo.id, undefined, true, {
+    hiddenRefs: [],
+    soloRef: 'refs/stash',
+  });
+  expect(solo.commits.some((c) => c.isStash)).toBe(true);
+  fixtureGit(path, ['checkout', '--detach']);
+  const detached = await service.snapshot(repo.id, undefined, true, {
+    hiddenRefs: hidden.refs.map((r) => r.name),
+  });
+  expect(detached.commits[0]?.oid).toBe(repo.head.oid);
+});
