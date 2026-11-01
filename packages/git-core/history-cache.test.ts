@@ -1,0 +1,165 @@
+import { afterAll, expect, test, vi } from 'vitest';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
+import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
+import { RepositoryService } from './src/repository.js';
+import { HistoryCache } from './src/history-cache.js';
+import { HistoryCursor } from './src/history.js';
+import * as runner from './src/runner.js';
+const root = await mkdtemp(join(tmpdir(), 'openkraken-history-cache-'));
+afterAll(() => rm(root, { recursive: true, force: true }));
+test('cached windows paint without waiting for Git and join the real stream without duplicates', async () => {
+  const path = createFixture(join(root, 'large'), 'linear', 19000),
+    dataDir = join(root, 'profile');
+  const expected = fixtureGit(path, ['rev-list', '--date-order', '--all']).split('\n');
+  let service = new RepositoryService('git', { dataDir });
+  const repo = await service.open(path);
+  const first = await service.snapshot(repo.id);
+  for (const offset of [2000, 7000, 12000]) await service.page(repo.id, first.cursor, offset, 5000);
+  await service.dispose();
+  const original = runner.runGit;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const spy = vi
+    .spyOn(runner, 'runGit')
+    .mockImplementation((git, args, options) =>
+      args[0] === 'rev-list'
+        ? gate.then(() => original(git, args, options))
+        : original(git, args, options),
+    );
+  service = new RepositoryService('git', { dataDir });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await service.open(path);
+    const warm = await Promise.race([
+      service.snapshot(repo.id),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Cached prefix waited for the Git stream')),
+          1500,
+        );
+      }),
+    ]);
+    clearTimeout(timer);
+    const all = [...warm.commits];
+    for (const offset of [2000, 7000, 12000])
+      all.push(...(await service.page(repo.id, warm.cursor, offset, 5000)).commits);
+    expect(all.map((c) => c.oid)).toEqual(expected.slice(0, 17000));
+    release();
+    const end = await service.page(repo.id, warm.cursor, 17000, 5000);
+    all.push(...end.commits);
+    expect(end.hasMore).toBe(false);
+    expect(all.map((c) => c.oid)).toEqual(expected);
+    expect(spy.mock.calls.filter(([, args]) => args[0] === 'rev-list')).toHaveLength(1);
+  } finally {
+    clearTimeout(timer);
+    release();
+    await service.dispose();
+    spy.mockRestore();
+  }
+  // A missing middle cache page falls back to the retained walk at the exact prefix.
+  await rm(join(dataDir, 'history', repo.id, 'tail-1.json'));
+  service = new RepositoryService('git', { dataDir });
+  try {
+    const partial = await service.snapshot((await service.open(path)).id);
+    const recovered = [...partial.commits];
+    let more = partial.hasMore;
+    while (more) {
+      const page = await service.page(repo.id, partial.cursor, recovered.length, 5000);
+      recovered.push(...page.commits);
+      more = page.hasMore;
+    }
+    expect(recovered.map((c) => c.oid)).toEqual(expected);
+  } finally {
+    await service.dispose();
+  }
+});
+test('changed refs, effective configuration and shallow boundaries invalidate cached history', async () => {
+  const source = createFixture(join(root, 'source'), 'linear', 30),
+    path = join(root, 'shallow.git'),
+    dataDir = join(root, 'shallow-profile');
+  fixtureGit(root, [
+    'clone',
+    '--bare',
+    '--depth=10',
+    '--no-tags',
+    pathToFileURL(source).href,
+    path,
+  ]);
+  let service = new RepositoryService('git', { dataDir });
+  let repo = await service.open(path),
+    snapshot = await service.snapshot(repo.id);
+  expect(snapshot.commits).toHaveLength(10);
+  await service.dispose();
+  const cachePath = join(dataDir, 'history', repo.id, 'prefix.json');
+  const oldKey = JSON.parse(await readFile(cachePath, 'utf8')).key;
+  fixtureGit(path, ['fetch', '--deepen=5', 'origin']);
+  service = new RepositoryService('git', { dataDir });
+  repo = await service.open(path);
+  snapshot = await service.snapshot(repo.id);
+  expect(snapshot.commits).toHaveLength(15);
+  await service.dispose();
+  expect(JSON.parse(await readFile(cachePath, 'utf8')).key).not.toBe(oldKey);
+  fixtureGit(source, ['commit', '--allow-empty', '-m', 'New visible head']);
+  fixtureGit(path, ['fetch', 'origin', 'main:refs/heads/main']);
+  fixtureGit(path, ['config', 'core.commitGraph', 'false']);
+  service = new RepositoryService('git', { dataDir });
+  try {
+    snapshot = await service.snapshot((await service.open(path)).id);
+    expect(snapshot.commits[0]?.summary).toBe('New visible head');
+  } finally {
+    await service.dispose();
+  }
+});
+test('damaged records miss safely; cache quotas and invalidation do not affect repositories', async () => {
+  const service = new RepositoryService('git');
+  const snapshot = await service.snapshot(
+    (await service.open(createFixture(join(root, 'small')))).id,
+  );
+  await service.dispose();
+  const directory = join(root, 'bounded'),
+    id = 'a'.repeat(64);
+  const cache = new HistoryCache(directory, id, 'key');
+  cache.record(0, snapshot.commits, false);
+  await cache.flush();
+  const path = join(directory, 'history', id, 'prefix.json');
+  const damaged = JSON.parse(await readFile(path, 'utf8'));
+  damaged.commits[0].summary = 'Tampered';
+  await writeFile(path, JSON.stringify(damaged));
+  expect(await new HistoryCache(directory, id, 'key').load()).toBeUndefined();
+  for (let i = 0; i < 18; i++) {
+    const entry = new HistoryCache(directory, i.toString(16).padStart(64, '0'), 'key');
+    entry.record(0, snapshot.commits, false);
+    await entry.flush();
+  }
+  expect(await readdir(join(directory, 'history'))).toHaveLength(16);
+  const last = new HistoryCache(directory, '0'.repeat(63) + 'f', 'key');
+  await last.invalidate();
+  await last.flush();
+  expect(await last.load()).toBeUndefined();
+});
+test('a divergent seeded prefix rejects continuation and invalidates the cache', async () => {
+  const path = createFixture(join(root, 'mismatch'), 'linear', 20),
+    service = new RepositoryService('git');
+  const snapshot = await service.snapshot((await service.open(path)).id);
+  await service.dispose();
+  const invalidate = vi.fn(),
+    commits = structuredClone(snapshot.commits.slice(0, 5));
+  commits[0]!.oid = 'f'.repeat(40);
+  const cursor = new HistoryCursor('git', path, [snapshot.repository.head.oid!], [], {
+    commits,
+    hasMore: true,
+    invalidate,
+  });
+  try {
+    await cursor.page(0, 5);
+    await expect(cursor.page(5, 10)).rejects.toMatchObject({ code: 'STALE_CACHE' });
+    expect(invalidate).toHaveBeenCalled();
+  } finally {
+    await cursor.close();
+  }
+});

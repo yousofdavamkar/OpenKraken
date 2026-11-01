@@ -80,6 +80,9 @@ importers:
       '@openkraken/ipc-contract':
         specifier: workspace:*
         version: link:../ipc-contract
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/graph:
     dependencies:

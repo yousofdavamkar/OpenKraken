@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
-import { access, readdir, realpath } from 'node:fs/promises';
+import { access, readdir, realpath, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Commit, GraphView, Repository, Snapshot } from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { HistoryParser, RefsParser, StatusParser, HISTORY_FORMAT, REF_FORMAT } from './parsers.js';
+import { HistoryCache } from './history-cache.js';
 import { RepositoryPreferences } from './preferences.js';
 import { HistoryCursor } from './history.js';
 import { RepositoryQueue } from './queue.js';
@@ -22,11 +23,14 @@ export class RepositoryService {
   private histories = new Map<string, HistoryCursor>();
   private processPool = new RepositoryQueue(3);
   private preferences: RepositoryPreferences;
+  private dataDir?: string;
+  private cache?: HistoryCache;
   constructor(
     private git: string,
     options: { dataDir?: string } = {},
   ) {
     this.preferences = new RepositoryPreferences(options.dataDir);
+    this.dataDir = options.dataDir;
   }
   private run(args: string[], options: RunOptions) {
     return this.processPool.run(
@@ -249,9 +253,55 @@ export class RepositoryService {
             await cursor.close();
             this.histories.delete(key);
           }
-        const history = new HistoryCursor(this.git, repository.path, [...starts], stashCommits);
+        await this.cache?.flush();
+        this.cache = undefined;
+        if (
+          this.dataDir &&
+          !process.env.GIT_SHALLOW_FILE &&
+          !process.env.GIT_REPLACE_REF_BASE &&
+          !process.env.GIT_NO_REPLACE_OBJECTS
+        ) {
+          const [version, config, ...metadata] = await Promise.all([
+            this.text(repository.path, ['--version'], signal),
+            this.text(repository.path, ['config', '--null', '--list'], signal),
+            ...['shallow', 'info/grafts', 'objects/info/alternates'].map((p) =>
+              readFile(join(repository.commonDir, p))
+                .then((b) => b.toString('base64'))
+                .catch(() => ''),
+            ),
+            ...['objects/info/commit-graph', 'objects/info/commit-graphs/commit-graph-chain'].map(
+              (p) =>
+                stat(join(repository.commonDir, p))
+                  .then((s) => `${s.size}:${s.mtimeMs}`)
+                  .catch(() => ''),
+            ),
+          ]);
+          const key = createHash('sha256')
+            .update(
+              JSON.stringify({
+                format: 2,
+                version,
+                config,
+                metadata,
+                starts: [...starts],
+                stashes: stashCommits.map((c) => c.oid),
+                replacements: refs.filter((r) => r.name.startsWith('refs/replace/')),
+              }),
+            )
+            .digest('hex');
+          this.cache = new HistoryCache(this.dataDir, id, key);
+        }
+        const seed = await this.cache?.load();
+        const history = new HistoryCursor(
+          this.git,
+          repository.path,
+          [...starts],
+          stashCommits,
+          seed,
+        );
         this.histories.set(id, history);
         const page = await history.page(0, 2000, signal);
+        this.cache?.record(0, page.commits, page.hasMore);
         if (requestedView) await this.preferences.save(id, requestedView);
         return {
           repository,
@@ -275,7 +325,10 @@ export class RepositoryService {
     return history;
   }
   async page(id: string, cursor: string, offset: number, count: number, signal?: AbortSignal) {
-    return this.history(id, cursor).page(offset, count, signal);
+    const cache = this.cache;
+    const result = await this.history(id, cursor).page(offset, count, signal);
+    cache?.record(offset, result.commits, result.hasMore);
+    return result;
   }
   async search(id: string, cursor: string, query: string, signal?: AbortSignal) {
     const history = this.history(id, cursor);
@@ -354,5 +407,6 @@ export class RepositoryService {
   async dispose() {
     await Promise.all([...this.histories.values()].map((cursor) => cursor.close()));
     this.histories.clear();
+    await this.cache?.flush();
   }
 }
