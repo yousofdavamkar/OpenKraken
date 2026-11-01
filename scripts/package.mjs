@@ -27,7 +27,7 @@ const outputs = await packager({
   name: 'OpenKraken',
   executableName: 'openkraken',
   electronVersion: '45.2.1',
-  asar: { unpack: '**/*.node' },
+  asar: { unpack: '**/*.node', unpackDir: 'dist/helpers' },
   overwrite: true,
 });
 for (const output of outputs) {

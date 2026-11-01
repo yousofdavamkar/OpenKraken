@@ -1,7 +1,9 @@
+import { buildAskpass } from './build-askpass.mjs';
 import { copyRuntimeDependencies } from './runtime-dependencies.mjs';
 import { build as esbuild } from 'esbuild';
 import { build as vite } from 'vite';
 import { resolve } from 'node:path';
+await buildAskpass();
 await esbuild({
   entryPoints: {
     main: 'apps/desktop/src/main.ts',

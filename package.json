@@ -9,7 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc -b",
-    "test": "vitest run",
+    "test": "pnpm build:helper && vitest run",
     "test:e2e": "pnpm build && playwright test",
     "build": "pnpm typecheck && node scripts/build.mjs",
     "start": "pnpm build && electron apps/desktop",
@@ -18,7 +18,8 @@
     "format": "prettier --write .",
     "fixtures": "tsx packages/test-fixtures/src/cli.ts",
     "smoke:package": "node scripts/smoke-package.mjs",
-    "benchmark:graph": "playwright test tests/e2e/benchmark.test.ts --reporter=list --output=test-results/benchmark"
+    "benchmark:graph": "playwright test tests/e2e/benchmark.test.ts --reporter=list --output=test-results/benchmark",
+    "build:helper": "node scripts/build-askpass.mjs"
   },
   "devDependencies": {
     "typescript": "7.0.2",

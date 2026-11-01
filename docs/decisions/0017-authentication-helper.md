@@ -1,0 +1,9 @@
+# 0017 — Native Git and SSH authentication bridge
+
+Git and OpenSSH require a separate askpass executable. Electron's `RunAsNode` fuse stays disabled, so the packaged Electron executable cannot serve as a Node helper. A small, independently authored Go program uses only the standard library; builds disable CGO and package the Go license beside the executable. The helper is unpacked from ASAR so the operating system can execute it. Release signing of this helper belongs to M8.
+
+The Git service owns a loopback listener. Each foreground transport receives a random 256-bit capability in its environment, valid only until that operation finishes or is cancelled. The helper sends one bounded JSON frame containing that capability and the native prompt. A timing-safe comparison authorizes the frame; the service accepts one outstanding prompt per operation. Replies are bounded, single-line strings, returned only to that helper's stdout. Connection establishment and prompt response have time limits. Invalid capabilities, expired scopes, cancellation and malformed frames fail closed without logging answers.
+
+The renderer will receive typed prompt/closed events with an operation identifier and a separate prompt identifier. Replies must match both. SSH's confirmation hint is an explicit yes/no question; other answers are secrets except Git's username prompt. Prompts are untrusted display text. URLs are redacted before display. This bridge does not persist credentials: existing Git credential helpers and SSH agents retain their native behavior. Background fetch never opens this bridge and retains its noninteractive overrides. TLS verification is never disabled.
+
+Tests exercise the compiled helper and the public broker boundary, including Unicode answers, invalid/expired capabilities, cancellation, and SSH confirmation. Transport and desktop integration follow in a separate change.

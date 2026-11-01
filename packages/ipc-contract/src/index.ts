@@ -672,6 +672,21 @@ export const repositoryEventSchema = z
 export type RepositoryEvent = z.infer<typeof repositoryEventSchema>;
 export const EVENT_CHANNEL = 'openkraken:repository-event';
 
+export const authenticationPromptSchema = z
+  .object({
+    type: z.literal('authenticationPrompt'),
+    id: requestId,
+    promptId: requestId,
+    context: z.string().max(1024),
+    message: z.string().max(4096),
+    kind: z.enum(['username', 'secret', 'confirm']),
+  })
+  .strict();
+export const authenticationClosedSchema = z
+  .object({ type: z.literal('authenticationClosed'), id: requestId, promptId: requestId })
+  .strict();
+export type AuthenticationEvent =
+  z.infer<typeof authenticationPromptSchema> | z.infer<typeof authenticationClosedSchema>;
 export const gitProgressEventSchema = z
   .object({ type: z.literal('gitProgress'), id: requestId, text: z.string().max(4096) })
   .strict();

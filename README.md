@@ -6,7 +6,7 @@ M0's secure shell and Git service now support a Canvas commit graph with worker-
 
 ## Run
 
-Requires Node.js 24+, pnpm 11.25.0 and Git 2.38+.
+Requires Node.js 24+, pnpm 11.25.0, Git 2.38+ and Go 1.27.3+ to build the small native authentication helper. Go is not required to run a packaged app. `OPENKRAKEN_GO` can select the build compiler.
 
 ```sh
 pnpm install --frozen-lockfile
