@@ -1,0 +1,42 @@
+{
+  "name": "openkraken",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "test:e2e": "pnpm build && playwright test",
+    "build": "pnpm typecheck && node scripts/build.mjs",
+    "start": "pnpm build && electron apps/desktop",
+    "package": "pnpm build && node scripts/package.mjs",
+    "lint": "eslint apps packages tests scripts && prettier --check .",
+    "format": "prettier --write .",
+    "fixtures": "tsx packages/test-fixtures/src/cli.ts"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vite": "8.3.5",
+    "vitest": "5.0.5",
+    "fast-check": "latest",
+    "electron": "45.2.1",
+    "@electron/fuses": "latest",
+    "@electron/packager": "20.3.0",
+    "@playwright/test": "latest",
+    "esbuild": "latest",
+    "tsx": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "eslint": "latest",
+    "@eslint/js": "latest",
+    "@babel/eslint-parser": "latest",
+    "@babel/core": "latest",
+    "@babel/plugin-syntax-typescript": "latest",
+    "prettier": "latest"
+  }
+}

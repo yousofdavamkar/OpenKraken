@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tsbuildinfo
+release/
+.test-fixtures/
+test-results/
+playwright-report/
+# Pre-existing analysis and lab material stay outside implementation history.
+/analysis/
+/[0-9]*

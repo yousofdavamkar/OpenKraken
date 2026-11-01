@@ -1,0 +1,23 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "packages/ipc-contract"
+    },
+    {
+      "path": "packages/git-core"
+    },
+    {
+      "path": "packages/graph"
+    },
+    {
+      "path": "packages/test-fixtures"
+    },
+    {
+      "path": "packages/ui"
+    },
+    {
+      "path": "apps/desktop"
+    }
+  ]
+}

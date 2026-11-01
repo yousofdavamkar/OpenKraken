@@ -1,0 +1,11 @@
+{
+  "name": "@openkraken/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.cjs",
+  "dependencies": {
+    "@openkraken/git-core": "workspace:*",
+    "@openkraken/ipc-contract": "workspace:*"
+  }
+}
