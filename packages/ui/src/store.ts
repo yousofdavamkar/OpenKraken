@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { freeze } from 'immer';
 import { immer } from 'zustand/middleware/immer';
 import type { Commit, DesktopApi, GraphView, Request, Snapshot } from '@openkraken/ipc-contract';
-import type { GraphRow } from '@openkraken/graph';
+import { patchPassages } from '@openkraken/graph';
+import type { GraphRow, GraphPassage } from '@openkraken/graph';
 import { GraphClient } from './graph-client.js';
 import { projectCommits, selectRow } from './history-model.js';
 import type { DisplayCommit, Selection } from './history-model.js';
@@ -18,6 +19,7 @@ interface State {
   snapshot?: Snapshot;
   rows: DisplayCommit[];
   layout: GraphRow[];
+  passages: GraphPassage[];
   maxColumns: number;
   busy?: string;
   paging?: string;
@@ -43,6 +45,7 @@ export const useRepository = create<State>()(
   immer((set, get) => ({
     rows: [],
     layout: [],
+    passages: [],
     maxColumns: 1,
     query: '',
     searchTruncated: false,
@@ -95,11 +98,20 @@ export const useRepository = create<State>()(
             ...previous.layout.slice(rows.length - layout.reusedTail, rows.length),
           ];
           freeze(nextLayout, true);
+          const nextPassages = patchPassages(
+            previous.passages,
+            layout.offset,
+            layout.offset + layout.rows.length,
+            rows.length,
+            layout.passages,
+          );
+          freeze(nextPassages, true);
           const query = sameRepository ? previous.query : '';
           set((s) => {
             s.snapshot = result.snapshot;
             s.rows = rows;
             s.layout = nextLayout;
+            s.passages = nextPassages;
             s.maxColumns = layout.maxColumns;
             s.query = query;
             s.matches = undefined;
@@ -191,6 +203,8 @@ export const useRepository = create<State>()(
         };
         const nextRows = [...current.rows, ...rows],
           nextLayout = [...current.layout, ...layout.rows];
+        const nextPassages = [...current.passages, ...layout.passages];
+        freeze(nextPassages, true);
         freeze(nextSnapshot, true);
         freeze(nextRows, true);
         freeze(nextLayout, true);
@@ -198,6 +212,7 @@ export const useRepository = create<State>()(
           s.snapshot = nextSnapshot;
           s.rows = nextRows;
           s.layout = nextLayout;
+          s.passages = nextPassages;
           s.maxColumns = layout.maxColumns;
         });
         if (get().query) await get().search(get().query);

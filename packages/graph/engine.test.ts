@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { GraphEngine, type GraphDocument } from './src/engine.js';
-import { allocateLanes, emptyCheckpoint } from './src/index.js';
+import { allocateLanes, emptyCheckpoint, patchPassages, passageBuckets } from './src/index.js';
 import { rowSegments, paintGraph } from './src/canvas.js';
 const documents = (count: number): GraphDocument[] =>
   Array.from({ length: count }, (_, i) => ({
@@ -247,4 +247,106 @@ test('a truncated refresh cannot reuse the previous longer continuation at its f
   });
   if (page.kind !== 'layout') throw new Error('Expected layout');
   expect(page.rows).toEqual(allocateLanes([...next, ...commits.slice(1000)]).rows.slice(1000));
+});
+
+test('wide histories share immutable pass-through edges across the worker transfer boundary', () => {
+  const tips = Array.from({ length: 200 }, (_, i) => `side-${i}`);
+  const commits = [
+    { oid: 'merge', parents: ['0', ...tips] },
+    ...Array.from({ length: 1000 }, (_, i) => ({ oid: String(i), parents: [String(i + 1)] })),
+  ];
+  const result = structuredClone(allocateLanes(commits));
+  const unique = new Set(result.rows.flatMap((r) => r.edges));
+  // Each pass is immutable for the lifetime of a lane, not a new object per row.
+  expect(unique.size).toBeLessThan(3000);
+  expect(result.rows[1]!.edges.find((e) => e.target === 'side-0' && e.kind === 'pass')).toBe(
+    result.rows[999]!.edges.find((e) => e.target === 'side-0' && e.kind === 'pass'),
+  );
+});
+
+test('compact worker spans preserve graph geometry across append and checkpoint refresh', () => {
+  const engine = new GraphEngine(true),
+    commits = documents(1800);
+  commits[0]!.parents = ['1', '1200', '1500'];
+  const initial = engine.handle({
+    id: 1,
+    generation: 'a',
+    method: 'reset',
+    offset: 0,
+    commits: commits.slice(0, 1000),
+  });
+  if (initial.kind !== 'layout') throw new Error('Expected layout');
+  const page = engine.handle({
+    id: 2,
+    generation: 'a',
+    method: 'append',
+    offset: 1000,
+    commits: commits.slice(1000),
+  });
+  if (page.kind !== 'layout') throw new Error('Expected layout');
+  const rows = [...initial.rows, ...page.rows],
+    passages = [...initial.passages, ...page.passages];
+  expect(rows.every((r) => r.edges.every((e) => e.kind !== 'pass'))).toBe(true);
+  const next = structuredClone(commits);
+  next[749]!.parents = ['replacement'];
+  next[750]!.oid = 'replacement';
+  const refreshed = engine.handle({
+    id: 3,
+    generation: 'b',
+    baseGeneration: 'a',
+    method: 'refresh',
+    offset: 0,
+    commits: next,
+  });
+  if (refreshed.kind !== 'layout') throw new Error('Expected layout');
+  expect(refreshed.reusedTail).toBe(800);
+  const patched = [
+    ...rows.slice(0, refreshed.offset),
+    ...refreshed.rows,
+    ...rows.slice(next.length - refreshed.reusedTail),
+  ];
+  const spans = patchPassages(
+    passages,
+    refreshed.offset,
+    refreshed.offset + refreshed.rows.length,
+    next.length,
+    refreshed.passages,
+  );
+  const buckets = passageBuckets(spans);
+  const expanded = patched.map((row) => ({
+    ...row,
+    edges: [
+      ...row.edges.filter((e) => e.kind === 'end'),
+      ...(buckets[Math.floor(row.rowIndex / 500)] ?? [])
+        .filter((p) => p.start <= row.rowIndex && p.end > row.rowIndex)
+        .map((p) => ({
+          from: p.column,
+          to: p.column,
+          kind: 'pass' as const,
+          colorIndex: p.colorIndex,
+          target: p.target,
+          dashed: p.dashed,
+        })),
+    ]
+      .sort((a, b) => a.from - b.from)
+      .concat(row.edges.filter((e) => e.kind !== 'end')),
+  }));
+  expect(expanded).toEqual(allocateLanes(next).rows);
+  expect(patchPassages(spans, 500, 750, 750, []).every((p) => p.end <= 500)).toBe(true);
+});
+
+test('search flushes any remaining cooperative indexing batches after a reset', () => {
+  const engine = new GraphEngine(true),
+    commits = documents(100);
+  engine.handle({ id: 1, generation: 'a', method: 'reset', offset: 0, commits });
+  expect(engine.indexPending(25)).toBe(true);
+  expect(engine.handle({ id: 2, generation: 'a', method: 'search', query: '99' })).toMatchObject({
+    oids: ['99'],
+  });
+  expect(engine.indexPending(25)).toBe(false);
+  engine.handle({ id: 3, generation: 'b', method: 'reset', offset: 0, commits: [] });
+  expect(engine.indexPending(25)).toBe(false);
+  expect(engine.handle({ id: 4, generation: 'b', method: 'search', query: '99' })).toMatchObject({
+    oids: [],
+  });
 });

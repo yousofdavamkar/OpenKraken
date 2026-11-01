@@ -10,6 +10,26 @@ const root = mkdtempSync(join(tmpdir(), 'openkraken-graph-'));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 function invariants(commits: GraphCommit[], pinnedOid?: string) {
   const { rows } = allocateLanes(commits, emptyCheckpoint(pinnedOid));
+  const compact = allocateLanes(commits, emptyCheckpoint(pinnedOid), true);
+  const expanded = compact.rows.map((row) => ({
+    ...row,
+    edges: [
+      ...row.edges.filter((e) => e.kind === 'end'),
+      ...compact.passages
+        .filter((p) => p.start <= row.rowIndex && p.end > row.rowIndex)
+        .map((p) => ({
+          from: p.column,
+          to: p.column,
+          kind: 'pass' as const,
+          colorIndex: p.colorIndex,
+          target: p.target,
+          dashed: p.dashed,
+        })),
+    ]
+      .sort((a, b) => a.from - b.from)
+      .concat(row.edges.filter((e) => e.kind !== 'end')),
+  }));
+  expect(expanded).toEqual(rows);
   expect(new Set(rows.map((r) => `${r.rowIndex}:${r.column}`)).size).toBe(rows.length);
   const positions = new Map(rows.map((r, i) => [r.oid, i]));
   commits.forEach((commit, index) => {

@@ -1,4 +1,4 @@
-import type { GraphRow } from './index.js';
+import type { GraphRow, GraphPassage } from './index.js';
 export const ROW_HEIGHT = 28;
 export const LANE_WIDTH = 20;
 export const GRAPH_PADDING = 14;
@@ -49,6 +49,7 @@ export function paintGraph(
     matches?: ReadonlySet<string>;
     selected?: ReadonlySet<string>;
     synthetic?: ReadonlySet<string>;
+    passages?: readonly (readonly GraphPassage[])[];
   },
 ) {
   const { width, height, scrollTop, dpr } = options;
@@ -67,7 +68,29 @@ export function paintGraph(
     const row = rows[i]!;
     const y = row.rowIndex * ROW_HEIGHT - scrollTop;
     ctx.globalAlpha = options.matches && !options.matches.has(row.oid) ? 0.22 : 1;
-    for (const segment of rowSegments(row, y)) {
+    const segments = rowSegments(row, y);
+    const split = row.edges.findIndex((e) => !['end', 'pass'].includes(e.kind));
+    const outgoing = segments.splice(split < 0 ? segments.length : split);
+    for (const p of options.passages?.[Math.floor(i / 500)] ?? []) {
+      if (p.start <= i && p.end > i)
+        segments.push({
+          x1: GRAPH_PADDING + p.column * LANE_WIDTH,
+          x2: GRAPH_PADDING + p.column * LANE_WIDTH,
+          y1: y,
+          y2: y + ROW_HEIGHT,
+          color: palette[p.colorIndex % palette.length]!,
+          dashed: p.dashed,
+        });
+    }
+    segments.sort((a, b) => a.x1 - b.x1);
+    segments.push(...outgoing);
+    for (const segment of segments) {
+      const left = options.scrollLeft ?? 0;
+      if (
+        Math.max(segment.x1, segment.x2) < left - 2 ||
+        Math.min(segment.x1, segment.x2) > left + width + 2
+      )
+        continue;
       ctx.strokeStyle = segment.color;
       ctx.setLineDash(segment.dashed ? [3, 3] : []);
       ctx.beginPath();

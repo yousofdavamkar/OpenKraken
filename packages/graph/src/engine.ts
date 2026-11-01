@@ -1,6 +1,6 @@
 import MiniSearch from 'minisearch';
 import { allocateLanes, emptyCheckpoint } from './index.js';
-import type { Checkpoint, GraphCommit, GraphRow } from './index.js';
+import type { Checkpoint, GraphCommit, GraphRow, GraphPassage } from './index.js';
 export interface GraphDocument extends GraphCommit {
   summary: string;
   body: string;
@@ -36,10 +36,12 @@ export type GraphResponse =
       maxColumns: number;
       checkpointRows: number[];
       reusedTail: number;
+      passages: GraphPassage[];
     }
   | { id: number; generation: string; kind: 'matches'; oids: string[] }
   | { id: number; generation: string; kind: 'error'; message: string };
 export class GraphEngine {
+  constructor(private compact = false) {}
   private generation = '';
   private documents: GraphCommit[] = [];
   private pinnedOid?: string;
@@ -48,9 +50,9 @@ export class GraphEngine {
   private index = this.createIndex();
   private seen = new Set<string>();
   private pending: GraphDocument[] = [];
-  indexPending() {
+  indexPending(limit = this.pending.length) {
     this.index.addAll(
-      this.pending.map((c) => ({
+      this.pending.splice(0, limit).map((c) => ({
         oid: c.oid,
         summary: c.summary,
         body: c.body,
@@ -58,7 +60,7 @@ export class GraphEngine {
         email: c.author.email,
       })),
     );
-    this.pending = [];
+    return this.pending.length > 0;
   }
   private createIndex() {
     return new MiniSearch({
@@ -99,11 +101,13 @@ export class GraphEngine {
         : this.checkpoints.find((c) => c.nextRow === offset)!;
     const checkpoints = this.checkpoints.filter((c) => c.nextRow <= offset);
     const rows: GraphRow[] = [];
+    const passages: GraphPassage[] = [];
     let reusedTail = 0;
     for (let at = offset; at < next.length;) {
       const end = Math.min(next.length, (Math.floor(at / 500) + 1) * 500);
-      const result = allocateLanes(next.slice(at, end), state);
+      const result = allocateLanes(next.slice(at, end), state, this.compact);
       rows.push(...result.rows);
+      passages.push(...result.passages);
       checkpoints.push(...result.checkpoints);
       state = result.checkpoint;
       at = end;
@@ -138,6 +142,7 @@ export class GraphEngine {
       maxColumns: state.maxColumns,
       checkpointRows: checkpoints.map((c) => c.nextRow),
       reusedTail,
+      passages,
     };
   }
   private validateIds(commits: GraphDocument[], append = false) {
@@ -178,7 +183,7 @@ export class GraphEngine {
       if (request.offset !== this.checkpoint.nextRow)
         throw new Error('Graph page offset does not match continuation');
       this.validateIds(request.commits, true);
-      const result = allocateLanes(request.commits, this.checkpoint);
+      const result = allocateLanes(request.commits, this.checkpoint, this.compact);
       this.documents.push(
         ...request.commits.map(({ oid, parents, isStash }) => ({ oid, parents, isStash })),
       );
@@ -195,6 +200,7 @@ export class GraphEngine {
         maxColumns: result.checkpoint.maxColumns,
         checkpointRows: result.checkpoints.map((c) => c.nextRow),
         reusedTail: 0,
+        passages: result.passages,
       };
     } catch (error) {
       return {

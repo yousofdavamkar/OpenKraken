@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { passageBuckets } from '@openkraken/graph';
 import { paintGraph, ROW_HEIGHT, LANE_WIDTH, GRAPH_PADDING } from '@openkraken/graph/canvas';
 import { navigationTarget, refBadges, refNavigationTargets } from './history-model.js';
 import { useRepository } from './store.js';
@@ -11,6 +12,7 @@ export function History() {
     snapshot,
     rows,
     layout,
+    passages,
     maxColumns,
     query,
     matches,
@@ -34,6 +36,7 @@ export function History() {
     estimateSize: () => ROW_HEIGHT,
     overscan: 10,
   });
+  const buckets = useMemo(() => passageBuckets(passages), [passages]);
   const selected = useMemo(() => new Set(selection.selected), [selection.selected]);
   const matching = useMemo(() => (matches ? new Set(matches) : undefined), [matches]);
   const synthetic = useMemo(
@@ -72,8 +75,9 @@ export function History() {
       matches: matching,
       selected,
       synthetic,
+      passages: buckets,
     });
-  }, [layout, bounds, graphWidth, scroll, matching, selected, synthetic]);
+  }, [layout, bounds, graphWidth, scroll, matching, selected, synthetic, buckets]);
   useLayoutEffect(() => {
     let second = 0;
     const first = requestAnimationFrame(() => {
