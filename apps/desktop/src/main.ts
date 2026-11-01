@@ -35,7 +35,7 @@ function startService() {
   child.on('message', (message) => {
     const event = desktopEventSchema.safeParse(message);
     if (event.success) {
-      if (event.data.type === 'gitProgress' && !pending.has(event.data.id)) return;
+      if (event.data.type !== 'repositoryChanged' && !pending.has(event.data.id)) return;
       if (service === child && window && !window.isDestroyed())
         window.webContents.send(EVENT_CHANNEL, event.data);
       return;

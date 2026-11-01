@@ -808,3 +808,10 @@ footer {
   font-size: 12px;
   margin: 4px 12px;
 }
+
+.authentication-message {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 35vh;
+  overflow-y: auto;
+}

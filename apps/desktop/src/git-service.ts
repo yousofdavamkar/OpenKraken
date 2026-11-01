@@ -1,8 +1,23 @@
+import { join } from 'node:path';
 import { serviceRequestSchema, shutdownSchema, cancelSchema } from '@openkraken/ipc-contract';
 import type { Result, ServiceRequest, Repository } from '@openkraken/ipc-contract';
-import { GitError, locateGit, RepositoryService, RepositoryWatcher } from '@openkraken/git-core';
+import {
+  GitError,
+  locateGit,
+  RepositoryService,
+  RepositoryWatcher,
+  AskpassBroker,
+} from '@openkraken/git-core';
 const parent = process.parentPort;
 if (!parent) throw new Error('Git service requires a parent port');
+const authentication = new AskpassBroker(
+  join(
+    __dirname.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'),
+    'helpers',
+    process.platform === 'win32' ? 'openkraken-askpass.exe' : 'openkraken-askpass',
+  ),
+  (event) => parent.postMessage(event),
+);
 let shuttingDown = false;
 const active = new Map<string, AbortController>();
 let service: Promise<RepositoryService> | undefined;
@@ -27,6 +42,34 @@ function getService() {
   }));
 }
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
+  if (request.method === 'answerPrompt')
+    return {
+      kind: 'authenticationAnswered',
+      accepted: authentication.answer(request.requestId, request.promptId, request.answer),
+    };
+  const interactive =
+    request.method === 'clone' ||
+    request.method === 'push' ||
+    request.method === 'pushPreview' ||
+    (request.method === 'fetch' && !request.background);
+  const context =
+    request.method === 'clone'
+      ? `Clone ${request.options.url}`
+      : request.method === 'fetch'
+        ? `Fetch ${request.name}`
+        : 'Push repository';
+  const scope = interactive ? await authentication.open(request.id, context, signal) : undefined;
+  try {
+    return await executeGit(request, signal, scope?.environment);
+  } finally {
+    scope?.close();
+  }
+}
+async function executeGit(
+  request: Exclude<ServiceRequest, { method: 'answerPrompt' }>,
+  signal: AbortSignal,
+  auth?: NodeJS.ProcessEnv,
+): Promise<Result> {
   const git = await getService();
   let lastProgress = 0;
   const progress = (text: string) => {
@@ -50,17 +93,24 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
   if (request.method === 'pushPreview')
     return {
       kind: 'pushPreview',
-      plan: await git.pushPreview(request.repoId, request.selection, signal, progress),
+      plan: await git.pushPreview(request.repoId, request.selection, signal, progress, auth),
     };
   if (request.method === 'push')
     return {
       kind: 'pushed',
-      ...(await git.push(request.repoId, request.options, signal, progress)),
+      ...(await git.push(request.repoId, request.options, signal, progress, auth)),
     };
   if (request.method === 'fetch')
     return {
       kind: 'remotes',
-      state: await git.fetch(request.repoId, request.name, signal, request.background, progress),
+      state: await git.fetch(
+        request.repoId,
+        request.name,
+        signal,
+        request.background,
+        progress,
+        auth,
+      ),
     };
   if (request.method === 'remotes')
     return { kind: 'remotes', state: await git.remotes(request.repoId, signal) };
@@ -121,7 +171,7 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
     request.method === 'refresh'
       ? { id: request.repoId }
       : request.method === 'clone'
-        ? await git.clone(request.path, request.options, signal, progress)
+        ? await git.clone(request.path, request.options, signal, progress, auth)
         : request.method === 'init'
           ? await git.init(request.path, request.branch, signal)
           : await git.open(request.path, signal);
@@ -203,6 +253,7 @@ parent.on('message', (event) => {
 async function shutdown() {
   try {
     clearTimeout(watchStart);
+    await authentication.close();
     await watcher?.close();
     await (await service)?.dispose();
   } finally {

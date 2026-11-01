@@ -6,3 +6,5 @@ export * from './repository.js';
 export * from './history.js';
 
 export * from './watcher.js';
+
+export * from './askpass.js';

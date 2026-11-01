@@ -1,5 +1,8 @@
 import { chromium } from '@playwright/test';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import { createServer } from 'node:net';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { promisify } from 'node:util';
 import { mkdtemp, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -50,9 +53,63 @@ try {
       typeof Reflect.get(window, 'openkraken')?.request === 'function',
   );
   if (!isolated) throw new Error('Packaged renderer isolation failed');
+  const socketPath =
+    process.platform === 'win32'
+      ? `\\\\.\\pipe\\openkraken-${randomUUID()}`
+      : join(profile, 'prompt.sock');
+  const token = randomBytes(32).toString('hex');
+  const server = createServer((socket) => {
+    let frame = '';
+    socket.setTimeout(5000, () => socket.destroy());
+    socket.on('data', (chunk) => {
+      frame += chunk;
+      if (frame.length > 32768) {
+        socket.destroy();
+        return;
+      }
+      if (!frame.endsWith('\n')) return;
+      try {
+        const request = JSON.parse(frame);
+        if (request.token !== token || request.prompt !== 'Packaged helper test')
+          throw new Error('Invalid helper request');
+        socket.end(JSON.stringify({ ok: true, answer: 'packaged-helper-ok' }) + '\n');
+      } catch {
+        socket.destroy();
+      }
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(socketPath, resolve);
+  });
+  try {
+    const resources =
+      process.platform === 'darwin'
+        ? join(directory, 'OpenKraken.app/Contents/Resources')
+        : join(directory, 'resources');
+    const helper = join(
+      resources,
+      'app.asar.unpacked/dist/helpers',
+      process.platform === 'win32' ? 'openkraken-askpass.exe' : 'openkraken-askpass',
+    );
+    const reply = await promisify(execFile)(helper, ['Packaged helper test'], {
+      timeout: 5000,
+      env: {
+        ...process.env,
+        OPENKRAKEN_ASKPASS_SOCKET: socketPath,
+        OPENKRAKEN_ASKPASS_TOKEN: token,
+      },
+    });
+    if (reply.stdout !== 'packaged-helper-ok\n' || reply.stderr)
+      throw new Error('Packaged native helper failed');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
   await mkdir('test-results', { recursive: true });
   await page.screenshot({ path: 'test-results/packaged-shell.png' });
-  console.log('Packaged ASAR app starts with hardened fuses; renderer isolation passed.');
+  console.log(
+    'Packaged ASAR app starts with hardened fuses; renderer isolation and native askpass helper passed.',
+  );
 } finally {
   await browser?.close();
   child.kill();

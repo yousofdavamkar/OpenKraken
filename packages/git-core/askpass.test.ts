@@ -64,3 +64,40 @@ test('bad tokens and cancellation cannot receive an answer; SSH confirmation is 
     await broker.close();
   }
 });
+test('SSH host-key confirmation without a hint is explicit and replies cannot cross operation scopes', async () => {
+  const id = randomUUID();
+  const broker = new AskpassBroker(helper, (event) => {
+    if (event.type === 'authenticationPrompt') {
+      expect(event.kind).toBe('confirm');
+      expect(broker.answer(randomUUID(), event.promptId, 'yes')).toBe(false);
+      expect(broker.answer(id, event.promptId, '')).toBe(false);
+      expect(broker.answer(id, event.promptId, 'no')).toBe(true);
+    }
+  });
+  let path: string;
+  try {
+    const scope = await broker.open(id, 'SSH clone');
+    path = scope.environment.OPENKRAKEN_ASKPASS_SOCKET;
+    if (process.platform !== 'win32') {
+      const { stat } = await import('node:fs/promises');
+      const { dirname } = await import('node:path');
+      expect((await stat(path)).mode & 0o777).toBe(0o600);
+      expect((await stat(dirname(path))).mode & 0o777).toBe(0o700);
+    } else expect(path.startsWith('\\\\.\\pipe\\openkraken-')).toBe(true);
+    const result = await runProcess(
+      helper,
+      [
+        "The authenticity of host 'example.test' can't be established.\nED25519 key fingerprint is SHA256:fixture.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? ",
+      ],
+      { env: scope.environment },
+    );
+    expect(result.stdout.toString()).toBe('no\n');
+    scope.close();
+  } finally {
+    await broker.close();
+  }
+  if (process.platform !== 'win32') {
+    const { stat } = await import('node:fs/promises');
+    await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+  }
+});

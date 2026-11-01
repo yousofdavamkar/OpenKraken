@@ -49,6 +49,7 @@ export class Remotes {
   constructor(
     private run: (args: string[], options?: RunOptions) => ReturnType<typeof runGit>,
     private onProgress?: (text: string) => void,
+    private authentication?: NodeJS.ProcessEnv,
   ) {}
   async state(signal?: AbortSignal): Promise<RemoteState> {
     const config = await this.run(['config', '--null', '--list'], {
@@ -172,6 +173,7 @@ export class Remotes {
           onStderr: progress ? (chunk) => progress.push(chunk) : undefined,
           allowedExitCodes: [0, 1],
           env: {
+            ...this.authentication,
             GIT_ALLOW_PROTOCOL: 'file:https:http:ssh:git',
             ...(background
               ? {

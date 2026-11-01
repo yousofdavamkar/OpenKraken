@@ -1,5 +1,8 @@
 import { createServer, type Socket } from 'node:net';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { mkdtemp, chmod, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
 import type { AuthenticationEvent } from '@openkraken/ipc-contract';
 import { GitError } from './runner.js';
@@ -18,7 +21,7 @@ type Pending = {
   socket: Socket;
   finish: (answer: string | null) => void;
 };
-/** One loopback listener per service, with expiring random credentials per native operation. */
+/** A private local socket per service, with expiring capabilities per native operation. */
 export class AskpassBroker {
   private scopes = new Map<string, Scope>();
   private pending = new Map<string, Pending>();
@@ -26,6 +29,7 @@ export class AskpassBroker {
   private server = createServer((socket) => this.connect(socket));
   private ready?: Promise<string>;
   private stopped = false;
+  private directory?: string;
   constructor(
     private helper: string,
     private emit: (event: AuthenticationEvent) => void,
@@ -33,21 +37,26 @@ export class AskpassBroker {
     this.server.maxConnections = 16;
   }
   private start() {
-    return (this.ready ??= new Promise<string>((resolve, reject) => {
+    return (this.ready ??= this.listen());
+  }
+  private async listen() {
+    let path: string;
+    if (process.platform === 'win32') path = `\\\\.\\pipe\\openkraken-${randomUUID()}`;
+    else {
+      this.directory = await mkdtemp(join(tmpdir(), 'openkraken-auth-'));
+      await chmod(this.directory, 0o700);
+      path = join(this.directory, 'prompt.sock');
+    }
+    await new Promise<void>((resolve, reject) => {
       this.server.once('error', reject);
-      this.server.listen(0, '127.0.0.1', () => {
-        const address = this.server.address();
-        if (!address || typeof address === 'string') {
-          reject(new Error('Invalid helper listener'));
-          return;
-        }
-        resolve(`127.0.0.1:${address.port}`);
-      });
-    }));
+      this.server.listen(path, resolve);
+    });
+    if (process.platform !== 'win32') await chmod(path, 0o600);
+    return path;
   }
   async open(id: string, context: string, signal?: AbortSignal) {
     if (this.stopped) throw new GitError('CANCELLED', 'Authentication cancelled');
-    const address = await this.start();
+    const path = await this.start();
     if (this.stopped || signal?.aborted)
       throw new GitError('CANCELLED', 'Authentication cancelled');
     if (this.scopes.has(id) || this.scopes.size >= 8)
@@ -71,7 +80,7 @@ export class AskpassBroker {
         GIT_ASKPASS: this.helper,
         SSH_ASKPASS: this.helper,
         SSH_ASKPASS_REQUIRE: 'force',
-        OPENKRAKEN_ASKPASS_ADDRESS: address,
+        OPENKRAKEN_ASKPASS_SOCKET: path,
         OPENKRAKEN_ASKPASS_TOKEN: scope.token.toString('hex'),
       },
       close: scope.close,
@@ -124,7 +133,8 @@ export class AskpassBroker {
       }
       const promptId = randomUUID();
       const kind =
-        input.hint === 'confirm'
+        input.hint === 'confirm' ||
+        /\(yes\/no(?:\/\[fingerprint\])?\)|Please type 'yes'.*'no'/i.test(input.prompt)
           ? 'confirm'
           : /^Username\b/i.test(input.prompt)
             ? 'username'
@@ -155,5 +165,6 @@ export class AskpassBroker {
     if (this.ready) await this.ready.catch(() => {});
     if (this.server.listening)
       await new Promise<void>((resolve) => this.server.close(() => resolve()));
+    if (this.directory) await rm(this.directory, { recursive: true, force: true });
   }
 }

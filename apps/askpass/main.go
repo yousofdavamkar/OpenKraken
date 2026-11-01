@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"strings"
 	"time"
@@ -26,24 +25,16 @@ func run() int {
 	if len(os.Args) != 2 || len(os.Args[1]) > 16384 || !utf8.ValidString(os.Args[1]) {
 		return 1
 	}
-	address := os.Getenv("OPENKRAKEN_ASKPASS_ADDRESS")
-	host, _, err := net.SplitHostPort(address)
-	if err != nil || host != "127.0.0.1" {
-		return 1
-	}
 	token := os.Getenv("OPENKRAKEN_ASKPASS_TOKEN")
 	decoded, err := hex.DecodeString(token)
 	if err != nil || len(decoded) != 32 {
 		return 1
 	}
-	conn, err := net.DialTimeout("tcp4", address, 3*time.Second)
+	conn, err := connect(os.Getenv("OPENKRAKEN_ASKPASS_SOCKET"))
 	if err != nil {
 		return 1
 	}
 	defer conn.Close()
-	if err = conn.SetDeadline(time.Now().Add(3 * time.Minute)); err != nil {
-		return 1
-	}
 	hint := ""
 	if os.Getenv("SSH_ASKPASS_PROMPT") == "confirm" {
 		hint = "confirm"
@@ -65,4 +56,13 @@ func run() int {
 	}
 	return 0
 }
-func main() { os.Exit(run()) }
+func main() {
+	result := make(chan int, 1)
+	go func() { result <- run() }()
+	select {
+	case code := <-result:
+		os.Exit(code)
+	case <-time.After(3 * time.Minute):
+		os.Exit(1)
+	}
+}

@@ -399,6 +399,19 @@ export const stashActionOptionsSchema = z.discriminatedUnion('action', [
     .strict(),
 ]);
 export type StashActionOptions = z.infer<typeof stashActionOptionsSchema>;
+const authenticationAnswer = z
+  .object({
+    id: requestId,
+    method: z.literal('answerPrompt'),
+    requestId,
+    promptId: requestId,
+    answer: z
+      .string()
+      .max(4096)
+      .refine((value) => !/[\r\n]/.test(value) && !value.includes('\0'), 'Use a single-line answer')
+      .nullable(),
+  })
+  .strict();
 const workingRequests = [
   z
     .object({
@@ -521,6 +534,7 @@ const workingRequests = [
     .strict(),
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  authenticationAnswer,
   z.object({ id: requestId, method: z.literal('clone'), options: cloneOptionsSchema }).strict(),
   ...workingRequests,
   z
@@ -554,6 +568,7 @@ export const requestSchema = z.discriminatedUnion('method', [
 ]);
 const repositoryPath = z.string().min(1).max(32768);
 export const serviceRequestSchema = z.discriminatedUnion('method', [
+  authenticationAnswer,
   z
     .object({
       id: requestId,
@@ -585,6 +600,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('authenticationAnswered'), accepted: z.boolean() }),
   z.object({
     kind: z.literal('stashAction'),
     state: workingStateSchema,
@@ -693,5 +709,7 @@ export const gitProgressEventSchema = z
 export const desktopEventSchema = z.discriminatedUnion('type', [
   repositoryEventSchema,
   gitProgressEventSchema,
+  authenticationPromptSchema,
+  authenticationClosedSchema,
 ]);
 export type DesktopEvent = z.infer<typeof desktopEventSchema>;

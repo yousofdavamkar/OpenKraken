@@ -77,6 +77,7 @@ export class RepositoryService {
     options: CloneOptions,
     signal?: AbortSignal,
     onProgress?: (text: string) => void,
+    authentication?: NodeJS.ProcessEnv,
   ) {
     const path = await realpath(input);
     return this.queue(path).run(
@@ -90,6 +91,7 @@ export class RepositoryService {
         const manager = new Remotes(
           (args, settings) => this.run(args, { ...settings, cwd: path }),
           onProgress,
+          authentication,
         );
         await manager.clone(options, signal);
         return this.open(path, signal);
@@ -461,7 +463,11 @@ export class RepositoryService {
     }
     return work;
   }
-  private remoteManager(id: string, onProgress?: (text: string) => void) {
+  private remoteManager(
+    id: string,
+    onProgress?: (text: string) => void,
+    authentication?: NodeJS.ProcessEnv,
+  ) {
     const repo = this.repositories.get(id);
     if (!repo) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
     return {
@@ -469,6 +475,7 @@ export class RepositoryService {
       manager: new Remotes(
         (args, options) => this.run(args, { ...options, cwd: repo.path }),
         onProgress,
+        authentication,
       ),
     };
   }
@@ -481,8 +488,9 @@ export class RepositoryService {
     selection: PushSelection,
     signal?: AbortSignal,
     onProgress?: (text: string) => void,
+    authentication?: NodeJS.ProcessEnv,
   ) {
-    const { repo, manager } = this.remoteManager(id, onProgress);
+    const { repo, manager } = this.remoteManager(id, onProgress, authentication);
     return this.queue(repo.commonDir).run(
       false,
       () => manager.pushPreview(selection, signal),
@@ -494,8 +502,9 @@ export class RepositoryService {
     options: PushOptions,
     signal?: AbortSignal,
     onProgress?: (text: string) => void,
+    authentication?: NodeJS.ProcessEnv,
   ) {
-    const { repo, manager } = this.remoteManager(id, onProgress);
+    const { repo, manager } = this.remoteManager(id, onProgress, authentication);
     return this.queue(repo.commonDir).run(true, () => manager.push(options, signal), signal);
   }
   fetch(
@@ -504,8 +513,9 @@ export class RepositoryService {
     signal?: AbortSignal,
     background = false,
     onProgress?: (text: string) => void,
+    authentication?: NodeJS.ProcessEnv,
   ) {
-    const { repo, manager } = this.remoteManager(id, onProgress);
+    const { repo, manager } = this.remoteManager(id, onProgress, authentication);
     return this.queue(repo.commonDir).run(
       true,
       () => manager.fetch(name, signal, background),
