@@ -109,3 +109,23 @@ export function navigationTarget(
             : 0;
   return delta ? rows[Math.max(0, Math.min(rows.length - 1, index + delta))]!.oid : undefined;
 }
+
+/** Excluded ref shortcuts must not page through an unrelated history looking for a missing tip. */
+export function refNavigationTargets(snapshot: Snapshot, rows: readonly { oid: string }[]) {
+  const view = snapshot.view,
+    head = snapshot.repository.head;
+  const visible = (name: string) =>
+    view.soloRef ? name === view.soloRef : !view.hiddenRefs.includes(name);
+  const headRef =
+    head.kind === 'branch' ? snapshot.refs.find((r) => r.name === head.ref) : undefined;
+  const upstream = snapshot.refs.find((r) => r.name === headRef?.upstream?.ref);
+  const loaded = (oid?: string) => !!oid && rows.some((r) => r.oid === oid);
+  return {
+    head:
+      loaded(head.oid) || (head.kind === 'branch' ? visible(head.ref) : !view.soloRef)
+        ? head.oid
+        : undefined,
+    upstream:
+      upstream && (visible(upstream.name) || loaded(upstream.target)) ? upstream.target : undefined,
+  };
+}

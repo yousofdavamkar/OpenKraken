@@ -201,7 +201,10 @@ for (const kind of fixtureKinds)
   test(`${kind} graph visual golden`, async () => {
     const { page, close } = await launch(kind);
     try {
-      await page.addStyleTag({ content: '.graph-viewport { flex: none; height: 420px; }' });
+      await page.addStyleTag({
+        content:
+          '.graph-viewport { flex: none; height: 420px; } .history-scroll { outline: none !important; }',
+      });
       await expect(page.getByTestId('commit-graph')).toHaveCSS('height', '420px');
       await page.getByRole('grid').focus();
       await expect(page.getByTestId('commit-graph')).toHaveScreenshot(`${kind}.png`, {

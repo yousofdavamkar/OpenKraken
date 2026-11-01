@@ -1,5 +1,11 @@
 import { expect, test } from 'vitest';
-import { navigationTarget, projectCommits, refBadges, selectRow } from './src/history-model.js';
+import {
+  navigationTarget,
+  projectCommits,
+  refBadges,
+  selectRow,
+  refNavigationTargets,
+} from './src/history-model.js';
 import type { DisplayCommit } from './src/history-model.js';
 import type { Snapshot, Commit, Ref } from '@openkraken/ipc-contract';
 const commit = (oid: string, parents: string[] = []): Commit => ({
@@ -56,4 +62,22 @@ test('local and remote badges sharing a name and target combine; tags stay separ
     { label: 'main', names: ['refs/heads/main', 'refs/remotes/origin/main'], kind: 'branch' },
     { label: 'main', names: ['refs/tags/main'], kind: 'tag' },
   ]);
+});
+
+test('HEAD and upstream shortcuts do not scan excluded histories, but still select loaded shared commits', () => {
+  const snapshot = {
+    view: { hiddenRefs: ['refs/heads/main'] },
+    repository: { head: { kind: 'branch', ref: 'refs/heads/main', oid: 'head' } },
+    refs: [
+      { name: 'refs/heads/main', target: 'head', upstream: { ref: 'refs/remotes/origin/main' } },
+      { name: 'refs/remotes/origin/main', target: 'remote' },
+    ],
+  } as Snapshot;
+  expect(refNavigationTargets(snapshot, [])).toEqual({ head: undefined, upstream: 'remote' });
+  snapshot.view.soloRef = 'refs/heads/other';
+  expect(refNavigationTargets(snapshot, [])).toEqual({ head: undefined, upstream: undefined });
+  expect(refNavigationTargets(snapshot, [{ oid: 'head' }, { oid: 'remote' }])).toEqual({
+    head: 'head',
+    upstream: 'remote',
+  });
 });

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { paintGraph, ROW_HEIGHT, LANE_WIDTH, GRAPH_PADDING } from '@openkraken/graph/canvas';
-import { navigationTarget, refBadges } from './history-model.js';
+import { navigationTarget, refBadges, refNavigationTargets } from './history-model.js';
 import { useRepository } from './store.js';
 const dateFormatter = new Intl.DateTimeFormat();
 export function History() {
@@ -124,15 +124,14 @@ export function History() {
       state.setDetail(rows.find((r) => r.oid === selection.focus));
       return;
     }
-    const headRef = snapshot.refs.find((r) => r.isHead),
-      upstream = snapshot.refs.find((r) => r.name === headRef?.upstream?.ref)?.target;
+    const refs = refNavigationTargets(snapshot, rows);
     const target = navigationTarget(
       rows,
       selection.focus,
       event.key,
       event.shiftKey,
-      snapshot.repository.head.oid,
-      upstream,
+      refs.head,
+      refs.upstream,
     );
     if (target) {
       event.preventDefault();
