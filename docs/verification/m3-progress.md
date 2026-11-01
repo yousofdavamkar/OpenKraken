@@ -14,7 +14,7 @@ Implemented and exercised against real Git and Electron:
 - Clone with shallow history, a branch/tag, on-demand blobs and sparse directories; bounded transport progress and cancellation.
 - Native askpass helper over a private Unix socket or Windows named pipe, typed username/password and SSH confirmation prompts, cancellation and existing credential-helper/agent compatibility.
 
-Remaining for M3: pull preferences/integration and the complete local-bare plus Gitea HTTPS/SSH acceptance suite. HTTPS prompts pass through native Git and Electron with a trusted test CA; live SSH acceptance remains pending. Remote deletion of server branches/tags also remains beyond the implemented local deletion flow. The current push dialog requires a single push URL per remote.
+Remaining for M3: pull preferences/integration and the remaining remote operations. The [Gitea HTTPS/SSH acceptance test](m3-gitea.md) now passes, including encrypted SSH keys and host-key consent. Remote deletion of server branches/tags also remains beyond the implemented local deletion flow. The current push dialog requires a single push URL per remote.
 
 Latest full regression after authentication: 124 Vitest tests passed, 24 Electron tests passed and the dedicated large-repository benchmark was skipped. Type checking, lint, build, Linux packaging and packaged renderer/native-helper smoke checks passed. The Windows helper cross-compiles; runtime behavior still needs a Windows runner. The graph suite measured 224.3 ms first paint, 165.5 ms for a 5,000-commit page, and 16.7 ms p95 scrolling on this Linux run. These are local results, not macOS/Windows verification.
 

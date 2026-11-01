@@ -27,6 +27,11 @@ jobs:
         run: xvfb-run -a pnpm exec playwright test
       - if: runner.os != 'Linux'
         run: pnpm exec playwright test
+      - if: runner.os == 'Linux'
+        name: Gitea HTTPS and SSH acceptance
+        env:
+          OPENKRAKEN_GITEA_TEST: '1'
+        run: xvfb-run -a pnpm exec playwright test tests/e2e/gitea.test.ts
       - run: pnpm package
       - if: runner.os == 'Linux'
         run: xvfb-run -a pnpm smoke:package
