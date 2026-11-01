@@ -84,6 +84,7 @@ export function allocateLanes(commits: readonly GraphCommit[], previous = emptyC
     });
     state.lanes[column] = null;
     const parents = [...new Set(commit.isStash ? commit.parents.slice(0, 1) : commit.parents)];
+    if (state.pinned && column === 0 && !parents.length) delete state.pinned;
     parents.forEach((parent, i) => {
       let destination = state.lanes.findIndex((lane) => lane?.target === parent);
       // A pinned first parent stays in lane zero even when another lane awaits it.

@@ -207,3 +207,44 @@ test('refresh handles metadata-only changes, insertions, truncation, repinning a
   update(commits, '500');
   update([]);
 });
+
+test('pin reservation ends at its root and does not capture a later unrelated chain', () => {
+  const commits = [
+    { oid: 'other', parents: ['shared'] },
+    { oid: 'pin', parents: [] },
+    { oid: 'later', parents: ['shared'] },
+    { oid: 'shared', parents: [] },
+  ];
+  const result = allocateLanes(commits, emptyCheckpoint('pin'));
+  expect(result.rows[2]?.edges.find((e) => e.kind === 'merge-in')?.to).toBe(1);
+  expect(result.rows[3]?.column).toBe(1);
+  expect(result.checkpoint.pinned).toBeUndefined();
+});
+
+test('a truncated refresh cannot reuse the previous longer continuation at its final checkpoint', () => {
+  const engine = new GraphEngine(),
+    commits = documents(2000);
+  engine.handle({ id: 1, generation: 'a', method: 'reset', offset: 0, commits });
+  const next = structuredClone(commits.slice(0, 1000));
+  next[749]!.parents = ['replacement'];
+  next[750]!.oid = 'replacement';
+  const fresh = engine.handle({
+    id: 2,
+    generation: 'b',
+    baseGeneration: 'a',
+    method: 'refresh',
+    offset: 0,
+    commits: next,
+  });
+  if (fresh.kind !== 'layout') throw new Error('Expected layout');
+  expect(fresh.offset).toBe(500);
+  const page = engine.handle({
+    id: 3,
+    generation: 'b',
+    method: 'append',
+    offset: 1000,
+    commits: commits.slice(1000),
+  });
+  if (page.kind !== 'layout') throw new Error('Expected layout');
+  expect(page.rows).toEqual(allocateLanes([...next, ...commits.slice(1000)]).rows.slice(1000));
+});

@@ -41,7 +41,7 @@ export type GraphResponse =
   | { id: number; generation: string; kind: 'error'; message: string };
 export class GraphEngine {
   private generation = '';
-  private documents: GraphDocument[] = [];
+  private documents: GraphCommit[] = [];
   private pinnedOid?: string;
   private checkpoint = emptyCheckpoint();
   private checkpoints: Checkpoint[] = [];
@@ -70,7 +70,7 @@ export class GraphEngine {
   private refresh(request: Extract<GraphRequest, { method: 'refresh' }>): GraphResponse {
     if (request.baseGeneration !== this.generation) throw new Error('Stale graph generation');
     this.validateIds(request.commits);
-    const sameTopology = (a: GraphDocument, b: GraphDocument) =>
+    const sameTopology = (a: GraphCommit, b: GraphCommit) =>
       a.oid === b.oid &&
       !!a.isStash === !!b.isStash &&
       a.parents.length === b.parents.length &&
@@ -89,7 +89,8 @@ export class GraphEngine {
     let suffix = next.length;
     if (old.length === next.length && request.pinnedOid === this.pinnedOid)
       while (suffix > prefix && sameTopology(old[suffix - 1]!, next[suffix - 1]!)) suffix--;
-    const unchanged = prefix === next.length && next.length === old.length;
+    const unchanged =
+      request.pinnedOid === this.pinnedOid && prefix === next.length && next.length === old.length;
     const offset = unchanged ? prefix : Math.floor(prefix / 500) * 500;
     let state = unchanged
       ? this.checkpoint
@@ -107,7 +108,13 @@ export class GraphEngine {
       state = result.checkpoint;
       at = end;
       const previous = this.checkpoints.find((c) => c.nextRow === at);
-      if (at >= suffix && previous && JSON.stringify(state) === JSON.stringify(previous)) {
+      if (
+        old.length === next.length &&
+        at < next.length &&
+        at >= suffix &&
+        previous &&
+        JSON.stringify(state) === JSON.stringify(previous)
+      ) {
         reusedTail = next.length - at;
         checkpoints.push(...this.checkpoints.filter((c) => c.nextRow > at));
         state = this.checkpoint;
@@ -116,7 +123,7 @@ export class GraphEngine {
     }
     this.generation = request.generation;
     this.pinnedOid = request.pinnedOid;
-    this.documents = [...next];
+    this.documents = next.map(({ oid, parents, isStash }) => ({ oid, parents, isStash }));
     this.checkpoint = state;
     this.checkpoints = checkpoints;
     this.index = this.createIndex();
@@ -172,7 +179,9 @@ export class GraphEngine {
         throw new Error('Graph page offset does not match continuation');
       this.validateIds(request.commits, true);
       const result = allocateLanes(request.commits, this.checkpoint);
-      this.documents.push(...request.commits);
+      this.documents.push(
+        ...request.commits.map(({ oid, parents, isStash }) => ({ oid, parents, isStash })),
+      );
       this.pending.push(...request.commits);
       for (const c of request.commits) this.seen.add(c.oid);
       this.checkpoint = result.checkpoint;
