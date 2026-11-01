@@ -11,3 +11,7 @@ The native dependency and its installed runtime dependency closure are copied in
 Tests cover path classification, external edit/add/commit latency below 1.5 seconds, paused writes, self-test polling fallback, linked worktrees, bare repos, preserved paged history, and the real Electron bridge. Performance depends on filesystem and repository size; polling on slow network storage is a fallback, not a universal 1.5 second guarantee. Large ignored directory trees can still cost native subscriptions even though their changes do not cause renderer updates.
 
 Public API reference: [Parcel watcher](https://github.com/parcel-bundler/watcher).
+
+## User actions during background refresh
+
+Background reads keep existing working-action controls available and mark their activity separately from user mutations. If a click arrives while a background read owns the state, the action waits for it instead of being discarded. Ref-bearing undo now performs an explicit full refresh (currently all Undo/Redo actions use this path): a quick delete/undo pair can return the watcher to its baseline while an intermediate snapshot is still visible. Watch notifications alone cannot repair that case. Pure status events continue to preserve the loaded history window.

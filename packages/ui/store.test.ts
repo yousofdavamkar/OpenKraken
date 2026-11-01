@@ -237,3 +237,38 @@ test('status refresh preserves the append-only history cursor, loaded commits an
   expect(useRepository.getState().error).toBeUndefined();
   expect(useRepository.getState().rows).toHaveLength(3);
 });
+test('a user request arriving during background refresh runs after it instead of being dropped', async () => {
+  const original = fixture();
+  await open(original);
+  const pending = deferred();
+  request.mockReturnValueOnce(pending.promise);
+  const refreshing = useRepository
+    .getState()
+    .run({ id: crypto.randomUUID(), method: 'refresh', repoId: original.repository.id }, true);
+  const next = fixture();
+  request.mockResolvedValueOnce({ kind: 'snapshot', snapshot: next });
+  const userRequest = useRepository.getState().run({ id: crypto.randomUUID(), method: 'open' });
+  pending.resolve({ kind: 'snapshot', snapshot: original });
+  await Promise.all([refreshing, userRequest]);
+  expect(useRepository.getState().snapshot?.cursor).toBe(next.cursor);
+  expect(useRepository.getState().busy).toBeUndefined();
+});
+test('background snapshots retain undo controls until fresh working state arrives', async () => {
+  const snapshot = fixture();
+  await open(snapshot);
+  useRepository.setState({
+    workingState: {
+      head: snapshot.repository.head,
+      revision: '0'.repeat(64),
+      status: snapshot.status,
+      undo: { id: crypto.randomUUID(), label: 'Delete tag' },
+    },
+  });
+  const next = fixture();
+  request.mockResolvedValueOnce({ kind: 'snapshot', snapshot: next });
+  await useRepository
+    .getState()
+    .run({ id: crypto.randomUUID(), method: 'refresh', repoId: snapshot.repository.id }, true);
+  expect(useRepository.getState().workingState?.undo?.label).toBe('Delete tag');
+  expect(useRepository.getState().syncing).toBeUndefined();
+});

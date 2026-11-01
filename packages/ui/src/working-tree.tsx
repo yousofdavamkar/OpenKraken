@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { Request, WorkingState, WorkingDiff, DiscardPreview } from '@openkraken/ipc-contract';
 import { DiscardDialog } from './discard-dialog.js';
 import { WorkingDiffDialog } from './working-diff.js';
-import { useRepository } from './store.js';
+import { useRepository, waitForBackground } from './store.js';
 export function WorkingTreePanel() {
-  const { snapshot, busy, workingState: state } = useRepository();
+  const { snapshot, busy: active, syncing, workingState: state } = useRepository();
+  const busy = syncing ? undefined : active;
   const [discard, setDiscard] = useState<{ preview: DiscardPreview; paths: string[] }>();
   const [preview, setPreview] = useState<WorkingDiff>();
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -16,6 +17,7 @@ export function WorkingTreePanel() {
   const [amendHead, setAmendHead] = useState<string>();
   const [sign, setSign] = useState('default');
   const templateLoaded = useRef(false);
+  const draftVersion = useRef(0);
   useEffect(() => {
     if (state && !templateLoaded.current) {
       templateLoaded.current = true;
@@ -43,7 +45,9 @@ export function WorkingTreePanel() {
     };
   }, [repoId, cursor]);
   if (!snapshot || !repoId) return null;
-  const mutate = async (request: Request) => {
+  const mutate = async (request: Request, onSuccess?: () => void) => {
+    if (useRepository.getState().syncing) await waitForBackground();
+    if (useRepository.getState().snapshot?.repository.id !== repoId) return false;
     if (useRepository.getState().busy) return false;
     let success = false;
     useRepository.setState({ busy: request.id });
@@ -54,13 +58,18 @@ export function WorkingTreePanel() {
       if (result.kind === 'workingState') {
         setState(result.state);
         success = true;
+        onSuccess?.();
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       useRepository.setState({ busy: undefined });
       if (useRepository.getState().snapshot?.repository.id === repoId)
-        await useRepository.getState().refreshStatus();
+        if (request.method === 'undo')
+          await useRepository
+            .getState()
+            .run({ id: crypto.randomUUID(), method: 'refresh', repoId });
+        else await useRepository.getState().refreshStatus(false);
     }
     return success;
   };
@@ -259,22 +268,26 @@ export function WorkingTreePanel() {
             onSubmit={async (event) => {
               event.preventDefault();
               if (!state) return;
-              const success = await mutate({
-                id: crypto.randomUUID(),
-                method: 'commit',
-                repoId,
-                options: {
-                  message: amend ? amendText : message,
-                  revision: state.revision,
-                  amend,
-                  ...(sign === 'default' ? {} : { sign: sign === 'on' }),
+              const submittedVersion = draftVersion.current;
+              await mutate(
+                {
+                  id: crypto.randomUUID(),
+                  method: 'commit',
+                  repoId,
+                  options: {
+                    message: amend ? amendText : message,
+                    revision: state.revision,
+                    amend,
+                    ...(sign === 'default' ? {} : { sign: sign === 'on' }),
+                  },
                 },
-              });
-              if (success) {
-                setMessage('');
-                setAmendText('');
-                setAmend(false);
-              }
+                () => {
+                  if (draftVersion.current !== submittedVersion) return;
+                  setMessage('');
+                  setAmendText('');
+                  setAmend(false);
+                },
+              );
             }}
           >
             <label>
@@ -284,7 +297,10 @@ export function WorkingTreePanel() {
                 aria-label="Commit message"
                 maxLength={65536}
                 value={amend ? amendText : message}
-                onChange={(event) => (amend ? setAmendText : setMessage)(event.target.value)}
+                onChange={(event) => {
+                  draftVersion.current++;
+                  (amend ? setAmendText : setMessage)(event.target.value);
+                }}
               />
             </label>
             <label>
@@ -293,6 +309,7 @@ export function WorkingTreePanel() {
                 checked={amend}
                 disabled={!!busy || !state?.head.oid}
                 onChange={(event) => {
+                  draftVersion.current++;
                   setAmend(event.target.checked);
                   if (event.target.checked) {
                     setAmendText(state?.amendMessage ?? '');

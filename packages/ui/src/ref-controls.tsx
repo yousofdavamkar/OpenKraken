@@ -2,7 +2,8 @@ import type { GraphView, Ref } from '@openkraken/ipc-contract';
 import { useRepository } from './store.js';
 
 export function RefControls({ reference }: { reference: Ref }) {
-  const { snapshot, busy, setView } = useRepository();
+  const { snapshot, busy: active, syncing, setView } = useRepository();
+  const busy = syncing ? undefined : active;
   if (!snapshot || (reference.objectType !== 'commit' && reference.peeledType !== 'commit'))
     return null;
   const view = snapshot.view,

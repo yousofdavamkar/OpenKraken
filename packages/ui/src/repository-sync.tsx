@@ -38,7 +38,7 @@ export function RepositorySync() {
       domains.clear();
       running = true;
       try {
-        if (full) await state.run({ id: crypto.randomUUID(), method: 'refresh', repoId });
+        if (full) await state.run({ id: crypto.randomUUID(), method: 'refresh', repoId }, true);
         else await state.refreshStatus();
       } finally {
         running = false;

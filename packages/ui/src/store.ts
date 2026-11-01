@@ -26,12 +26,13 @@ interface State {
   snapshot?: Snapshot;
   workingState?: WorkingState;
   watcherMode?: 'native' | 'polling';
-  refreshStatus: () => Promise<void>;
+  refreshStatus: (background?: boolean) => Promise<void>;
   rows: DisplayCommit[];
   layout: GraphRow[];
   passages: GraphPassage[];
   maxColumns: number;
   busy?: string;
+  syncing?: string;
   paging?: string;
   searching?: string;
   error?: string;
@@ -41,7 +42,7 @@ interface State {
   searchTruncated: boolean;
   selection: Selection;
   detail?: Commit | DisplayCommit;
-  run: (request: Request) => Promise<void>;
+  run: (request: Request, background?: boolean) => Promise<void>;
   cancel: () => Promise<void>;
   setView: (view: GraphView) => Promise<void>;
   loadMore: (count?: number) => Promise<void>;
@@ -60,13 +61,14 @@ export const useRepository = create<State>()(
     query: '',
     searchTruncated: false,
     selection: { selected: [] },
-    refreshStatus: async () => {
+    refreshStatus: async (background = true) => {
       const previous = get(),
         snapshot = previous.snapshot;
       if (!snapshot || previous.busy || previous.paging) return;
       const id = crypto.randomUUID();
       set((s) => {
         s.busy = id;
+        if (background) s.syncing = id;
       });
       let fullRefresh = false;
       try {
@@ -136,21 +138,27 @@ export const useRepository = create<State>()(
       } finally {
         set((s) => {
           if (s.busy === id) s.busy = undefined;
+          if (s.syncing === id) s.syncing = undefined;
         });
         if (fullRefresh)
-          await get().run({
-            id: crypto.randomUUID(),
-            method: 'refresh',
-            repoId: snapshot.repository.id,
-          });
+          await get().run(
+            {
+              id: crypto.randomUUID(),
+              method: 'refresh',
+              repoId: snapshot.repository.id,
+            },
+            background,
+          );
       }
     },
-    run: async (request) => {
+    run: async (request, background = false) => {
+      if (!background && get().syncing) await waitForBackground();
       if (get().busy) return;
       const previousPage = get().paging,
         previousSearch = get().searching;
       set((s) => {
         s.busy = request.id;
+        if (background) s.syncing = request.id;
         s.error = undefined;
       });
       if (previousPage) await window.openkraken.cancel(previousPage);
@@ -204,8 +212,10 @@ export const useRepository = create<State>()(
           const query = sameRepository ? previous.query : '';
           set((s) => {
             s.snapshot = result.snapshot;
-            s.workingState = undefined;
-            if (!sameRepository) s.watcherMode = undefined;
+            if (!sameRepository) {
+              s.workingState = undefined;
+              s.watcherMode = undefined;
+            }
             s.rows = rows;
             s.layout = nextLayout;
             s.passages = nextPassages;
@@ -243,6 +253,7 @@ export const useRepository = create<State>()(
       } finally {
         set((s) => {
           if (s.busy === request.id) s.busy = undefined;
+          if (s.syncing === request.id) s.syncing = undefined;
         });
       }
     },
@@ -257,6 +268,7 @@ export const useRepository = create<State>()(
         });
     },
     loadMore: async (count = 5000) => {
+      if (get().syncing) await waitForBackground();
       const snapshot = get().snapshot;
       if (!snapshot?.hasMore || get().paging || get().busy) return;
       const id = crypto.randomUUID(),
@@ -353,6 +365,7 @@ export const useRepository = create<State>()(
       }
     },
     searchAll: async () => {
+      if (get().syncing) await waitForBackground();
       const { snapshot, query } = get();
       if (!snapshot || !query.trim() || get().searching) return;
       const id = crypto.randomUUID(),
@@ -411,3 +424,17 @@ export const useRepository = create<State>()(
     },
   })),
 );
+
+/** A user click can arrive before React paints the background busy state. Preserve that intent. */
+export async function waitForBackground() {
+  while (useRepository.getState().syncing) {
+    await new Promise<void>((resolve) => {
+      const unsubscribe = useRepository.subscribe((state) => {
+        if (!state.syncing) {
+          unsubscribe();
+          resolve();
+        }
+      });
+    });
+  }
+}

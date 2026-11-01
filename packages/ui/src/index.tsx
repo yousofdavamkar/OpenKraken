@@ -9,8 +9,20 @@ import { RefControls } from './ref-controls.js';
 import { useRepository } from './store.js';
 import './style.css';
 function App() {
-  const { snapshot, busy, paging, searching, detail, setDetail, error, run, cancel, setView } =
-    useRepository();
+  const {
+    snapshot,
+    busy: active,
+    syncing,
+    paging,
+    searching,
+    detail,
+    setDetail,
+    error,
+    run,
+    cancel,
+    setView,
+  } = useRepository();
+  const busy = syncing ? undefined : active;
   const [init, setInit] = useState(false);
   const [branch, setBranch] = useState('main');
   const open = () => void run({ id: crypto.randomUUID(), method: 'open' });

@@ -19,11 +19,13 @@ export function History() {
     matches,
     selection,
     paging,
-    busy,
+    busy: active,
+    syncing,
     searchResults,
     searching,
     searchTruncated,
   } = state;
+  const busy = syncing ? undefined : active;
   const viewport = useRef<HTMLDivElement>(null),
     canvas = useRef<HTMLCanvasElement>(null),
     search = useRef<HTMLInputElement>(null);

@@ -54,6 +54,10 @@ test('working-tree buttons stage, unstage, undo and redo through the real Git se
       .getByRole('textbox', { name: 'Commit message', exact: true })
       .fill('Amended in the desktop\n');
     await page.getByRole('button', { name: 'Amend commit', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Undo', exact: true })).toHaveAttribute(
+      'title',
+      'Amend commit',
+    );
     await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeEnabled();
     expect(fixtureGit(repo, ['log', '-1', '--format=%s'])).toBe('Amended in the desktop');
   } finally {
