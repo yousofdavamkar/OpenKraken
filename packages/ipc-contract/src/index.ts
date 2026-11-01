@@ -195,6 +195,13 @@ export type DiscardPreview = z.infer<typeof discardPreviewSchema>;
 export const referenceOptionsSchema = z.discriminatedUnion('action', [
   z
     .object({
+      action: z.literal('checkoutBranch'),
+      name: z.string().min(1).max(1024),
+      expected: oidSchema,
+    })
+    .strict(),
+  z
+    .object({
       action: z.literal('createBranch'),
       name: z.string().min(1).max(1024),
       target: oidSchema,

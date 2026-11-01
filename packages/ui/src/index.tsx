@@ -4,7 +4,7 @@ import { AvatarSettings } from './avatars.js';
 import { RepositorySync } from './repository-sync.js';
 import { WorkingTreePanel } from './working-tree.js';
 import { History } from './history.js';
-import { NewReferences, TagActions } from './references.js';
+import { NewReferences, ReferenceActions } from './references.js';
 import { RefControls } from './ref-controls.js';
 import { useRepository } from './store.js';
 import './style.css';
@@ -145,7 +145,7 @@ function App() {
                           )}
                         </div>
                         <RefControls reference={ref} />
-                        <TagActions reference={ref} />
+                        <ReferenceActions reference={ref} />
                       </div>
                     ))}
                   </section>

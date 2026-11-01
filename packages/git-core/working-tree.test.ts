@@ -398,3 +398,71 @@ test('undo refuses to remove a branch checked out by another worktree', async ()
   await expect(work.undo()).rejects.toMatchObject({ code: 'BRANCH_IN_USE' });
   expect(fixtureGit(path, ['rev-parse', 'occupied'])).toBe(target);
 });
+test('branch checkout and undo preserve later nonconflicting edits and refuse overwritten or moved targets', async () => {
+  const { path, work } = await setup('switch');
+  fixtureGit(path, ['checkout', '-b', 'other']);
+  await writeFile(join(path, 'tracked.txt'), 'other branch\n');
+  fixtureGit(path, ['commit', '-am', 'Other tree']);
+  const other = fixtureGit(path, ['rev-parse', 'HEAD']);
+  fixtureGit(path, ['checkout', 'main']);
+  await work.reference({ action: 'checkoutBranch', name: 'other', expected: other });
+  expect(fixtureGit(path, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/other');
+  expect(await readFile(join(path, 'tracked.txt'), 'utf8')).toBe('other branch\n');
+  await writeFile(join(path, 'after.txt'), 'keep this later untracked edit\n');
+  await work.undo();
+  expect(fixtureGit(path, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/main');
+  expect(await readFile(join(path, 'tracked.txt'), 'utf8')).toBe('base\n');
+  expect(await readFile(join(path, 'after.txt'), 'utf8')).toBe('keep this later untracked edit\n');
+  await work.undo(true);
+  expect(fixtureGit(path, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/other');
+  await writeFile(join(path, 'tracked.txt'), 'later edit in other\n');
+  await expect(work.undo()).rejects.toThrow();
+  expect(fixtureGit(path, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/other');
+  expect(await readFile(join(path, 'tracked.txt'), 'utf8')).toBe('later edit in other\n');
+  fixtureGit(path, ['restore', 'tracked.txt']);
+  fixtureGit(path, ['branch', '-f', 'main', 'main~1']);
+  await expect(work.undo()).rejects.toMatchObject({ code: 'STALE_UNDO' });
+  await expect(
+    work.reference({ action: 'checkoutBranch', name: 'main', expected: other }),
+  ).rejects.toMatchObject({ code: 'STALE_REF' });
+});
+test('checkout undo supports detached and unborn starting HEADs', async () => {
+  for (const kind of ['detached', 'unborn']) {
+    const { path, work } = await setup(`switch-${kind}`);
+    const target = fixtureGit(path, ['rev-parse', 'main']);
+    if (kind === 'detached') fixtureGit(path, ['switch', '--detach', 'HEAD~1']);
+    else fixtureGit(path, ['switch', '--orphan', 'empty']);
+    const before = (await work.state()).head;
+    await work.reference({ action: 'checkoutBranch', name: 'main', expected: target });
+    await work.undo();
+    expect((await work.state()).head).toEqual(before);
+    await work.undo(true);
+    expect((await work.state()).head).toEqual({
+      kind: 'branch',
+      ref: 'refs/heads/main',
+      oid: target,
+    });
+  }
+});
+test.skipIf(process.platform === 'win32')(
+  'failed post-checkout hook keeps the completed switch recoverable',
+  async () => {
+    const { path, work } = await setup('switch-hook');
+    fixtureGit(path, ['branch', 'other', 'HEAD~1']);
+    const target = fixtureGit(path, ['rev-parse', 'other']);
+    const hook = join(path, '.git/hooks/post-checkout');
+    await writeFile(hook, '#!/bin/sh\necho checkout-hook-failed >&2\nexit 1\n', { mode: 0o755 });
+    await expect(
+      work.reference({ action: 'checkoutBranch', name: 'other', expected: target }),
+    ).rejects.toThrow('checkout-hook-failed');
+    expect((await work.state()).head).toEqual({
+      kind: 'branch',
+      ref: 'refs/heads/other',
+      oid: target,
+    });
+    expect((await work.state()).undo?.label).toBe('Switch branch');
+    await rm(hook);
+    await work.undo();
+    expect(fixtureGit(path, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/main');
+  },
+);

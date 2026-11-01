@@ -24,6 +24,10 @@ test('create branches and annotated tags, confirm deletion and restore with Undo
     expect(fixtureGit(repo, ['rev-parse', 'feature/ui'])).toBe(
       fixtureGit(repo, ['rev-parse', 'HEAD']),
     );
+    await page.getByRole('button', { name: 'Switch to feature/ui', exact: true }).click();
+    await expect(page.getByTestId('head')).toHaveText('feature/ui');
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect(page.getByTestId('head')).toHaveText('main');
     await page.getByRole('button', { name: 'New tag', exact: true }).click();
     dialog = page.getByRole('dialog', { name: 'Create tag' });
     await dialog.getByRole('textbox', { name: 'Tag name', exact: true }).fill('release/ui');

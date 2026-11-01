@@ -615,8 +615,106 @@ export class WorkingTree {
         signal,
       });
   }
+  private async noOperation() {
+    const markers = await readdir(this.repo.gitDir);
+    if (
+      markers.some((p) =>
+        [
+          'MERGE_HEAD',
+          'CHERRY_PICK_HEAD',
+          'REVERT_HEAD',
+          'rebase-merge',
+          'rebase-apply',
+          'sequencer',
+        ].includes(p),
+      )
+    )
+      throw new GitError(
+        'OPERATION_IN_PROGRESS',
+        'Finish or abort the active Git operation before switching branches',
+      );
+  }
+  private async checkoutBranch(
+    options: Extract<ReferenceOptions, { action: 'checkoutBranch' }>,
+    signal?: AbortSignal,
+  ) {
+    const ref = `refs/heads/${options.name}`;
+    if (
+      options.name.startsWith('-') ||
+      (await this.run(['check-ref-format', ref], { signal, allowedExitCodes: [0, 1] })).exitCode !==
+        0
+    )
+      throw new GitError('INVALID_REF', 'Enter a valid branch name');
+    return this.transaction(
+      'Switch branch',
+      async (indexFile) => {
+        await this.noOperation();
+        if ((await this.referenceState([ref], signal))[ref] !== options.expected)
+          throw new GitError(
+            'STALE_REF',
+            'The branch changed. Review its current target before switching.',
+          );
+        await this.run(['switch', '--no-guess', '--', options.name], {
+          indexFile,
+          signal,
+          readOnly: false,
+        });
+      },
+      signal,
+      undefined,
+      true,
+    );
+  }
+  private async restoreCheckout(
+    indexFile: string,
+    publish: () => Promise<void>,
+    target: Saved,
+    expected: Saved,
+    signal?: AbortSignal,
+  ) {
+    await this.noOperation();
+    if (
+      target.head.kind === 'branch' &&
+      (await this.referenceState([target.head.ref], signal))[target.head.ref] !==
+        (target.head.oid ?? null)
+    )
+      throw new GitError(
+        'STALE_UNDO',
+        'The previous branch moved. Undo would switch to a different commit.',
+      );
+    if (target.head.oid)
+      await this.run(['cat-file', '-e', `${target.head.oid}^{commit}`], { signal });
+    const pending = join(this.directory, `pending-${randomUUID()}.json`);
+    await atomic(pending, JSON.stringify({ label: 'Restore checkout', before: expected, target }));
+    let failure: unknown;
+    try {
+      const args =
+        target.head.kind === 'branch'
+          ? target.head.oid
+            ? ['switch', '--no-guess', '--', target.head.ref.slice('refs/heads/'.length)]
+            : ['switch', '--orphan', target.head.ref.slice('refs/heads/'.length)]
+          : ['switch', '--detach', target.head.oid];
+      await this.run(args, { indexFile, signal, readOnly: false });
+    } catch (e) {
+      failure = e;
+    }
+    const after = await this.saved(indexFile);
+    const changed = !sameHead(after.head, expected.head) || after.signature !== expected.signature;
+    if (changed) await publish();
+    if (failure) {
+      if (!changed) await rm(pending, { force: true });
+      throw failure;
+    }
+    if (!sameHead(after.head, target.head) || after.signature !== target.signature)
+      throw new GitError(
+        'CHECKOUT_CHANGED',
+        `Checkout hooks or another writer changed the result. Recovery backup: ${pending}`,
+      );
+    return pending;
+  }
   async reference(input: ReferenceOptions, signal?: AbortSignal) {
     const options = referenceOptionsSchema.parse(input);
+    if (options.action === 'checkoutBranch') return this.checkoutBranch(options, signal);
     const branch = options.action === 'createBranch';
     const ref = `refs/${branch ? 'heads' : 'tags'}/${options.name}`;
     if (options.name.startsWith('-') || options.name === 'HEAD' || options.name.includes('\0'))
@@ -781,6 +879,20 @@ export class WorkingTree {
             'HEAD or the index changed outside this action. Undo would overwrite newer work.',
           );
         if (expected.files) await this.backups.assertCurrent(expected.files);
+        const switching =
+          target.head.kind !== expected.head.kind ||
+          (target.head.kind === 'branch' &&
+            expected.head.kind === 'branch' &&
+            target.head.ref !== expected.head.ref);
+        if (switching) {
+          const pending = await this.restoreCheckout(index, publish, target, expected, signal);
+          source.pop();
+          (redo ? journal.undo : journal.redo).push(entry);
+          await this.saveJournal(journal);
+          await rm(pending, { force: true });
+          await this.pruneFiles(journal);
+          return;
+        }
         if (
           expected.refs &&
           JSON.stringify(await this.referenceState(Object.keys(expected.refs))) !==

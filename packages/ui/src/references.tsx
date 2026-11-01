@@ -1,6 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Ref, ReferenceOptions } from '@openkraken/ipc-contract';
 import { useRepository } from './store.js';
+async function executeReference(repoId: string, options: ReferenceOptions) {
+  if (useRepository.getState().busy) return false;
+  const id = crypto.randomUUID();
+  useRepository.setState({ busy: id });
+  try {
+    const result = await window.openkraken.request({ id, method: 'reference', repoId, options });
+    if (result.kind === 'error') throw new Error(result.message);
+    if (result.kind === 'workingState') useRepository.setState({ workingState: result.state });
+    return result.kind === 'workingState';
+  } finally {
+    useRepository.setState({ busy: undefined });
+    if (useRepository.getState().snapshot?.repository.id === repoId)
+      await useRepository.getState().run({ id: crypto.randomUUID(), method: 'refresh', repoId });
+  }
+}
 type Action = 'createBranch' | 'createTag' | 'deleteTag';
 function ReferenceDialog({
   action,
@@ -30,8 +45,7 @@ function ReferenceDialog({
   }, []);
   const submit = async () => {
     if (!snapshot || useRepository.getState().busy) return;
-    const repoId = snapshot.repository.id,
-      id = crypto.randomUUID();
+    const repoId = snapshot.repository.id;
     const options: ReferenceOptions =
       action === 'deleteTag'
         ? { action, name, expected: target }
@@ -39,19 +53,11 @@ function ReferenceDialog({
           ? { action, name, target }
           : { action, name, target, ...(message ? { message } : {}), sign };
     setError(undefined);
-    useRepository.setState({ busy: id });
     let success = false;
     try {
-      const result = await window.openkraken.request({ id, method: 'reference', repoId, options });
-      if (result.kind === 'error') throw new Error(result.message);
-      success = result.kind === 'workingState';
-      if (result.kind === 'workingState') useRepository.setState({ workingState: result.state });
+      success = await executeReference(repoId, options);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      useRepository.setState({ busy: undefined });
-      if (useRepository.getState().snapshot?.repository.id === repoId)
-        await useRepository.getState().run({ id: crypto.randomUUID(), method: 'refresh', repoId });
     }
     if (success) close();
   };
@@ -167,9 +173,36 @@ export function NewReferences() {
     </>
   );
 }
-export function TagActions({ reference }: { reference: Ref }) {
-  const { busy } = useRepository();
+export function ReferenceActions({ reference }: { reference: Ref }) {
+  const { busy, snapshot } = useRepository();
+  const [error, setError] = useState<string>();
   const [reviewed, setReviewed] = useState<Ref>();
+  if (reference.kind === 'local' && snapshot && !snapshot.repository.isBare)
+    return (
+      <>
+        <button
+          disabled={!!busy || reference.isHead}
+          aria-label={`Switch to ${reference.shortName}`}
+          onClick={() => {
+            setError(undefined);
+            void executeReference(snapshot.repository.id, {
+              action: 'checkoutBranch',
+              name: reference.shortName,
+              expected: reference.target,
+            }).catch((error: unknown) =>
+              setError(error instanceof Error ? error.message : String(error)),
+            );
+          }}
+        >
+          {reference.isHead ? 'Current' : 'Switch'}
+        </button>
+        {error && (
+          <p role="alert" className="error">
+            {error}
+          </p>
+        )}
+      </>
+    );
   if (reference.kind !== 'tag') return null;
   return (
     <>

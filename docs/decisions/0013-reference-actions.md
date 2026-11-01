@@ -9,3 +9,11 @@ The dialogs show the target commit or reviewed tag object. Deletion explicitly c
 Validation: real Git branch/tag/undo flows, exact annotation bytes, stale ref refusal, invalid names, linked-worktree protection, a bare-repository fixture, and an Electron create/delete/undo flow.
 
 Public references: [Git branch](https://git-scm.com/docs/git-branch), [Git tag](https://git-scm.com/docs/git-tag), and [Git update-ref transactions](https://git-scm.com/docs/git-update-ref).
+
+## Checkout and its inverse
+
+Branch checkout uses native `git switch --no-guess` with the isolated index, without force or discard flags. The reviewed tip must still match before switching, and active merge/rebase/sequencer operations block the action. Native Git protects tracked and untracked work and enforces linked-worktree occupancy.
+
+Checkout undo switches back through Git instead of copying every file in the repository. It checks the recorded index and HEAD and requires the previous branch tip to remain unchanged. New nonconflicting working edits survive; conflicting edits cause Git to refuse. Detached and unborn previous HEADs use native detached/orphan switch modes. Pending undo records preserve recovery information if hooks or cancellation change the result. A failed post-checkout hook still records an already-completed initial switch so the user can undo it.
+
+The checkout slice is validated with different trees, later untracked and conflicting tracked edits, moved previous branches, detached/unborn heads, a failing native hook, and the Electron switch/undo flow. Branch rename/delete/upstream and remote operations remain subsequent work.
