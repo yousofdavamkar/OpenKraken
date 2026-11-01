@@ -364,3 +364,154 @@ footer {
     display: none;
   }
 }
+/* One scrolling DOM grid and one viewport-sized Canvas share row coordinates. */
+.history {
+  overflow: hidden;
+}
+.graph-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.graph-viewport .history-scroll {
+  height: 100%;
+  width: 100%;
+}
+.graph-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.graph-columns {
+  padding: 0;
+  gap: 0;
+}
+.graph-columns > :not(:first-child) {
+  padding: 0 8px;
+}
+.column-head.graph-columns {
+  flex-shrink: 0;
+}
+.column-head.graph-columns > :first-child {
+  padding-left: 12px;
+}
+.commit-row.selected {
+  background: #23413f;
+}
+.commit-row.dimmed {
+  opacity: 0.27;
+}
+.commit-row:has(+ .commit-row) {
+  contain: layout style;
+}
+.history-scroll:focus-visible {
+  outline: 1px solid #6bdfc2;
+  outline-offset: -2px;
+}
+.history-search {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+  padding: 8px 12px;
+  align-items: center;
+}
+.history-search input {
+  width: 100%;
+  min-width: 80px;
+  background: #151d28;
+  border: 1px solid #354153;
+  color: #dce3ed;
+  padding: 8px;
+  border-radius: 5px;
+}
+.history-search span {
+  color: #91a0b5;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.history-search button {
+  font-size: 10px;
+  white-space: nowrap;
+}
+.history-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 10px;
+  gap: 10px;
+  min-height: 38px;
+  border-top: 1px solid #283242;
+  color: #91a0b5;
+  font-size: 10px;
+}
+.history-bottom button {
+  padding: 5px 9px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.search-results {
+  max-height: 155px;
+  overflow: auto;
+  padding: 8px 12px;
+  border-bottom: 1px solid #354153;
+}
+.search-results p {
+  font-size: 11px;
+  color: #91a0b5;
+}
+.search-results button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-bottom: 4px;
+}
+.commit-detail {
+  margin-bottom: 24px;
+  border-bottom: 1px solid #354153;
+  padding-bottom: 14px;
+}
+.commit-detail h2 {
+  margin-top: 14px;
+}
+.commit-detail code {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #79dfc3;
+  font-size: 11px;
+}
+.commit-detail pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  line-height: 1.6;
+}
+.badge.branch {
+  background: #284439;
+  color: #92ddbb;
+}
+.badge.tag {
+  background: #493c28;
+  color: #edcc91;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 1050px) {
+  .graph-columns time,
+  .column-head.graph-columns span:last-child {
+    display: block;
+  }
+  .history-search span {
+    display: none;
+  }
+}

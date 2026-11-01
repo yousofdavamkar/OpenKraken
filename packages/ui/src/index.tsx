@@ -1,73 +1,11 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { useVirtualizer } from '@tanstack/react-virtual';
-import type { Commit } from '@openkraken/ipc-contract';
+import { History } from './history.js';
 import { useRepository } from './store.js';
 import './style.css';
-const dateFormatter = new Intl.DateTimeFormat();
-function History({ commits }: { commits: Commit[] }) {
-  const viewport = useRef<HTMLDivElement>(null);
-  const virtual = useVirtualizer({
-    count: commits.length,
-    getScrollElement: () => viewport.current,
-    estimateSize: () => 28,
-    overscan: 10,
-  });
-  useLayoutEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        performance.mark('repository-painted');
-        if (performance.getEntriesByName('repository-open-start').length)
-          performance.measure(
-            'repository-first-paint',
-            'repository-open-start',
-            'repository-painted',
-          );
-      });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [commits]);
-  return (
-    <div
-      className="history-scroll"
-      ref={viewport}
-      role="table"
-      aria-label="Commit history"
-      aria-rowcount={commits.length}
-    >
-      <div className="history-space" style={{ height: virtual.getTotalSize() }}>
-        {virtual.getVirtualItems().map((item) => {
-          const commit = commits[item.index]!;
-          return (
-            <div
-              className="commit-row"
-              key={commit.oid}
-              role="row"
-              aria-rowindex={item.index + 1}
-              style={{ transform: `translateY(${item.start}px)` }}
-            >
-              <code role="cell">{commit.oid.slice(0, 8)}</code>
-              <span role="cell" className="commit-subject" title={commit.body}>
-                {commit.isStash && <b className="badge">stash</b>}
-                {commit.parents.length > 1 && <b className="badge">merge</b>}
-                {commit.summary || '(empty message)'}
-              </span>
-              <span role="cell" className="author">
-                {commit.author.name}
-              </span>
-              <time role="cell">{dateFormatter.format(commit.author.time * 1000)}</time>
-            </div>
-          );
-        })}
-      </div>
-      {!commits.length && (
-        <p className="empty">No commits yet. This repository is ready for its first commit.</p>
-      )}
-    </div>
-  );
-}
 function App() {
-  const { snapshot, busy, error, run, cancel } = useRepository();
+  const { snapshot, busy, paging, searching, detail, setDetail, error, run, cancel } =
+    useRepository();
   const [init, setInit] = useState(false);
   const [branch, setBranch] = useState('main');
   const open = () => void run({ id: crypto.randomUUID(), method: 'open' });
@@ -102,7 +40,7 @@ function App() {
               Refresh
             </button>
           )}
-          {busy && <button onClick={() => void cancel()}>Cancel</button>}
+          {(busy || paging || searching) && <button onClick={() => void cancel()}>Cancel</button>}
         </div>
       </header>
       {init && (
@@ -193,18 +131,28 @@ function App() {
                 <h2>History</h2>
                 <span data-testid="commit-count">
                   {snapshot.commits.length.toLocaleString()} commits
-                  {snapshot.hasMore ? ' · first page' : ''}
+                  {snapshot.hasMore ? ' · more available' : ''}
                 </span>
               </div>
-              <div className="column-head">
-                <span>COMMIT</span>
-                <span>MESSAGE</span>
-                <span>AUTHOR</span>
-                <span>DATE</span>
-              </div>
-              <History commits={snapshot.commits} />
+              <History />
             </section>
             <aside className="status">
+              {detail && (
+                <section className="commit-detail" aria-label="Commit details">
+                  <button onClick={() => setDetail()}>Close details</button>
+                  <h2>{detail.summary}</h2>
+                  <code>{detail.oid}</code>
+                  <p>
+                    {detail.author.name} {detail.author.email}
+                  </p>
+                  <pre>{detail.body}</pre>
+                  <h3>Parents</h3>
+                  {detail.parents.map((parent) => (
+                    <code key={parent}>{parent}</code>
+                  ))}
+                </section>
+              )}
+
               <h2>
                 Working tree <span>{snapshot.status.entries.length}</span>
               </h2>
