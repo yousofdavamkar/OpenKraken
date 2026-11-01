@@ -300,7 +300,45 @@ export const remoteOptionsSchema = z.discriminatedUnion('action', [
     .strict(),
 ]);
 export type RemoteOptions = z.infer<typeof remoteOptionsSchema>;
+const pushRefSchema = z
+  .string()
+  .min(11)
+  .max(1024)
+  .regex(/^refs\/(heads|tags)\/.+/);
+export const pushSelectionSchema = z
+  .object({ name: remoteNameSchema, source: pushRefSchema, destination: pushRefSchema })
+  .strict();
+export type PushSelection = z.infer<typeof pushSelectionSchema>;
+export const pushPlanSchema = pushSelectionSchema
+  .extend({
+    sourceOid: oidSchema,
+    remoteOid: oidSchema.nullable(),
+    token: remoteTokenSchema,
+    url: z.string(),
+  })
+  .strict();
+export type PushPlan = z.infer<typeof pushPlanSchema>;
+export const pushOptionsSchema = z
+  .object({ plan: pushPlanSchema, force: z.boolean().optional(), upstream: z.boolean().optional() })
+  .strict();
+export type PushOptions = z.infer<typeof pushOptionsSchema>;
 const workingRequests = [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('pushPreview'),
+      repoId: repoIdSchema,
+      selection: pushSelectionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('push'),
+      repoId: repoIdSchema,
+      options: pushOptionsSchema,
+    })
+    .strict(),
   z
     .object({
       id: requestId,
@@ -444,6 +482,8 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('pushPreview'), plan: pushPlanSchema }),
+  z.object({ kind: z.literal('pushed'), state: remoteStateSchema, warning: z.string().optional() }),
   z.object({ kind: z.literal('remotes'), state: remoteStateSchema }),
   z.object({ kind: z.literal('discardPreview'), preview: discardPreviewSchema }),
   z.object({ kind: z.literal('diff'), diff: workingDiffSchema }),

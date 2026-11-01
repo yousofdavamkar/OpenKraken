@@ -7,6 +7,8 @@ import type {
   PatchOptions,
   ReferenceOptions,
   RemoteOptions,
+  PushSelection,
+  PushOptions,
   GraphView,
   Repository,
   Snapshot,
@@ -442,6 +444,18 @@ export class RepositoryService {
   remotes(id: string, signal?: AbortSignal) {
     const { repo, manager } = this.remoteManager(id);
     return this.queue(repo.commonDir).run(false, () => manager.state(signal), signal);
+  }
+  pushPreview(id: string, selection: PushSelection, signal?: AbortSignal) {
+    const { repo, manager } = this.remoteManager(id);
+    return this.queue(repo.commonDir).run(
+      false,
+      () => manager.pushPreview(selection, signal),
+      signal,
+    );
+  }
+  push(id: string, options: PushOptions, signal?: AbortSignal) {
+    const { repo, manager } = this.remoteManager(id);
+    return this.queue(repo.commonDir).run(true, () => manager.push(options, signal), signal);
   }
   fetch(id: string, name: string, signal?: AbortSignal, background = false) {
     const { repo, manager } = this.remoteManager(id);

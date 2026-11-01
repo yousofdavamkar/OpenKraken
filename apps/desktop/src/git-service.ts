@@ -28,6 +28,13 @@ function getService() {
 }
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
   const git = await getService();
+  if (request.method === 'pushPreview')
+    return {
+      kind: 'pushPreview',
+      plan: await git.pushPreview(request.repoId, request.selection, signal),
+    };
+  if (request.method === 'push')
+    return { kind: 'pushed', ...(await git.push(request.repoId, request.options, signal)) };
   if (request.method === 'fetch')
     return {
       kind: 'remotes',
@@ -133,6 +140,7 @@ parent.on('message', (event) => {
     'reference',
     'remote',
     'fetch',
+    'push',
   ].includes(request.method);
   const observed = watcher;
   if (writing) observed?.pause();

@@ -191,3 +191,89 @@ test.skipIf(process.platform === 'win32')(
     }
   },
 );
+test('push publishes reviewed tips, sets upstream and uses an explicit lease for non-fast-forward updates', async () => {
+  const path = createFixture(join(root, 'push-client'));
+  const bare = join(root, 'push-remote.git');
+  fixtureGit(path, ['clone', '--bare', '.', bare]);
+  fixtureGit(path, ['remote', 'set-url', 'origin', bare]);
+  const service = new RepositoryService('git');
+  const repo = await service.open(path);
+  const selection = {
+    name: 'origin',
+    source: 'refs/heads/main',
+    destination: 'refs/heads/published',
+  };
+  let plan = await service.pushPreview(repo.id, selection);
+  expect(plan.remoteOid).toBeNull();
+  await service.push(repo.id, { plan, upstream: true });
+  expect(fixtureGit(bare, ['rev-parse', 'published'])).toBe(plan.sourceOid);
+  expect(fixtureGit(path, ['rev-parse', '--symbolic-full-name', 'main@{upstream}'])).toBe(
+    'refs/remotes/origin/published',
+  );
+  fixtureGit(path, ['commit', '--allow-empty', '-m', 'First published commit']);
+  plan = await service.pushPreview(repo.id, selection);
+  await service.push(repo.id, { plan });
+  const published = fixtureGit(bare, ['rev-parse', 'published']);
+  fixtureGit(path, ['reset', '--soft', 'HEAD~1']);
+  fixtureGit(path, ['commit', '--allow-empty', '-m', 'Rewritten published commit']);
+  plan = await service.pushPreview(repo.id, selection);
+  await expect(service.push(repo.id, { plan })).rejects.toThrow(/non-fast-forward|rejected/);
+  expect(fixtureGit(bare, ['rev-parse', 'published'])).toBe(published);
+  // Another writer changes the server after review. The explicit lease must refuse it.
+  fixtureGit(bare, ['update-ref', 'refs/heads/published', `${published}~1`]);
+  await expect(service.push(repo.id, { plan, force: true })).rejects.toThrow(/stale info|rejected/);
+  fixtureGit(bare, ['update-ref', 'refs/heads/published', published]);
+  plan = await service.pushPreview(repo.id, selection);
+  await service.push(repo.id, { plan, force: true });
+  expect(fixtureGit(bare, ['rev-parse', 'published'])).toBe(plan.sourceOid);
+  plan = await service.pushPreview(repo.id, selection);
+  fixtureGit(path, ['commit', '--allow-empty', '-m', 'Changed after review']);
+  await expect(service.push(repo.id, { plan })).rejects.toMatchObject({ code: 'STALE_PUSH' });
+  await service.dispose();
+});
+test('push reviews the push URL and publishes only the selected ref despite mirror and follow-tags settings', async () => {
+  const path = createFixture(join(root, 'push-settings'));
+  const fetchRemote = join(root, 'push-settings-fetch.git');
+  const pushRemote = join(root, 'push-settings-push.git');
+  fixtureGit(path, ['clone', '--bare', '.', fetchRemote]);
+  fixtureGit(path, ['clone', '--bare', '.', pushRemote]);
+  fixtureGit(fetchRemote, ['branch', 'published', 'HEAD~1']);
+  fixtureGit(pushRemote, ['branch', 'published', 'HEAD']);
+  fixtureGit(pushRemote, ['branch', 'server-only', 'HEAD']);
+  fixtureGit(path, ['remote', 'set-url', 'origin', fetchRemote]);
+  fixtureGit(path, ['remote', 'set-url', '--push', 'origin', pushRemote]);
+  fixtureGit(path, ['config', 'remote.origin.mirror', 'true']);
+  fixtureGit(path, ['config', 'push.followTags', 'true']);
+  fixtureGit(path, ['branch', 'private-branch']);
+  fixtureGit(path, ['tag', '-a', 'v', '-m', 'Do not publish implicitly']);
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const plan = await service.pushPreview(repo.id, {
+      name: 'origin',
+      source: 'refs/heads/main',
+      destination: 'refs/heads/published',
+    });
+    expect(plan.remoteOid).toBe(fixtureGit(pushRemote, ['rev-parse', 'published']));
+    expect(plan.remoteOid).not.toBe(fixtureGit(fetchRemote, ['rev-parse', 'published']));
+    await service.push(repo.id, { plan });
+    expect(
+      fixtureGit(pushRemote, [
+        'for-each-ref',
+        '--format=%(refname)',
+        'refs/tags/v',
+        'refs/heads/private-branch',
+      ]),
+    ).toBe('');
+    expect(fixtureGit(pushRemote, ['rev-parse', 'server-only'])).toBe(plan.sourceOid);
+    const tag = await service.pushPreview(repo.id, {
+      name: 'origin',
+      source: 'refs/tags/v',
+      destination: 'refs/tags/v',
+    });
+    await service.push(repo.id, { plan: tag });
+    expect(fixtureGit(pushRemote, ['cat-file', '-t', 'refs/tags/v'])).toBe('tag');
+  } finally {
+    await service.dispose();
+  }
+});

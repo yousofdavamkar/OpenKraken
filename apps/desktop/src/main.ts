@@ -74,7 +74,7 @@ function callService(request: ServiceRequest): Promise<Result> {
           message: 'The Git service did not respond in time.',
         });
       },
-      request.method === 'fetch'
+      ['fetch', 'pushPreview', 'push'].includes(request.method)
         ? 210000
         : request.method === 'commit' || request.method === 'reference'
           ? 180000

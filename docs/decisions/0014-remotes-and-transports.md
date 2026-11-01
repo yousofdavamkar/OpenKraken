@@ -25,3 +25,15 @@ Reference: [Git fetch documentation](https://git-scm.com/docs/git-fetch).
 Automatic fetch is off by default, with per-repository intervals of 5, 15 or 30 minutes persisted in the local profile's renderer storage. A timer tick skips an open dialog, active operation, search or paging. It fetches configured remotes sequentially and refreshes history after completion; the existing Cancel action can interrupt it. Disabling the timer or leaving the repository cancels its active request. Failures appear as a status message, with the next attempt at the configured interval.
 
 Background requests disable Git askpass, SSH askpass, and interactive Git Credential Manager prompting while retaining noninteractive credential-helper/agent access. Third-party credential helpers still execute as configured native programs. The Electron clock test verifies opt-in, dialog deferral, a real bare-remote fetch and interval persistence across reload. A native HTTP authentication fixture verifies that foreground askpass executes and background fetch suppresses the same helper.
+
+## Reviewed push
+
+Push reviews a full local branch/tag ref, its current object ID, the full destination ref and the server's current object ID. Review queries the resolved push URL, which may differ from the fetch URL. This first flow requires one push URL per remote; configure separate remotes for separate destinations. The configuration/tracking-ref token and local source tip must still match before submission. The pushed source is the exact reviewed object ID, so a later local branch movement cannot silently change the outgoing content.
+
+Normal push keeps native non-fast-forward protection. Replacing remote history requires an explicit checkbox and uses `--force-with-lease=<destination>:<reviewed-oid>`; an absent destination uses an empty expected value. No bare `--force` is used. Mirror mode and implicit follow-tags are disabled for this operation, and there is exactly one explicit refspec. Native pre-push hooks still run. The common transport boundary enforces TLS, restricts protocols and preserves sanitized porcelain rejection details.
+
+Optional upstream selection runs after successful publication and only if the local branch still matches the reviewed tip. If the remote's fetch mapping cannot provide that tracking ref, or another error prevents the local setting, the result reports that push completed but upstream was not set. Remote writes have no Undo. Cancellation or a connection failure can occur after server acceptance; the dialog directs a cancelled push to review its destination before retrying.
+
+Real-Git tests cover fresh/fast-forward pushes, upstream tracking, rejected non-fast-forwards, intervening server changes, explicit lease replacement, stale local sources, separate fetch/push URLs, annotated tags and isolation from mirror/follow-tags settings. Electron verifies reviewed publication, native rejection and the explicit force-with-lease checkbox flow.
+
+Reference: [Git push documentation](https://git-scm.com/docs/git-push).
