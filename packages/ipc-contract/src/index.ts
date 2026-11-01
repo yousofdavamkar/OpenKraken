@@ -249,7 +249,67 @@ export const referenceOptionsSchema = z.discriminatedUnion('action', [
     .strict(),
 ]);
 export type ReferenceOptions = z.infer<typeof referenceOptionsSchema>;
+export const remoteStateSchema = z.object({
+  token: z.string().regex(/^[0-9a-f]{64}$/),
+  remotes: z.array(
+    z.object({ name: z.string(), urls: z.array(z.string()), pushUrls: z.array(z.string()) }),
+  ),
+});
+export type RemoteState = z.infer<typeof remoteStateSchema>;
+const remoteNameSchema = z
+  .string()
+  .min(1)
+  .max(1024)
+  // eslint-disable-next-line no-control-regex -- Reject control bytes at the IPC boundary.
+  .regex(/^[^-\s][^\s\x00-\x1f\x7f]*$/);
+const remoteUrlSchema = z
+  .string()
+  .min(1)
+  .max(32768)
+  // eslint-disable-next-line no-control-regex -- Reject control bytes at the IPC boundary.
+  .regex(/^[^-\x00-\x1f\x7f][^\x00-\x1f\x7f]*$/);
+const remoteTokenSchema = z.string().regex(/^[0-9a-f]{64}$/);
+export const remoteOptionsSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('add'),
+      name: remoteNameSchema,
+      url: remoteUrlSchema,
+      token: remoteTokenSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('setUrl'),
+      name: remoteNameSchema,
+      url: remoteUrlSchema,
+      push: z.boolean().optional(),
+      token: remoteTokenSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('rename'),
+      name: remoteNameSchema,
+      newName: remoteNameSchema,
+      token: remoteTokenSchema,
+    })
+    .strict(),
+  z
+    .object({ action: z.literal('remove'), name: remoteNameSchema, token: remoteTokenSchema })
+    .strict(),
+]);
+export type RemoteOptions = z.infer<typeof remoteOptionsSchema>;
 const workingRequests = [
+  z.object({ id: requestId, method: z.literal('remotes'), repoId: repoIdSchema }).strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('remote'),
+      repoId: repoIdSchema,
+      options: remoteOptionsSchema,
+    })
+    .strict(),
   z
     .object({
       id: requestId,
@@ -375,6 +435,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('remotes'), state: remoteStateSchema }),
   z.object({ kind: z.literal('discardPreview'), preview: discardPreviewSchema }),
   z.object({ kind: z.literal('diff'), diff: workingDiffSchema }),
   z.object({ kind: z.literal('workingState'), state: workingStateSchema }),

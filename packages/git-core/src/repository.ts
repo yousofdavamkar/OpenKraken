@@ -6,6 +6,7 @@ import type {
   CommitOptions,
   PatchOptions,
   ReferenceOptions,
+  RemoteOptions,
   GraphView,
   Repository,
   Snapshot,
@@ -15,6 +16,7 @@ import { HistoryParser, RefsParser, StatusParser, HISTORY_FORMAT, REF_FORMAT } f
 import { HistoryCache } from './history-cache.js';
 import { RepositoryPreferences } from './preferences.js';
 import { HistoryCursor } from './history.js';
+import { Remotes } from './remotes.js';
 import { WorkingTree } from './working-tree.js';
 import { RepositoryQueue } from './queue.js';
 
@@ -428,6 +430,22 @@ export class RepositoryService {
       this.workingTrees.set(id, work);
     }
     return work;
+  }
+  private remoteManager(id: string) {
+    const repo = this.repositories.get(id);
+    if (!repo) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
+    return {
+      repo,
+      manager: new Remotes((args, options) => this.run(args, { ...options, cwd: repo.path })),
+    };
+  }
+  remotes(id: string, signal?: AbortSignal) {
+    const { repo, manager } = this.remoteManager(id);
+    return this.queue(repo.commonDir).run(false, () => manager.state(signal), signal);
+  }
+  remote(id: string, options: RemoteOptions, signal?: AbortSignal) {
+    const { repo, manager } = this.remoteManager(id);
+    return this.queue(repo.commonDir).run(true, () => manager.change(options, signal), signal);
   }
   reference(id: string, options: ReferenceOptions, signal?: AbortSignal) {
     const work = this.working(id);
