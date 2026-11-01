@@ -1,0 +1,34 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist/test-types"
+  },
+  "include": [
+    "packages/**/*.test.ts",
+    "apps/**/*.test.ts",
+    "tests/**/*.ts",
+    "vitest.config.ts",
+    "playwright.config.ts"
+  ],
+  "references": [
+    {
+      "path": "packages/ipc-contract"
+    },
+    {
+      "path": "packages/git-core"
+    },
+    {
+      "path": "packages/graph"
+    },
+    {
+      "path": "packages/test-fixtures"
+    },
+    {
+      "path": "packages/ui"
+    },
+    {
+      "path": "apps/desktop"
+    }
+  ]
+}
