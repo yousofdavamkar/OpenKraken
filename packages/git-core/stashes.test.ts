@@ -6,6 +6,10 @@ import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
 import { RepositoryService } from './src/repository.js';
 const root = await mkdtemp(join(tmpdir(), 'openkraken-stashes-'));
 afterAll(() => rm(root, { recursive: true, force: true }));
+const pick = (entry: { selector: string; oid: string }) => ({
+  selector: entry.selector,
+  oid: entry.oid,
+});
 const bytes = (path: string) => Buffer.from(path).toString('base64');
 test('partial stash saves selected paths and untracked content; Undo restores work while retaining the stash', async () => {
   const path = createFixture(join(root, 'partial'));
@@ -83,5 +87,117 @@ test('a partial stash excludes unselected staged files from both stash trees and
   expect(fixtureGit(path, ['show', 'stash@{0}^2:other.txt'])).toBe('old other');
   expect(fixtureGit(path, ['show', ':other.txt'])).toBe('unselected staged edit');
   expect(await readFile(join(path, 'other.txt'), 'utf8')).toBe('unselected staged edit\n');
+  await service.dispose();
+});
+test('apply and pop restore a reviewed stash; stale lists and failed applications preserve saved entries', async () => {
+  const path = createFixture(join(root, 'apply'));
+  for (const text of ['first', 'second']) {
+    await writeFile(join(path, 'tracked.txt'), `${text}\n`);
+    fixtureGit(path, ['add', 'tracked.txt']);
+    fixtureGit(path, ['stash', 'push', '-m', text]);
+  }
+  const service = new RepositoryService('git', { dataDir: join(root, 'profile') });
+  const repo = await service.open(path);
+  let list = await service.stashes(repo.id);
+  const first = list.entries[1]!;
+  await service.stashAction(repo.id, {
+    action: 'apply',
+    ...pick(first),
+    token: list.token,
+    restoreIndex: true,
+  });
+  expect(fixtureGit(path, ['show', ':tracked.txt'])).toBe('first');
+  expect(await readFile(join(path, 'tracked.txt'), 'utf8')).toBe('first\n');
+  expect((await service.stashes(repo.id)).entries).toHaveLength(2);
+  await expect(
+    service.stashAction(repo.id, { action: 'pop', ...pick(list.entries[0]!), token: list.token }),
+  ).rejects.toThrow();
+  expect((await service.stashes(repo.id)).entries).toHaveLength(2);
+  fixtureGit(path, ['restore', '--source=HEAD', '--staged', '--worktree', '.']);
+  await service.stashAction(repo.id, {
+    action: 'pop',
+    ...pick(first),
+    token: list.token,
+    restoreIndex: true,
+  });
+  expect(fixtureGit(path, ['show', ':tracked.txt'])).toBe('first');
+  list = await service.stashes(repo.id);
+  expect(list.entries).toHaveLength(1);
+  expect(list.entries[0]?.subject).toContain('second');
+  const stale = list;
+  fixtureGit(path, ['stash', 'push', '-m', 'external']);
+  await expect(
+    service.stashAction(repo.id, {
+      action: 'drop',
+      ...pick(stale.entries[0]!),
+      token: stale.token,
+    }),
+  ).rejects.toMatchObject({ code: 'STALE_STASH_LIST' });
+  expect((await service.stashes(repo.id)).entries).toHaveLength(2);
+  await service.dispose();
+});
+test('a conflicted pop publishes native conflict stages and keeps the stash', async () => {
+  const path = createFixture(join(root, 'conflict'));
+  await writeFile(join(path, 'tracked.txt'), 'stashed side\n');
+  fixtureGit(path, ['stash', 'push', '-m', 'Conflict candidate']);
+  await writeFile(join(path, 'tracked.txt'), 'committed side\n');
+  fixtureGit(path, ['add', 'tracked.txt']);
+  fixtureGit(path, ['commit', '-m', 'Conflicting branch']);
+  const service = new RepositoryService('git', { dataDir: join(root, 'profile') });
+  const repo = await service.open(path);
+  const list = await service.stashes(repo.id);
+  await expect(
+    service.stashAction(repo.id, { action: 'pop', ...pick(list.entries[0]!), token: list.token }),
+  ).rejects.toThrow();
+  expect(
+    (await service.workingState(repo.id)).status.entries.find(
+      (entry) => entry.path === 'tracked.txt',
+    )?.kind,
+  ).toBe('conflict');
+  expect(fixtureGit(path, ['show', ':2:tracked.txt'])).toBe('committed side');
+  expect(fixtureGit(path, ['show', ':3:tracked.txt'])).toBe('stashed side');
+  expect((await service.stashes(repo.id)).entries[0]?.oid).toBe(list.entries[0]?.oid);
+  await service.dispose();
+});
+test('renaming a stash retains its tree and parents and moves it to the top; drop removes only the reviewed entry', async () => {
+  const path = createFixture(join(root, 'rename'));
+  for (const text of ['first', 'second']) {
+    await writeFile(join(path, 'tracked.txt'), `${text}\n`);
+    fixtureGit(path, ['stash', 'push', '-m', text]);
+  }
+  const service = new RepositoryService('git', { dataDir: join(root, 'profile') });
+  const repo = await service.open(path);
+  let list = await service.stashes(repo.id);
+  const first = list.entries[1]!;
+  await service.stashAction(repo.id, {
+    action: 'rename',
+    ...pick(first),
+    token: list.token,
+    message: 'Renamed first',
+  });
+  list = await service.stashes(repo.id);
+  expect(list.entries).toHaveLength(2);
+  expect(list.entries[0]?.subject).toBe('Renamed first');
+  expect(fixtureGit(path, ['show', '-s', '--format=%T %P', list.entries[0]!.oid])).toBe(
+    fixtureGit(path, ['show', '-s', '--format=%T %P', first.oid]),
+  );
+  await service.stashAction(repo.id, {
+    action: 'rename',
+    ...pick(list.entries[0]!),
+    token: list.token,
+    message: 'Rename top too',
+  });
+  list = await service.stashes(repo.id);
+  expect(list.entries).toHaveLength(2);
+  expect(list.entries[0]?.subject).toBe('Rename top too');
+  await service.stashAction(repo.id, {
+    action: 'drop',
+    ...pick(list.entries[0]!),
+    token: list.token,
+  });
+  list = await service.stashes(repo.id);
+  expect(list.entries).toHaveLength(1);
+  expect(list.entries[0]?.subject).toContain('second');
+  expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
   await service.dispose();
 });

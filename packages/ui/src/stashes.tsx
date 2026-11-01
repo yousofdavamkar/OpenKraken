@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { StashState, WorkingState } from '@openkraken/ipc-contract';
+import type { StashState, WorkingState, StashActionOptions } from '@openkraken/ipc-contract';
 import { useRepository, waitForBackground } from './store.js';
 function StashDialog({
   repoId,
@@ -21,6 +21,11 @@ function StashDialog({
   const [staged, setStaged] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState('');
+  const [restoreIndex, setRestoreIndex] = useState(false);
+  const [dropping, setDropping] = useState<Extract<StashActionOptions, { action: 'drop' }>>();
+  const [editing, setEditing] = useState<Extract<StashActionOptions, { action: 'rename' }>>();
+
   const load = async () => {
     const result = await window.openkraken.request({
       id: crypto.randomUUID(),
@@ -40,9 +45,10 @@ function StashDialog({
   const paths = entries
     .filter((entry) => staged || selected.has(entry.pathBytes))
     .map((entry) => entry.pathBytes);
-  const submit = async () => {
+  const submit = async (action?: StashActionOptions) => {
     setPending(true);
     setError(undefined);
+    setNotice('');
     let id: string | undefined;
     try {
       if (useRepository.getState().syncing) await waitForBackground();
@@ -51,19 +57,39 @@ function StashDialog({
         throw new Error('Wait for the current operation to finish');
       id = crypto.randomUUID();
       useRepository.setState({ busy: id });
-      const result = await window.openkraken.request({
-        id,
-        method: 'stashPush',
-        repoId,
-        options: {
-          revision: work.revision,
-          message,
-          includeUntracked: untracked,
-          stagedOnly: staged,
-          ...(staged ? {} : { paths }),
-        },
-      });
+      const result = await window.openkraken.request(
+        action
+          ? { id, method: 'stashAction', repoId, options: action }
+          : {
+              id,
+              method: 'stashPush',
+              repoId,
+              options: {
+                revision: work.revision,
+                message,
+                includeUntracked: untracked,
+                stagedOnly: staged,
+                ...(staged ? {} : { paths }),
+              },
+            },
+      );
       if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'stashAction') {
+        setWork(result.state);
+        setStashes(result.stashes);
+        useRepository.setState({ workingState: result.state });
+        setSelected(new Set(result.state.status.entries.map((entry) => entry.pathBytes)));
+        setDropping(undefined);
+        setEditing(undefined);
+        setNotice(
+          result.warning ??
+            (action?.action === 'rename'
+              ? 'Stash message updated'
+              : action?.action === 'drop'
+                ? 'Stash removed'
+                : 'Stash applied'),
+        );
+      }
       if (result.kind === 'workingState') {
         setWork(result.state);
         useRepository.setState({ workingState: result.state });
@@ -81,6 +107,8 @@ function StashDialog({
     }
   };
   const reload = async () => {
+    setDropping(undefined);
+    setEditing(undefined);
     setPending(true);
     setError(undefined);
     try {
@@ -175,13 +203,104 @@ function StashDialog({
         <button disabled={pending || !paths.length}>Stash selected files</button>
       </form>
       <h3>Saved stashes</h3>
-      {stashes?.entries.map((entry) => (
-        <section className="stash-entry" key={entry.selector}>
-          <strong>{entry.selector}</strong>
-          <p>{entry.subject}</p>
-          <code>{entry.oid}</code>
+      <label>
+        <input
+          type="checkbox"
+          checked={restoreIndex}
+          disabled={pending}
+          onChange={(event) => setRestoreIndex(event.target.checked)}
+        />{' '}
+        Restore staged state when applying
+      </label>
+      <p>
+        Apply and pop use Git's merge behavior and have no workspace Undo. A conflicted pop keeps
+        its stash.
+      </p>
+      {stashes?.entries.map((entry) => {
+        const selection = { selector: entry.selector, oid: entry.oid, token: stashes.token };
+        return (
+          <section className="stash-entry" key={entry.selector}>
+            <strong>{entry.selector}</strong>
+            <p>{entry.subject}</p>
+            <code>{entry.oid}</code>
+            <div className="dialog-actions">
+              <button
+                disabled={pending}
+                aria-label={`Apply ${entry.selector}`}
+                onClick={() => void submit({ action: 'apply', ...selection, restoreIndex })}
+              >
+                Apply
+              </button>
+              <button
+                disabled={pending}
+                aria-label={`Apply and remove ${entry.selector}`}
+                onClick={() => void submit({ action: 'pop', ...selection, restoreIndex })}
+              >
+                Apply and remove
+              </button>
+              <button
+                disabled={pending}
+                aria-label={`Rename ${entry.selector}`}
+                onClick={() => {
+                  setEditing({ action: 'rename', ...selection, message: entry.subject });
+                  setDropping(undefined);
+                }}
+              >
+                Rename
+              </button>
+              <button
+                disabled={pending}
+                aria-label={`Drop ${entry.selector}`}
+                onClick={() => {
+                  setDropping({ action: 'drop', ...selection });
+                  setEditing(undefined);
+                }}
+              >
+                Drop
+              </button>
+            </div>
+          </section>
+        );
+      })}
+      {editing && (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit(editing);
+          }}
+        >
+          <label>
+            New stash message
+            <input
+              value={editing.message}
+              disabled={pending}
+              maxLength={4096}
+              required
+              onChange={(event) => setEditing({ ...editing, message: event.target.value })}
+            />
+          </label>
+          <p>Renaming preserves the saved trees and moves this stash to the top.</p>
+          <button disabled={pending || !editing.message.trim()}>Save stash message</button>{' '}
+          <button type="button" disabled={pending} onClick={() => setEditing(undefined)}>
+            Cancel rename
+          </button>
+        </form>
+      )}
+      {dropping && (
+        <section aria-label="Confirm stash drop">
+          <p>Drop {dropping.selector}? This removes the saved copy and has no Undo.</p>
+          <code>{dropping.oid}</code>
+          <div className="dialog-actions">
+            <button disabled={pending} onClick={() => setDropping(undefined)}>
+              Keep stash
+            </button>
+            <button className="danger" disabled={pending} onClick={() => void submit(dropping)}>
+              Confirm drop
+            </button>
+          </div>
         </section>
-      ))}
+      )}
+      {notice && <p role="status">{notice}</p>}
       {stashes && !stashes.entries.length && <p>No saved stashes.</p>}
       {error && (
         <p role="alert" className="error">

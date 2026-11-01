@@ -11,3 +11,13 @@ Undo restores the workspace/index while keeping the created stash. This avoids d
 Tests verify literal selected paths, untracked content, workspace Undo, staged-only changes, stale index refusal and exclusion/preservation of unrelated staged work. An Electron flow selects files, creates a stash and restores the workspace with Undo.
 
 Reference: [Git stash documentation](https://git-scm.com/docs/git-stash).
+
+## Apply, pop, drop and message editing
+
+Actions carry the reviewed list token, selector and full object ID. Apply uses the object ID with native `git stash apply`, optionally restoring the staged state. Its isolated index is published even when Git reports conflicts, so conflict stages remain available for resolution. HEAD changes during the operation prevent publication and retain a recovery record. Apply/pop do not create a workspace Undo entry: Git can merge renames and create conflict paths outside the original stash paths, so a partial file snapshot would give misleading recovery guarantees.
+
+Pop applies first and drops the reviewed entry only after success. A failed application keeps the stash. If the list changed or dropping fails after a successful application, the result explains that the saved entry was retained. Drop has a dedicated confirmation and no Undo. List checks reject stale reviews, while native Git owns the ref/reflog locks; a list check plus a native reflog edit is not atomic against external stash writers.
+
+Message editing creates an unsigned stash commit with the same tree and parents and the new message, stores it at the top, then removes the original reviewed entry. Git does not append a new reflog entry when storing the already-current stash object, so copying the commit also supports renaming the newest stash. The object ID and author/committer metadata can change; saved file/index/untracked trees remain identical. If the list changes during replacement, both recovery copies are retained with a warning. Editing an already-equal message is a no-op.
+
+Tests cover apply with staged-state restoration, pop, dirty-work refusal, published conflict stages, stale-list refusal, drop isolation, repeated message editing and identical saved trees/parents. The desktop test renames a saved stash and applies/removes it after the workspace Undo flow.

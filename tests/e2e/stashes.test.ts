@@ -33,6 +33,30 @@ test('stash selected files with untracked content and restore the workspace thro
     await expect.poll(() => readFileSync(join(repo, 'tracked.txt'), 'utf8')).toBe('stash me\n');
     expect(readFileSync(join(repo, 'new.txt'), 'utf8')).toBe('new stash content\n');
     expect(fixtureGit(repo, ['stash', 'list'])).toContain('Desktop stash');
+    // Leave the saved copy as the only source, then exercise message editing and pop.
+    fixtureGit(repo, ['restore', '--source=HEAD', '--staged', '--worktree', 'tracked.txt']);
+    rmSync(join(repo, 'new.txt'));
+    await page.getByRole('button', { name: 'Stashes', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Rename stash@{0}', exact: true }).click();
+    await dialog
+      .getByRole('textbox', { name: 'New stash message', exact: true })
+      .fill('Renamed desktop stash');
+    await dialog.getByRole('button', { name: 'Save stash message', exact: true }).click();
+    await expect(dialog.getByText('Renamed desktop stash', { exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Apply and remove stash@{0}', exact: true }).click();
+    await expect(dialog.getByText('No saved stashes.', { exact: true })).toBeVisible();
+    expect(readFileSync(join(repo, 'tracked.txt'), 'utf8')).toBe('stash me\n');
+    expect(readFileSync(join(repo, 'new.txt'), 'utf8')).toBe('new stash content\n');
+    fixtureGit(repo, ['stash', 'push', '--include-untracked', '-m', 'Drop candidate']);
+    await dialog.getByRole('button', { name: 'Reload', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Drop stash@{0}', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Keep stash', exact: true }).click();
+    expect(fixtureGit(repo, ['stash', 'list'])).toContain('Drop candidate');
+    await dialog.getByRole('button', { name: 'Drop stash@{0}', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Confirm drop', exact: true }).click();
+    await expect(dialog.getByText('No saved stashes.', { exact: true })).toBeVisible();
+    expect(fixtureGit(repo, ['stash', 'list'])).toBe('');
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

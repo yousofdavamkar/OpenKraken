@@ -349,7 +349,38 @@ export const stashPushOptionsSchema = z
     'Staged-only and untracked modes cannot be combined',
   );
 export type StashPushOptions = z.infer<typeof stashPushOptionsSchema>;
+const stashSelectionSchema = z.object({
+  selector: z.string().regex(/^stash@\{[0-9]+\}$/),
+  oid: oidSchema,
+  token: remoteTokenSchema,
+});
+export const stashActionOptionsSchema = z.discriminatedUnion('action', [
+  stashSelectionSchema
+    .extend({ action: z.enum(['apply', 'pop']), restoreIndex: z.boolean().optional() })
+    .strict(),
+  stashSelectionSchema.extend({ action: z.literal('drop') }).strict(),
+  stashSelectionSchema
+    .extend({
+      action: z.literal('rename'),
+      message: z
+        .string()
+        .trim()
+        .min(1)
+        .max(4096)
+        .refine((message) => !message.includes('\0'), 'Invalid stash message'),
+    })
+    .strict(),
+]);
+export type StashActionOptions = z.infer<typeof stashActionOptionsSchema>;
 const workingRequests = [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('stashAction'),
+      repoId: repoIdSchema,
+      options: stashActionOptionsSchema,
+    })
+    .strict(),
   z.object({ id: requestId, method: z.literal('stashes'), repoId: repoIdSchema }).strict(),
   z
     .object({
@@ -518,6 +549,12 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('stashAction'),
+    state: workingStateSchema,
+    stashes: stashStateSchema,
+    warning: z.string().optional(),
+  }),
   z.object({ kind: z.literal('stashes'), state: stashStateSchema }),
   z.object({ kind: z.literal('pushPreview'), plan: pushPlanSchema }),
   z.object({ kind: z.literal('pushed'), state: remoteStateSchema, warning: z.string().optional() }),

@@ -18,6 +18,8 @@ import {
   oidSchema,
   referenceOptionsSchema,
   stashPushOptionsSchema,
+  stashActionOptionsSchema,
+  type StashActionOptions,
   type StashPushOptions,
   type ReferenceOptions,
   type WorkingState,
@@ -365,6 +367,50 @@ export class WorkingTree {
   }
   stashes(signal?: AbortSignal) {
     return new StashStore((args, options) => this.run(args, options)).list(signal);
+  }
+  async stashAction(input: StashActionOptions, signal?: AbortSignal) {
+    const options = stashActionOptionsSchema.parse(input);
+    const store = new StashStore((args, options) => this.run(args, options));
+    let warning: string | undefined;
+    if (options.action === 'rename') warning = await store.rename(options, signal);
+    else if (options.action === 'drop') await store.drop(options, signal);
+    else {
+      await this.locked(async (indexFile, publish) => {
+        await this.noOperation();
+        await store.selected(options, signal);
+        const before = await this.saved(indexFile);
+        const pending = join(this.directory, `pending-${randomUUID()}.json`);
+        const record = { label: 'Apply stash', stash: options.oid, indexFile, before };
+        await atomic(pending, JSON.stringify(record));
+        let failure: unknown;
+        try {
+          await this.run(
+            ['stash', 'apply', ...(options.restoreIndex ? ['--index'] : []), options.oid],
+            { indexFile, signal, readOnly: false },
+          );
+        } catch (error) {
+          failure = error;
+        }
+        const after = await this.saved(indexFile);
+        await atomic(pending, JSON.stringify({ ...record, after }));
+        if (!sameHead(before.head, after.head))
+          throw new GitError(
+            'CONCURRENT_HEAD',
+            `HEAD changed while applying the stash. The index was not published. Recovery record: ${pending}`,
+          );
+        if (before.signature !== after.signature) await publish();
+        await rm(pending, { force: true });
+        if (failure) throw failure;
+      }, signal);
+      if (options.action === 'pop') {
+        try {
+          await store.drop(options, signal);
+        } catch (error) {
+          warning = `Stash applied but its saved entry was kept: ${error instanceof Error ? error.message : String(error)}`;
+        }
+      }
+    }
+    return { state: await this.state(), stashes: await store.list(), warning };
   }
   async stashPush(input: StashPushOptions, signal?: AbortSignal) {
     const options = stashPushOptionsSchema.parse(input);
