@@ -1,10 +1,6 @@
-import { allocateLanes } from './index.js';
-import type { GraphCommit, Checkpoint } from './index.js';
-self.onmessage = (
-  event: MessageEvent<{ id: number; commits: GraphCommit[]; checkpoint?: Checkpoint }>,
-) => {
-  self.postMessage({
-    id: event.data.id,
-    ...allocateLanes(event.data.commits, event.data.checkpoint),
-  });
+import { GraphEngine } from './engine.js';
+import type { GraphRequest } from './engine.js';
+const engine = new GraphEngine();
+self.onmessage = (event: MessageEvent<GraphRequest>) => {
+  self.postMessage(engine.handle(event.data));
 };
