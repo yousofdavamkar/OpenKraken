@@ -8,6 +8,19 @@ export class HistoryCursor {
   readonly id = randomUUID();
   readonly starts: string[];
   private buffer: Commit[] = [];
+  private bufferedBytes = 0;
+  private size(commit: Commit) {
+    return (
+      256 +
+      2 *
+        (commit.body.length +
+          commit.author.name.length +
+          commit.author.email.length +
+          commit.committer.name.length +
+          commit.committer.email.length) +
+      commit.parents.length * 128
+    );
+  }
   private offset = 0;
   private demand = 1;
   private done = false;
@@ -17,7 +30,12 @@ export class HistoryCursor {
   private resume?: () => void;
   private controller = new AbortController();
   private completion: Promise<void>;
-  constructor(git: string, cwd: string, starts: string[], stashes: Commit[] = []) {
+  constructor(
+    git: string,
+    cwd: string,
+    starts: string[],
+    readonly stashes: Commit[] = [],
+  ) {
     this.starts = [...starts];
     const byBase = new Map<string, Commit[]>();
     for (const stash of stashes) {
@@ -25,7 +43,11 @@ export class HistoryCursor {
       if (base) byBase.set(base, [...(byBase.get(base) ?? []), stash]);
     }
     const parser = new HistoryParser((commit) => {
-      this.buffer.push(...(byBase.get(commit.oid) ?? []), commit);
+      const records = [...(byBase.get(commit.oid) ?? []), commit];
+      for (const record of records) this.bufferedBytes += this.size(record);
+      if (this.bufferedBytes > 64 * 1024 * 1024)
+        throw new GitError('OUTPUT_LIMIT', 'Buffered history exceeded 64 MiB; use a smaller page');
+      this.buffer.push(...records);
       byBase.delete(commit.oid);
     });
     this.completion = (
@@ -89,6 +111,7 @@ export class HistoryCursor {
       }
       if (this.error) throw this.error;
       const commits = this.buffer.splice(0, count);
+      for (const commit of commits) this.bufferedBytes -= this.size(commit);
       const offset = this.offset;
       this.offset += commits.length;
       return { cursor: this.id, offset, commits, hasMore: this.buffer.length > 0 || !this.done };
@@ -111,5 +134,6 @@ export class HistoryCursor {
     this.stop(new GitError('STALE_CURSOR', 'History has changed; refresh to restart'));
     await this.completion;
     this.buffer = [];
+    this.bufferedBytes = 0;
   }
 }

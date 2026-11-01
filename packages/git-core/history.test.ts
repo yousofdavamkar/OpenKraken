@@ -109,3 +109,12 @@ test('Git search finds unloaded messages, author/email and object prefixes witho
     (await service.page(snapshot.repository.id, snapshot.cursor, 2000, 200)).commits,
   ).toHaveLength(200);
 });
+
+test('all-history search includes stash messages without exposing implementation parents', async () => {
+  const path = createFixture(join(root, 'stash-search'), 'stash');
+  const snapshot = await service.snapshot((await service.open(path)).id);
+  const result = await service.search(snapshot.repository.id, snapshot.cursor, 'Fixture stash');
+  expect(result.commits).toHaveLength(1);
+  expect(result.commits[0]?.isStash).toBe(true);
+  expect(result.commits[0]?.parents).toHaveLength(1);
+});

@@ -1,9 +1,4 @@
-import {
-  serviceRequestSchema,
-  shutdownSchema,
-  cancelSchema,
-  resultSchema,
-} from '@openkraken/ipc-contract';
+import { serviceRequestSchema, shutdownSchema, cancelSchema } from '@openkraken/ipc-contract';
 import type { Result, ServiceRequest } from '@openkraken/ipc-contract';
 import { GitError, locateGit, RepositoryService } from '@openkraken/git-core';
 const parent = process.parentPort;
@@ -62,7 +57,7 @@ parent.on('message', (event) => {
   active.set(request.id, controller);
   execute(request, controller.signal)
     .then((result) => {
-      parent.postMessage({ id: request.id, result: resultSchema.parse(result) });
+      parent.postMessage({ id: request.id, result });
     })
     .catch((error: unknown) => {
       const result: Result =

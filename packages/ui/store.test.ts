@@ -5,6 +5,7 @@ import type { Result, Snapshot } from '@openkraken/ipc-contract';
 vi.mock('./src/graph-client.js', () => ({
   GraphClient: class {
     private engine = new GraphEngine();
+    close() {}
     async request(request: GraphRequest) {
       return this.engine.handle({ ...request, id: 1 });
     }

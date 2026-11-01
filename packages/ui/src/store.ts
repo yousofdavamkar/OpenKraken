@@ -56,12 +56,15 @@ export const useRepository = create<State>()(
       });
       if (previousPage) await window.openkraken.cancel(previousPage);
       if (previousSearch) await window.openkraken.cancel(previousSearch);
+      querySequence++;
       performance.mark('repository-open-start');
       try {
         const result = await window.openkraken.request(request);
         if (get().busy !== request.id) return;
         if (result.kind === 'snapshot') {
           const rows = projectCommits(result.snapshot.commits, result.snapshot, true);
+          client?.close();
+          client = new GraphClient();
           const layout = await graph().request({
             method: 'reset',
             generation: result.snapshot.cursor,

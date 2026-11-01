@@ -33,6 +33,14 @@ export class GraphClient {
       this.pending.clear();
     };
   }
+  close() {
+    this.worker.terminate();
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('Graph generation replaced'));
+    }
+    this.pending.clear();
+  }
   request(input: Input): Promise<GraphResponse> {
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {

@@ -275,7 +275,15 @@ export class RepositoryService {
       find(`--grep=${query}`),
       find(`--author=${query}`),
     ]);
-    let commits = [...new Map([...messages, ...authors].map((c) => [c.oid, c])).values()];
+    const queryLower = query.toLocaleLowerCase();
+    const stashes = history.stashes.filter((c) =>
+      [c.body, c.author.name, c.author.email, c.oid].some((value) =>
+        value.toLocaleLowerCase().includes(queryLower),
+      ),
+    );
+    let commits = [
+      ...new Map([...messages, ...authors, ...stashes].map((c) => [c.oid, c])).values(),
+    ];
     if (/^[0-9a-f]{7,64}$/i.test(query)) {
       const resolved = await this.text(
         repo.path,

@@ -33,6 +33,20 @@ export class GraphEngine {
   private checkpoint = emptyCheckpoint();
   private checkpoints: Checkpoint[] = [];
   private index = this.createIndex();
+  private seen = new Set<string>();
+  private pending: GraphDocument[] = [];
+  indexPending() {
+    this.index.addAll(
+      this.pending.map((c) => ({
+        oid: c.oid,
+        summary: c.summary,
+        body: c.body,
+        name: c.author.name,
+        email: c.author.email,
+      })),
+    );
+    this.pending = [];
+  }
   private createIndex() {
     return new MiniSearch({
       idField: 'oid',
@@ -48,9 +62,12 @@ export class GraphEngine {
         this.checkpoint = emptyCheckpoint();
         this.checkpoints = [];
         this.index = this.createIndex();
+        this.seen.clear();
+        this.pending = [];
       }
       if (request.generation !== this.generation) throw new Error('Stale graph generation');
-      if (request.method === 'search')
+      if (request.method === 'search') {
+        this.indexPending();
         return {
           id: request.id,
           generation: this.generation,
@@ -59,17 +76,17 @@ export class GraphEngine {
             ? this.index.search(request.query.trim()).map((result) => String(result.id))
             : [],
         };
+      }
       if (request.offset !== this.checkpoint.nextRow)
         throw new Error('Graph page offset does not match continuation');
       const ids = new Set<string>();
       for (const c of request.commits) {
-        if (ids.has(c.oid) || this.index.has(c.oid)) throw new Error('Duplicate graph commit');
+        if (ids.has(c.oid) || this.seen.has(c.oid)) throw new Error('Duplicate graph commit');
         ids.add(c.oid);
       }
       const result = allocateLanes(request.commits, this.checkpoint);
-      this.index.addAll(
-        request.commits.map((c) => ({ ...c, name: c.author.name, email: c.author.email })),
-      );
+      this.pending.push(...request.commits);
+      for (const id of ids) this.seen.add(id);
       this.checkpoint = result.checkpoint;
       this.checkpoints.push(...result.checkpoints);
       return {
