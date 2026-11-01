@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type {
   Commit,
   CommitOptions,
+  CloneOptions,
   PatchOptions,
   ReferenceOptions,
   RemoteOptions,
@@ -70,6 +71,31 @@ export class RepositoryService {
   ) {
     const result = await this.run(args, { cwd, signal, allowedExitCodes });
     return result.stdout.toString('utf8').replace(/\r?\n$/, '');
+  }
+  async clone(
+    input: string,
+    options: CloneOptions,
+    signal?: AbortSignal,
+    onProgress?: (text: string) => void,
+  ) {
+    const path = await realpath(input);
+    return this.queue(path).run(
+      true,
+      async () => {
+        if ((await readdir(path)).length)
+          throw new GitError(
+            'CLONE_DESTINATION_NOT_EMPTY',
+            'Choose an empty folder for this clone',
+          );
+        const manager = new Remotes(
+          (args, settings) => this.run(args, { ...settings, cwd: path }),
+          onProgress,
+        );
+        await manager.clone(options, signal);
+        return this.open(path, signal);
+      },
+      signal,
+    );
   }
   async open(input: string, signal?: AbortSignal): Promise<Repository> {
     const cwd = await realpath(input);

@@ -120,9 +120,11 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
   const repo =
     request.method === 'refresh'
       ? { id: request.repoId }
-      : request.method === 'init'
-        ? await git.init(request.path, request.branch, signal)
-        : await git.open(request.path, signal);
+      : request.method === 'clone'
+        ? await git.clone(request.path, request.options, signal, progress)
+        : request.method === 'init'
+          ? await git.init(request.path, request.branch, signal)
+          : await git.open(request.path, signal);
   if ('path' in repo) await prepareWatcher(repo);
   return {
     kind: 'snapshot',

@@ -75,11 +75,13 @@ function callService(request: ServiceRequest): Promise<Result> {
           message: 'The Git service did not respond in time.',
         });
       },
-      ['fetch', 'pushPreview', 'push'].includes(request.method)
-        ? 210000
-        : request.method === 'commit' || request.method === 'reference'
-          ? 180000
-          : 60000,
+      request.method === 'clone'
+        ? 1860000
+        : ['fetch', 'pushPreview', 'push'].includes(request.method)
+          ? 210000
+          : request.method === 'commit' || request.method === 'reference'
+            ? 180000
+            : 60000,
     );
     pending.set(request.id, { resolve, timer });
     child.postMessage(request);
@@ -149,18 +151,21 @@ else {
         if (
           request.method === 'open' ||
           request.method === 'init' ||
+          request.method === 'clone' ||
           request.method === 'discover'
         ) {
           const selected = await dialog.showOpenDialog(window!, {
             title:
-              request.method === 'init'
-                ? 'Initialize repository in folder'
-                : request.method === 'discover'
-                  ? 'Scan for repositories'
-                  : 'Open repository',
+              request.method === 'clone'
+                ? 'Clone into an empty folder'
+                : request.method === 'init'
+                  ? 'Initialize repository in folder'
+                  : request.method === 'discover'
+                    ? 'Scan for repositories'
+                    : 'Open repository',
             properties: [
               'openDirectory',
-              ...(request.method === 'init' ? ['createDirectory' as const] : []),
+              ...(['init', 'clone'].includes(request.method) ? ['createDirectory' as const] : []),
             ],
           });
           if (selected.canceled || !selected.filePaths[0] || cancelled.has(request.id))
@@ -168,7 +173,10 @@ else {
           path = selected.filePaths[0];
         }
         return await callService(
-          request.method === 'open' || request.method === 'init' || request.method === 'discover'
+          request.method === 'open' ||
+            request.method === 'init' ||
+            request.method === 'discover' ||
+            request.method === 'clone'
             ? { ...request, path: path! }
             : request,
         );

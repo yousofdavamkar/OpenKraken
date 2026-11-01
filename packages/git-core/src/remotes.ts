@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
+import { isAbsolute } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   remoteOptionsSchema,
+  cloneOptionsSchema,
+  type CloneOptions,
   pushSelectionSchema,
   pushOptionsSchema,
   oidSchema,
@@ -74,6 +78,51 @@ export class Remotes {
       remotes: [...remotes.values()].sort((a, b) => a.name.localeCompare(b.name)),
     };
   }
+  async clone(input: CloneOptions, signal?: AbortSignal) {
+    const options = cloneOptionsSchema.parse(input);
+    validateUrl(options.url);
+    if (
+      !isAbsolute(options.url) &&
+      !/^[a-z][a-z0-9+.-]*:\/\//i.test(options.url) &&
+      !/^[^/:\s]+:.+/.test(options.url)
+    )
+      throw new GitError(
+        'INVALID_CLONE_URL',
+        'Use a repository URL or an absolute local repository path',
+      );
+    if (options.branch) {
+      if (options.branch.startsWith('-'))
+        throw new GitError('INVALID_REF', 'Choose a valid branch or tag name');
+      await this.run(['check-ref-format', `refs/heads/${options.branch}`], { signal });
+    }
+    const url =
+      isAbsolute(options.url) && (options.depth || options.filter)
+        ? pathToFileURL(options.url).href
+        : options.url;
+    await this.network(
+      [
+        'clone',
+        '--progress',
+        '--origin=origin',
+        '--no-recurse-submodules',
+        ...(options.branch ? ['--branch', options.branch] : []),
+        ...(options.depth ? ['--depth', String(options.depth)] : []),
+        ...(options.filter ? [`--filter=${options.filter}`] : []),
+        ...(options.sparse ? ['--sparse'] : []),
+        '--',
+        url,
+        '.',
+      ],
+      signal,
+      false,
+      { timeoutMs: 1800000 },
+    );
+    if (options.sparse)
+      await this.network(['sparse-checkout', 'set', '--cone', '--stdin'], signal, false, {
+        stdin: options.sparse.map((path) => JSON.stringify(path)).join('\n') + '\n',
+        timeoutMs: 1800000,
+      });
+  }
   async fetch(input: string, signal?: AbortSignal, background = false) {
     const name = remoteNameSchema.parse(input);
     const state = await this.state(signal);
@@ -95,7 +144,12 @@ export class Remotes {
     );
     return this.state();
   }
-  private async network(args: string[], signal?: AbortSignal, background = false) {
+  private async network(
+    args: string[],
+    signal?: AbortSignal,
+    background = false,
+    options: { stdin?: string; timeoutMs?: number } = {},
+  ) {
     const progress = this.onProgress ? new GitProgressLines(this.onProgress) : undefined;
     // URL-specific settings can outrank the global TLS setting, even in local config.
     const tls = await this.run(['config', '--null', '--get-regexp', '^http\\..*\\.sslverify$'], {
@@ -113,7 +167,8 @@ export class Remotes {
         {
           signal,
           readOnly: false,
-          timeoutMs: 180000,
+          timeoutMs: options.timeoutMs ?? 180000,
+          stdin: options.stdin,
           onStderr: progress ? (chunk) => progress.push(chunk) : undefined,
           allowedExitCodes: [0, 1],
           env: {

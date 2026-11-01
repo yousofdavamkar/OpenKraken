@@ -6,6 +6,7 @@ import { WorkingTreePanel } from './working-tree.js';
 import { History } from './history.js';
 import { NewReferences, ReferenceActions } from './references.js';
 import { GitProgress } from './git-progress.js';
+import { Clone } from './clone.js';
 import { Stashes } from './stashes.js';
 import { Push } from './push.js';
 import { ManageRemotes } from './remotes.js';
@@ -42,6 +43,7 @@ function App() {
         </div>
         <div className="toolbar">
           <AvatarSettings />
+          <Clone />
           <NewReferences />
           <ManageRemotes />
           <Push />

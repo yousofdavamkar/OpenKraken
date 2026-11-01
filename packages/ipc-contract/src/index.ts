@@ -268,6 +268,33 @@ const remoteUrlSchema = z
   .max(32768)
   // eslint-disable-next-line no-control-regex -- Reject control bytes at the IPC boundary.
   .regex(/^[^-\x00-\x1f\x7f][^\x00-\x1f\x7f]*$/);
+export const cloneOptionsSchema = z
+  .object({
+    url: remoteUrlSchema,
+    branch: z.string().min(1).max(1024).optional(),
+    depth: z.number().int().min(1).max(1000000).optional(),
+    filter: z.literal('blob:none').optional(),
+    sparse: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(1024)
+          .refine(
+            (path) =>
+              !path.startsWith('/') &&
+              !path
+                .split('/')
+                .some((part) => !part || ['.', '..', '.git'].includes(part.toLowerCase())) &&
+              [...path].every((char) => char.charCodeAt(0) >= 32 && char !== '\\' && char !== ':'),
+            'Use repository-relative directories separated by /',
+          ),
+      )
+      .max(1000)
+      .optional(),
+  })
+  .strict();
+export type CloneOptions = z.infer<typeof cloneOptionsSchema>;
 const remoteTokenSchema = z.string().regex(/^[0-9a-f]{64}$/);
 export const remoteOptionsSchema = z.discriminatedUnion('action', [
   z
@@ -494,6 +521,7 @@ const workingRequests = [
     .strict(),
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  z.object({ id: requestId, method: z.literal('clone'), options: cloneOptionsSchema }).strict(),
   ...workingRequests,
   z
     .object({
@@ -526,6 +554,14 @@ export const requestSchema = z.discriminatedUnion('method', [
 ]);
 const repositoryPath = z.string().min(1).max(32768);
 export const serviceRequestSchema = z.discriminatedUnion('method', [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('clone'),
+      path: repositoryPath,
+      options: cloneOptionsSchema,
+    })
+    .strict(),
   ...workingRequests,
   ...historyRequests,
   z.object({ id: requestId, method: z.literal('open'), path: repositoryPath }).strict(),
