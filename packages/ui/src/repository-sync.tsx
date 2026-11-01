@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { RepositoryEvent } from '@openkraken/ipc-contract';
+import { AutomaticFetch } from './automatic-fetch.js';
 import { useRepository } from './store.js';
 const setting = 'openkraken.refreshOnFocus';
 function loadFocus() {
@@ -81,6 +82,7 @@ export function RepositorySync() {
             ? 'Watching for changes'
             : 'Starting file watcher…'}
       </span>
+      <AutomaticFetch key={snapshot.repository.id} repoId={snapshot.repository.id} />
       <label>
         <input
           type="checkbox"

@@ -71,7 +71,7 @@ export class Remotes {
       remotes: [...remotes.values()].sort((a, b) => a.name.localeCompare(b.name)),
     };
   }
-  async fetch(input: string, signal?: AbortSignal) {
+  async fetch(input: string, signal?: AbortSignal, background = false) {
     const name = remoteNameSchema.parse(input);
     const state = await this.state(signal);
     if (!state.remotes.some((remote) => remote.name === name))
@@ -90,6 +90,7 @@ export class Remotes {
       await this.run(
         [
           ...overrides,
+          ...(background ? ['-c', 'credential.interactive=false'] : []),
           'fetch',
           '--atomic',
           '--prune',
@@ -103,7 +104,17 @@ export class Remotes {
           signal,
           readOnly: false,
           timeoutMs: 180000,
-          env: { GIT_ALLOW_PROTOCOL: 'file:https:http:ssh:git' },
+          env: {
+            GIT_ALLOW_PROTOCOL: 'file:https:http:ssh:git',
+            ...(background
+              ? {
+                  GIT_ASKPASS: '',
+                  SSH_ASKPASS: '',
+                  SSH_ASKPASS_REQUIRE: 'never',
+                  GCM_INTERACTIVE: 'never',
+                }
+              : {}),
+          },
         },
       );
     } catch (error) {

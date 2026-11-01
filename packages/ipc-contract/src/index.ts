@@ -307,6 +307,7 @@ const workingRequests = [
       method: z.literal('fetch'),
       repoId: repoIdSchema,
       name: remoteNameSchema,
+      background: z.boolean().optional(),
     })
     .strict(),
   z.object({ id: requestId, method: z.literal('remotes'), repoId: repoIdSchema }).strict(),

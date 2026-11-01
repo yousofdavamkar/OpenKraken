@@ -29,7 +29,10 @@ function getService() {
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
   const git = await getService();
   if (request.method === 'fetch')
-    return { kind: 'remotes', state: await git.fetch(request.repoId, request.name, signal) };
+    return {
+      kind: 'remotes',
+      state: await git.fetch(request.repoId, request.name, signal, request.background),
+    };
   if (request.method === 'remotes')
     return { kind: 'remotes', state: await git.remotes(request.repoId, signal) };
   if (request.method === 'remote')

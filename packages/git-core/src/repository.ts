@@ -443,9 +443,13 @@ export class RepositoryService {
     const { repo, manager } = this.remoteManager(id);
     return this.queue(repo.commonDir).run(false, () => manager.state(signal), signal);
   }
-  fetch(id: string, name: string, signal?: AbortSignal) {
+  fetch(id: string, name: string, signal?: AbortSignal, background = false) {
     const { repo, manager } = this.remoteManager(id);
-    return this.queue(repo.commonDir).run(true, () => manager.fetch(name, signal), signal);
+    return this.queue(repo.commonDir).run(
+      true,
+      () => manager.fetch(name, signal, background),
+      signal,
+    );
   }
   remote(id: string, options: RemoteOptions, signal?: AbortSignal) {
     const { repo, manager } = this.remoteManager(id);

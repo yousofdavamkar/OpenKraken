@@ -19,3 +19,9 @@ Transport protocols are restricted to file, HTTP(S), SSH and Git; external helpe
 Tests fetch and prune refs/tags against a local bare repository, preserve working edits, reject option-like remote names and external transport helpers, and refuse a self-signed HTTPS server even with URL-specific TLS verification disabled. The certificate and key in `packages/test-fixtures/tls` are public localhost test fixtures, never used by the application. The desktop test fetches a branch before editing/removing its remote.
 
 Reference: [Git fetch documentation](https://git-scm.com/docs/git-fetch).
+
+## Automatic fetch
+
+Automatic fetch is off by default, with per-repository intervals of 5, 15 or 30 minutes persisted in the local profile's renderer storage. A timer tick skips an open dialog, active operation, search or paging. It fetches configured remotes sequentially and refreshes history after completion; the existing Cancel action can interrupt it. Disabling the timer or leaving the repository cancels its active request. Failures appear as a status message, with the next attempt at the configured interval.
+
+Background requests disable Git askpass, SSH askpass, and interactive Git Credential Manager prompting while retaining noninteractive credential-helper/agent access. Third-party credential helpers still execute as configured native programs. The Electron clock test verifies opt-in, dialog deferral, a real bare-remote fetch and interval persistence across reload. A native HTTP authentication fixture verifies that foreground askpass executes and background fetch suppresses the same helper.

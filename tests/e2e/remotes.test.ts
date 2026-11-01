@@ -52,3 +52,45 @@ test('manage remote URLs and confirm local removal through the desktop', async (
     rmSync(root, { recursive: true, force: true });
   }
 });
+test('automatic fetch is opt-in, skips open dialogs and persists its interval', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-auto-fetch-'));
+  const repo = createFixture(join(root, 'repo'));
+  const remotePath = join(root, 'remote.git');
+  fixtureGit(repo, ['clone', '--bare', '.', remotePath]);
+  fixtureGit(repo, ['remote', 'set-url', 'origin', remotePath]);
+  fixtureGit(remotePath, ['branch', 'automatic']);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await page.clock.install();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, repo);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    const interval = page.getByRole('combobox', { name: 'Automatic fetch', exact: true });
+    await expect(interval).toHaveValue('0');
+    await interval.selectOption('5');
+    await page.getByRole('button', { name: 'Manage remotes', exact: true }).click();
+    await page.clock.fastForward(300001);
+    expect(
+      fixtureGit(repo, ['for-each-ref', '--format=%(refname)', 'refs/remotes/origin/automatic']),
+    ).toBe('');
+    await page
+      .getByRole('dialog', { name: 'Manage remotes' })
+      .getByRole('button', { name: 'Close', exact: true })
+      .click();
+    await page.clock.fastForward(300001);
+    await expect(page.getByText('Automatic fetch completed', { exact: true })).toBeVisible();
+    expect(fixtureGit(repo, ['rev-parse', 'origin/automatic'])).toBe(
+      fixtureGit(remotePath, ['rev-parse', 'automatic']),
+    );
+    await page.reload();
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await expect(interval).toHaveValue('5');
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

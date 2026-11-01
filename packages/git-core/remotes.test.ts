@@ -152,3 +152,42 @@ test('fetch refuses untrusted TLS even with URL-specific sslVerify=false and blo
     await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
   }
 });
+test.skipIf(process.platform === 'win32')(
+  'background fetch disables native askpass prompts',
+  async () => {
+    const { createServer } = await import('node:http');
+    const server = createServer((_request, response) => {
+      response.writeHead(401, { 'WWW-Authenticate': 'Basic realm="test"' });
+      response.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Expected TCP listener');
+    const path = createFixture(join(root, 'background-auth'));
+    const marker = join(path, 'prompted');
+    const askpass = join(path, 'askpass.sh');
+    await writeFile(askpass, '#!/bin/sh\ntouch prompted\nprintf "fixture-credential\\n"\n', {
+      mode: 0o755,
+    });
+    fixtureGit(path, ['remote', 'set-url', 'origin', `http://127.0.0.1:${address.port}/repo.git`]);
+    fixtureGit(path, ['config', 'credential.helper', '']);
+    fixtureGit(path, ['config', 'core.askPass', askpass]);
+    const service = new RepositoryService('git');
+    try {
+      const repo = await service.open(path);
+      await expect(service.fetch(repo.id, 'origin')).rejects.toThrow();
+      expect(await readFile(marker, 'utf8')).toBe('');
+      await rm(marker);
+      await expect(service.fetch(repo.id, 'origin', undefined, true)).rejects.toMatchObject({
+        code: 'GIT_FAILED',
+      });
+      await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await service.dispose();
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        server.close((e) => (e ? reject(e) : resolve())),
+      );
+    }
+  },
+);
