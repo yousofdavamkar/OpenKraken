@@ -322,7 +322,43 @@ export const pushOptionsSchema = z
   .object({ plan: pushPlanSchema, force: z.boolean().optional(), upstream: z.boolean().optional() })
   .strict();
 export type PushOptions = z.infer<typeof pushOptionsSchema>;
+export const stashStateSchema = z.object({
+  token: remoteTokenSchema,
+  entries: z
+    .array(
+      z.object({
+        oid: oidSchema,
+        selector: z.string().regex(/^stash@\{[0-9]+\}$/),
+        subject: z.string(),
+      }),
+    )
+    .max(10000),
+});
+export type StashState = z.infer<typeof stashStateSchema>;
+export const stashPushOptionsSchema = z
+  .object({
+    revision: remoteTokenSchema,
+    message: z.string().max(4096).optional(),
+    includeUntracked: z.boolean().optional(),
+    stagedOnly: z.boolean().optional(),
+    paths: z.array(pathBytesSchema).min(1).max(10000).optional(),
+  })
+  .strict()
+  .refine(
+    (value) => !(value.stagedOnly && value.includeUntracked),
+    'Staged-only and untracked modes cannot be combined',
+  );
+export type StashPushOptions = z.infer<typeof stashPushOptionsSchema>;
 const workingRequests = [
+  z.object({ id: requestId, method: z.literal('stashes'), repoId: repoIdSchema }).strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('stashPush'),
+      repoId: repoIdSchema,
+      options: stashPushOptionsSchema,
+    })
+    .strict(),
   z
     .object({
       id: requestId,
@@ -482,6 +518,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('stashes'), state: stashStateSchema }),
   z.object({ kind: z.literal('pushPreview'), plan: pushPlanSchema }),
   z.object({ kind: z.literal('pushed'), state: remoteStateSchema, warning: z.string().optional() }),
   z.object({ kind: z.literal('remotes'), state: remoteStateSchema }),

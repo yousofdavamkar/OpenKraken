@@ -788,3 +788,16 @@ footer {
   display: block;
   overflow-wrap: anywhere;
 }
+
+.stash-dialog {
+  max-height: 85vh;
+  overflow: auto;
+}
+.stash-dialog fieldset {
+  max-height: 220px;
+  overflow: auto;
+}
+.stash-entry {
+  border-bottom: 1px solid var(--border);
+  padding: 8px 0;
+}

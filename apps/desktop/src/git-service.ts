@@ -28,6 +28,13 @@ function getService() {
 }
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
   const git = await getService();
+  if (request.method === 'stashes')
+    return { kind: 'stashes', state: await git.stashes(request.repoId, signal) };
+  if (request.method === 'stashPush')
+    return {
+      kind: 'workingState',
+      state: await git.stashPush(request.repoId, request.options, signal),
+    };
   if (request.method === 'pushPreview')
     return {
       kind: 'pushPreview',
@@ -141,6 +148,7 @@ parent.on('message', (event) => {
     'remote',
     'fetch',
     'push',
+    'stashPush',
   ].includes(request.method);
   const observed = watcher;
   if (writing) observed?.pause();

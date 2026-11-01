@@ -17,6 +17,8 @@ import {
   headSchema,
   oidSchema,
   referenceOptionsSchema,
+  stashPushOptionsSchema,
+  type StashPushOptions,
   type ReferenceOptions,
   type WorkingState,
   type WorkingDiff,
@@ -24,6 +26,7 @@ import {
   type Repository,
 } from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
+import { StashStore } from './stash.js';
 import { RepositoryQueue } from './queue.js';
 import { FileBackups, fileImageSchema, sameImages, type FileImage } from './file-backups.js';
 import { BranchConfiguration } from './branch-config.js';
@@ -359,6 +362,145 @@ export class WorkingTree {
         paths.set(entry.origPathBytes, Buffer.from(entry.origPathBytes, 'base64'));
     }
     return Buffer.concat([...paths.values()].flatMap((p) => [p, Buffer.from([0])]));
+  }
+  stashes(signal?: AbortSignal) {
+    return new StashStore((args, options) => this.run(args, options)).list(signal);
+  }
+  async stashPush(input: StashPushOptions, signal?: AbortSignal) {
+    const options = stashPushOptionsSchema.parse(input);
+    await this.noOperation();
+    const current = await this.state(signal);
+    if (current.status.entries.some((entry) => entry.kind === 'conflict'))
+      throw new GitError('UNRESOLVED_CONFLICT', 'Resolve conflicts before stashing');
+    const selected =
+      options.paths ??
+      current.status.entries
+        .filter(
+          (entry) =>
+            (options.includeUntracked || entry.kind !== 'untracked') &&
+            (!options.stagedOnly || entry.index !== '.'),
+        )
+        .map((entry) => entry.pathBytes);
+    if (!selected.length)
+      throw new GitError('NOTHING_TO_STASH', 'There are no matching changes to stash');
+    if (options.stagedOnly && options.paths) {
+      const staged = current.status.entries
+        .filter((entry) => entry.kind !== 'untracked' && entry.index !== '.')
+        .map((entry) => entry.pathBytes);
+      if (
+        staged.some((path) => !selected.includes(path)) ||
+        selected.some((path) => !staged.includes(path))
+      )
+        throw new GitError(
+          'STAGED_STASH_SELECTION',
+          'Staged-only stashes include all staged files. Use a regular stash for a path selection.',
+        );
+    }
+    const stdin = await this.paths(selected, signal);
+    const entries = current.status.entries.filter((entry) => selected.includes(entry.pathBytes));
+    if (entries.some((entry) => entry.kind === 'untracked') && !options.includeUntracked)
+      throw new GitError('UNTRACKED_SELECTION', 'Enable untracked files to stash this selection');
+    if (entries.some((entry) => entry.submodule.startsWith('S')))
+      throw new GitError('SUBMODULE_OPERATION', 'Stash changes inside each submodule separately');
+    const paths = [
+      ...new Set(
+        entries.flatMap((entry) => [
+          entry.pathBytes,
+          ...(entry.origPathBytes ? [entry.origPathBytes] : []),
+        ]),
+      ),
+    ];
+    return this.transaction(
+      'Stash changes (keep stash on Undo)',
+      async (indexFile, before) => {
+        if (this.revision(before) !== options.revision)
+          throw new GitError(
+            'STALE_STASH',
+            'HEAD or staged content changed. Review the stash again.',
+          );
+        await this.noOperation();
+        await this.backups.assertCurrent(before.files!, 'STALE_STASH');
+        if (!before.head.oid)
+          throw new GitError('UNBORN_STASH', 'Create an initial commit before stashing');
+        const push = () =>
+          this.run(
+            [
+              'stash',
+              'push',
+              ...(options.includeUntracked ? ['--include-untracked'] : []),
+              ...(options.stagedOnly ? ['--staged'] : []),
+              ...(options.message ? ['--message', options.message] : []),
+              ...(options.stagedOnly ? [] : ['--pathspec-from-file=-', '--pathspec-file-nul']),
+            ],
+            { indexFile, stdin: options.stagedOnly ? undefined : stdin, signal, readOnly: false },
+          );
+        if (options.stagedOnly) await push();
+        else await this.withStashSelection(indexFile, before, paths, push, signal);
+      },
+      signal,
+      paths,
+    );
+  }
+  private async withStashSelection(
+    indexFile: string,
+    before: Saved,
+    paths: string[],
+    change: () => Promise<unknown>,
+    signal?: AbortSignal,
+  ) {
+    const selected = new Set(paths);
+    const entries = async (signal?: AbortSignal) => {
+      const raw = (await this.run(['ls-files', '--stage', '-z'], { indexFile, signal })).stdout;
+      const parts: Buffer[] = [];
+      for (let at = 0; at < raw.length;) {
+        const end = raw.indexOf(0, at),
+          tab = raw.indexOf(9, at);
+        if (end < 0 || tab < at || tab > end)
+          throw new GitError('INVALID_INDEX', 'Invalid index entry');
+        if (selected.has(raw.subarray(tab + 1, end).toString('base64')))
+          parts.push(raw.subarray(at, end + 1));
+        at = end + 1;
+      }
+      return Buffer.concat(parts);
+    };
+    const replace = (raw: Buffer, signal?: AbortSignal) =>
+      this.run(['update-index', '-z', '--index-info'], {
+        indexFile,
+        signal,
+        readOnly: false,
+        stdin: Buffer.concat([
+          ...paths.map((path) =>
+            Buffer.concat([
+              Buffer.from(`0 ${'0'.repeat(before.head.oid!.length)}\t`),
+              Buffer.from(path, 'base64'),
+              Buffer.from([0]),
+            ]),
+          ),
+          raw,
+        ]),
+      });
+    const original = await entries(signal);
+    const originalTime = await stat(indexFile);
+    let prepared = false;
+    try {
+      await this.run(['read-tree', before.head.oid!], { indexFile, signal, readOnly: false });
+      await replace(original, signal);
+      prepared = true;
+      await change();
+    } finally {
+      let after: Buffer | undefined;
+      try {
+        if (prepared) after = await entries();
+      } finally {
+        await writeFile(indexFile, Buffer.from(before.index, 'base64'));
+        await utimes(
+          indexFile,
+          originalTime.atime,
+          new Date(Math.floor(originalTime.mtimeMs / 1000) * 1000),
+        );
+      }
+      if (after) await replace(after);
+    }
   }
   async files(action: 'stage' | 'unstage', selected: string[], signal?: AbortSignal) {
     const stdin = await this.paths(selected, signal);

@@ -9,6 +9,7 @@ import type {
   RemoteOptions,
   PushSelection,
   PushOptions,
+  StashPushOptions,
   GraphView,
   Repository,
   Snapshot,
@@ -468,6 +469,14 @@ export class RepositoryService {
   remote(id: string, options: RemoteOptions, signal?: AbortSignal) {
     const { repo, manager } = this.remoteManager(id);
     return this.queue(repo.commonDir).run(true, () => manager.change(options, signal), signal);
+  }
+  stashes(id: string, signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(false, () => work.stashes(signal), signal);
+  }
+  stashPush(id: string, options: StashPushOptions, signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(true, () => work.stashPush(options, signal), signal);
   }
   reference(id: string, options: ReferenceOptions, signal?: AbortSignal) {
     const work = this.working(id);

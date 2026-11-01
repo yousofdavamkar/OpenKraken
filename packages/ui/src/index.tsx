@@ -5,6 +5,7 @@ import { RepositorySync } from './repository-sync.js';
 import { WorkingTreePanel } from './working-tree.js';
 import { History } from './history.js';
 import { NewReferences, ReferenceActions } from './references.js';
+import { Stashes } from './stashes.js';
 import { Push } from './push.js';
 import { ManageRemotes } from './remotes.js';
 import { RefControls } from './ref-controls.js';
@@ -43,6 +44,7 @@ function App() {
           <NewReferences />
           <ManageRemotes />
           <Push />
+          <Stashes />
           <button onClick={open} disabled={!!busy}>
             Open repository
           </button>
