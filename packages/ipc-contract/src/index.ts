@@ -607,7 +607,7 @@ export type Result = z.infer<typeof resultSchema>;
 export interface DesktopApi {
   request(request: Request): Promise<Result>;
   cancel(id: string): Promise<void>;
-  subscribe(listener: (event: RepositoryEvent) => void): () => void;
+  subscribe(listener: (event: DesktopEvent) => void): () => void;
 }
 
 export const shutdownSchema = z.object({ shutdown: z.literal(true) }).strict();
@@ -635,3 +635,12 @@ export const repositoryEventSchema = z
   .strict();
 export type RepositoryEvent = z.infer<typeof repositoryEventSchema>;
 export const EVENT_CHANNEL = 'openkraken:repository-event';
+
+export const gitProgressEventSchema = z
+  .object({ type: z.literal('gitProgress'), id: requestId, text: z.string().max(4096) })
+  .strict();
+export const desktopEventSchema = z.discriminatedUnion('type', [
+  repositoryEventSchema,
+  gitProgressEventSchema,
+]);
+export type DesktopEvent = z.infer<typeof desktopEventSchema>;

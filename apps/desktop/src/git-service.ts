@@ -28,6 +28,13 @@ function getService() {
 }
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
   const git = await getService();
+  let lastProgress = 0;
+  const progress = (text: string) => {
+    const now = Date.now();
+    if (now - lastProgress < 100) return;
+    lastProgress = now;
+    parent!.postMessage({ type: 'gitProgress', id: request.id, text });
+  };
   if (request.method === 'stashAction')
     return {
       kind: 'stashAction',
@@ -43,14 +50,17 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
   if (request.method === 'pushPreview')
     return {
       kind: 'pushPreview',
-      plan: await git.pushPreview(request.repoId, request.selection, signal),
+      plan: await git.pushPreview(request.repoId, request.selection, signal, progress),
     };
   if (request.method === 'push')
-    return { kind: 'pushed', ...(await git.push(request.repoId, request.options, signal)) };
+    return {
+      kind: 'pushed',
+      ...(await git.push(request.repoId, request.options, signal, progress)),
+    };
   if (request.method === 'fetch')
     return {
       kind: 'remotes',
-      state: await git.fetch(request.repoId, request.name, signal, request.background),
+      state: await git.fetch(request.repoId, request.name, signal, request.background, progress),
     };
   if (request.method === 'remotes')
     return { kind: 'remotes', state: await git.remotes(request.repoId, signal) };

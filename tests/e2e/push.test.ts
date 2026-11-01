@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test } from '@playwright/test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createFixture, fixtureGit } from '../../packages/test-fixtures/src/index.js';
@@ -9,6 +9,12 @@ test('review and push a branch to a local remote with upstream tracking', async 
   const remote = join(root, 'remote.git');
   fixtureGit(repo, ['clone', '--bare', '.', remote]);
   fixtureGit(repo, ['remote', 'set-url', 'origin', remote]);
+  if (process.platform !== 'win32')
+    writeFileSync(
+      join(repo, '.git/hooks/pre-push'),
+      '#!/bin/sh\necho "Preparing reviewed push" >&2\nsleep 1\n',
+      { mode: 0o755 },
+    );
   const app = await electron.launch({
     args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
   });
@@ -25,6 +31,8 @@ test('review and push a branch to a local remote with upstream tracking', async 
     await dialog.getByRole('button', { name: 'Review push', exact: true }).click();
     await expect(dialog.getByText('Create refs/heads/published', { exact: true })).toBeVisible();
     await dialog.getByRole('button', { name: 'Push reviewed tip', exact: true }).click();
+    if (process.platform !== 'win32')
+      await expect(dialog.getByTestId('git-progress')).toHaveText('Preparing reviewed push');
     await expect(dialog.getByText('Push completed', { exact: true })).toBeVisible();
     expect(fixtureGit(remote, ['rev-parse', 'published'])).toBe(
       fixtureGit(repo, ['rev-parse', 'HEAD']),

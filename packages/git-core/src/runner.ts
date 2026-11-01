@@ -16,6 +16,7 @@ export interface RunOptions {
   readOnly?: boolean;
   maxBytes?: number;
   timeoutMs?: number;
+  onStderr?: (chunk: Buffer) => void;
   onStdout?: (chunk: Buffer) => void | Promise<void>;
   allowedExitCodes?: number[];
   env?: NodeJS.ProcessEnv;
@@ -99,6 +100,7 @@ export function runProcess(
         return;
       }
       try {
+        if (!isOut && options.onStderr) options.onStderr(chunk);
         if (isOut && options.onStdout) return options.onStdout(chunk);
         else (isOut ? stdout : stderr).push(chunk);
       } catch (error) {

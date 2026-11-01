@@ -47,7 +47,7 @@ export function RepositorySync() {
       }
     };
     const unsubscribe = window.openkraken.subscribe((event) => {
-      if (event.repoId !== repoId) return;
+      if (event.type !== 'repositoryChanged' || event.repoId !== repoId) return;
       useRepository.setState({ watcherMode: event.mode });
       for (const domain of event.domains) domains.add(domain);
       schedule();

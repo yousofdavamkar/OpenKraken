@@ -37,3 +37,9 @@ Optional upstream selection runs after successful publication and only if the lo
 Real-Git tests cover fresh/fast-forward pushes, upstream tracking, rejected non-fast-forwards, intervening server changes, explicit lease replacement, stale local sources, separate fetch/push URLs, annotated tags and isolation from mirror/follow-tags settings. Electron verifies reviewed publication, native rejection and the explicit force-with-lease checkbox flow.
 
 Reference: [Git push documentation](https://git-scm.com/docs/git-push).
+
+## Transport progress
+
+Native stderr remains bounded diagnostic output and also feeds a UTF-8 line decoder. Only complete lines are emitted, with URL credentials/parameters masked; overlong lines are omitted. Typed progress events use the existing validated event channel, carry the active request ID and at most 4 KiB of text, and are throttled to ten events per second in the Git service. Main ignores progress for completed requests. The desktop displays progress only for its current operation and retains the existing cancellation path.
+
+Unit tests cover split UTF-8/credentials, overlong lines and stderr delivery. The Electron push flow observes progress from a native pre-push hook before publication completes.

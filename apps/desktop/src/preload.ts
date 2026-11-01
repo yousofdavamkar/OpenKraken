@@ -3,7 +3,7 @@ import {
   CHANNEL,
   CANCEL_CHANNEL,
   EVENT_CHANNEL,
-  repositoryEventSchema,
+  desktopEventSchema,
   requestSchema,
   cancelSchema,
 } from '@openkraken/ipc-contract';
@@ -12,7 +12,7 @@ import type { DesktopApi, Result } from '@openkraken/ipc-contract';
 const api: DesktopApi = {
   subscribe: (listener) => {
     const handler = (_event: unknown, data: unknown) => {
-      const parsed = repositoryEventSchema.safeParse(data);
+      const parsed = desktopEventSchema.safeParse(data);
       if (parsed.success) listener(parsed.data);
     };
     ipcRenderer.on(EVENT_CHANNEL, handler);

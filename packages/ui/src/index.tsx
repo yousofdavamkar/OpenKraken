@@ -5,6 +5,7 @@ import { RepositorySync } from './repository-sync.js';
 import { WorkingTreePanel } from './working-tree.js';
 import { History } from './history.js';
 import { NewReferences, ReferenceActions } from './references.js';
+import { GitProgress } from './git-progress.js';
 import { Stashes } from './stashes.js';
 import { Push } from './push.js';
 import { ManageRemotes } from './remotes.js';
@@ -68,6 +69,7 @@ function App() {
           {(busy || paging || searching) && <button onClick={() => void cancel()}>Cancel</button>}
         </div>
       </header>
+      <GitProgress />
       {init && (
         <form
           className="init-form"

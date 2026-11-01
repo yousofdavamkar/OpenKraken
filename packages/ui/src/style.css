@@ -801,3 +801,10 @@ footer {
   border-bottom: 1px solid var(--border);
   padding: 8px 0;
 }
+
+.git-progress {
+  font-family: var(--font-mono, monospace);
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  margin: 4px 12px;
+}

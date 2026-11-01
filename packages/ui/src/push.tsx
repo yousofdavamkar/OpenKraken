@@ -1,3 +1,4 @@
+import { GitProgress } from './git-progress.js';
 import { useEffect, useRef, useState } from 'react';
 import type { PushPlan, RemoteState } from '@openkraken/ipc-contract';
 import { useRepository, waitForBackground } from './store.js';
@@ -111,6 +112,7 @@ function PushDialog({ repoId, close }: { repoId: string; close: () => void }) {
         }}
       >
         <h2>Push to remote</h2>
+        <GitProgress />
         <label>
           Remote
           <select

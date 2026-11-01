@@ -13,13 +13,7 @@ import {
 } from '@openkraken/ipc-contract';
 import { GitError, type runGit, type RunOptions } from './runner.js';
 
-/** Display configured endpoints without propagating embedded credentials to the renderer. */
-function displayUrl(value: string) {
-  return value
-    .replace(/(https?:\/\/)[^/@]*@/gi, '$1[credentials]@')
-    .replace(/([a-z][a-z0-9+.-]*:\/\/[^/:@]*):[^/@]*@/gi, '$1:[redacted]@')
-    .replace(/[?#].*$/, '[redacted parameters]');
-}
+import { GitProgressLines, redactGitMessage as displayUrl } from './progress.js';
 function validateUrl(value: string) {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
     let url: URL;
@@ -48,7 +42,10 @@ function validateUrl(value: string) {
   }
 }
 export class Remotes {
-  constructor(private run: (args: string[], options?: RunOptions) => ReturnType<typeof runGit>) {}
+  constructor(
+    private run: (args: string[], options?: RunOptions) => ReturnType<typeof runGit>,
+    private onProgress?: (text: string) => void,
+  ) {}
   async state(signal?: AbortSignal): Promise<RemoteState> {
     const config = await this.run(['config', '--null', '--list'], {
       signal,
@@ -99,6 +96,7 @@ export class Remotes {
     return this.state();
   }
   private async network(args: string[], signal?: AbortSignal, background = false) {
+    const progress = this.onProgress ? new GitProgressLines(this.onProgress) : undefined;
     // URL-specific settings can outrank the global TLS setting, even in local config.
     const tls = await this.run(['config', '--null', '--get-regexp', '^http\\..*\\.sslverify$'], {
       signal,
@@ -116,6 +114,7 @@ export class Remotes {
           signal,
           readOnly: false,
           timeoutMs: 180000,
+          onStderr: progress ? (chunk) => progress.push(chunk) : undefined,
           allowedExitCodes: [0, 1],
           env: {
             GIT_ALLOW_PROTOCOL: 'file:https:http:ssh:git',
@@ -141,6 +140,8 @@ export class Remotes {
       if (error instanceof GitError)
         throw new GitError(error.code, displayUrl(error.message), error.exitCode);
       throw error;
+    } finally {
+      progress?.end();
     }
   }
   private async sourceOid(ref: string, signal?: AbortSignal) {

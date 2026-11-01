@@ -435,32 +435,51 @@ export class RepositoryService {
     }
     return work;
   }
-  private remoteManager(id: string) {
+  private remoteManager(id: string, onProgress?: (text: string) => void) {
     const repo = this.repositories.get(id);
     if (!repo) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
     return {
       repo,
-      manager: new Remotes((args, options) => this.run(args, { ...options, cwd: repo.path })),
+      manager: new Remotes(
+        (args, options) => this.run(args, { ...options, cwd: repo.path }),
+        onProgress,
+      ),
     };
   }
   remotes(id: string, signal?: AbortSignal) {
     const { repo, manager } = this.remoteManager(id);
     return this.queue(repo.commonDir).run(false, () => manager.state(signal), signal);
   }
-  pushPreview(id: string, selection: PushSelection, signal?: AbortSignal) {
-    const { repo, manager } = this.remoteManager(id);
+  pushPreview(
+    id: string,
+    selection: PushSelection,
+    signal?: AbortSignal,
+    onProgress?: (text: string) => void,
+  ) {
+    const { repo, manager } = this.remoteManager(id, onProgress);
     return this.queue(repo.commonDir).run(
       false,
       () => manager.pushPreview(selection, signal),
       signal,
     );
   }
-  push(id: string, options: PushOptions, signal?: AbortSignal) {
-    const { repo, manager } = this.remoteManager(id);
+  push(
+    id: string,
+    options: PushOptions,
+    signal?: AbortSignal,
+    onProgress?: (text: string) => void,
+  ) {
+    const { repo, manager } = this.remoteManager(id, onProgress);
     return this.queue(repo.commonDir).run(true, () => manager.push(options, signal), signal);
   }
-  fetch(id: string, name: string, signal?: AbortSignal, background = false) {
-    const { repo, manager } = this.remoteManager(id);
+  fetch(
+    id: string,
+    name: string,
+    signal?: AbortSignal,
+    background = false,
+    onProgress?: (text: string) => void,
+  ) {
+    const { repo, manager } = this.remoteManager(id, onProgress);
     return this.queue(repo.commonDir).run(
       true,
       () => manager.fetch(name, signal, background),

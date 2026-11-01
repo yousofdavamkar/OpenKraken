@@ -1,3 +1,4 @@
+import { GitProgress } from './git-progress.js';
 import { useEffect, useRef, useState } from 'react';
 import type { RemoteOptions, RemoteState } from '@openkraken/ipc-contract';
 import { useRepository, waitForBackground } from './store.js';
@@ -90,6 +91,7 @@ function RemoteDialog({ repoId, close }: { repoId: string; close: () => void }) 
       }}
     >
       <h2>Manage remotes</h2>
+      <GitProgress />
       {state?.remotes.map((remote) => (
         <section key={remote.name} className="remote-entry">
           <h3>{remote.name}</h3>
