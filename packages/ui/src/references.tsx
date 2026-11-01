@@ -18,7 +18,8 @@ async function executeReference(repoId: string, options: ReferenceOptions) {
       await useRepository.getState().run({ id: crypto.randomUUID(), method: 'refresh', repoId });
   }
 }
-type Action = 'createBranch' | 'createTag' | 'deleteTag' | 'renameBranch' | 'setUpstream';
+type Action =
+  'createBranch' | 'createTag' | 'deleteTag' | 'renameBranch' | 'setUpstream' | 'deleteBranch';
 function ReferenceDialog({
   action,
   target,
@@ -37,17 +38,17 @@ function ReferenceDialog({
   const [message, setMessage] = useState('');
   const [upstream, setUpstream] = useState(reference?.upstream?.ref ?? '');
   const [sign, setSign] = useState(false);
+  const [force, setForce] = useState(false);
   const [error, setError] = useState<string>();
-  const title =
-    action === 'createBranch'
-      ? 'Create branch'
-      : action === 'createTag'
-        ? 'Create tag'
-        : action === 'renameBranch'
-          ? 'Rename branch'
-          : action === 'setUpstream'
-            ? 'Set upstream'
-            : 'Delete tag';
+  const title = {
+    createBranch: 'Create branch',
+    createTag: 'Create tag',
+    deleteTag: 'Delete tag',
+    renameBranch: 'Rename branch',
+    setUpstream: 'Set upstream',
+    deleteBranch: 'Delete branch',
+  }[action];
+  const deleting = action === 'deleteTag' || action === 'deleteBranch';
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
@@ -55,15 +56,17 @@ function ReferenceDialog({
     if (!snapshot) return;
     const repoId = snapshot.repository.id;
     const options: ReferenceOptions =
-      action === 'setUpstream'
-        ? { action, name, expected: target, ...(upstream ? { upstream } : {}) }
-        : action === 'renameBranch'
-          ? { action, name: reference!.shortName, newName: name, expected: target }
-          : action === 'deleteTag'
-            ? { action, name, expected: target }
-            : action === 'createBranch'
-              ? { action, name, target }
-              : { action, name, target, ...(message ? { message } : {}), sign };
+      action === 'deleteBranch'
+        ? { action, name, expected: target, force }
+        : action === 'setUpstream'
+          ? { action, name, expected: target, ...(upstream ? { upstream } : {}) }
+          : action === 'renameBranch'
+            ? { action, name: reference!.shortName, newName: name, expected: target }
+            : action === 'deleteTag'
+              ? { action, name, expected: target }
+              : action === 'createBranch'
+                ? { action, name, target }
+                : { action, name, target, ...(message ? { message } : {}), sign };
     setError(undefined);
     let success = false;
     try {
@@ -117,10 +120,10 @@ function ReferenceDialog({
               </select>
             </label>
           </>
-        ) : action === 'deleteTag' ? (
+        ) : deleting ? (
           <p>
-            Delete local tag <strong>{name}</strong>? Undo can restore it. This does not delete a
-            remote tag.
+            Delete local {action === 'deleteBranch' ? 'branch' : 'tag'} <strong>{name}</strong>?
+            Undo can restore it. This does not delete its remote counterpart.
           </p>
         ) : (
           <label>
@@ -136,8 +139,24 @@ function ReferenceDialog({
           </label>
         )}
         <p>
-          {action === 'deleteTag' ? 'Reviewed tag object' : 'Target commit'}: <code>{target}</code>
+          {action === 'deleteTag'
+            ? 'Reviewed tag object'
+            : action === 'deleteBranch'
+              ? 'Reviewed branch tip'
+              : 'Target commit'}
+          : <code>{target}</code>
         </p>
+        {action === 'deleteBranch' && (
+          <label>
+            <input
+              type="checkbox"
+              checked={force}
+              disabled={!!busy}
+              onChange={(event) => setForce(event.target.checked)}
+            />{' '}
+            Allow deleting unmerged commits
+          </label>
+        )}
         {action === 'createTag' && (
           <>
             <label>
@@ -173,7 +192,7 @@ function ReferenceDialog({
           <button
             type="submit"
             disabled={!!busy || !name.trim() || (sign && !message.trim())}
-            className={action === 'deleteTag' ? 'danger' : undefined}
+            className={deleting ? 'danger' : undefined}
           >
             {title}
           </button>
@@ -218,7 +237,9 @@ export function ReferenceActions({ reference }: { reference: Ref }) {
   const busy = syncing ? undefined : active;
   const [error, setError] = useState<string>();
   const [reviewed, setReviewed] = useState<Ref>();
-  const [branchAction, setBranchAction] = useState<'renameBranch' | 'setUpstream'>('renameBranch');
+  const [branchAction, setBranchAction] = useState<'renameBranch' | 'setUpstream' | 'deleteBranch'>(
+    'renameBranch',
+  );
   if (reference.kind === 'local' && snapshot)
     return (
       <>
@@ -257,6 +278,16 @@ export function ReferenceActions({ reference }: { reference: Ref }) {
           }}
         >
           Upstream
+        </button>
+        <button
+          disabled={!!busy || reference.isHead}
+          aria-label={`Delete branch ${reference.shortName}`}
+          onClick={() => {
+            setBranchAction('deleteBranch');
+            setReviewed(reference);
+          }}
+        >
+          Delete
         </button>
         {reviewed && (
           <ReferenceDialog

@@ -51,6 +51,16 @@ test('create branches and annotated tags, confirm deletion and restore with Undo
     await expect
       .poll(() => fixtureGit(repo, ['rev-parse', '--symbolic-full-name', 'main@{upstream}']))
       .toBe('refs/remotes/origin/main');
+    await page.getByRole('button', { name: 'Delete branch feature/ui', exact: true }).click();
+    dialog = page.getByRole('dialog', { name: 'Delete branch' });
+    await expect(dialog.getByText('feature/ui', { exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Delete branch', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(fixtureGit(repo, ['branch', '--list', 'feature/ui'])).toBe('');
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect(
+      page.getByRole('button', { name: 'Switch to feature/ui', exact: true }),
+    ).toBeVisible();
     await page.getByRole('button', { name: 'New tag', exact: true }).click();
     dialog = page.getByRole('dialog', { name: 'Create tag' });
     await dialog.getByRole('textbox', { name: 'Tag name', exact: true }).fill('release/ui');

@@ -566,3 +566,35 @@ test('upstream undo preserves byte-valued and boolean settings and respects an e
     ).stdout,
   ).toEqual(before);
 });
+test('branch deletion checks mergedness and worktree use, with atomic guarded ref/config undo', async () => {
+  const { path, work } = await setup('delete-branch');
+  fixtureGit(path, ['checkout', '-b', 'unmerged']);
+  await writeFile(join(path, 'tracked.txt'), 'unique branch work\n');
+  fixtureGit(path, ['commit', '-am', 'Unique work']);
+  const expected = fixtureGit(path, ['rev-parse', 'HEAD']);
+  fixtureGit(path, ['config', 'branch.unmerged.description', 'Keep this description']);
+  fixtureGit(path, ['checkout', 'main']);
+  await expect(
+    work.reference({ action: 'deleteBranch', name: 'unmerged', expected }),
+  ).rejects.toMatchObject({ code: 'UNMERGED_BRANCH' });
+  expect(fixtureGit(path, ['rev-parse', 'unmerged'])).toBe(expected);
+  await work.reference({ action: 'deleteBranch', name: 'unmerged', expected, force: true });
+  expect(fixtureGit(path, ['branch', '--list', 'unmerged'])).toBe('');
+  await writeFile(join(path, '.git/config.lock'), 'another writer');
+  await expect(work.undo()).rejects.toMatchObject({ code: 'CONFIG_LOCKED' });
+  expect(fixtureGit(path, ['branch', '--list', 'unmerged'])).toBe('');
+  await rm(join(path, '.git/config.lock'));
+  await work.undo();
+  expect(fixtureGit(path, ['rev-parse', 'unmerged'])).toBe(expected);
+  expect(fixtureGit(path, ['config', 'branch.unmerged.description'])).toBe('Keep this description');
+  await work.undo(true);
+  expect(fixtureGit(path, ['branch', '--list', 'unmerged'])).toBe('');
+  const main = fixtureGit(path, ['rev-parse', 'main']);
+  await expect(
+    work.reference({ action: 'deleteBranch', name: 'main', expected: main, force: true }),
+  ).rejects.toMatchObject({ code: 'BRANCH_IN_USE' });
+  fixtureGit(path, ['branch', 'unmerged', 'HEAD~1']);
+  await expect(
+    work.reference({ action: 'deleteBranch', name: 'unmerged', expected, force: true }),
+  ).rejects.toMatchObject({ code: 'STALE_REF' });
+});

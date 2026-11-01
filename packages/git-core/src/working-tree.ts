@@ -631,6 +631,81 @@ export class WorkingTree {
   private branchConfiguration(names: string[], signal?: AbortSignal) {
     return this.configuration.read(names, signal);
   }
+  private async deleteBranch(
+    options: Extract<ReferenceOptions, { action: 'deleteBranch' }>,
+    signal?: AbortSignal,
+  ) {
+    const ref = `refs/heads/${options.name}`;
+    if (
+      options.name.startsWith('-') ||
+      (await this.run(['check-ref-format', ref], { signal, allowedExitCodes: [0, 1] })).exitCode !==
+        0
+    )
+      throw new GitError('INVALID_REF', 'Enter a valid branch name');
+    return this.transaction(
+      'Delete branch',
+      async (_index, before) => {
+        if (before.refs?.[ref] !== options.expected)
+          throw new GitError(
+            'STALE_REF',
+            'The branch changed. Review its current target before deleting.',
+          );
+        const worktrees = (
+          await this.run(['worktree', 'list', '--porcelain', '-z'], { signal })
+        ).stdout
+          .toString()
+          .split('\0');
+        if (
+          (before.head.kind === 'branch' && before.head.ref === ref) ||
+          worktrees.includes(`branch ${ref}`)
+        )
+          throw new GitError(
+            'BRANCH_IN_USE',
+            'Switch away from this branch in every worktree before deleting it',
+          );
+        if (!options.force) {
+          const upstream = (
+            await this.run(['rev-parse', '--verify', '--quiet', `${ref}@{upstream}`], {
+              signal,
+              allowedExitCodes: [0, 1, 128],
+            })
+          ).stdout
+            .toString()
+            .trim();
+          const into = upstream || before.head.oid;
+          if (
+            !into ||
+            (
+              await this.run(['merge-base', '--is-ancestor', options.expected, into], {
+                signal,
+                allowedExitCodes: [0, 1],
+              })
+            ).exitCode !== 0
+          )
+            throw new GitError(
+              'UNMERGED_BRANCH',
+              'This branch has unmerged commits. Review the target and explicitly allow deleting unmerged work to continue.',
+            );
+        }
+        await this.configuration.restore(
+          { [options.name]: [] },
+          before.branchConfig!,
+          async () => {
+            await this.run(['update-ref', '--no-deref', '-d', ref, options.expected], {
+              signal,
+              readOnly: false,
+            });
+          },
+          signal,
+        );
+      },
+      signal,
+      undefined,
+      false,
+      [ref],
+      [options.name],
+    );
+  }
   private async setUpstream(
     options: Extract<ReferenceOptions, { action: 'setUpstream' }>,
     signal?: AbortSignal,
@@ -873,6 +948,7 @@ export class WorkingTree {
     if (options.action === 'checkoutBranch') return this.checkoutBranch(options, signal);
     if (options.action === 'renameBranch') return this.renameBranch(options, signal);
     if (options.action === 'setUpstream') return this.setUpstream(options, signal);
+    if (options.action === 'deleteBranch') return this.deleteBranch(options, signal);
     const branch = options.action === 'createBranch';
     const ref = `refs/${branch ? 'heads' : 'tags'}/${options.name}`;
     if (options.name.startsWith('-') || options.name === 'HEAD' || options.name.includes('\0'))

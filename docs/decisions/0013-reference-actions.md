@@ -27,3 +27,9 @@ Rename uses native `git branch --move`, including the current branch, and journa
 Upstream selection accepts an existing full local or remote branch ref, or clears the upstream. Native `git branch` applies the change. Undo checks the branch tip and affected settings, acquires `config.lock`, and prepares a private copy that preserves all unrelated configuration. Only the selected branch sections are replaced. Native Git parses and verifies that candidate before publication. Repeated values, bare boolean keys, multiline text, and non-UTF-8 values round-trip; section comments/formatting may be normalized. An existing lock is left untouched and causes refusal. Configuration is capped at 2 MiB for this operation.
 
 Branch creation, rename, tags and upstream settings work in bare repositories. Their ref-only changes do not publish an otherwise absent worktree index. The upstream UI and its undo flow are tested in Electron, in addition to the real-Git configuration tests.
+
+## Branch deletion
+
+Deletion checks the reviewed branch tip and uses compare-and-swap ref removal. Current branches and branches used by any worktree are protected, including when unmerged deletion is allowed. By default the tip must be an ancestor of its upstream, or HEAD when there is no upstream; deleting unmerged work requires an explicit checkbox. A locked, verified configuration candidate is prepared before removing the ref. Undo restores both the recorded tip and branch settings, refuses newer refs/settings, and leaves foreign locks untouched. Ref and configuration publication are separate filesystem operations; the journal is not a cross-file atomic transaction.
+
+Real Git tests cover merged/unmerged checks, explicit force, stale tips, current-branch protection, configuration lock refusal, and deletion/undo/redo. The Electron flow deletes a branch and restores it through Undo.
