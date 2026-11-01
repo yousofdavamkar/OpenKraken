@@ -17,7 +17,8 @@
     "lint": "eslint apps packages tests scripts && prettier --check .",
     "format": "prettier --write .",
     "fixtures": "tsx packages/test-fixtures/src/cli.ts",
-    "smoke:package": "node scripts/smoke-package.mjs"
+    "smoke:package": "node scripts/smoke-package.mjs",
+    "benchmark:graph": "playwright test tests/e2e/benchmark.test.ts --reporter=list --output=test-results/benchmark"
   },
   "devDependencies": {
     "typescript": "7.0.2",
