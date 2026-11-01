@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Ref, ReferenceOptions } from '@openkraken/ipc-contract';
-import { useRepository } from './store.js';
+import { useRepository, waitForBackground } from './store.js';
 async function executeReference(repoId: string, options: ReferenceOptions) {
+  if (useRepository.getState().syncing) await waitForBackground();
+  if (useRepository.getState().snapshot?.repository.id !== repoId) return false;
   if (useRepository.getState().busy) return false;
   const id = crypto.randomUUID();
   useRepository.setState({ busy: id });
@@ -16,7 +18,7 @@ async function executeReference(repoId: string, options: ReferenceOptions) {
       await useRepository.getState().run({ id: crypto.randomUUID(), method: 'refresh', repoId });
   }
 }
-type Action = 'createBranch' | 'createTag' | 'deleteTag';
+type Action = 'createBranch' | 'createTag' | 'deleteTag' | 'renameBranch';
 function ReferenceDialog({
   action,
   target,
@@ -29,7 +31,8 @@ function ReferenceDialog({
   close: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const { snapshot, busy } = useRepository();
+  const { snapshot, busy: active, syncing } = useRepository();
+  const busy = syncing ? undefined : active;
   const [name, setName] = useState(reference?.shortName ?? '');
   const [message, setMessage] = useState('');
   const [sign, setSign] = useState(false);
@@ -39,19 +42,23 @@ function ReferenceDialog({
       ? 'Create branch'
       : action === 'createTag'
         ? 'Create tag'
-        : 'Delete tag';
+        : action === 'renameBranch'
+          ? 'Rename branch'
+          : 'Delete tag';
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
   const submit = async () => {
-    if (!snapshot || useRepository.getState().busy) return;
+    if (!snapshot) return;
     const repoId = snapshot.repository.id;
     const options: ReferenceOptions =
-      action === 'deleteTag'
-        ? { action, name, expected: target }
-        : action === 'createBranch'
-          ? { action, name, target }
-          : { action, name, target, ...(message ? { message } : {}), sign };
+      action === 'renameBranch'
+        ? { action, name: reference!.shortName, newName: name, expected: target }
+        : action === 'deleteTag'
+          ? { action, name, expected: target }
+          : action === 'createBranch'
+            ? { action, name, target }
+            : { action, name, target, ...(message ? { message } : {}), sign };
     setError(undefined);
     let success = false;
     try {
@@ -85,7 +92,7 @@ function ReferenceDialog({
           </p>
         ) : (
           <label>
-            {action === 'createBranch' ? 'Branch name' : 'Tag name'}
+            {action === 'createBranch' || action === 'renameBranch' ? 'Branch name' : 'Tag name'}
             <input
               autoFocus
               required
@@ -144,7 +151,8 @@ function ReferenceDialog({
   );
 }
 export function NewReferences() {
-  const { snapshot, detail, selection, busy } = useRepository();
+  const { snapshot, detail, selection, busy: active, syncing } = useRepository();
+  const busy = syncing ? undefined : active;
   const [action, setAction] = useState<Action>();
   const [target, setTarget] = useState('');
   if (!snapshot) return null;
@@ -174,7 +182,8 @@ export function NewReferences() {
   );
 }
 export function ReferenceActions({ reference }: { reference: Ref }) {
-  const { busy, snapshot } = useRepository();
+  const { busy: active, syncing, snapshot } = useRepository();
+  const busy = syncing ? undefined : active;
   const [error, setError] = useState<string>();
   const [reviewed, setReviewed] = useState<Ref>();
   if (reference.kind === 'local' && snapshot && !snapshot.repository.isBare)
@@ -196,6 +205,21 @@ export function ReferenceActions({ reference }: { reference: Ref }) {
         >
           {reference.isHead ? 'Current' : 'Switch'}
         </button>
+        <button
+          disabled={!!busy}
+          aria-label={`Rename branch ${reference.shortName}`}
+          onClick={() => setReviewed(reference)}
+        >
+          Rename
+        </button>
+        {reviewed && (
+          <ReferenceDialog
+            action="renameBranch"
+            reference={reviewed}
+            target={reviewed.target}
+            close={() => setReviewed(undefined)}
+          />
+        )}
         {error && (
           <p role="alert" className="error">
             {error}

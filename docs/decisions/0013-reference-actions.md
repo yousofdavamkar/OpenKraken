@@ -17,3 +17,7 @@ Branch checkout uses native `git switch --no-guess` with the isolated index, wit
 Checkout undo switches back through Git instead of copying every file in the repository. It checks the recorded index and HEAD and requires the previous branch tip to remain unchanged. New nonconflicting working edits survive; conflicting edits cause Git to refuse. Detached and unborn previous HEADs use native detached/orphan switch modes. Pending undo records preserve recovery information if hooks or cancellation change the result. A failed post-checkout hook still records an already-completed initial switch so the user can undo it.
 
 The checkout slice is validated with different trees, later untracked and conflicting tracked edits, moved previous branches, detached/unborn heads, a failing native hook, and the Electron switch/undo flow. Branch rename/delete/upstream and remote operations remain subsequent work.
+
+## Branch rename
+
+Rename uses native `git branch --move`, including the current branch, and journals both ref names and their local branch settings. The destination must have neither a ref nor existing branch settings. Branches used by a different worktree are refused. Undo reverses the native rename after verifying both refs, HEAD/index and the exact affected configuration entries. Settings for similarly named branches (including names with dots) are outside the scope and remain unchanged. Configuration entries are recorded as bytes, preserving non-UTF-8 values and multiline descriptions without decoding them for comparison.

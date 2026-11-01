@@ -34,6 +34,7 @@ const savedSchema = z.object({
   index: z.string().max(MAX_INDEX * 2),
   signature: z.string(),
   files: z.array(fileImageSchema).optional(),
+  branchConfig: z.record(z.string(), z.array(z.string())).optional(),
   refs: z.record(z.string().regex(/^refs\/(heads|tags)\/[^\s]+$/), oidSchema.nullable()).optional(),
 });
 const entrySchema = z.object({
@@ -179,6 +180,7 @@ export class WorkingTree {
     files?: string[],
     signal?: AbortSignal,
     refs?: string[],
+    config?: string[],
   ): Promise<Saved> {
     if ((await stat(indexFile)).size > MAX_INDEX)
       throw new GitError('UNDO_LIMIT', 'The index exceeds the 32 MiB undo limit');
@@ -188,6 +190,7 @@ export class WorkingTree {
     return {
       index: index.toString('base64'),
       ...(refs ? { refs: await this.referenceState(refs, signal) } : {}),
+      ...(config ? { branchConfig: await this.branchConfiguration(config, signal) } : {}),
       ...(await this.fingerprint(indexFile)),
       ...(files ? { files: await this.backups.capture(files, true, signal) } : {}),
     };
@@ -279,12 +282,13 @@ export class WorkingTree {
     files?: string[],
     movesHead = false,
     refs?: string[],
+    config?: string[],
   ) {
     await this.locked(
       async (index, publish) => {
         const journal = await this.journal();
         await this.pruneFiles(journal);
-        const before = await this.saved(index, files, signal, refs),
+        const before = await this.saved(index, files, signal, refs, config),
           id = randomUUID();
         const pending = join(this.directory, `pending-${id}.json`);
         await atomic(pending, JSON.stringify({ id, label, before }));
@@ -294,7 +298,7 @@ export class WorkingTree {
         } catch (error) {
           failure = error;
         }
-        const after = await this.saved(index, files, undefined, refs);
+        const after = await this.saved(index, files, undefined, refs, config);
         if (!movesHead && !sameHead(before.head, after.head))
           throw new GitError(
             'CONCURRENT_HEAD',
@@ -304,7 +308,8 @@ export class WorkingTree {
           !sameHead(before.head, after.head) ||
           before.signature !== after.signature ||
           !sameImages(before.files, after.files) ||
-          JSON.stringify(before.refs) !== JSON.stringify(after.refs)
+          JSON.stringify(before.refs) !== JSON.stringify(after.refs) ||
+          JSON.stringify(before.branchConfig) !== JSON.stringify(after.branchConfig)
         ) {
           journal.undo.push({ id, label, before, after });
           journal.redo = [];
@@ -615,6 +620,119 @@ export class WorkingTree {
         signal,
       });
   }
+  private async branchConfiguration(names: string[], signal?: AbortSignal) {
+    const config: Record<string, string[]> = Object.fromEntries(names.map((name) => [name, []]));
+    const raw = (
+      await this.run(['config', '--local', '--null', '--list'], {
+        signal,
+        maxBytes: 2 * 1024 * 1024,
+      })
+    ).stdout;
+    for (let at = 0; at < raw.length;) {
+      const end = raw.indexOf(0, at);
+      if (end < 0) break;
+      const entry = raw.subarray(at, end);
+      const newline = entry.indexOf(10);
+      const key = entry.subarray(0, newline < 0 ? entry.length : newline);
+      const section = key.subarray(0, key.lastIndexOf(46));
+      for (const name of names)
+        if (section.equals(Buffer.from(`branch.${name}`)))
+          config[name]!.push(entry.toString('base64'));
+      at = end + 1;
+    }
+    return config;
+  }
+  private async canRename(ref: string, signal?: AbortSignal) {
+    const current = await this.head(signal);
+    const fields = (await this.run(['worktree', 'list', '--porcelain', '-z'], { signal })).stdout
+      .toString()
+      .split('\0');
+    const using = fields.filter((field) => field === `branch ${ref}`).length;
+    if (using > (current.kind === 'branch' && current.ref === ref ? 1 : 0))
+      throw new GitError('BRANCH_IN_USE', 'Switch the other worktree before renaming this branch');
+  }
+  private async renameBranch(
+    options: Extract<ReferenceOptions, { action: 'renameBranch' }>,
+    signal?: AbortSignal,
+  ) {
+    const names = [options.name, options.newName];
+    for (const name of names)
+      if (
+        name.startsWith('-') ||
+        name === 'HEAD' ||
+        (
+          await this.run(['check-ref-format', `refs/heads/${name}`], {
+            signal,
+            allowedExitCodes: [0, 1],
+          })
+        ).exitCode !== 0
+      )
+        throw new GitError('INVALID_REF', 'Enter a valid branch name');
+    const refs = names.map((name) => `refs/heads/${name}`);
+    return this.transaction(
+      'Rename branch',
+      async (_index, before) => {
+        await this.noOperation();
+        if (before.refs?.[refs[0]!] !== options.expected)
+          throw new GitError(
+            'STALE_REF',
+            'The branch changed. Review its current target before renaming.',
+          );
+        if (before.refs?.[refs[1]!] || before.branchConfig?.[options.newName]?.length)
+          throw new GitError(
+            'REF_EXISTS',
+            'The new name already has a branch or saved branch settings',
+          );
+        await this.canRename(refs[0]!, signal);
+        await this.run(['branch', '--move', '--', options.name, options.newName], {
+          signal,
+          readOnly: false,
+        });
+      },
+      signal,
+      undefined,
+      true,
+      refs,
+      names,
+    );
+  }
+  private async restoreRename(target: Saved, expected: Saved, signal?: AbortSignal) {
+    const from = Object.keys(expected.refs ?? {}).find(
+      (name) => expected.refs![name] && !target.refs?.[name],
+    );
+    const to = Object.keys(target.refs ?? {}).find(
+      (name) => target.refs![name] && !expected.refs?.[name],
+    );
+    if (
+      !from?.startsWith('refs/heads/') ||
+      !to?.startsWith('refs/heads/') ||
+      expected.refs![from] !== target.refs![to]
+    )
+      throw new GitError('UNDO_UNAVAILABLE', 'The branch rename record is incomplete');
+    await this.noOperation();
+    await this.canRename(from, signal);
+    const pending = join(this.directory, `pending-${randomUUID()}.json`);
+    await atomic(
+      pending,
+      JSON.stringify({ label: 'Restore branch rename', before: expected, target }),
+    );
+    await this.run(['branch', '--move', '--', from.slice(11), to.slice(11)], {
+      signal,
+      readOnly: false,
+    });
+    if (
+      !sameHead(await this.head(), target.head) ||
+      JSON.stringify(await this.referenceState(Object.keys(target.refs!))) !==
+        JSON.stringify(target.refs) ||
+      JSON.stringify(await this.branchConfiguration(Object.keys(target.branchConfig!))) !==
+        JSON.stringify(target.branchConfig)
+    )
+      throw new GitError(
+        'RENAME_CHANGED',
+        `Another writer changed the rename result. Recovery backup: ${pending}`,
+      );
+    return pending;
+  }
   private async noOperation() {
     const markers = await readdir(this.repo.gitDir);
     if (
@@ -715,6 +833,7 @@ export class WorkingTree {
   async reference(input: ReferenceOptions, signal?: AbortSignal) {
     const options = referenceOptionsSchema.parse(input);
     if (options.action === 'checkoutBranch') return this.checkoutBranch(options, signal);
+    if (options.action === 'renameBranch') return this.renameBranch(options, signal);
     const branch = options.action === 'createBranch';
     const ref = `refs/${branch ? 'heads' : 'tags'}/${options.name}`;
     if (options.name.startsWith('-') || options.name === 'HEAD' || options.name.includes('\0'))
@@ -879,6 +998,33 @@ export class WorkingTree {
             'HEAD or the index changed outside this action. Undo would overwrite newer work.',
           );
         if (expected.files) await this.backups.assertCurrent(expected.files);
+        if (
+          expected.refs &&
+          JSON.stringify(await this.referenceState(Object.keys(expected.refs))) !==
+            JSON.stringify(expected.refs)
+        )
+          throw new GitError(
+            'STALE_UNDO',
+            'A reference changed outside this action. Newer work was left unchanged.',
+          );
+        if (
+          expected.branchConfig &&
+          JSON.stringify(
+            await this.branchConfiguration(Object.keys(expected.branchConfig), signal),
+          ) !== JSON.stringify(expected.branchConfig)
+        )
+          throw new GitError(
+            'STALE_UNDO',
+            'Branch settings changed outside this action. Newer settings were left unchanged.',
+          );
+        if (entry.label === 'Rename branch') {
+          const pending = await this.restoreRename(target, expected, signal);
+          source.pop();
+          (redo ? journal.undo : journal.redo).push(entry);
+          await this.saveJournal(journal);
+          await rm(pending, { force: true });
+          return;
+        }
         const switching =
           target.head.kind !== expected.head.kind ||
           (target.head.kind === 'branch' &&
@@ -893,15 +1039,6 @@ export class WorkingTree {
           await this.pruneFiles(journal);
           return;
         }
-        if (
-          expected.refs &&
-          JSON.stringify(await this.referenceState(Object.keys(expected.refs))) !==
-            JSON.stringify(expected.refs)
-        )
-          throw new GitError(
-            'STALE_UNDO',
-            'A reference changed outside this action. Newer work was left unchanged.',
-          );
         await writeFile(index, Buffer.from(target.index, 'base64'));
         await this.verifyIndex(index);
         if (!sameHead(target.head, expected.head)) {

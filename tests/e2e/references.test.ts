@@ -28,6 +28,15 @@ test('create branches and annotated tags, confirm deletion and restore with Undo
     await expect(page.getByTestId('head')).toHaveText('feature/ui');
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
     await expect(page.getByTestId('head')).toHaveText('main');
+    await page.getByRole('button', { name: 'Rename branch main', exact: true }).click();
+    dialog = page.getByRole('dialog', { name: 'Rename branch' });
+    await dialog.getByRole('textbox', { name: 'Branch name', exact: true }).fill('main-renamed');
+    await dialog.getByRole('button', { name: 'Rename branch', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByTestId('head')).toHaveText('main-renamed');
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect(page.getByTestId('head')).toHaveText('main');
+
     await page.getByRole('button', { name: 'New tag', exact: true }).click();
     dialog = page.getByRole('dialog', { name: 'Create tag' });
     await dialog.getByRole('textbox', { name: 'Tag name', exact: true }).fill('release/ui');

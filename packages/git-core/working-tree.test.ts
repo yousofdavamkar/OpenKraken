@@ -466,3 +466,30 @@ test.skipIf(process.platform === 'win32')(
     expect(fixtureGit(path, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/main');
   },
 );
+test('renaming a current branch moves its configuration and undo restores both without replacing newer settings', async () => {
+  const { path, work } = await setup('rename-branch');
+  fixtureGit(path, ['config', 'branch.main.rebase', 'true']);
+  fixtureGit(path, ['config', 'branch.main.description', 'Reviewed\nbranch description']);
+  const expected = fixtureGit(path, ['rev-parse', 'HEAD']);
+  await work.reference({
+    action: 'renameBranch',
+    name: 'main',
+    newName: 'renamed/topic',
+    expected,
+  });
+  expect(fixtureGit(path, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/renamed/topic');
+  expect(fixtureGit(path, ['config', 'branch.renamed/topic.remote'])).toBe('origin');
+  expect(fixtureGit(path, ['config', 'branch.renamed/topic.description'])).toBe(
+    'Reviewed\nbranch description',
+  );
+  fixtureGit(path, ['config', 'branch.main.child.remote', 'unrelated']);
+  await work.undo();
+  expect(fixtureGit(path, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/main');
+  expect(fixtureGit(path, ['config', 'branch.main.child.remote'])).toBe('unrelated');
+  expect(fixtureGit(path, ['config', 'branch.main.rebase'])).toBe('true');
+  await work.undo(true);
+  fixtureGit(path, ['config', 'branch.renamed/topic.rebase', 'false']);
+  await expect(work.undo()).rejects.toMatchObject({ code: 'STALE_UNDO' });
+  expect(fixtureGit(path, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/renamed/topic');
+  expect(fixtureGit(path, ['config', 'branch.renamed/topic.rebase'])).toBe('false');
+});
