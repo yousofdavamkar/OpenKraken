@@ -6,6 +6,8 @@ function RemoteDialog({ repoId, close }: { repoId: string; close: () => void }) 
   const [state, setState] = useState<RemoteState>();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState('');
+  const [fetching, setFetching] = useState(false);
   const [editing, setEditing] = useState<string>();
   const [removing, setRemoving] = useState<string>();
   const [name, setName] = useState('');
@@ -19,6 +21,7 @@ function RemoteDialog({ repoId, close }: { repoId: string; close: () => void }) 
         repoId,
       });
       if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'cancelled') setNotice('Fetch cancelled');
       if (result.kind === 'remotes') {
         setState(result.state);
         setError(undefined);
@@ -33,9 +36,11 @@ function RemoteDialog({ repoId, close }: { repoId: string; close: () => void }) 
     dialog.current?.showModal();
     void load();
   }, []);
-  const change = async (options: RemoteOptions) => {
+  const change = async (options: RemoteOptions | { action: 'fetch'; name: string }) => {
     setPending(true);
     setError(undefined);
+    setNotice(options.action === 'fetch' ? `Fetching ${options.name}…` : '');
+    setFetching(options.action === 'fetch');
     let id: string | undefined;
     try {
       if (useRepository.getState().syncing) await waitForBackground();
@@ -44,18 +49,29 @@ function RemoteDialog({ repoId, close }: { repoId: string; close: () => void }) 
         throw new Error('Wait for the current operation to finish');
       id = crypto.randomUUID();
       useRepository.setState({ busy: id });
-      const result = await window.openkraken.request({ id, method: 'remote', repoId, options });
+      const result = await window.openkraken.request(
+        options.action === 'fetch'
+          ? { id, method: 'fetch', repoId, name: options.name }
+          : { id, method: 'remote', repoId, options },
+      );
       if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'cancelled') setNotice('Fetch cancelled');
       if (result.kind === 'remotes') {
         setState(result.state);
-        setRemoving(undefined);
-        setEditing(undefined);
-        setName('');
-        setUrl('');
+        if (options.action === 'fetch') setNotice(`Fetched ${options.name}`);
+        else {
+          setRemoving(undefined);
+          setEditing(undefined);
+          setName('');
+          setUrl('');
+        }
       }
     } catch (e) {
+      setNotice('');
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      setFetching(false);
+      if (options.action === 'fetch' && useRepository.getState().busy !== id) setNotice('');
       if (id && useRepository.getState().busy === id) useRepository.setState({ busy: undefined });
       if (id && useRepository.getState().snapshot?.repository.id === repoId)
         await useRepository.getState().run({ id: crypto.randomUUID(), method: 'refresh', repoId });
@@ -89,6 +105,13 @@ function RemoteDialog({ repoId, close }: { repoId: string; close: () => void }) 
               <code key={i}>{value}</code>
             ))}
           </div>
+          <button
+            disabled={pending}
+            aria-label={`Fetch ${remote.name}`}
+            onClick={() => void change({ action: 'fetch', name: remote.name })}
+          >
+            Fetch
+          </button>{' '}
           <button
             disabled={pending}
             aria-label={`Edit ${remote.name}`}
@@ -194,6 +217,10 @@ function RemoteDialog({ repoId, close }: { repoId: string; close: () => void }) 
           <button disabled={pending || !state || !name.trim() || !url.trim()}>Add remote</button>
         )}
       </form>
+      {notice && <p role="status">{notice}</p>}
+      {fetching && (
+        <button onClick={() => void useRepository.getState().cancel()}>Cancel fetch</button>
+      )}
       {error && (
         <p role="alert" className="error">
           {error}

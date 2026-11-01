@@ -28,6 +28,8 @@ function getService() {
 }
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
   const git = await getService();
+  if (request.method === 'fetch')
+    return { kind: 'remotes', state: await git.fetch(request.repoId, request.name, signal) };
   if (request.method === 'remotes')
     return { kind: 'remotes', state: await git.remotes(request.repoId, signal) };
   if (request.method === 'remote')
@@ -119,9 +121,16 @@ parent.on('message', (event) => {
   if (active.has(request.id)) return;
   const controller = new AbortController();
   active.set(request.id, controller);
-  const writing = ['files', 'patch', 'discard', 'commit', 'undo', 'reference', 'remote'].includes(
-    request.method,
-  );
+  const writing = [
+    'files',
+    'patch',
+    'discard',
+    'commit',
+    'undo',
+    'reference',
+    'remote',
+    'fetch',
+  ].includes(request.method);
   const observed = watcher;
   if (writing) observed?.pause();
   execute(request, controller.signal)

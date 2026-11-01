@@ -91,3 +91,64 @@ test('remote endpoint edits reject credentials and helper commands; configured s
   ).rejects.toThrow();
   await service.dispose();
 });
+test('fetch imports and prunes remote refs and tags without changing local work', async () => {
+  const source = createFixture(join(root, 'fetch-source'));
+  const bare = join(root, 'fetch-remote.git');
+  fixtureGit(source, ['clone', '--bare', '.', bare]);
+  const path = createFixture(join(root, 'fetch-client'));
+  fixtureGit(path, ['remote', 'set-url', 'origin', bare]);
+  fixtureGit(source, ['branch', 'incoming']);
+  fixtureGit(source, ['tag', 'remote-release']);
+  fixtureGit(source, ['push', bare, 'incoming', 'refs/tags/remote-release']);
+  await writeFile(join(path, 'tracked.txt'), 'local edit\n');
+  const head = fixtureGit(path, ['rev-parse', 'HEAD']);
+  const service = new RepositoryService('git');
+  const repo = await service.open(path);
+  await service.fetch(repo.id, 'origin');
+  expect(fixtureGit(path, ['rev-parse', 'origin/incoming'])).toBe(
+    fixtureGit(source, ['rev-parse', 'incoming']),
+  );
+  expect(fixtureGit(path, ['rev-parse', 'remote-release'])).toBe(
+    fixtureGit(source, ['rev-parse', 'remote-release']),
+  );
+  expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(head);
+  expect(await readFile(join(path, 'tracked.txt'), 'utf8')).toBe('local edit\n');
+  fixtureGit(source, ['push', bare, '--delete', 'incoming']);
+  await service.fetch(repo.id, 'origin');
+  expect(
+    fixtureGit(path, ['for-each-ref', '--format=%(refname)', 'refs/remotes/origin/incoming']),
+  ).toBe('');
+  await expect(service.fetch(repo.id, '--all')).rejects.toThrow();
+  await service.dispose();
+});
+test('fetch refuses untrusted TLS even with URL-specific sslVerify=false and blocks external helpers', async () => {
+  const { createServer } = await import('node:https');
+  const server = createServer(
+    {
+      key: await readFile(new URL('../test-fixtures/tls/localhost-test.key', import.meta.url)),
+      cert: await readFile(new URL('../test-fixtures/tls/localhost-test.crt', import.meta.url)),
+    },
+    (_request, response) => {
+      response.writeHead(404);
+      response.end();
+    },
+  );
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Expected TCP listener');
+  const path = createFixture(join(root, 'tls'));
+  const url = `https://127.0.0.1:${address.port}/repo.git`;
+  const service = new RepositoryService('git');
+  try {
+    fixtureGit(path, ['remote', 'set-url', 'origin', url]);
+    fixtureGit(path, ['config', `http.${url}.sslVerify`, 'false']);
+    const repo = await service.open(path);
+    await expect(service.fetch(repo.id, 'origin')).rejects.toThrow(/certificate|SSL|TLS/i);
+    fixtureGit(path, ['remote', 'set-url', 'origin', 'ext::echo should-not-run']);
+    await expect(service.fetch(repo.id, 'origin')).rejects.toThrow(/transport.*ext.*not allowed/i);
+  } finally {
+    await service.dispose();
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
+  }
+});

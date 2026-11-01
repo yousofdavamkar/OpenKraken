@@ -256,7 +256,7 @@ export const remoteStateSchema = z.object({
   ),
 });
 export type RemoteState = z.infer<typeof remoteStateSchema>;
-const remoteNameSchema = z
+export const remoteNameSchema = z
   .string()
   .min(1)
   .max(1024)
@@ -301,6 +301,14 @@ export const remoteOptionsSchema = z.discriminatedUnion('action', [
 ]);
 export type RemoteOptions = z.infer<typeof remoteOptionsSchema>;
 const workingRequests = [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('fetch'),
+      repoId: repoIdSchema,
+      name: remoteNameSchema,
+    })
+    .strict(),
   z.object({ id: requestId, method: z.literal('remotes'), repoId: repoIdSchema }).strict(),
   z
     .object({

@@ -9,3 +9,13 @@ Existing HTTP userinfo, URL passwords and query/fragment parameters are masked b
 Tests exercise the public repository service against real Git, including stale edits, existing configuration locks, native tracking rename/removal and credential masking. An Electron test adds a remote, edits its fetch URL and confirms its removal.
 
 Reference: [Git remote documentation](https://git-scm.com/docs/git-remote).
+
+## Fetch
+
+Manual fetch uses an existing remote name, atomic ref updates, pruning, tag discovery, progress output, and no recursive submodule fetches. It runs on the repository write queue, supports process-group cancellation, and has a three-minute Git timeout. The desktop refreshes history after completion or failure. Local branches, index and worktree are not integrated by fetch.
+
+Transport protocols are restricted to file, HTTP(S), SSH and Git; external helpers such as `ext::` cannot execute through this action. The runner enforces global TLS verification, and fetch additionally overrides configured URL-specific `http.*.sslVerify` settings. Native credential helpers and SSH agents remain available. Git errors mask URL credentials before delivery to the renderer. The per-session prompting bridge and automatic fetch policy remain separate work.
+
+Tests fetch and prune refs/tags against a local bare repository, preserve working edits, reject option-like remote names and external transport helpers, and refuse a self-signed HTTPS server even with URL-specific TLS verification disabled. The certificate and key in `packages/test-fixtures/tls` are public localhost test fixtures, never used by the application. The desktop test fetches a branch before editing/removing its remote.
+
+Reference: [Git fetch documentation](https://git-scm.com/docs/git-fetch).
