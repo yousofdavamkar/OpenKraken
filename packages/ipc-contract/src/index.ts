@@ -99,15 +99,26 @@ export const requestSchema = z.discriminatedUnion('method', [
     .strict(),
   z.object({ id: requestId, method: z.literal('discover') }).strict(),
 ]);
-export const serviceRequestSchema = z
-  .object({
-    id: requestId,
-    method: z.enum(['open', 'init', 'refresh', 'discover']),
-    path: z.string().min(1).max(32768).optional(),
-    repoId: z.string().optional(),
-    branch: z.string().optional(),
-  })
-  .strict();
+const repositoryPath = z.string().min(1).max(32768);
+export const serviceRequestSchema = z.discriminatedUnion('method', [
+  z.object({ id: requestId, method: z.literal('open'), path: repositoryPath }).strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('init'),
+      path: repositoryPath,
+      branch: z.string().min(1).max(200),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('refresh'),
+      repoId: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict(),
+  z.object({ id: requestId, method: z.literal('discover'), path: repositoryPath }).strict(),
+]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('snapshot'), snapshot: snapshotSchema }),

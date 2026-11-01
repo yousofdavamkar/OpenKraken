@@ -16,7 +16,8 @@
     "package": "pnpm build && node scripts/package.mjs",
     "lint": "eslint apps packages tests scripts && prettier --check .",
     "format": "prettier --write .",
-    "fixtures": "tsx packages/test-fixtures/src/cli.ts"
+    "fixtures": "tsx packages/test-fixtures/src/cli.ts",
+    "smoke:package": "node scripts/smoke-package.mjs"
   },
   "devDependencies": {
     "typescript": "7.0.2",

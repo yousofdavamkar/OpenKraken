@@ -12,13 +12,7 @@
     "declaration": true,
     "emitDeclarationOnly": true,
     "jsx": "react-jsx",
-    "lib": [
-      "ES2023",
-      "DOM",
-      "DOM.Iterable"
-    ],
-    "types": [
-      "node"
-    ]
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"]
   }
 }
