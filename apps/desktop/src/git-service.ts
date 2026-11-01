@@ -28,6 +28,11 @@ function getService() {
 }
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
   const git = await getService();
+  if (request.method === 'reference')
+    return {
+      kind: 'workingState',
+      state: await git.reference(request.repoId, request.options, signal),
+    };
   if (request.method === 'diff')
     return {
       kind: 'diff',
@@ -110,7 +115,9 @@ parent.on('message', (event) => {
   if (active.has(request.id)) return;
   const controller = new AbortController();
   active.set(request.id, controller);
-  const writing = ['files', 'patch', 'discard', 'commit', 'undo'].includes(request.method);
+  const writing = ['files', 'patch', 'discard', 'commit', 'undo', 'reference'].includes(
+    request.method,
+  );
   const observed = watcher;
   if (writing) observed?.pause();
   execute(request, controller.signal)

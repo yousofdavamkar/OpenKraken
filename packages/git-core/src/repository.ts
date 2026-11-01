@@ -5,6 +5,7 @@ import type {
   Commit,
   CommitOptions,
   PatchOptions,
+  ReferenceOptions,
   GraphView,
   Repository,
   Snapshot,
@@ -427,6 +428,10 @@ export class RepositoryService {
       this.workingTrees.set(id, work);
     }
     return work;
+  }
+  reference(id: string, options: ReferenceOptions, signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(true, () => work.reference(options, signal), signal);
   }
   workingState(id: string, signal?: AbortSignal) {
     const work = this.working(id);

@@ -4,6 +4,7 @@ import { AvatarSettings } from './avatars.js';
 import { RepositorySync } from './repository-sync.js';
 import { WorkingTreePanel } from './working-tree.js';
 import { History } from './history.js';
+import { NewReferences, TagActions } from './references.js';
 import { RefControls } from './ref-controls.js';
 import { useRepository } from './store.js';
 import './style.css';
@@ -25,6 +26,7 @@ function App() {
         </div>
         <div className="toolbar">
           <AvatarSettings />
+          <NewReferences />
           <button onClick={open} disabled={!!busy}>
             Open repository
           </button>
@@ -143,6 +145,7 @@ function App() {
                           )}
                         </div>
                         <RefControls reference={ref} />
+                        <TagActions reference={ref} />
                       </div>
                     ))}
                   </section>

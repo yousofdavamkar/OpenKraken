@@ -738,3 +738,40 @@ footer {
   color: #8d9cb1;
   font-size: 0.75rem;
 }
+
+.reference-dialog {
+  width: min(560px, 90vw);
+  border: 1px solid #354153;
+  border-radius: 10px;
+  color: #dce3ed;
+  background: #151d28;
+  padding: 24px;
+}
+.reference-dialog::backdrop {
+  background: #0009;
+}
+.reference-dialog form {
+  display: grid;
+  gap: 16px;
+}
+.reference-dialog h2,
+.reference-dialog p {
+  margin: 0;
+}
+.reference-dialog label {
+  display: block;
+}
+.reference-dialog input:not([type='checkbox']),
+.reference-dialog textarea {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  background: #10151e;
+  color: #dce3ed;
+  border: 1px solid #354153;
+  padding: 8px;
+  border-radius: 5px;
+}
+.reference-dialog code {
+  overflow-wrap: anywhere;
+}

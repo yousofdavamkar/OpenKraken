@@ -74,7 +74,7 @@ function callService(request: ServiceRequest): Promise<Result> {
           message: 'The Git service did not respond in time.',
         });
       },
-      request.method === 'commit' ? 180000 : 60000,
+      request.method === 'commit' || request.method === 'reference' ? 180000 : 60000,
     );
     pending.set(request.id, { resolve, timer });
     child.postMessage(request);

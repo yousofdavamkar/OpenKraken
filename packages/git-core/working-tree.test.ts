@@ -350,3 +350,51 @@ test('discard refuses unresolved index entries without changing conflict content
   });
   expect(await readFile(join(path, 'tracked.txt'))).toEqual(content);
 });
+test('branch and annotated tag creation are undoable and reject stale or injected ref changes', async () => {
+  const { path, work } = await setup('references');
+  const target = fixtureGit(path, ['rev-parse', 'HEAD']);
+  await work.reference({ action: 'createBranch', name: 'feature/review', target });
+  expect(fixtureGit(path, ['rev-parse', 'refs/heads/feature/review'])).toBe(target);
+  await work.undo();
+  expect(fixtureGit(path, ['branch', '--list', 'feature/review'])).toBe('');
+  await work.undo(true);
+  expect(fixtureGit(path, ['rev-parse', 'refs/heads/feature/review'])).toBe(target);
+  const message = 'Reviewed release\n\nBody\n\n';
+  await work.reference({ action: 'createTag', name: 'release/review', target, message });
+  const tag = fixtureGit(path, ['rev-parse', 'refs/tags/release/review']);
+  const { runGit } = await import('./src/runner.js');
+  const raw = (await runGit('git', ['cat-file', 'tag', tag], { cwd: path })).stdout.toString();
+  expect(raw.slice(raw.indexOf('\n\n') + 2)).toBe(message);
+  await work.reference({ action: 'deleteTag', name: 'release/review', expected: tag });
+  await work.undo();
+  expect(fixtureGit(path, ['rev-parse', 'refs/tags/release/review'])).toBe(tag);
+  fixtureGit(path, ['tag', '-f', 'release/review', 'HEAD~1']);
+  await expect(work.undo()).rejects.toMatchObject({ code: 'STALE_UNDO' });
+  await expect(
+    work.reference({ action: 'deleteTag', name: 'release/review', expected: tag }),
+  ).rejects.toMatchObject({ code: 'STALE_REF' });
+  await expect(
+    work.reference({ action: 'createBranch', name: '--help', target }),
+  ).rejects.toMatchObject({ code: 'INVALID_REF' });
+});
+test('bare repository ref actions and undo never create a working index', async () => {
+  const { path } = await setup('bare-reference-source');
+  const bare = join(root, 'bare-reference.git');
+  fixtureGit(path, ['clone', '--bare', '.', bare]);
+  const repo = await new RepositoryService('git').open(bare);
+  const work = new WorkingTree('git', repo, join(root, 'profile'));
+  const target = fixtureGit(bare, ['rev-parse', 'HEAD']);
+  await work.reference({ action: 'createBranch', name: 'bare-created', target });
+  expect(fixtureGit(bare, ['rev-parse', 'bare-created'])).toBe(target);
+  await work.undo();
+  expect(fixtureGit(bare, ['branch', '--list', 'bare-created'])).toBe('');
+  await expect(readFile(join(bare, 'index'))).rejects.toMatchObject({ code: 'ENOENT' });
+});
+test('undo refuses to remove a branch checked out by another worktree', async () => {
+  const { path, work } = await setup('branch-in-use');
+  const target = fixtureGit(path, ['rev-parse', 'HEAD']);
+  await work.reference({ action: 'createBranch', name: 'occupied', target });
+  fixtureGit(path, ['worktree', 'add', join(root, 'occupied-worktree'), 'occupied']);
+  await expect(work.undo()).rejects.toMatchObject({ code: 'BRANCH_IN_USE' });
+  expect(fixtureGit(path, ['rev-parse', 'occupied'])).toBe(target);
+});

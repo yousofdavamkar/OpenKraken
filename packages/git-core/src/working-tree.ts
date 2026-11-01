@@ -15,6 +15,9 @@ import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
 import {
   headSchema,
+  oidSchema,
+  referenceOptionsSchema,
+  type ReferenceOptions,
   type WorkingState,
   type WorkingDiff,
   type PatchOptions,
@@ -31,6 +34,7 @@ const savedSchema = z.object({
   index: z.string().max(MAX_INDEX * 2),
   signature: z.string(),
   files: z.array(fileImageSchema).optional(),
+  refs: z.record(z.string().regex(/^refs\/(heads|tags)\/[^\s]+$/), oidSchema.nullable()).optional(),
 });
 const entrySchema = z.object({
   id: z.string().uuid(),
@@ -170,7 +174,12 @@ export class WorkingTree {
     ]);
     return { head, signature: hash(Buffer.concat([entries.stdout, diff.stdout])) };
   }
-  private async saved(indexFile: string, files?: string[], signal?: AbortSignal): Promise<Saved> {
+  private async saved(
+    indexFile: string,
+    files?: string[],
+    signal?: AbortSignal,
+    refs?: string[],
+  ): Promise<Saved> {
     if ((await stat(indexFile)).size > MAX_INDEX)
       throw new GitError('UNDO_LIMIT', 'The index exceeds the 32 MiB undo limit');
     const index = await readFile(indexFile);
@@ -178,6 +187,7 @@ export class WorkingTree {
       throw new GitError('UNDO_LIMIT', 'The index exceeds the 32 MiB undo limit');
     return {
       index: index.toString('base64'),
+      ...(refs ? { refs: await this.referenceState(refs, signal) } : {}),
       ...(await this.fingerprint(indexFile)),
       ...(files ? { files: await this.backups.capture(files, true, signal) } : {}),
     };
@@ -214,8 +224,9 @@ export class WorkingTree {
   private async locked<T>(
     work: (index: string, publish: () => Promise<void>) => Promise<T>,
     signal?: AbortSignal,
+    allowBare = false,
   ) {
-    if (this.repo.isBare)
+    if (this.repo.isBare && !allowBare)
       throw new GitError('BARE_REPOSITORY', 'This repository has no working tree');
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const lockPath = join(this.repo.gitDir, 'index.lock');
@@ -267,40 +278,47 @@ export class WorkingTree {
     signal?: AbortSignal,
     files?: string[],
     movesHead = false,
+    refs?: string[],
   ) {
-    await this.locked(async (index, publish) => {
-      const journal = await this.journal();
-      await this.pruneFiles(journal);
-      const before = await this.saved(index, files, signal),
-        id = randomUUID();
-      const pending = join(this.directory, `pending-${id}.json`);
-      await atomic(pending, JSON.stringify({ id, label, before }));
-      let failure: unknown;
-      try {
-        await change(index, before);
-      } catch (error) {
-        failure = error;
-      }
-      const after = await this.saved(index, files);
-      if (!movesHead && !sameHead(before.head, after.head))
-        throw new GitError(
-          'CONCURRENT_HEAD',
-          `HEAD changed during the operation; the index was not published. Recovery backup: ${pending}`,
-        );
-      if (
-        !sameHead(before.head, after.head) ||
-        before.signature !== after.signature ||
-        !sameImages(before.files, after.files)
-      ) {
-        journal.undo.push({ id, label, before, after });
-        journal.redo = [];
-        await this.saveJournal(journal);
-        await publish();
-      }
-      await rm(pending, { force: true });
-      await this.pruneFiles(journal);
-      if (failure) throw failure;
-    }, signal);
+    await this.locked(
+      async (index, publish) => {
+        const journal = await this.journal();
+        await this.pruneFiles(journal);
+        const before = await this.saved(index, files, signal, refs),
+          id = randomUUID();
+        const pending = join(this.directory, `pending-${id}.json`);
+        await atomic(pending, JSON.stringify({ id, label, before }));
+        let failure: unknown;
+        try {
+          await change(index, before);
+        } catch (error) {
+          failure = error;
+        }
+        const after = await this.saved(index, files, undefined, refs);
+        if (!movesHead && !sameHead(before.head, after.head))
+          throw new GitError(
+            'CONCURRENT_HEAD',
+            `HEAD changed during the operation; the index was not published. Recovery backup: ${pending}`,
+          );
+        if (
+          !sameHead(before.head, after.head) ||
+          before.signature !== after.signature ||
+          !sameImages(before.files, after.files) ||
+          JSON.stringify(before.refs) !== JSON.stringify(after.refs)
+        ) {
+          journal.undo.push({ id, label, before, after });
+          journal.redo = [];
+          await this.saveJournal(journal);
+          if (!sameHead(before.head, after.head) || before.signature !== after.signature)
+            await publish();
+        }
+        await rm(pending, { force: true });
+        await this.pruneFiles(journal);
+        if (failure) throw failure;
+      },
+      signal,
+      !!refs,
+    );
     return this.state();
   }
   private async paths(selected: string[], signal?: AbortSignal) {
@@ -550,6 +568,119 @@ export class WorkingTree {
       paths,
     );
   }
+  private async referenceState(names: string[], signal?: AbortSignal) {
+    const state: Record<string, string | null> = Object.fromEntries(
+      names.map((name) => [name, null]),
+    );
+    const output = await this.run(
+      ['for-each-ref', '--format=%(refname)%00%(objectname)%00%(symref)', '--', ...names],
+      { signal },
+    );
+    for (const line of output.stdout.toString().split('\n')) {
+      const [name, oid, symbolic] = line.split('\0');
+      if (!name || !names.includes(name)) continue;
+      if (symbolic)
+        throw new GitError('SYMBOLIC_REF', 'This action requires a direct branch or tag');
+      state[name] = oid!;
+    }
+    return state;
+  }
+  private async restoreReferences(
+    target: Record<string, string | null>,
+    expected: Record<string, string | null>,
+    signal?: AbortSignal,
+  ) {
+    const changed = Object.entries(target).filter(([name, oid]) => oid !== expected[name]);
+    if (changed.some(([name]) => name.startsWith('refs/heads/'))) {
+      const worktrees = (
+        await this.run(['worktree', 'list', '--porcelain', '-z'], { signal })
+      ).stdout
+        .toString()
+        .split('\0');
+      if (changed.some(([name]) => worktrees.includes(`branch ${name}`)))
+        throw new GitError(
+          'BRANCH_IN_USE',
+          'A worktree is using this branch. Switch that worktree before undoing this action.',
+        );
+    }
+    const commands = changed.map(([name, oid]) =>
+      oid
+        ? `update ${name} ${oid} ${expected[name] ?? '0'.repeat(oid.length)}`
+        : `delete ${name} ${expected[name]}`,
+    );
+    if (commands.length)
+      await this.run(['update-ref', '--no-deref', '--stdin'], {
+        stdin: ['start', ...commands, 'prepare', 'commit', ''].join('\n'),
+        readOnly: false,
+        signal,
+      });
+  }
+  async reference(input: ReferenceOptions, signal?: AbortSignal) {
+    const options = referenceOptionsSchema.parse(input);
+    const branch = options.action === 'createBranch';
+    const ref = `refs/${branch ? 'heads' : 'tags'}/${options.name}`;
+    if (options.name.startsWith('-') || options.name === 'HEAD' || options.name.includes('\0'))
+      throw new GitError('INVALID_REF', 'Enter a valid branch or tag name');
+    const valid = await this.run(['check-ref-format', ref], { signal, allowedExitCodes: [0, 1] });
+    if (valid.exitCode !== 0) throw new GitError('INVALID_REF', 'Enter a valid branch or tag name');
+    return this.transaction(
+      options.action === 'createBranch'
+        ? 'Create branch'
+        : options.action === 'createTag'
+          ? 'Create tag'
+          : 'Delete tag',
+      async (_index, before) => {
+        if (options.action === 'deleteTag') {
+          if (before.refs?.[ref] !== options.expected)
+            throw new GitError(
+              'STALE_REF',
+              'The tag changed. Review its current target before deleting.',
+            );
+          await this.run(['update-ref', '--no-deref', '-d', ref, options.expected], {
+            signal,
+            readOnly: false,
+          });
+          return;
+        }
+        if (before.refs?.[ref])
+          throw new GitError('REF_EXISTS', 'A reference with that name already exists');
+        await this.run(['cat-file', '-e', `${options.target}^{commit}`], { signal });
+        if (branch)
+          await this.run(['branch', '--no-track', '--', options.name, options.target], {
+            signal,
+            readOnly: false,
+          });
+        else {
+          if (options.sign && !options.message?.trim())
+            throw new GitError('INVALID_MESSAGE', 'A signed tag needs an annotation');
+          if (
+            options.message !== undefined &&
+            (!options.message.trim() ||
+              options.message.includes('\0') ||
+              Buffer.byteLength(options.message) > 65536)
+          )
+            throw new GitError('INVALID_MESSAGE', 'Enter a tag annotation of at most 64 KiB');
+          await this.run(
+            [
+              'tag',
+              ...(options.message !== undefined
+                ? ['--annotate', '--cleanup=verbatim', '--file=-']
+                : []),
+              options.sign ? '--sign' : '--no-sign',
+              '--',
+              options.name,
+              options.target,
+            ],
+            { signal, readOnly: false, stdin: options.message, timeoutMs: 120000 },
+          );
+        }
+      },
+      signal,
+      undefined,
+      false,
+      [ref],
+    );
+  }
   async commit(
     options: { message: string; revision: string; amend?: boolean; sign?: boolean },
     signal?: AbortSignal,
@@ -635,51 +766,67 @@ export class WorkingTree {
       );
   }
   async undo(redo = false, signal?: AbortSignal) {
-    await this.locked(async (index, publish) => {
-      const journal = await this.journal(),
-        source = redo ? journal.redo : journal.undo;
-      const entry = source.at(-1);
-      if (!entry) throw new GitError('NOTHING_TO_UNDO', `Nothing to ${redo ? 'redo' : 'undo'}`);
-      const expected = redo ? entry.before : entry.after,
-        target = redo ? entry.after : entry.before;
-      const current = await this.saved(index);
-      if (!sameHead(current.head, expected.head) || current.signature !== expected.signature)
-        throw new GitError(
-          'STALE_UNDO',
-          'HEAD or the index changed outside this action. Undo would overwrite newer work.',
-        );
-      if (expected.files) await this.backups.assertCurrent(expected.files);
-      await writeFile(index, Buffer.from(target.index, 'base64'));
-      await this.verifyIndex(index);
-      if (!sameHead(target.head, expected.head)) {
+    await this.locked(
+      async (index, publish) => {
+        const journal = await this.journal(),
+          source = redo ? journal.redo : journal.undo;
+        const entry = source.at(-1);
+        if (!entry) throw new GitError('NOTHING_TO_UNDO', `Nothing to ${redo ? 'redo' : 'undo'}`);
+        const expected = redo ? entry.before : entry.after,
+          target = redo ? entry.after : entry.before;
+        const current = await this.saved(index);
+        if (!sameHead(current.head, expected.head) || current.signature !== expected.signature)
+          throw new GitError(
+            'STALE_UNDO',
+            'HEAD or the index changed outside this action. Undo would overwrite newer work.',
+          );
+        if (expected.files) await this.backups.assertCurrent(expected.files);
         if (
-          target.head.kind !== expected.head.kind ||
-          (target.head.kind === 'branch' &&
-            (expected.head.kind !== 'branch' || target.head.ref !== expected.head.ref))
+          expected.refs &&
+          JSON.stringify(await this.referenceState(Object.keys(expected.refs))) !==
+            JSON.stringify(expected.refs)
         )
           throw new GitError(
             'STALE_UNDO',
-            'The action changed branches; restore it with Git before using undo',
+            'A reference changed outside this action. Newer work was left unchanged.',
           );
-        const ref = expected.head.kind === 'branch' ? expected.head.ref : 'HEAD';
-        const args = target.head.oid
-          ? [
-              'update-ref',
-              '--no-deref',
-              ref,
-              target.head.oid,
-              expected.head.oid ?? '0'.repeat(target.head.oid.length),
-            ]
-          : ['update-ref', '--no-deref', '-d', ref, expected.head.oid!];
-        await this.run(args, { readOnly: false });
-      }
-      if (target.files) await this.backups.restore(target.files, signal);
-      await publish();
-      source.pop();
-      (redo ? journal.undo : journal.redo).push(entry);
-      await this.saveJournal(journal);
-      await this.pruneFiles(journal);
-    }, signal);
+        await writeFile(index, Buffer.from(target.index, 'base64'));
+        await this.verifyIndex(index);
+        if (!sameHead(target.head, expected.head)) {
+          if (
+            target.head.kind !== expected.head.kind ||
+            (target.head.kind === 'branch' &&
+              (expected.head.kind !== 'branch' || target.head.ref !== expected.head.ref))
+          )
+            throw new GitError(
+              'STALE_UNDO',
+              'The action changed branches; restore it with Git before using undo',
+            );
+          const ref = expected.head.kind === 'branch' ? expected.head.ref : 'HEAD';
+          const args = target.head.oid
+            ? [
+                'update-ref',
+                '--no-deref',
+                ref,
+                target.head.oid,
+                expected.head.oid ?? '0'.repeat(target.head.oid.length),
+              ]
+            : ['update-ref', '--no-deref', '-d', ref, expected.head.oid!];
+          await this.run(args, { readOnly: false });
+        }
+        if (target.refs && expected.refs)
+          await this.restoreReferences(target.refs, expected.refs, signal);
+        if (target.files) await this.backups.restore(target.files, signal);
+        if (!sameHead(target.head, expected.head) || current.signature !== target.signature)
+          await publish();
+        source.pop();
+        (redo ? journal.undo : journal.redo).push(entry);
+        await this.saveJournal(journal);
+        await this.pruneFiles(journal);
+      },
+      signal,
+      true,
+    );
     return this.state();
   }
 }

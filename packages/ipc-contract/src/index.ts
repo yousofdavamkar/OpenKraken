@@ -192,7 +192,41 @@ export const discardPreviewSchema = z.object({
   bytes: z.number().nonnegative(),
 });
 export type DiscardPreview = z.infer<typeof discardPreviewSchema>;
+export const referenceOptionsSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('createBranch'),
+      name: z.string().min(1).max(1024),
+      target: oidSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('createTag'),
+      name: z.string().min(1).max(1024),
+      target: oidSchema,
+      message: z.string().max(65536).optional(),
+      sign: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('deleteTag'),
+      name: z.string().min(1).max(1024),
+      expected: oidSchema,
+    })
+    .strict(),
+]);
+export type ReferenceOptions = z.infer<typeof referenceOptionsSchema>;
 const workingRequests = [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('reference'),
+      repoId: repoIdSchema,
+      options: referenceOptionsSchema,
+    })
+    .strict(),
   z
     .object({
       id: requestId,
