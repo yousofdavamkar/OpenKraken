@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Commit, Repository, Snapshot } from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { HistoryParser, RefsParser, StatusParser, HISTORY_FORMAT, REF_FORMAT } from './parsers.js';
+import { HistoryCursor } from './history.js';
 import { RepositoryQueue } from './queue.js';
 
 async function exists(path: string) {
@@ -17,7 +18,8 @@ async function exists(path: string) {
 export class RepositoryService {
   private repositories = new Map<string, Repository>();
   private queues = new Map<string, RepositoryQueue>();
-  private processPool = new RepositoryQueue(4);
+  private histories = new Map<string, HistoryCursor>();
+  private processPool = new RepositoryQueue(3);
   constructor(private git: string) {}
   private run(args: string[], options: RunOptions) {
     return this.processPool.run(
@@ -211,55 +213,92 @@ export class RepositoryService {
             .map((c) => ({ ...c, parents: c.parents.slice(0, 1), isStash: true }));
           for (const stash of stashCommits) if (stash.parents[0]) starts.add(stash.parents[0]);
         }
-        const parser = new HistoryParser();
-        if (starts.size)
-          await this.run(
-            [
-              'rev-list',
-              '--date-order',
-              '--parents',
-              '--max-count=2001',
-              `--format=${HISTORY_FORMAT}`,
-              '--stdin',
-            ],
-            {
-              cwd: repository.path,
-              signal,
-              stdin: [...starts].join('\n') + '\n',
-              onStdout: (b) => parser.push(b),
-            },
-          );
-        let commits = parser.finish();
-        if (stashCommits.length) commits = orderCommits([...commits, ...stashCommits]);
+        await this.histories.get(id)?.close();
+        // The current UI owns one active repository. Release inactive cursors on a switch.
+        for (const [key, cursor] of this.histories)
+          if (key !== id) {
+            await cursor.close();
+            this.histories.delete(key);
+          }
+        const history = new HistoryCursor(this.git, repository.path, [...starts], stashCommits);
+        this.histories.set(id, history);
+        const page = await history.page(0, 2000, signal);
         return {
           repository,
           refs,
           status,
-          commits: commits.slice(0, 2000),
-          hasMore: commits.length > 2000,
+          commits: page.commits,
+          hasMore: page.hasMore,
+          cursor: history.id,
           elapsedMs: performance.now() - start,
         };
       },
       signal,
     );
   }
-}
-export function orderCommits(commits: Commit[]): Commit[] {
-  const unique = new Map(commits.map((c) => [c.oid, c]));
-  const children = new Map<string, number>();
-  for (const c of unique.values())
-    for (const p of c.parents) children.set(p, (children.get(p) ?? 0) + 1);
-  const ready = [...unique.values()].filter((c) => !children.get(c.oid));
-  const result: Commit[] = [];
-  while (ready.length) {
-    ready.sort((a, b) => b.committer.time - a.committer.time || a.oid.localeCompare(b.oid));
-    const c = ready.shift()!;
-    result.push(c);
-    for (const p of c.parents) {
-      const count = children.get(p)! - 1;
-      children.set(p, count);
-      if (!count && unique.has(p)) ready.push(unique.get(p)!);
-    }
+  private history(id: string, cursor: string) {
+    const history = this.histories.get(id);
+    if (!history || history.id !== cursor)
+      throw new GitError('STALE_CURSOR', 'History changed; refresh to restart');
+    return history;
   }
-  return result;
+  async page(id: string, cursor: string, offset: number, count: number, signal?: AbortSignal) {
+    return this.history(id, cursor).page(offset, count, signal);
+  }
+  async search(id: string, cursor: string, query: string, signal?: AbortSignal) {
+    const history = this.history(id, cursor);
+    const repo = this.repositories.get(id)!;
+    const find = async (filter: string) => {
+      const parser = new HistoryParser();
+      if (history.starts.length)
+        await this.run(
+          [
+            'log',
+            '--date-order',
+            '--max-count=101',
+            '--regexp-ignore-case',
+            '--fixed-strings',
+            filter,
+            `--format=commit %H%n${HISTORY_FORMAT}`,
+            '--stdin',
+          ],
+          {
+            cwd: repo.path,
+            signal,
+            stdin: history.starts.join('\n') + '\n',
+            onStdout: (b) => parser.push(b),
+          },
+        );
+      return parser.finish();
+    };
+    const [messages, authors] = await Promise.all([
+      find(`--grep=${query}`),
+      find(`--author=${query}`),
+    ]);
+    let commits = [...new Map([...messages, ...authors].map((c) => [c.oid, c])).values()];
+    if (/^[0-9a-f]{7,64}$/i.test(query)) {
+      const resolved = await this.text(
+        repo.path,
+        ['rev-parse', '--verify', '--quiet', '--end-of-options', `${query}^{commit}`],
+        signal,
+        [0, 1],
+      );
+      if (resolved) {
+        const parser = new HistoryParser();
+        await this.run(['log', '-1', `--format=commit %H%n${HISTORY_FORMAT}`, resolved, '--'], {
+          cwd: repo.path,
+          signal,
+          onStdout: (b) => parser.push(b),
+        });
+        commits = [...new Map([...commits, ...parser.finish()].map((c) => [c.oid, c])).values()];
+      }
+    }
+    this.history(id, cursor);
+    commits.sort((a, b) => b.committer.time - a.committer.time);
+    return { cursor, commits: commits.slice(0, 100), truncated: commits.length > 100 };
+  }
+  async dispose() {
+    await Promise.all([...this.histories.values()].map((cursor) => cursor.close()));
+    this.histories.clear();
+  }
 }

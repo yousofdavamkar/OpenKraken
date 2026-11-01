@@ -16,7 +16,7 @@ export interface RunOptions {
   readOnly?: boolean;
   maxBytes?: number;
   timeoutMs?: number;
-  onStdout?: (chunk: Buffer) => void;
+  onStdout?: (chunk: Buffer) => void | Promise<void>;
   allowedExitCodes?: number[];
   env?: NodeJS.ProcessEnv;
 }
@@ -80,10 +80,14 @@ export function runProcess(
     };
     const abort = () => stop(new GitError('CANCELLED', 'Operation cancelled'));
     options.signal?.addEventListener('abort', abort, { once: true });
-    const timer = setTimeout(
-      () => stop(new GitError('TIMEOUT', 'Git operation timed out')),
-      options.timeoutMs ?? 30000,
-    );
+    let delivery = Promise.resolve();
+    const timer =
+      options.timeoutMs === 0
+        ? undefined
+        : setTimeout(
+            () => stop(new GitError('TIMEOUT', 'Git operation timed out')),
+            options.timeoutMs ?? 30000,
+          );
     const consume = (chunk: Buffer, isOut: boolean) => {
       if (failure) return;
       bytes += chunk.length;
@@ -92,13 +96,21 @@ export function runProcess(
         return;
       }
       try {
-        if (isOut && options.onStdout) options.onStdout(chunk);
+        if (isOut && options.onStdout) return options.onStdout(chunk);
         else (isOut ? stdout : stderr).push(chunk);
       } catch (error) {
         stop(error instanceof Error ? error : new Error(String(error)));
       }
     };
-    child.stdout.on('data', (chunk: Buffer) => consume(chunk, true));
+    child.stdout.on('data', (chunk: Buffer) => {
+      child.stdout.pause();
+      delivery = Promise.resolve()
+        .then(() => consume(chunk, true))
+        .catch((error) => {
+          stop(error instanceof Error ? error : new Error(String(error)));
+        })
+        .finally(() => child.stdout.resume());
+    });
     child.stderr.on('data', (chunk: Buffer) => consume(chunk, false));
     child.on('error', (error) => {
       failure ??= error;
@@ -106,7 +118,8 @@ export function runProcess(
     child.stdin.on('error', (error: NodeJS.ErrnoException) => {
       if (error.code !== 'EPIPE') stop(error);
     });
-    child.on('close', (code) => {
+    child.on('close', async (code) => {
+      await delivery;
       clearTimeout(timer);
       if (escalation) clearTimeout(escalation);
       options.signal?.removeEventListener('abort', abort);

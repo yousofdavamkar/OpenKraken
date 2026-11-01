@@ -18,6 +18,16 @@ function getService() {
 }
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
   const git = await getService();
+  if (request.method === 'page')
+    return {
+      kind: 'page',
+      ...(await git.page(request.repoId, request.cursor, request.offset, request.count, signal)),
+    };
+  if (request.method === 'search')
+    return {
+      kind: 'search',
+      ...(await git.search(request.repoId, request.cursor, request.query, signal)),
+    };
   if (request.method === 'discover')
     return { kind: 'discovery', paths: await git.discover(request.path, signal) };
   const repo =
@@ -35,7 +45,7 @@ parent.on('message', (event) => {
   if (shutdownSchema.safeParse(event.data).success) {
     shuttingDown = true;
     for (const controller of active.values()) controller.abort();
-    if (!active.size) process.exit(0);
+    if (!active.size) void shutdown();
     return;
   }
   if (shuttingDown) return;
@@ -68,6 +78,14 @@ parent.on('message', (event) => {
     .finally(() => {
       controller.abort();
       active.delete(request.id);
-      if (shuttingDown && !active.size) process.exit(0);
+      if (shuttingDown && !active.size) void shutdown();
     });
 });
+
+async function shutdown() {
+  try {
+    await (await service)?.dispose();
+  } finally {
+    process.exit(0);
+  }
+}

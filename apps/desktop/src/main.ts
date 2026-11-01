@@ -119,7 +119,11 @@ else {
       inFlight.add(request.id);
       try {
         let path: string | undefined;
-        if (request.method !== 'refresh') {
+        if (
+          request.method === 'open' ||
+          request.method === 'init' ||
+          request.method === 'discover'
+        ) {
           const selected = await dialog.showOpenDialog(window!, {
             title:
               request.method === 'init'
@@ -137,7 +141,9 @@ else {
           path = selected.filePaths[0];
         }
         return await callService(
-          request.method === 'refresh' ? request : { ...request, path: path! },
+          request.method === 'open' || request.method === 'init' || request.method === 'discover'
+            ? { ...request, path: path! }
+            : request,
         );
       } catch (error) {
         return {

@@ -172,6 +172,7 @@ function signature(name: string, email: string, time: string, date: string) {
   };
 }
 export class HistoryParser {
+  constructor(private accept?: (commit: Commit) => void) {}
   readonly value: Commit[] = [];
   private fields: string[] = [];
   private decoder = new NulDecoder((field) => {
@@ -193,7 +194,7 @@ export class HistoryParser {
     ];
     const match = /^\n?commit [0-9a-f]+(?: [0-9a-f]+)*\n([0-9a-f]+)$/.exec(header);
     if (!match || end !== '') throw new Error('Malformed history record');
-    this.value.push({
+    const commit: Commit = {
       oid: oid(match[1]!),
       parents: parents ? parents.split(' ').map(oid) : [],
       author: signature(an, ae, at, ai),
@@ -201,7 +202,9 @@ export class HistoryParser {
       summary: body.split('\n')[0]!,
       body,
       isStash: false,
-    });
+    };
+    if (this.accept) this.accept(commit);
+    else this.value.push(commit);
     this.fields = [];
   });
   push(chunk: Buffer) {

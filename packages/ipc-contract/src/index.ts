@@ -82,10 +82,33 @@ export const snapshotSchema = z.object({
   status: statusSchema,
   commits: z.array(commitSchema),
   hasMore: z.boolean(),
+  cursor: z.string().uuid(),
   elapsedMs: z.number(),
 });
 const requestId = z.string().uuid();
+const historyRequests = [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('page'),
+      repoId: z.string().regex(/^[0-9a-f]{64}$/),
+      cursor: z.string().uuid(),
+      offset: z.number().int().nonnegative(),
+      count: z.number().int().min(1).max(5000),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('search'),
+      repoId: z.string().regex(/^[0-9a-f]{64}$/),
+      cursor: z.string().uuid(),
+      query: z.string().trim().min(1).max(200),
+    })
+    .strict(),
+] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  ...historyRequests,
   z.object({ id: requestId, method: z.literal('open') }).strict(),
   z
     .object({ id: requestId, method: z.literal('init'), branch: z.string().min(1).max(200) })
@@ -101,6 +124,7 @@ export const requestSchema = z.discriminatedUnion('method', [
 ]);
 const repositoryPath = z.string().min(1).max(32768);
 export const serviceRequestSchema = z.discriminatedUnion('method', [
+  ...historyRequests,
   z.object({ id: requestId, method: z.literal('open'), path: repositoryPath }).strict(),
   z
     .object({
@@ -121,6 +145,19 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('page'),
+    cursor: z.string().uuid(),
+    offset: z.number().int().nonnegative(),
+    commits: z.array(commitSchema),
+    hasMore: z.boolean(),
+  }),
+  z.object({
+    kind: z.literal('search'),
+    cursor: z.string().uuid(),
+    commits: z.array(commitSchema),
+    truncated: z.boolean(),
+  }),
   z.object({ kind: z.literal('snapshot'), snapshot: snapshotSchema }),
   z.object({ kind: z.literal('discovery'), paths: z.array(z.string()) }),
   z.object({ kind: z.literal('cancelled') }),
