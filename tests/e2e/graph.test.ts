@@ -212,3 +212,42 @@ for (const kind of fixtureKinds)
       await close();
     }
   });
+
+test('sidebar hide, solo and pin change graph roots and survive refresh', async () => {
+  const { page, repository, close } = await launch('orphan');
+  try {
+    const grid = page.getByRole('grid');
+    const other = fixtureGit(repository, ['rev-parse', 'other']);
+    const parent = fixtureGit(repository, ['rev-parse', 'other~1']);
+    await expect(page.getByTestId('commit-count')).toHaveText('4 commits');
+    await page.getByRole('button', { name: 'Hide refs/heads/other', exact: true }).click();
+    await expect(page.getByTestId('commit-count')).toHaveText('2 commits');
+    await expect(grid.locator(`[data-oid="${other}"]`)).toHaveCount(0);
+    await page.getByRole('button', { name: 'Hide refs/heads/other', exact: true }).click();
+    await expect(page.getByTestId('commit-count')).toHaveText('4 commits');
+    await page.getByRole('button', { name: 'Solo refs/heads/main', exact: true }).click();
+    await expect(page.getByTestId('commit-count')).toHaveText('2 commits');
+    await page.getByRole('button', { name: 'Pin refs/heads/other', exact: true }).click();
+    await expect(page.getByTestId('commit-count')).toHaveText('4 commits');
+    await expect(grid.locator(`[data-oid="${other}"]`)).toHaveAttribute('data-column', '0');
+    await expect(grid.locator(`[data-oid="${parent}"]`)).toHaveAttribute('data-column', '0');
+    await grid.locator(`[data-oid="${other}"]`).click();
+    await page.getByRole('textbox', { name: 'Search commits' }).fill(other);
+    await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect(
+      page.getByRole('button', { name: 'Pin refs/heads/other', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await expect(grid.locator(`[data-oid="${other}"]`)).toHaveAttribute('data-column', '0');
+    await expect(grid.locator(`[data-oid="${other}"]`)).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('textbox', { name: 'Search commits' })).toHaveValue(other);
+    await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Reset graph view', exact: true }).click();
+    await expect(
+      page.getByRole('button', { name: 'Pin refs/heads/other', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'false');
+    await page.screenshot({ path: 'test-results/graph-views.png' });
+  } finally {
+    await close();
+  }
+});

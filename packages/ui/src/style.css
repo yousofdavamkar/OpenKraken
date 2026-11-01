@@ -515,3 +515,38 @@ footer {
     display: none;
   }
 }
+
+.ref {
+  display: block;
+}
+.ref-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+.hidden-ref .ref-label {
+  opacity: 0.45;
+}
+.ref-controls {
+  display: flex;
+  gap: 4px;
+  margin-top: 5px;
+}
+.ref-controls button {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+.ref-controls button[aria-pressed='true'] {
+  border-color: #6bdfc2;
+  color: #6bdfc2;
+}
+.view-summary {
+  padding: 8px;
+  border: 1px solid #283242;
+  margin: 10px 0;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.view-summary p {
+  margin: 4px 0;
+}

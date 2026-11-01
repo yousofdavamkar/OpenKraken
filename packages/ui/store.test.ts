@@ -136,3 +136,54 @@ test('wrong page offset fails before modifying visible history', async () => {
   expect(useRepository.getState().error).toContain('no longer matches');
   expect(useRepository.getState().rows).toHaveLength(1);
 });
+
+test('refresh keeps unchanged layout identities, selection, search and the active view', async () => {
+  const snapshot = fixture();
+  snapshot.view = { hiddenRefs: ['refs/heads/hidden'], pinnedRef: 'refs/heads/main' };
+  snapshot.pinnedOid = snapshot.commits[0]!.oid;
+  snapshot.commits.push({
+    ...snapshot.commits[0]!,
+    oid: 'b'.repeat(40),
+    parents: [],
+    summary: 'Second',
+  });
+  await open(snapshot);
+  useRepository.getState().select('b'.repeat(40), 'toggle');
+  await useRepository.getState().search('First');
+  const before = useRepository.getState();
+  const next = structuredClone(snapshot);
+  next.cursor = crypto.randomUUID();
+  next.commits[0]!.summary = 'Replacement';
+  request.mockResolvedValueOnce({ kind: 'snapshot', snapshot: next });
+  await useRepository
+    .getState()
+    .run({ id: crypto.randomUUID(), method: 'refresh', repoId: snapshot.repository.id });
+  expect(request.mock.lastCall?.[0]).toMatchObject({ view: snapshot.view });
+  expect(useRepository.getState().layout[0]).toBe(before.layout[0]);
+  expect(useRepository.getState().layout[1]).toBe(before.layout[1]);
+  expect(useRepository.getState().selection).toEqual(before.selection);
+  expect(useRepository.getState().query).toBe('First');
+  // The body still contains First, even though the subject changed.
+  expect(useRepository.getState().matches).toEqual(['a'.repeat(40), 'b'.repeat(40)]);
+  await useRepository.getState().search('Replacement');
+  expect(useRepository.getState().matches).toEqual(['a'.repeat(40)]);
+});
+
+test('changing views sends explicit roots and only applies the returned snapshot', async () => {
+  const snapshot = fixture();
+  await open(snapshot);
+  const pending = deferred();
+  request.mockReturnValueOnce(pending.promise);
+  const view = { hiddenRefs: [], soloRef: 'refs/heads/side' };
+  const changing = useRepository.getState().setView(view);
+  expect(request.mock.lastCall?.[0]).toMatchObject({ method: 'refresh', view });
+  expect(useRepository.getState().snapshot?.view).toEqual(snapshot.view);
+  pending.resolve({
+    kind: 'snapshot',
+    snapshot: { ...snapshot, cursor: crypto.randomUUID(), commits: [], view, hasMore: false },
+  });
+  await changing;
+  expect(useRepository.getState().snapshot?.view).toEqual(view);
+  expect(useRepository.getState().layout).toEqual([]);
+  expect(useRepository.getState().selection.selected).toEqual([]);
+});

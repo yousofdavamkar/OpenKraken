@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { freeze } from 'immer';
 import { immer } from 'zustand/middleware/immer';
-import type { Commit, DesktopApi, Request, Snapshot } from '@openkraken/ipc-contract';
+import type { Commit, DesktopApi, GraphView, Request, Snapshot } from '@openkraken/ipc-contract';
 import type { GraphRow } from '@openkraken/graph';
 import { GraphClient } from './graph-client.js';
 import { projectCommits, selectRow } from './history-model.js';
@@ -31,6 +31,7 @@ interface State {
   detail?: Commit | DisplayCommit;
   run: (request: Request) => Promise<void>;
   cancel: () => Promise<void>;
+  setView: (view: GraphView) => Promise<void>;
   loadMore: (count?: number) => Promise<void>;
   search: (query: string) => Promise<void>;
   searchAll: () => Promise<void>;
@@ -59,34 +60,72 @@ export const useRepository = create<State>()(
       querySequence++;
       performance.mark('repository-open-start');
       try {
+        if (
+          request.method === 'refresh' &&
+          !request.view &&
+          get().snapshot?.repository.id === request.repoId
+        )
+          request = { ...request, view: get().snapshot!.view };
         const result = await window.openkraken.request(request);
         if (get().busy !== request.id) return;
         if (result.kind === 'snapshot') {
           const rows = projectCommits(result.snapshot.commits, result.snapshot, true);
-          client?.close();
-          client = new GraphClient();
+          const previous = get(),
+            sameRepository =
+              request.method === 'refresh' &&
+              previous.snapshot?.repository.id === result.snapshot.repository.id;
+          if (!sameRepository) {
+            client?.close();
+            client = new GraphClient();
+          }
           const layout = await graph().request({
-            method: 'reset',
+            ...(sameRepository
+              ? ({ method: 'refresh', baseGeneration: previous.snapshot!.cursor } as const)
+              : ({ method: 'reset' } as const)),
             generation: result.snapshot.cursor,
             offset: 0,
             commits: rows,
+            pinnedOid: result.snapshot.pinnedOid,
           });
           if (layout.kind !== 'layout') throw new Error('Invalid graph response');
           querySequence++;
+          const nextLayout = [
+            ...previous.layout.slice(0, layout.offset),
+            ...layout.rows,
+            ...previous.layout.slice(rows.length - layout.reusedTail, rows.length),
+          ];
+          freeze(nextLayout, true);
+          const query = sameRepository ? previous.query : '';
           set((s) => {
             s.snapshot = result.snapshot;
             s.rows = rows;
-            s.layout = layout.rows;
+            s.layout = nextLayout;
             s.maxColumns = layout.maxColumns;
-            s.query = '';
+            s.query = query;
             s.matches = undefined;
             s.searchResults = undefined;
             s.searching = undefined;
             s.paging = undefined;
             s.detail = undefined;
-            const focus = rows.find((r) => r.oid === s.selection.focus)?.oid ?? rows[0]?.oid;
-            s.selection = { focus, anchor: focus, selected: focus ? [focus] : [] };
+            const available = new Set(rows.map((r) => r.oid));
+            const focus =
+              sameRepository && s.selection.focus && available.has(s.selection.focus)
+                ? s.selection.focus
+                : rows[0]?.oid;
+            const selected = sameRepository
+              ? s.selection.selected.filter((oid) => available.has(oid))
+              : [];
+            const anchor =
+              sameRepository && s.selection.anchor && available.has(s.selection.anchor)
+                ? s.selection.anchor
+                : focus;
+            s.selection = {
+              focus,
+              anchor,
+              selected: selected.length ? selected : focus ? [focus] : [],
+            };
           });
+          if (query) await get().search(query);
         } else if (result.kind === 'error') throw new Error(result.message);
       } catch (error) {
         set((s) => {
@@ -97,6 +136,16 @@ export const useRepository = create<State>()(
           if (s.busy === request.id) s.busy = undefined;
         });
       }
+    },
+    setView: async (view) => {
+      const snapshot = get().snapshot;
+      if (snapshot)
+        await get().run({
+          id: crypto.randomUUID(),
+          method: 'refresh',
+          repoId: snapshot.repository.id,
+          view,
+        });
     },
     loadMore: async (count = 5000) => {
       const snapshot = get().snapshot;

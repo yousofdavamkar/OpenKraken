@@ -40,7 +40,17 @@ export function History() {
     () => new Set(rows.filter((r) => r.kind !== 'commit').map((r) => r.oid)),
     [rows],
   );
-  const badges = useMemo(() => refBadges(snapshot?.refs ?? []), [snapshot?.refs]);
+  const badges = useMemo(
+    () =>
+      refBadges(
+        snapshot?.refs.filter((r) =>
+          snapshot.view.soloRef
+            ? r.name === snapshot.view.soloRef
+            : !snapshot.view.hiddenRefs.includes(r.name),
+        ) ?? [],
+      ),
+    [snapshot?.refs, snapshot?.view],
+  );
   useLayoutEffect(() => {
     const element = viewport.current;
     if (!element) return;

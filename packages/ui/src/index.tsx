@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { History } from './history.js';
+import { RefControls } from './ref-controls.js';
 import { useRepository } from './store.js';
 import './style.css';
 function App() {
-  const { snapshot, busy, paging, searching, detail, setDetail, error, run, cancel } =
+  const { snapshot, busy, paging, searching, detail, setDetail, error, run, cancel, setView } =
     useRepository();
   const [init, setInit] = useState(false);
   const [branch, setBranch] = useState('main');
@@ -88,6 +89,20 @@ function App() {
               <h2>
                 References <span>{snapshot.refs.length}</span>
               </h2>
+              {(snapshot.view.hiddenRefs.length > 0 ||
+                snapshot.view.soloRef ||
+                snapshot.view.pinnedRef) && (
+                <div className="view-summary" aria-label="Active graph view">
+                  {snapshot.view.hiddenRefs.length > 0 && (
+                    <p>{snapshot.view.hiddenRefs.length} hidden refs</p>
+                  )}
+                  {snapshot.view.soloRef && <p>Solo: {snapshot.view.soloRef}</p>}
+                  {snapshot.view.pinnedRef && <p>Pinned: {snapshot.view.pinnedRef}</p>}
+                  <button disabled={!!busy} onClick={() => void setView({ hiddenRefs: [] })}>
+                    Reset graph view
+                  </button>
+                </div>
+              )}
               {(['local', 'remote', 'tag', 'stash', 'other'] as const).map((kind) => {
                 const refs = snapshot.refs.filter((r) => r.kind === kind);
                 return refs.length ? (
@@ -105,21 +120,24 @@ function App() {
                     </h3>
                     {refs.map((ref) => (
                       <div
-                        className={`ref ${ref.isHead ? 'current' : ''}`}
+                        className={`ref ${ref.isHead ? 'current' : ''} ${snapshot.view.hiddenRefs.includes(ref.name) ? 'hidden-ref' : ''}`}
                         key={ref.name}
                         title={`${ref.name}\n${ref.target}`}
                       >
-                        <span>
-                          {ref.isHead ? '● ' : ''}
-                          {ref.shortName}
-                        </span>
-                        {ref.upstream && (
-                          <small>
-                            {ref.upstream.gone
-                              ? 'gone'
-                              : `↑${ref.upstream.ahead} ↓${ref.upstream.behind}`}
-                          </small>
-                        )}
+                        <div className="ref-label">
+                          <span>
+                            {ref.isHead ? '● ' : ''}
+                            {ref.shortName}
+                          </span>
+                          {ref.upstream && (
+                            <small>
+                              {ref.upstream.gone
+                                ? 'gone'
+                                : `↑${ref.upstream.ahead} ↓${ref.upstream.behind}`}
+                            </small>
+                          )}
+                        </div>
+                        <RefControls reference={ref} />
                       </div>
                     ))}
                   </section>
