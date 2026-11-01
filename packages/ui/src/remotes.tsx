@@ -1,4 +1,5 @@
 import { GitProgress } from './git-progress.js';
+import { DeleteRemoteRef } from './delete-remote.js';
 import { useEffect, useRef, useState } from 'react';
 import type { RemoteOptions, RemoteState } from '@openkraken/ipc-contract';
 import { useRepository, waitForBackground } from './store.js';
@@ -132,7 +133,13 @@ function RemoteDialog({ repoId, close }: { repoId: string; close: () => void }) 
             onClick={() => setRemoving(remote.name)}
           >
             Remove
-          </button>
+          </button>{' '}
+          <DeleteRemoteRef
+            repoId={repoId}
+            name={remote.name}
+            disabled={pending}
+            updated={() => void load()}
+          />
         </section>
       ))}
       {removing && (

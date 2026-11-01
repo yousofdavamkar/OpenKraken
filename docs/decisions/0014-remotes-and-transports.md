@@ -43,3 +43,9 @@ Reference: [Git push documentation](https://git-scm.com/docs/git-push).
 Native stderr remains bounded diagnostic output and also feeds a UTF-8 line decoder. Only complete lines are emitted, with URL credentials/parameters masked; overlong lines are omitted. Typed progress events use the existing validated event channel, carry the active request ID and at most 4 KiB of text, and are throttled to ten events per second in the Git service. Main ignores progress for completed requests. The desktop displays progress only for its current operation and retains the existing cancellation path.
 
 Unit tests cover split UTF-8/credentials, overlong lines and stderr delivery. The Electron push flow observes progress from a native pre-push hook before publication completes.
+
+## Server branch/tag deletion
+
+Remote deletion is a separate reviewed flow in Manage remotes. It resolves the remote's single push URL, queries the exact branch or tag, and displays that server object ID before enabling confirmation. Confirmation checks the configuration/tracking-state token and sends a deletion refspec with `--force-with-lease=<destination>:<reviewed-id>`. There is no unconditional force path. Mirror and follow-tags behavior are explicitly disabled, native hooks still run, and local branches/tags are not deleted. Server writes have no application Undo. Cancellation requires a new review because the server might already have applied the request.
+
+Native tests cover branches, tags, separate fetch/push URLs, a changed server tip, stale local configuration, mirror/follow-tags settings and absent refs. The desktop test verifies that dismissing a reviewed deletion leaves the branch intact and a separate confirmation deletes it.

@@ -94,3 +94,47 @@ test('automatic fetch is opt-in, skips open dialogs and persists its interval', 
     rmSync(root, { recursive: true, force: true });
   }
 });
+test('server branch deletion requires reviewing its tip and a separate confirmation', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-delete-remote-e2e-'));
+  const local = createFixture(join(root, 'local'));
+  const remote = join(root, 'remote.git');
+  fixtureGit(local, ['clone', '--bare', '.', remote]);
+  fixtureGit(remote, ['branch', 'obsolete']);
+  fixtureGit(local, ['remote', 'set-url', 'origin', remote]);
+  const tip = fixtureGit(remote, ['rev-parse', 'obsolete']);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, local);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('button', { name: 'Manage remotes', exact: true }).click();
+    const remotes = page.getByRole('dialog', { name: 'Manage remotes', exact: true });
+    await remotes
+      .getByRole('button', { name: 'Delete branch or tag from origin', exact: true })
+      .click();
+    const dialog = page.getByRole('dialog', { name: 'Delete from remote', exact: true });
+    await dialog.getByRole('textbox', { name: 'Branch or tag name', exact: true }).fill('obsolete');
+    await dialog.getByRole('button', { name: 'Review deletion', exact: true }).click();
+    await expect(dialog.getByText(tip, { exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    expect(fixtureGit(remote, ['rev-parse', 'obsolete'])).toBe(tip);
+    await remotes
+      .getByRole('button', { name: 'Delete branch or tag from origin', exact: true })
+      .click();
+    await dialog.getByRole('textbox', { name: 'Branch or tag name', exact: true }).fill('obsolete');
+    await dialog.getByRole('button', { name: 'Review deletion', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Delete reviewed remote ref', exact: true }).click();
+    await expect(dialog.getByText('Remote ref deleted', { exact: true })).toBeVisible();
+    expect(fixtureGit(remote, ['for-each-ref', '--format=%(refname)', 'refs/heads/obsolete'])).toBe(
+      '',
+    );
+    expect(fixtureGit(local, ['rev-parse', 'HEAD'])).toBe(tip);
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

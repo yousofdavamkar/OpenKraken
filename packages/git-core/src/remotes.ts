@@ -3,6 +3,10 @@ import { isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   remoteOptionsSchema,
+  deleteRemoteSelectionSchema,
+  deleteRemotePlanSchema,
+  type DeleteRemoteSelection,
+  type DeleteRemotePlan,
   cloneOptionsSchema,
   type CloneOptions,
   pushSelectionSchema,
@@ -223,6 +227,61 @@ export class Remotes {
       throw new GitError('MULTIPLE_PUSH_URLS', 'This push flow requires one push URL per remote');
     return urls[0];
   }
+  private async remoteOid(url: string, destination: string, signal?: AbortSignal) {
+    const result = await this.network(['ls-remote', '--refs', '--', url, destination], signal);
+    const match = result.stdout
+      .toString()
+      .split('\n')
+      .map((line) => line.split('\t'))
+      .find(([, ref]) => ref === destination);
+    return match ? oidSchema.parse(match[0]) : null;
+  }
+  async deletePreview(
+    input: DeleteRemoteSelection,
+    signal?: AbortSignal,
+  ): Promise<DeleteRemotePlan> {
+    const selection = deleteRemoteSelectionSchema.parse(input);
+    const state = await this.state(signal);
+    if (!state.remotes.some((remote) => remote.name === selection.name))
+      throw new GitError('UNKNOWN_REMOTE', 'Choose an existing remote');
+    await this.run(['check-ref-format', selection.destination], { signal });
+    const url = await this.pushUrl(selection.name, signal);
+    const remoteOid = await this.remoteOid(url, selection.destination, signal);
+    if (!remoteOid)
+      throw new GitError(
+        'REMOTE_REF_MISSING',
+        'That branch or tag does not exist at the push destination.',
+      );
+    return { ...selection, remoteOid, token: state.token, url: displayUrl(url) };
+  }
+  async delete(input: DeleteRemotePlan, signal?: AbortSignal) {
+    const plan = deleteRemotePlanSchema.parse(input);
+    await this.run(['check-ref-format', plan.destination], { signal });
+    if ((await this.state(signal)).token !== plan.token)
+      throw new GitError(
+        'STALE_REMOTE_DELETE',
+        'The remote configuration or tracking refs changed. Review the deletion again.',
+      );
+    await this.pushUrl(plan.name, signal);
+    await this.network(
+      [
+        '-c',
+        `remote.${plan.name}.mirror=false`,
+        '-c',
+        'push.followTags=false',
+        'push',
+        '--porcelain',
+        '--progress',
+        '--no-recurse-submodules',
+        `--force-with-lease=${plan.destination}:${plan.remoteOid}`,
+        '--',
+        plan.name,
+        `:${plan.destination}`,
+      ],
+      signal,
+    );
+    return this.state();
+  }
   async pushPreview(input: PushSelection, signal?: AbortSignal): Promise<PushPlan> {
     const selection = pushSelectionSchema.parse(input);
     const state = await this.state(signal);
@@ -231,19 +290,11 @@ export class Remotes {
     const sourceOid = await this.sourceOid(selection.source, signal);
     await this.run(['check-ref-format', selection.destination], { signal });
     const url = await this.pushUrl(selection.name, signal);
-    const result = await this.network(
-      ['ls-remote', '--refs', '--', url, selection.destination],
-      signal,
-    );
-    const match = result.stdout
-      .toString()
-      .split('\n')
-      .map((line) => line.split('\t'))
-      .find(([, ref]) => ref === selection.destination);
+    const remoteOid = await this.remoteOid(url, selection.destination, signal);
     return {
       ...selection,
       sourceOid,
-      remoteOid: match ? oidSchema.parse(match[0]) : null,
+      remoteOid,
       token: state.token,
       url: displayUrl(url),
     };

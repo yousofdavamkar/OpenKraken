@@ -277,3 +277,64 @@ test('push reviews the push URL and publishes only the selected ref despite mirr
     await service.dispose();
   }
 });
+test('reviewed remote deletion uses the push URL and an exact lease for branches and tags', async () => {
+  const local = createFixture(join(root, 'delete-server-ref'));
+  const remote = join(root, 'delete-server.git');
+  const other = join(root, 'delete-fetch.git');
+  fixtureGit(local, ['clone', '--bare', '.', remote]);
+  fixtureGit(local, ['clone', '--bare', '.', other]);
+  fixtureGit(remote, ['branch', 'obsolete']);
+  fixtureGit(other, ['branch', 'obsolete']);
+  fixtureGit(local, ['remote', 'set-url', 'origin', other]);
+  fixtureGit(local, ['remote', 'set-url', '--push', 'origin', remote]);
+  const service = new RepositoryService('git');
+  const repo = await service.open(local);
+  try {
+    const plan = await service.deleteRemotePreview(repo.id, {
+      name: 'origin',
+      destination: 'refs/heads/obsolete',
+    });
+    expect(plan.remoteOid).toBe(fixtureGit(remote, ['rev-parse', 'obsolete']));
+    fixtureGit(local, ['config', 'push.followTags', 'true']);
+    await expect(service.deleteRemote(repo.id, plan)).rejects.toMatchObject({
+      code: 'STALE_REMOTE_DELETE',
+    });
+    expect(fixtureGit(remote, ['rev-parse', 'obsolete'])).toBe(plan.remoteOid);
+    fixtureGit(local, ['config', 'remote.origin.mirror', 'true']);
+    const reviewed = await service.deleteRemotePreview(repo.id, {
+      name: 'origin',
+      destination: 'refs/heads/obsolete',
+    });
+    await service.deleteRemote(repo.id, reviewed);
+    expect(fixtureGit(remote, ['rev-parse', 'main'])).toBe(plan.remoteOid);
+    expect(fixtureGit(remote, ['for-each-ref', '--format=%(refname)', 'refs/heads/obsolete'])).toBe(
+      '',
+    );
+    expect(fixtureGit(other, ['rev-parse', 'obsolete'])).toBe(plan.remoteOid);
+    let tag = await service.deleteRemotePreview(repo.id, {
+      name: 'origin',
+      destination: 'refs/tags/v0.1.0',
+    });
+    fixtureGit(remote, [
+      'update-ref',
+      'refs/tags/v0.1.0',
+      fixtureGit(remote, ['rev-parse', 'HEAD~1']),
+    ]);
+    await expect(service.deleteRemote(repo.id, tag)).rejects.toThrow(/stale|rejected/i);
+    expect(fixtureGit(remote, ['rev-parse', 'v0.1.0'])).not.toBe(tag.remoteOid);
+    tag = await service.deleteRemotePreview(repo.id, {
+      name: 'origin',
+      destination: 'refs/tags/v0.1.0',
+    });
+    await service.deleteRemote(repo.id, tag);
+    expect(fixtureGit(remote, ['for-each-ref', '--format=%(refname)', 'refs/tags/v0.1.0'])).toBe(
+      '',
+    );
+    expect(fixtureGit(local, ['rev-parse', 'v0.1.0'])).toBe(plan.remoteOid);
+    await expect(
+      service.deleteRemotePreview(repo.id, { name: 'origin', destination: 'refs/heads/missing' }),
+    ).rejects.toMatchObject({ code: 'REMOTE_REF_MISSING' });
+  } finally {
+    await service.dispose();
+  }
+});

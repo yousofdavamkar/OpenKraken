@@ -79,7 +79,9 @@ function callService(request: ServiceRequest): Promise<Result> {
         ? 1860000
         : request.method === 'pull'
           ? 390000
-          : ['fetch', 'pushPreview', 'push'].includes(request.method)
+          : ['fetch', 'pushPreview', 'push', 'deleteRemote', 'deleteRemotePreview'].includes(
+                request.method,
+              )
             ? 210000
             : request.method === 'commit' || request.method === 'reference'
               ? 180000

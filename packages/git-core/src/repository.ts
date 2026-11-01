@@ -10,6 +10,8 @@ import type {
   RemoteOptions,
   PushSelection,
   PushOptions,
+  DeleteRemoteSelection,
+  DeleteRemotePlan,
   PullOptions,
   StashPushOptions,
   StashActionOptions,
@@ -483,6 +485,30 @@ export class RepositoryService {
   remotes(id: string, signal?: AbortSignal) {
     const { repo, manager } = this.remoteManager(id);
     return this.queue(repo.commonDir).run(false, () => manager.state(signal), signal);
+  }
+  deleteRemotePreview(
+    id: string,
+    selection: DeleteRemoteSelection,
+    signal?: AbortSignal,
+    onProgress?: (text: string) => void,
+    authentication?: NodeJS.ProcessEnv,
+  ) {
+    const { repo, manager } = this.remoteManager(id, onProgress, authentication);
+    return this.queue(repo.commonDir).run(
+      false,
+      () => manager.deletePreview(selection, signal),
+      signal,
+    );
+  }
+  deleteRemote(
+    id: string,
+    plan: DeleteRemotePlan,
+    signal?: AbortSignal,
+    onProgress?: (text: string) => void,
+    authentication?: NodeJS.ProcessEnv,
+  ) {
+    const { repo, manager } = this.remoteManager(id, onProgress, authentication);
+    return this.queue(repo.commonDir).run(true, () => manager.delete(plan, signal), signal);
   }
   pushPreview(
     id: string,

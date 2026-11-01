@@ -51,6 +51,8 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
     request.method === 'clone' ||
     request.method === 'push' ||
     request.method === 'pull' ||
+    request.method === 'deleteRemote' ||
+    request.method === 'deleteRemotePreview' ||
     request.method === 'pushPreview' ||
     (request.method === 'fetch' && !request.background);
   const context =
@@ -60,7 +62,9 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
         ? `Fetch ${request.name}`
         : request.method === 'pull'
           ? 'Pull upstream'
-          : 'Push repository';
+          : request.method === 'deleteRemote' || request.method === 'deleteRemotePreview'
+            ? 'Delete remote ref'
+            : 'Push repository';
   const scope = interactive ? await authentication.open(request.id, context, signal) : undefined;
   try {
     return await executeGit(request, signal, scope?.environment);
@@ -81,6 +85,22 @@ async function executeGit(
     lastProgress = now;
     parent!.postMessage({ type: 'gitProgress', id: request.id, text });
   };
+  if (request.method === 'deleteRemotePreview')
+    return {
+      kind: 'deleteRemotePreview',
+      plan: await git.deleteRemotePreview(
+        request.repoId,
+        request.selection,
+        signal,
+        progress,
+        auth,
+      ),
+    };
+  if (request.method === 'deleteRemote')
+    return {
+      kind: 'remotes',
+      state: await git.deleteRemote(request.repoId, request.plan, signal, progress, auth),
+    };
   if (request.method === 'pull')
     return {
       kind: 'workingState',
@@ -223,6 +243,7 @@ parent.on('message', (event) => {
     'remote',
     'fetch',
     'push',
+    'deleteRemote',
     'pull',
     'stashPush',
     'stashAction',

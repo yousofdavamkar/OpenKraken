@@ -353,6 +353,15 @@ export const pushOptionsSchema = z
   .object({ plan: pushPlanSchema, force: z.boolean().optional(), upstream: z.boolean().optional() })
   .strict();
 export type PushOptions = z.infer<typeof pushOptionsSchema>;
+export const deleteRemoteSelectionSchema = z
+  .object({ name: remoteNameSchema, destination: pushRefSchema })
+  .strict();
+export type DeleteRemoteSelection = z.infer<typeof deleteRemoteSelectionSchema>;
+export const deleteRemotePlanSchema = deleteRemoteSelectionSchema
+  .extend({ remoteOid: oidSchema, token: remoteTokenSchema, url: z.string() })
+  .strict();
+export type DeleteRemotePlan = z.infer<typeof deleteRemotePlanSchema>;
+
 export const stashStateSchema = z.object({
   token: remoteTokenSchema,
   entries: z
@@ -417,6 +426,22 @@ const authenticationAnswer = z
   })
   .strict();
 const workingRequests = [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('deleteRemotePreview'),
+      repoId: repoIdSchema,
+      selection: deleteRemoteSelectionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('deleteRemote'),
+      repoId: repoIdSchema,
+      plan: deleteRemotePlanSchema,
+    })
+    .strict(),
   z
     .object({
       id: requestId,
@@ -612,6 +637,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('deleteRemotePreview'), plan: deleteRemotePlanSchema }),
   z.object({ kind: z.literal('authenticationAnswered'), accepted: z.boolean() }),
   z.object({
     kind: z.literal('stashAction'),
