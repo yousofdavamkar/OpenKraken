@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Request, WorkingState, WorkingDiff } from '@openkraken/ipc-contract';
+import type { Request, WorkingState, WorkingDiff, DiscardPreview } from '@openkraken/ipc-contract';
+import { DiscardDialog } from './discard-dialog.js';
 import { WorkingDiffDialog } from './working-diff.js';
 import { useRepository } from './store.js';
 export function WorkingTreePanel() {
   const { snapshot, busy } = useRepository();
+  const [discard, setDiscard] = useState<{ preview: DiscardPreview; paths: string[] }>();
   const [preview, setPreview] = useState<WorkingDiff>();
   const [previewBusy, setPreviewBusy] = useState(false);
   const previewSequence = useRef(0);
@@ -83,6 +85,24 @@ export function WorkingTreePanel() {
       if (sequence === previewSequence.current) setPreviewBusy(false);
     }
   };
+  const reviewDiscard = async (paths: string[]) => {
+    setPreviewBusy(true);
+    setError(undefined);
+    try {
+      const result = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'discardPreview',
+        repoId,
+        paths,
+      });
+      if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'discardPreview') setDiscard({ preview: result.preview, paths });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
   const status = state?.status ?? snapshot.status;
   const staged = status.entries.filter((e) => e.kind !== 'untracked' && e.index !== '.');
   const unstaged = status.entries.filter((e) => e.kind === 'untracked' || e.worktree !== '.');
@@ -90,6 +110,26 @@ export function WorkingTreePanel() {
     void mutate({ id: crypto.randomUUID(), method: 'files', repoId, action, paths });
   return (
     <section aria-label="Working tree">
+      {discard && (
+        <DiscardDialog
+          preview={discard.preview}
+          busy={!!busy}
+          error={error}
+          onClose={() => setDiscard(undefined)}
+          onCancel={() => void useRepository.getState().cancel()}
+          onApply={() => {
+            void mutate({
+              id: crypto.randomUUID(),
+              method: 'discard',
+              repoId,
+              paths: discard.paths,
+              token: discard.preview.token,
+            }).then((ok) => {
+              if (ok) setDiscard(undefined);
+            });
+          }}
+        />
+      )}
       {preview && (
         <WorkingDiffDialog
           key={preview.token}
@@ -194,7 +234,22 @@ export function WorkingTreePanel() {
                     onClick={() => files(action, [entry.pathBytes])}
                   >
                     {action === 'stage' ? 'Stage' : 'Unstage'}
-                  </button>
+                  </button>{' '}
+                  {action === 'stage' && (
+                    <button
+                      className="danger"
+                      aria-label={`Discard ${entry.path}`}
+                      disabled={
+                        !!busy ||
+                        previewBusy ||
+                        entry.kind === 'conflict' ||
+                        entry.submodule.startsWith('S')
+                      }
+                      onClick={() => void reviewDiscard([entry.pathBytes])}
+                    >
+                      Discard
+                    </button>
+                  )}
                 </div>
               ))}
             </section>

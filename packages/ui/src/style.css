@@ -709,3 +709,21 @@ footer {
 .no-newline {
   color: #e1bb78;
 }
+
+.discard-review {
+  max-width: 580px;
+}
+.discard-review ul {
+  max-height: 35vh;
+  overflow: auto;
+  padding-left: 24px;
+}
+.discard-review li {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 8px 0;
+}
+.danger {
+  color: #ffadb5;
+  border-color: #784450;
+}

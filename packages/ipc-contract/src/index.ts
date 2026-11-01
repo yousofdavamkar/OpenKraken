@@ -186,7 +186,30 @@ export const workingDiffSchema = z.object({
   ),
 });
 export type WorkingDiff = z.infer<typeof workingDiffSchema>;
+export const discardPreviewSchema = z.object({
+  token: z.string().regex(/^[0-9a-f]{64}$/),
+  paths: z.array(z.string()),
+  bytes: z.number().nonnegative(),
+});
+export type DiscardPreview = z.infer<typeof discardPreviewSchema>;
 const workingRequests = [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('discardPreview'),
+      repoId: repoIdSchema,
+      paths: z.array(pathBytesSchema).min(1).max(10000),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('discard'),
+      repoId: repoIdSchema,
+      paths: z.array(pathBytesSchema).min(1).max(10000),
+      token: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict(),
   z
     .object({
       id: requestId,
@@ -287,6 +310,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('discardPreview'), preview: discardPreviewSchema }),
   z.object({ kind: z.literal('diff'), diff: workingDiffSchema }),
   z.object({ kind: z.literal('workingState'), state: workingStateSchema }),
   z.object({ kind: z.literal('appearance'), remoteAvatars: z.boolean() }),

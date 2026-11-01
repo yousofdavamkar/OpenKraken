@@ -452,6 +452,22 @@ export class RepositoryService {
     const work = this.working(id);
     return this.queue(work.repo.commonDir).run(true, () => work.patch(options, signal), signal);
   }
+  discardPreview(id: string, paths: string[], signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(
+      false,
+      () => work.discardPreview(paths, signal),
+      signal,
+    );
+  }
+  discard(id: string, paths: string[], token: string, signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(
+      true,
+      () => work.discard(paths, token, signal),
+      signal,
+    );
+  }
   commit(id: string, options: CommitOptions, signal?: AbortSignal) {
     const work = this.working(id);
     return this.queue(work.repo.commonDir).run(true, () => work.commit(options, signal), signal);

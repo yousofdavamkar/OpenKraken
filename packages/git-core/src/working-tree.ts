@@ -22,6 +22,7 @@ import {
 } from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { RepositoryQueue } from './queue.js';
+import { FileBackups, fileImageSchema, sameImages, type FileImage } from './file-backups.js';
 import { parsePatch, selectPatch } from './patch.js';
 import { StatusParser } from './parsers.js';
 const MAX_INDEX = 32 * 1024 * 1024;
@@ -29,6 +30,7 @@ const savedSchema = z.object({
   head: headSchema,
   index: z.string().max(MAX_INDEX * 2),
   signature: z.string(),
+  files: z.array(fileImageSchema).optional(),
 });
 const entrySchema = z.object({
   id: z.string().uuid(),
@@ -64,6 +66,7 @@ async function copyIndex(source: string, target: string) {
 /** Git writes are serialized by RepositoryService and protected from external index writers. */
 export class WorkingTree {
   private directory: string;
+  private backups: FileBackups;
   private processes = new RepositoryQueue(3);
   constructor(
     private git: string,
@@ -72,6 +75,7 @@ export class WorkingTree {
   ) {
     if (!/^[0-9a-f]{64}$/.test(repo.id)) throw new Error('Invalid repository');
     this.directory = join(dataDir, 'undo', repo.id);
+    this.backups = new FileBackups(repo.path, this.directory);
   }
   private run(args: string[], options: RunOptions = {}) {
     return this.processes.run(
@@ -107,7 +111,18 @@ export class WorkingTree {
     }
   }
   private async saveJournal(journal: Journal) {
-    while (journal.undo.length + journal.redo.length > 20) journal.undo.shift();
+    const retainedBytes = () => {
+      const unique = new Map<string, number>();
+      for (const entry of [...journal.undo, ...journal.redo])
+        for (const file of [...(entry.before.files ?? []), ...(entry.after.files ?? [])])
+          if (file.digest) unique.set(file.digest, file.bytes ?? 0);
+      return [...unique.values()].reduce((n, bytes) => n + bytes, 0);
+    };
+    while (journal.undo.length + journal.redo.length > 20 || retainedBytes() > 512 * 1024 * 1024) {
+      if (journal.undo.length > 1) journal.undo.shift();
+      else if (journal.redo.length) journal.redo.shift();
+      else throw new GitError('UNDO_LIMIT', 'File backups exceed the 512 MiB journal limit');
+    }
     let data = JSON.stringify(journal);
     while (Buffer.byteLength(data) > 128 * 1024 * 1024 && journal.undo.length > 1) {
       journal.undo.shift();
@@ -155,13 +170,17 @@ export class WorkingTree {
     ]);
     return { head, signature: hash(Buffer.concat([entries.stdout, diff.stdout])) };
   }
-  private async saved(indexFile: string): Promise<Saved> {
+  private async saved(indexFile: string, files?: string[], signal?: AbortSignal): Promise<Saved> {
     if ((await stat(indexFile)).size > MAX_INDEX)
       throw new GitError('UNDO_LIMIT', 'The index exceeds the 32 MiB undo limit');
     const index = await readFile(indexFile);
     if (index.length > MAX_INDEX)
       throw new GitError('UNDO_LIMIT', 'The index exceeds the 32 MiB undo limit');
-    return { index: index.toString('base64'), ...(await this.fingerprint(indexFile)) };
+    return {
+      index: index.toString('base64'),
+      ...(await this.fingerprint(indexFile)),
+      ...(files ? { files: await this.backups.capture(files, true, signal) } : {}),
+    };
   }
   private async commitInfo(oid?: string, signal?: AbortSignal) {
     const [template, sign, commit] = await Promise.all([
@@ -246,10 +265,13 @@ export class WorkingTree {
     label: string,
     change: (index: string, before: Saved) => Promise<void>,
     signal?: AbortSignal,
+    files?: string[],
+    movesHead = false,
   ) {
     await this.locked(async (index, publish) => {
-      const before = await this.saved(index),
-        journal = await this.journal(),
+      const journal = await this.journal();
+      await this.pruneFiles(journal);
+      const before = await this.saved(index, files, signal),
         id = randomUUID();
       const pending = join(this.directory, `pending-${id}.json`);
       await atomic(pending, JSON.stringify({ id, label, before }));
@@ -259,14 +281,24 @@ export class WorkingTree {
       } catch (error) {
         failure = error;
       }
-      const after = await this.saved(index);
-      if (!sameHead(before.head, after.head) || before.signature !== after.signature) {
+      const after = await this.saved(index, files);
+      if (!movesHead && !sameHead(before.head, after.head))
+        throw new GitError(
+          'CONCURRENT_HEAD',
+          `HEAD changed during the operation; the index was not published. Recovery backup: ${pending}`,
+        );
+      if (
+        !sameHead(before.head, after.head) ||
+        before.signature !== after.signature ||
+        !sameImages(before.files, after.files)
+      ) {
         journal.undo.push({ id, label, before, after });
         journal.redo = [];
         await this.saveJournal(journal);
         await publish();
       }
       await rm(pending, { force: true });
+      await this.pruneFiles(journal);
       if (failure) throw failure;
     }, signal);
     return this.state();
@@ -422,6 +454,102 @@ export class WorkingTree {
       signal,
     );
   }
+  private async pruneFiles(journal: Journal) {
+    await this.backups
+      .prune(
+        [...journal.undo, ...journal.redo].flatMap((entry) => [
+          ...(entry.before.files ?? []),
+          ...(entry.after.files ?? []),
+        ]),
+      )
+      .catch(() => {});
+  }
+  private discardToken(value: {
+    head: Repository['head'];
+    signature: string;
+    files?: FileImage[];
+  }) {
+    return hash(JSON.stringify({ revision: this.revision(value), files: value.files }));
+  }
+  async discardPreview(paths: string[], signal?: AbortSignal) {
+    await this.paths(paths, signal);
+    const fingerprint = await this.fingerprint();
+    const files = await this.backups.capture(paths, false, signal);
+    return {
+      token: this.discardToken({ ...fingerprint, files }),
+      paths: files.map((f) => Buffer.from(f.pathBytes, 'base64').toString('utf8')),
+      bytes: files.reduce((n, f) => n + (f.bytes ?? 0), 0),
+    };
+  }
+  async discard(paths: string[], token: string, signal?: AbortSignal) {
+    await this.paths(paths, signal);
+    return this.transaction(
+      'Discard files',
+      async (indexFile, before) => {
+        if (token !== this.discardToken(before))
+          throw new GitError(
+            'STALE_DISCARD',
+            'Files or staged content changed since confirmation. Review them again before discarding.',
+          );
+        const raw = (await this.run(['ls-files', '--stage', '-z'], { indexFile, signal })).stdout;
+        const tracked = new Map<string, { mode: string; oid: string }>();
+        for (let at = 0; at < raw.length;) {
+          const end = raw.indexOf(0, at),
+            tab = raw.indexOf(9, at);
+          if (end < 0 || tab < 0 || tab > end) break;
+          const [mode, oid, stage] = raw.subarray(at, tab).toString().split(' ');
+          const pathBytes = raw.subarray(tab + 1, end).toString('base64');
+          if (stage !== '0' && paths.includes(pathBytes))
+            throw new GitError(
+              'UNRESOLVED_CONFLICT',
+              'Resolve the conflict before discarding this file',
+            );
+          tracked.set(pathBytes, { mode: mode!, oid: oid! });
+          at = end + 1;
+        }
+        const restoring = before.files!.filter((f) => tracked.has(f.pathBytes));
+        if (restoring.some((f) => tracked.get(f.pathBytes)!.mode === '160000'))
+          throw new GitError(
+            'SUBMODULE_OPERATION',
+            'Use submodule controls to change a submodule worktree',
+          );
+        if (restoring.length) {
+          const sizes = (
+            await this.run(['cat-file', '--batch-check=%(objectsize)'], {
+              stdin: restoring.map((f) => tracked.get(f.pathBytes)!.oid).join('\n') + '\n',
+              signal,
+            })
+          ).stdout
+            .toString()
+            .trim()
+            .split('\n')
+            .map(Number);
+          if (
+            sizes.some((n) => !Number.isFinite(n) || n > 64 * 1024 * 1024) ||
+            sizes.reduce((n, s) => n + s, 0) > 128 * 1024 * 1024
+          )
+            throw new GitError('UNDO_LIMIT', 'Restored content exceeds discard backup limits');
+        }
+        await this.backups.assertCurrent(before.files!, 'STALE_DISCARD');
+        for (const file of before.files!)
+          if (!tracked.has(file.pathBytes)) await this.backups.trash(file, signal);
+        if (restoring.length)
+          await this.run(
+            ['restore', '--worktree', '--pathspec-from-file=-', '--pathspec-file-nul'],
+            {
+              indexFile,
+              signal,
+              readOnly: false,
+              stdin: Buffer.concat(
+                restoring.flatMap((f) => [Buffer.from(f.pathBytes, 'base64'), Buffer.from([0])]),
+              ),
+            },
+          );
+      },
+      signal,
+      paths,
+    );
+  }
   async commit(
     options: { message: string; revision: string; amend?: boolean; sign?: boolean },
     signal?: AbortSignal,
@@ -474,6 +602,8 @@ export class WorkingTree {
         );
       },
       signal,
+      undefined,
+      true,
     );
   }
   private async verifyIndex(indexFile: string) {
@@ -518,6 +648,7 @@ export class WorkingTree {
           'STALE_UNDO',
           'HEAD or the index changed outside this action. Undo would overwrite newer work.',
         );
+      if (expected.files) await this.backups.assertCurrent(expected.files);
       await writeFile(index, Buffer.from(target.index, 'base64'));
       await this.verifyIndex(index);
       if (!sameHead(target.head, expected.head)) {
@@ -542,10 +673,12 @@ export class WorkingTree {
           : ['update-ref', '--no-deref', '-d', ref, expected.head.oid!];
         await this.run(args, { readOnly: false });
       }
+      if (target.files) await this.backups.restore(target.files, signal);
       await publish();
       source.pop();
       (redo ? journal.undo : journal.redo).push(entry);
       await this.saveJournal(journal);
+      await this.pruneFiles(journal);
     }, signal);
     return this.state();
   }

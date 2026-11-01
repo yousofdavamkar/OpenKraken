@@ -284,3 +284,69 @@ test('copying the index preserves Git’s conservative checks for files with rac
   });
   expect(fixtureGit(path, ['show', ':tracked.txt'])).toBe('AFTER!');
 });
+test('discard preserves staged content and undo restores tracked and untracked bytes without overwriting newer edits', async () => {
+  const { path, work } = await setup('discard');
+  await writeFile(join(path, 'tracked.txt'), 'staged\n');
+  await work.files('stage', [bytes('tracked.txt')]);
+  const original = Buffer.from([0, 255, 2, 10, 128]);
+  await writeFile(join(path, 'tracked.txt'), original);
+  await writeFile(join(path, 'new.txt'), 'untracked content\n', { mode: 0o755 });
+  const selected = [bytes('tracked.txt'), bytes('new.txt')];
+  const preview = await work.discardPreview(selected);
+  await work.discard(selected, preview.token);
+  expect(await readFile(join(path, 'tracked.txt'), 'utf8')).toBe('staged\n');
+  await expect(readFile(join(path, 'new.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(fixtureGit(path, ['show', ':tracked.txt'])).toBe('staged');
+  await work.undo();
+  expect(await readFile(join(path, 'tracked.txt'))).toEqual(original);
+  expect(await readFile(join(path, 'new.txt'), 'utf8')).toBe('untracked content\n');
+  await work.undo(true);
+  await writeFile(join(path, 'tracked.txt'), 'newer editor changes\n');
+  await expect(work.undo()).rejects.toMatchObject({ code: 'STALE_UNDO' });
+  expect(await readFile(join(path, 'tracked.txt'), 'utf8')).toBe('newer editor changes\n');
+  const stale = await work.discardPreview([bytes('tracked.txt')]);
+  await writeFile(join(path, 'tracked.txt'), 'changed after confirmation\n');
+  await expect(work.discard([bytes('tracked.txt')], stale.token)).rejects.toMatchObject({
+    code: 'STALE_DISCARD',
+  });
+  expect(await readFile(join(path, 'tracked.txt'), 'utf8')).toBe('changed after confirmation\n');
+});
+test.skipIf(process.platform === 'win32')(
+  'discard restores links and executable permissions without following the link target',
+  async () => {
+    const { path, work } = await setup('discard-links');
+    const { symlink, readlink, chmod, stat } = await import('node:fs/promises');
+    const outside = join(root, 'outside.txt');
+    await writeFile(outside, 'outside stays unchanged\n');
+    await rm(join(path, 'tracked.txt'));
+    await symlink(outside, join(path, 'tracked.txt'));
+    await writeFile(join(path, 'new.sh'), '#!/bin/sh\necho original\n');
+    await chmod(join(path, 'new.sh'), 0o755);
+    const selected = [bytes('tracked.txt'), bytes('new.sh')];
+    await work.discard(selected, (await work.discardPreview(selected)).token);
+    expect(await readFile(join(path, 'tracked.txt'), 'utf8')).toBe('base\n');
+    expect(await readFile(outside, 'utf8')).toBe('outside stays unchanged\n');
+    await work.undo();
+    expect(await readlink(join(path, 'tracked.txt'))).toBe(outside);
+    expect((await stat(join(path, 'new.sh'))).mode & 0o777).toBe(0o755);
+    expect(await readFile(outside, 'utf8')).toBe('outside stays unchanged\n');
+  },
+);
+
+test('discard refuses unresolved index entries without changing conflict contents', async () => {
+  const { path, work } = await setup('discard-conflict');
+  fixtureGit(path, ['checkout', '-b', 'other']);
+  await writeFile(join(path, 'tracked.txt'), 'other\n');
+  fixtureGit(path, ['commit', '-am', 'Other']);
+  fixtureGit(path, ['checkout', 'main']);
+  await writeFile(join(path, 'tracked.txt'), 'main\n');
+  fixtureGit(path, ['commit', '-am', 'Main']);
+  spawnSync('git', ['merge', 'other'], { cwd: path });
+  const content = await readFile(join(path, 'tracked.txt'));
+  const selected = [bytes('tracked.txt')];
+  const preview = await work.discardPreview(selected);
+  await expect(work.discard(selected, preview.token)).rejects.toMatchObject({
+    code: 'UNRESOLVED_CONFLICT',
+  });
+  expect(await readFile(join(path, 'tracked.txt'))).toEqual(content);
+});

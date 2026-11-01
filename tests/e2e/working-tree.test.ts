@@ -95,3 +95,37 @@ test('diff dialog stages a chosen hunk and leaves neighboring edits unstaged', a
     rmSync(root, { recursive: true, force: true });
   }
 });
+test('discard requires a reviewed confirmation and Undo restores the file', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-discard-e2e-'));
+  const repo = createFixture(join(root, 'repo'));
+  writeFileSync(join(repo, 'tracked.txt'), 'valuable changes\n');
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, repo);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('button', { name: 'Discard tracked.txt', exact: true }).click();
+    const review = page.getByRole('dialog', { name: 'Discard working changes' });
+    await expect(review.getByText('tracked.txt', { exact: true })).toBeVisible();
+    await review.getByRole('button', { name: 'Keep changes', exact: true }).click();
+    await expect(
+      page.getByRole('button', { name: 'Discard tracked.txt', exact: true }),
+    ).toBeEnabled();
+    await page.getByRole('button', { name: 'Discard tracked.txt', exact: true }).click();
+    await review.getByRole('button', { name: 'Discard changes', exact: true }).click();
+    await expect(review).toHaveCount(0);
+    await expect(page.getByText('Working tree clean', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect(
+      page.getByRole('button', { name: 'Discard tracked.txt', exact: true }),
+    ).toBeEnabled();
+    expect(fixtureGit(repo, ['diff', '--', 'tracked.txt'])).toContain('+valuable changes');
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

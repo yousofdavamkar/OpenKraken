@@ -23,6 +23,16 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
       kind: 'workingState',
       state: await git.patch(request.repoId, request.options, signal),
     };
+  if (request.method === 'discardPreview')
+    return {
+      kind: 'discardPreview',
+      preview: await git.discardPreview(request.repoId, request.paths, signal),
+    };
+  if (request.method === 'discard')
+    return {
+      kind: 'workingState',
+      state: await git.discard(request.repoId, request.paths, request.token, signal),
+    };
   if (request.method === 'commit')
     return {
       kind: 'workingState',
