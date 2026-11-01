@@ -50,6 +50,7 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
   const interactive =
     request.method === 'clone' ||
     request.method === 'push' ||
+    request.method === 'pull' ||
     request.method === 'pushPreview' ||
     (request.method === 'fetch' && !request.background);
   const context =
@@ -57,7 +58,9 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
       ? `Clone ${request.options.url}`
       : request.method === 'fetch'
         ? `Fetch ${request.name}`
-        : 'Push repository';
+        : request.method === 'pull'
+          ? 'Pull upstream'
+          : 'Push repository';
   const scope = interactive ? await authentication.open(request.id, context, signal) : undefined;
   try {
     return await executeGit(request, signal, scope?.environment);
@@ -78,6 +81,11 @@ async function executeGit(
     lastProgress = now;
     parent!.postMessage({ type: 'gitProgress', id: request.id, text });
   };
+  if (request.method === 'pull')
+    return {
+      kind: 'workingState',
+      state: await git.pull(request.repoId, request.options, signal, progress, auth),
+    };
   if (request.method === 'stashAction')
     return {
       kind: 'stashAction',
@@ -215,6 +223,7 @@ parent.on('message', (event) => {
     'remote',
     'fetch',
     'push',
+    'pull',
     'stashPush',
     'stashAction',
   ].includes(request.method);

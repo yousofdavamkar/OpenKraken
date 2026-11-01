@@ -1,0 +1,11 @@
+# 0018 — Explicit pull policy and clean tracked workspace
+
+Pull fetches the current branch's configured upstream remote, then integrates the exact fetched upstream commit with one explicit policy: fast-forward-only (default), merge, or rebase. The selection is saved per repository in the application profile's renderer storage; it does not rewrite Git configuration. An upstream pointing at another local branch skips network fetch. Detached and unborn HEAD, missing upstream, active operations, changed HEAD/index and dirty tracked files are refused before fetch. The branch/upstream/revision and clean tracked state are checked again after fetch while holding the index lock.
+
+Fast-forward-only refuses divergence. Merge explicitly permits a fast-forward or a merge commit. Rebase uses the native merge backend's normal replay, with automatic stashing, extra branch updates and merge preservation disabled. Native hooks and configured signing still run. Fetch preserves TLS verification and the foreground authentication bridge. Cancellation stops native processes and refreshes the repository; completed fetch/ref changes are not rolled back implicitly.
+
+Integration uses the existing alternate-index lock and records before/after HEAD/index in a pending profile record. Native conflict stages are published even when Git exits unsuccessfully. The merge/rebase operation files remain available for native resolution or abort. The merge backend may create `rebase-merge/interactive` even for a noninteractive replay; that marker alone does not mean the user requested a todo editor.
+
+This slice does not add workspace Undo for pull, nor a conflict-resolution interface. A prior undo entry refuses a mismatching HEAD/index. Ref-moving undo and operation continuation/abort controls belong to M4. Fetch and integration cannot be atomic with each other or with unrelated external Git processes. Git retains its native handling of ignored and untracked paths; pull does not implicitly clean or stash them.
+
+Verification uses real repositories for all three policies, incompatible Git pull preferences, divergent refusal, conflict index stages plus native abort, and dirty/stale/detached/missing-upstream guards. Electron verifies policy selection, persistence and graph refresh. The Gitea acceptance flow also pulls over verified HTTPS with real credential prompts.

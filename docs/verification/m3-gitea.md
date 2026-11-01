@@ -5,7 +5,7 @@ The dedicated Electron test passed on Linux in 8.8 seconds against Gitea 1.26.4 
 The test creates a private repository and exercises the real desktop, Git service, native helper and server:
 
 - HTTPS clone with username/password dialogs and certificate verification against a test CA.
-- Push review and rejection when the server has newer commits; the local branch is unchanged.
+- Push review and rejection when the server has newer commits; the local branch is unchanged. A subsequent authenticated HTTPS pull fast-forwards to the server tip.
 - SSH clone with an unknown host key: declining refuses the connection, then explicit confirmation permits it.
 - An encrypted Ed25519 key prompts for its passphrase and completes the SSH clone.
 
@@ -19,4 +19,4 @@ OPENKRAKEN_GITEA_TEST=1 xvfb-run -a pnpm exec playwright test tests/e2e/gitea.te
 
 `OPENKRAKEN_CONTAINER_ENGINE` can select a Podman executable; the fixture then uses its keep-id user namespace. `OPENKRAKEN_GITEA_IMAGE` can select a preloaded image. On this machine Podman and its dependencies were extracted into the developer tool cache; no system package installation or daemon was required.
 
-This establishes Linux transport acceptance. It does not establish Windows named-pipe or macOS execution. Pull policy and server-ref deletion are separate M3 work. The fixture follows Gitea's [rootless container documentation](https://docs.gitea.com/installation/install-with-docker-rootless/).
+This establishes Linux transport acceptance. It does not establish Windows named-pipe or macOS execution. Server-ref deletion is separate M3 work. The fixture follows Gitea's [rootless container documentation](https://docs.gitea.com/installation/install-with-docker-rootless/).

@@ -20,6 +20,8 @@ import {
   stashPushOptionsSchema,
   stashActionOptionsSchema,
   type StashActionOptions,
+  pullOptionsSchema,
+  type PullOptions,
   type StashPushOptions,
   type ReferenceOptions,
   type WorkingState,
@@ -29,6 +31,7 @@ import {
 } from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { StashStore } from './stash.js';
+import { GitProgressLines, redactGitMessage } from './progress.js';
 import { RepositoryQueue } from './queue.js';
 import { FileBackups, fileImageSchema, sameImages, type FileImage } from './file-backups.js';
 import { BranchConfiguration } from './branch-config.js';
@@ -364,6 +367,110 @@ export class WorkingTree {
         paths.set(entry.origPathBytes, Buffer.from(entry.origPathBytes, 'base64'));
     }
     return Buffer.concat([...paths.values()].flatMap((p) => [p, Buffer.from([0])]));
+  }
+  async pullContext(input: PullOptions, signal?: AbortSignal) {
+    const options = pullOptionsSchema.parse(input);
+    if (this.repo.isBare)
+      throw new GitError('BARE_REPOSITORY', 'This repository has no working tree');
+    await this.noOperation();
+    const state = await this.state(signal);
+    if (state.revision !== options.revision)
+      throw new GitError(
+        'STALE_PULL',
+        'HEAD or staged files changed. Review the current branch before pulling.',
+      );
+    if (state.head.kind !== 'branch' || !state.head.oid)
+      throw new GitError('PULL_BRANCH_REQUIRED', 'Switch to an existing branch before pulling.');
+    if (state.status.entries.some((entry) => !['untracked', 'ignored'].includes(entry.kind)))
+      throw new GitError('PULL_DIRTY', 'Commit or stash tracked changes before pulling.');
+    const fields = (
+      await this.run(
+        ['for-each-ref', '--format=%(upstream)%00%(upstream:remotename)', state.head.ref],
+        { signal },
+      )
+    ).stdout
+      .toString()
+      .trimEnd()
+      .split('\0');
+    if (!fields[0] || !fields[1])
+      throw new GitError(
+        'PULL_UPSTREAM_REQUIRED',
+        'Set an upstream for this branch before pulling.',
+      );
+    return { head: state.head, upstream: fields[0], remote: fields[1] };
+  }
+  async integratePull(
+    input: PullOptions,
+    context: Awaited<ReturnType<WorkingTree['pullContext']>>,
+    signal?: AbortSignal,
+    onProgress?: (text: string) => void,
+  ) {
+    const options = pullOptionsSchema.parse(input);
+    await this.locked(async (indexFile, publish) => {
+      if (JSON.stringify(await this.pullContext(options, signal)) !== JSON.stringify(context))
+        throw new GitError(
+          'STALE_PULL',
+          'The branch or upstream changed during fetch. Review it before pulling again.',
+        );
+      const target = oidSchema.parse(
+        (
+          await this.run(['rev-parse', '--verify', `${context.upstream}^{commit}`], { signal })
+        ).stdout
+          .toString()
+          .trim(),
+      );
+      const before = await this.saved(indexFile);
+      const pending = join(this.directory, `pending-${randomUUID()}.json`);
+      const record = { label: `Pull (${options.mode})`, target, before };
+      await atomic(pending, JSON.stringify(record));
+      const progress = onProgress ? new GitProgressLines(onProgress) : undefined;
+      let failure: unknown;
+      try {
+        const result = await this.run(
+          options.mode === 'rebase'
+            ? [
+                'rebase',
+                '--merge',
+                '--no-autostash',
+                '--no-update-refs',
+                '--no-rebase-merges',
+                target,
+              ]
+            : [
+                'merge',
+                options.mode === 'ff-only' ? '--ff-only' : '--ff',
+                '--no-autostash',
+                '--no-edit',
+                target,
+              ],
+          {
+            indexFile,
+            signal,
+            readOnly: false,
+            allowedExitCodes: [0, 1],
+            timeoutMs: 180000,
+            env: { GIT_EDITOR: 'true' },
+            onStderr: progress ? (chunk) => progress.push(chunk) : undefined,
+          },
+        );
+        if (result.exitCode)
+          throw new GitError(
+            'GIT_FAILED',
+            redactGitMessage(`${result.stdout.toString()}\n${result.stderr}`.trim()),
+          );
+      } catch (error) {
+        failure = error;
+      } finally {
+        progress?.end();
+      }
+      const after = await this.saved(indexFile);
+      await atomic(pending, JSON.stringify({ ...record, after }));
+      if (!sameHead(before.head, after.head) || before.signature !== after.signature)
+        await publish();
+      await rm(pending, { force: true });
+      if (failure) throw failure;
+    }, signal);
+    return this.state();
   }
   stashes(signal?: AbortSignal) {
     return new StashStore((args, options) => this.run(args, options)).list(signal);
@@ -1050,7 +1157,7 @@ export class WorkingTree {
     )
       throw new GitError(
         'OPERATION_IN_PROGRESS',
-        'Finish or abort the active Git operation before switching branches',
+        'Finish or abort the active Git operation before starting another action',
       );
   }
   private async checkoutBranch(

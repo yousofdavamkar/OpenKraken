@@ -10,6 +10,7 @@ import type {
   RemoteOptions,
   PushSelection,
   PushOptions,
+  PullOptions,
   StashPushOptions,
   StashActionOptions,
   GraphView,
@@ -506,6 +507,25 @@ export class RepositoryService {
   ) {
     const { repo, manager } = this.remoteManager(id, onProgress, authentication);
     return this.queue(repo.commonDir).run(true, () => manager.push(options, signal), signal);
+  }
+  pull(
+    id: string,
+    options: PullOptions,
+    signal?: AbortSignal,
+    onProgress?: (text: string) => void,
+    authentication?: NodeJS.ProcessEnv,
+  ) {
+    const work = this.working(id);
+    const { repo, manager } = this.remoteManager(id, onProgress, authentication);
+    return this.queue(repo.commonDir).run(
+      true,
+      async () => {
+        const context = await work.pullContext(options, signal);
+        if (context.remote !== '.') await manager.fetch(context.remote, signal);
+        return work.integratePull(options, context, signal, onProgress);
+      },
+      signal,
+    );
   }
   fetch(
     id: string,

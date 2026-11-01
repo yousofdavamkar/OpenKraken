@@ -59,6 +59,15 @@ test('Gitea container: verified HTTPS auth, rejected push, SSH host-key consent 
     await expect(push.getByRole('alert')).toContainText(/rejected|fetch first|non-fast-forward/i);
     expect(fixtureGit(target, ['rev-parse', 'HEAD'])).toBe(original);
     await push.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.getByRole('button', { name: 'Pull', exact: true }).click();
+    const pull = page.getByRole('dialog', { name: 'Pull upstream', exact: true });
+    await pull.getByRole('button', { name: 'Fetch and integrate', exact: true }).click();
+    await credentials(page, remote.credentials);
+    await expect(pull.getByText('Pull completed', { exact: true })).toBeVisible();
+    expect(fixtureGit(target, ['rev-parse', 'HEAD'])).toBe(
+      fixtureGit(source, ['rev-parse', 'HEAD']),
+    );
+    await pull.getByRole('button', { name: 'Close', exact: true }).click();
     const sshTarget = join(root, 'ssh-clone');
     mkdirSync(sshTarget);
     await app.evaluate(({ dialog }, path) => {

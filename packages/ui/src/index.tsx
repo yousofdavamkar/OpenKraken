@@ -10,6 +10,7 @@ import { Clone } from './clone.js';
 import { Authentication } from './authentication.js';
 import { Stashes } from './stashes.js';
 import { Push } from './push.js';
+import { Pull } from './pull.js';
 import { ManageRemotes } from './remotes.js';
 import { RefControls } from './ref-controls.js';
 import { useRepository } from './store.js';
@@ -47,6 +48,7 @@ function App() {
           <Clone />
           <NewReferences />
           <ManageRemotes />
+          <Pull />
           <Push />
           <Stashes />
           <button onClick={open} disabled={!!busy}>

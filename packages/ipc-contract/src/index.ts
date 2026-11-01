@@ -296,6 +296,10 @@ export const cloneOptionsSchema = z
   .strict();
 export type CloneOptions = z.infer<typeof cloneOptionsSchema>;
 const remoteTokenSchema = z.string().regex(/^[0-9a-f]{64}$/);
+export const pullOptionsSchema = z
+  .object({ mode: z.enum(['ff-only', 'merge', 'rebase']), revision: remoteTokenSchema })
+  .strict();
+export type PullOptions = z.infer<typeof pullOptionsSchema>;
 export const remoteOptionsSchema = z.discriminatedUnion('action', [
   z
     .object({
@@ -413,6 +417,14 @@ const authenticationAnswer = z
   })
   .strict();
 const workingRequests = [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('pull'),
+      repoId: repoIdSchema,
+      options: pullOptionsSchema,
+    })
+    .strict(),
   z
     .object({
       id: requestId,
