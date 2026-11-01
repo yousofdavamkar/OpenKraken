@@ -18,7 +18,7 @@ async function executeReference(repoId: string, options: ReferenceOptions) {
       await useRepository.getState().run({ id: crypto.randomUUID(), method: 'refresh', repoId });
   }
 }
-type Action = 'createBranch' | 'createTag' | 'deleteTag' | 'renameBranch';
+type Action = 'createBranch' | 'createTag' | 'deleteTag' | 'renameBranch' | 'setUpstream';
 function ReferenceDialog({
   action,
   target,
@@ -35,6 +35,7 @@ function ReferenceDialog({
   const busy = syncing ? undefined : active;
   const [name, setName] = useState(reference?.shortName ?? '');
   const [message, setMessage] = useState('');
+  const [upstream, setUpstream] = useState(reference?.upstream?.ref ?? '');
   const [sign, setSign] = useState(false);
   const [error, setError] = useState<string>();
   const title =
@@ -44,7 +45,9 @@ function ReferenceDialog({
         ? 'Create tag'
         : action === 'renameBranch'
           ? 'Rename branch'
-          : 'Delete tag';
+          : action === 'setUpstream'
+            ? 'Set upstream'
+            : 'Delete tag';
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
@@ -52,13 +55,15 @@ function ReferenceDialog({
     if (!snapshot) return;
     const repoId = snapshot.repository.id;
     const options: ReferenceOptions =
-      action === 'renameBranch'
-        ? { action, name: reference!.shortName, newName: name, expected: target }
-        : action === 'deleteTag'
-          ? { action, name, expected: target }
-          : action === 'createBranch'
-            ? { action, name, target }
-            : { action, name, target, ...(message ? { message } : {}), sign };
+      action === 'setUpstream'
+        ? { action, name, expected: target, ...(upstream ? { upstream } : {}) }
+        : action === 'renameBranch'
+          ? { action, name: reference!.shortName, newName: name, expected: target }
+          : action === 'deleteTag'
+            ? { action, name, expected: target }
+            : action === 'createBranch'
+              ? { action, name, target }
+              : { action, name, target, ...(message ? { message } : {}), sign };
     setError(undefined);
     let success = false;
     try {
@@ -85,7 +90,34 @@ function ReferenceDialog({
         }}
       >
         <h2>{title}</h2>
-        {action === 'deleteTag' ? (
+        {action === 'setUpstream' ? (
+          <>
+            <p>
+              Branch: <strong>{name}</strong>
+            </p>
+            <label>
+              Upstream
+              <select
+                value={upstream}
+                disabled={!!busy}
+                onChange={(event) => setUpstream(event.target.value)}
+              >
+                <option value="">No upstream</option>
+                {snapshot?.refs
+                  .filter(
+                    (ref) =>
+                      (ref.kind === 'local' || ref.kind === 'remote') &&
+                      ref.name !== reference?.name,
+                  )
+                  .map((ref) => (
+                    <option key={ref.name} value={ref.name}>
+                      {ref.shortName}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          </>
+        ) : action === 'deleteTag' ? (
           <p>
             Delete local tag <strong>{name}</strong>? Undo can restore it. This does not delete a
             remote tag.
@@ -186,11 +218,12 @@ export function ReferenceActions({ reference }: { reference: Ref }) {
   const busy = syncing ? undefined : active;
   const [error, setError] = useState<string>();
   const [reviewed, setReviewed] = useState<Ref>();
-  if (reference.kind === 'local' && snapshot && !snapshot.repository.isBare)
+  const [branchAction, setBranchAction] = useState<'renameBranch' | 'setUpstream'>('renameBranch');
+  if (reference.kind === 'local' && snapshot)
     return (
       <>
         <button
-          disabled={!!busy || reference.isHead}
+          disabled={!!busy || reference.isHead || snapshot.repository.isBare}
           aria-label={`Switch to ${reference.shortName}`}
           onClick={() => {
             setError(undefined);
@@ -208,13 +241,26 @@ export function ReferenceActions({ reference }: { reference: Ref }) {
         <button
           disabled={!!busy}
           aria-label={`Rename branch ${reference.shortName}`}
-          onClick={() => setReviewed(reference)}
+          onClick={() => {
+            setBranchAction('renameBranch');
+            setReviewed(reference);
+          }}
         >
           Rename
         </button>
+        <button
+          disabled={!!busy}
+          aria-label={`Set upstream ${reference.shortName}`}
+          onClick={() => {
+            setBranchAction('setUpstream');
+            setReviewed(reference);
+          }}
+        >
+          Upstream
+        </button>
         {reviewed && (
           <ReferenceDialog
-            action="renameBranch"
+            action={branchAction}
             reference={reviewed}
             target={reviewed.target}
             close={() => setReviewed(undefined)}

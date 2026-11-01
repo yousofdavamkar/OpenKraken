@@ -388,6 +388,13 @@ test('bare repository ref actions and undo never create a working index', async 
   expect(fixtureGit(bare, ['rev-parse', 'bare-created'])).toBe(target);
   await work.undo();
   expect(fixtureGit(bare, ['branch', '--list', 'bare-created'])).toBe('');
+  await work.reference({
+    action: 'renameBranch',
+    name: 'main',
+    newName: 'bare-main',
+    expected: target,
+  });
+  await work.undo();
   await expect(readFile(join(bare, 'index'))).rejects.toMatchObject({ code: 'ENOENT' });
 });
 test('undo refuses to remove a branch checked out by another worktree', async () => {
@@ -492,4 +499,70 @@ test('renaming a current branch moves its configuration and undo restores both w
   await expect(work.undo()).rejects.toMatchObject({ code: 'STALE_UNDO' });
   expect(fixtureGit(path, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/renamed/topic');
   expect(fixtureGit(path, ['config', 'branch.renamed/topic.rebase'])).toBe('false');
+});
+test('upstream changes and undo preserve exact branch settings and unrelated configuration', async () => {
+  const { path, work } = await setup('upstream');
+  fixtureGit(path, ['config', '--add', 'branch.main.description', 'first\nline\t"quoted"']);
+  fixtureGit(path, ['config', '--add', 'branch.main.description', 'second']);
+  const expected = fixtureGit(path, ['rev-parse', 'main']);
+  fixtureGit(path, ['branch', 'local-upstream', 'HEAD~1']);
+  await work.reference({
+    action: 'setUpstream',
+    name: 'main',
+    expected,
+    upstream: 'refs/heads/local-upstream',
+  });
+  expect(fixtureGit(path, ['rev-parse', '--symbolic-full-name', 'main@{upstream}'])).toBe(
+    'refs/heads/local-upstream',
+  );
+  fixtureGit(path, ['config', 'user.email', 'later@example.test']);
+  await work.undo();
+  expect(fixtureGit(path, ['rev-parse', '--symbolic-full-name', 'main@{upstream}'])).toBe(
+    'refs/remotes/origin/main',
+  );
+  expect(fixtureGit(path, ['config', '--get-all', 'branch.main.description'])).toBe(
+    'first\nline\t"quoted"\nsecond',
+  );
+  expect(fixtureGit(path, ['config', 'user.email'])).toBe('later@example.test');
+  await work.undo(true);
+  expect(fixtureGit(path, ['rev-parse', '--symbolic-full-name', 'main@{upstream}'])).toBe(
+    'refs/heads/local-upstream',
+  );
+  await work.reference({ action: 'setUpstream', name: 'main', expected });
+  expect((await work.state()).status.upstream).toBeUndefined();
+  await work.undo();
+  expect(fixtureGit(path, ['rev-parse', '--symbolic-full-name', 'main@{upstream}'])).toBe(
+    'refs/heads/local-upstream',
+  );
+});
+test('upstream undo preserves byte-valued and boolean settings and respects an existing config lock', async () => {
+  const { path, work } = await setup('upstream-bytes');
+  const { appendFile } = await import('node:fs/promises');
+  const { runGit } = await import('./src/runner.js');
+  await appendFile(
+    join(path, '.git/config'),
+    Buffer.concat([
+      Buffer.from('\n[branch "main"]\n\trebase\n\tdescription = "'),
+      Buffer.from([0xff, 0xfe]),
+      Buffer.from('"\n'),
+    ]),
+  );
+  const before = (
+    await runGit('git', ['config', '--null', '--get-all', 'branch.main.description'], { cwd: path })
+  ).stdout;
+  const expected = fixtureGit(path, ['rev-parse', 'main']);
+  await work.reference({ action: 'setUpstream', name: 'main', expected });
+  await writeFile(join(path, '.git/config.lock'), 'another writer');
+  await expect(work.undo()).rejects.toMatchObject({ code: 'CONFIG_LOCKED' });
+  expect(await readFile(join(path, '.git/config.lock'), 'utf8')).toBe('another writer');
+  await rm(join(path, '.git/config.lock'));
+  await work.undo();
+  expect(fixtureGit(path, ['config', '--bool', 'branch.main.rebase'])).toBe('true');
+  expect(
+    (
+      await runGit('git', ['config', '--null', '--get-all', 'branch.main.description'], {
+        cwd: path,
+      })
+    ).stdout,
+  ).toEqual(before);
 });

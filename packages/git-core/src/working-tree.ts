@@ -26,6 +26,7 @@ import {
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { RepositoryQueue } from './queue.js';
 import { FileBackups, fileImageSchema, sameImages, type FileImage } from './file-backups.js';
+import { BranchConfiguration } from './branch-config.js';
 import { parsePatch, selectPatch } from './patch.js';
 import { StatusParser } from './parsers.js';
 const MAX_INDEX = 32 * 1024 * 1024;
@@ -72,6 +73,7 @@ async function copyIndex(source: string, target: string) {
 export class WorkingTree {
   private directory: string;
   private backups: FileBackups;
+  private configuration: BranchConfiguration;
   private processes = new RepositoryQueue(3);
   constructor(
     private git: string,
@@ -81,6 +83,9 @@ export class WorkingTree {
     if (!/^[0-9a-f]{64}$/.test(repo.id)) throw new Error('Invalid repository');
     this.directory = join(dataDir, 'undo', repo.id);
     this.backups = new FileBackups(repo.path, this.directory);
+    this.configuration = new BranchConfiguration(repo.commonDir, this.directory, (args, options) =>
+      this.run(args, options),
+    );
   }
   private run(args: string[], options: RunOptions = {}) {
     return this.processes.run(
@@ -314,7 +319,10 @@ export class WorkingTree {
           journal.undo.push({ id, label, before, after });
           journal.redo = [];
           await this.saveJournal(journal);
-          if (!sameHead(before.head, after.head) || before.signature !== after.signature)
+          if (
+            (!this.repo.isBare && !sameHead(before.head, after.head)) ||
+            before.signature !== after.signature
+          )
             await publish();
         }
         await rm(pending, { force: true });
@@ -620,27 +628,57 @@ export class WorkingTree {
         signal,
       });
   }
-  private async branchConfiguration(names: string[], signal?: AbortSignal) {
-    const config: Record<string, string[]> = Object.fromEntries(names.map((name) => [name, []]));
-    const raw = (
-      await this.run(['config', '--local', '--null', '--list'], {
-        signal,
-        maxBytes: 2 * 1024 * 1024,
-      })
-    ).stdout;
-    for (let at = 0; at < raw.length;) {
-      const end = raw.indexOf(0, at);
-      if (end < 0) break;
-      const entry = raw.subarray(at, end);
-      const newline = entry.indexOf(10);
-      const key = entry.subarray(0, newline < 0 ? entry.length : newline);
-      const section = key.subarray(0, key.lastIndexOf(46));
-      for (const name of names)
-        if (section.equals(Buffer.from(`branch.${name}`)))
-          config[name]!.push(entry.toString('base64'));
-      at = end + 1;
-    }
-    return config;
+  private branchConfiguration(names: string[], signal?: AbortSignal) {
+    return this.configuration.read(names, signal);
+  }
+  private async setUpstream(
+    options: Extract<ReferenceOptions, { action: 'setUpstream' }>,
+    signal?: AbortSignal,
+  ) {
+    const ref = `refs/heads/${options.name}`;
+    if (
+      options.name.startsWith('-') ||
+      (await this.run(['check-ref-format', ref], { signal, allowedExitCodes: [0, 1] })).exitCode !==
+        0
+    )
+      throw new GitError('INVALID_REF', 'Enter a valid branch name');
+    if (
+      options.upstream &&
+      (!/^refs\/(heads|remotes)\//.test(options.upstream) ||
+        (
+          await this.run(['check-ref-format', options.upstream], {
+            signal,
+            allowedExitCodes: [0, 1],
+          })
+        ).exitCode !== 0)
+    )
+      throw new GitError('INVALID_REF', 'Choose an existing local or remote branch as upstream');
+    return this.transaction(
+      'Set upstream',
+      async (_index, before) => {
+        if (before.refs?.[ref] !== options.expected)
+          throw new GitError(
+            'STALE_REF',
+            'The branch changed. Review it before setting its upstream.',
+          );
+        await this.run(
+          [
+            'branch',
+            ...(options.upstream
+              ? [`--set-upstream-to=${options.upstream}`]
+              : ['--unset-upstream']),
+            '--',
+            options.name,
+          ],
+          { signal, readOnly: false },
+        );
+      },
+      signal,
+      undefined,
+      false,
+      [ref],
+      [options.name],
+    );
   }
   private async canRename(ref: string, signal?: AbortSignal) {
     const current = await this.head(signal);
@@ -834,6 +872,7 @@ export class WorkingTree {
     const options = referenceOptionsSchema.parse(input);
     if (options.action === 'checkoutBranch') return this.checkoutBranch(options, signal);
     if (options.action === 'renameBranch') return this.renameBranch(options, signal);
+    if (options.action === 'setUpstream') return this.setUpstream(options, signal);
     const branch = options.action === 'createBranch';
     const ref = `refs/${branch ? 'heads' : 'tags'}/${options.name}`;
     if (options.name.startsWith('-') || options.name === 'HEAD' || options.name.includes('\0'))
@@ -1063,8 +1102,18 @@ export class WorkingTree {
             : ['update-ref', '--no-deref', '-d', ref, expected.head.oid!];
           await this.run(args, { readOnly: false });
         }
-        if (target.refs && expected.refs)
-          await this.restoreReferences(target.refs, expected.refs, signal);
+        const restoreRefs = async () => {
+          if (target.refs && expected.refs)
+            await this.restoreReferences(target.refs, expected.refs, signal);
+        };
+        if (target.branchConfig && expected.branchConfig)
+          await this.configuration.restore(
+            target.branchConfig,
+            expected.branchConfig,
+            restoreRefs,
+            signal,
+          );
+        else await restoreRefs();
         if (target.files) await this.backups.restore(target.files, signal);
         if (!sameHead(target.head, expected.head) || current.signature !== target.signature)
           await publish();

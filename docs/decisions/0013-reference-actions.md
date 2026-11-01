@@ -21,3 +21,9 @@ The checkout slice is validated with different trees, later untracked and confli
 ## Branch rename
 
 Rename uses native `git branch --move`, including the current branch, and journals both ref names and their local branch settings. The destination must have neither a ref nor existing branch settings. Branches used by a different worktree are refused. Undo reverses the native rename after verifying both refs, HEAD/index and the exact affected configuration entries. Settings for similarly named branches (including names with dots) are outside the scope and remain unchanged. Configuration entries are recorded as bytes, preserving non-UTF-8 values and multiline descriptions without decoding them for comparison.
+
+## Upstream settings
+
+Upstream selection accepts an existing full local or remote branch ref, or clears the upstream. Native `git branch` applies the change. Undo checks the branch tip and affected settings, acquires `config.lock`, and prepares a private copy that preserves all unrelated configuration. Only the selected branch sections are replaced. Native Git parses and verifies that candidate before publication. Repeated values, bare boolean keys, multiline text, and non-UTF-8 values round-trip; section comments/formatting may be normalized. An existing lock is left untouched and causes refusal. Configuration is capped at 2 MiB for this operation.
+
+Branch creation, rename, tags and upstream settings work in bare repositories. Their ref-only changes do not publish an otherwise absent worktree index. The upstream UI and its undo flow are tested in Electron, in addition to the real-Git configuration tests.

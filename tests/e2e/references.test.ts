@@ -37,6 +37,20 @@ test('create branches and annotated tags, confirm deletion and restore with Undo
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
     await expect(page.getByTestId('head')).toHaveText('main');
 
+    await page.getByRole('button', { name: 'Set upstream main', exact: true }).click();
+    dialog = page.getByRole('dialog', { name: 'Set upstream' });
+    await dialog
+      .getByRole('combobox', { name: 'Upstream', exact: true })
+      .selectOption('refs/heads/feature/ui');
+    await dialog.getByRole('button', { name: 'Set upstream', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(fixtureGit(repo, ['rev-parse', '--symbolic-full-name', 'main@{upstream}'])).toBe(
+      'refs/heads/feature/ui',
+    );
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect
+      .poll(() => fixtureGit(repo, ['rev-parse', '--symbolic-full-name', 'main@{upstream}']))
+      .toBe('refs/remotes/origin/main');
     await page.getByRole('button', { name: 'New tag', exact: true }).click();
     dialog = page.getByRole('dialog', { name: 'Create tag' });
     await dialog.getByRole('textbox', { name: 'Tag name', exact: true }).fill('release/ui');
