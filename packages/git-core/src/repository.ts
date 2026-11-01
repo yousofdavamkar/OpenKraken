@@ -7,6 +7,7 @@ import { HistoryParser, RefsParser, StatusParser, HISTORY_FORMAT, REF_FORMAT } f
 import { HistoryCache } from './history-cache.js';
 import { RepositoryPreferences } from './preferences.js';
 import { HistoryCursor } from './history.js';
+import { WorkingTree } from './working-tree.js';
 import { RepositoryQueue } from './queue.js';
 
 async function exists(path: string) {
@@ -403,6 +404,38 @@ export class RepositoryService {
     this.history(id, cursor);
     commits.sort((a, b) => b.committer.time - a.committer.time);
     return { cursor, commits: commits.slice(0, 100), truncated: commits.length > 100 };
+  }
+  private workingTrees = new Map<string, WorkingTree>();
+  private working(id: string) {
+    const repo = this.repositories.get(id);
+    if (!repo) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
+    if (!this.dataDir)
+      throw new GitError(
+        'PROFILE_REQUIRED',
+        'A profile directory is required for recoverable working-tree operations',
+      );
+    let work = this.workingTrees.get(id);
+    if (!work) {
+      work = new WorkingTree(this.git, repo, this.dataDir);
+      this.workingTrees.set(id, work);
+    }
+    return work;
+  }
+  workingState(id: string, signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(false, () => work.state(signal), signal);
+  }
+  files(id: string, action: 'stage' | 'unstage', paths: string[], signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(
+      true,
+      () => work.files(action, paths, signal),
+      signal,
+    );
+  }
+  undo(id: string, redo = false, signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(true, () => work.undo(redo, signal), signal);
   }
   async dispose() {
     await Promise.all([...this.histories.values()].map((cursor) => cursor.close()));

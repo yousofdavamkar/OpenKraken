@@ -19,6 +19,8 @@ export interface RunOptions {
   onStdout?: (chunk: Buffer) => void | Promise<void>;
   allowedExitCodes?: number[];
   env?: NodeJS.ProcessEnv;
+  /** Trusted service-owned alternate index; never sourced from renderer or shell env. */
+  indexFile?: string;
 }
 /** No shell. Bounded total output even when streaming; wait for close before releasing locks. */
 export function runProcess(
@@ -40,6 +42,7 @@ export function runProcess(
         )
       )
         delete env[key];
+    if (options.indexFile) env.GIT_INDEX_FILE = options.indexFile;
     delete env.GIT_SSL_NO_VERIFY;
     env.LC_ALL = 'C';
     env.GIT_TERMINAL_PROMPT = '0';

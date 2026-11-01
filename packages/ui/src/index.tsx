@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AvatarSettings } from './avatars.js';
+import { WorkingTreePanel } from './working-tree.js';
 import { History } from './history.js';
 import { RefControls } from './ref-controls.js';
 import { useRepository } from './store.js';
@@ -173,31 +174,7 @@ function App() {
                 </section>
               )}
 
-              <h2>
-                Working tree <span>{snapshot.status.entries.length}</span>
-              </h2>
-              {snapshot.repository.isBare ? (
-                <p className="muted">Bare repository</p>
-              ) : snapshot.status.entries.length ? (
-                snapshot.status.entries.map((entry) => (
-                  <div className="status-entry" key={entry.pathBytes}>
-                    <code className={entry.kind === 'conflict' ? 'conflict' : ''}>
-                      {entry.index}
-                      {entry.worktree}
-                    </code>
-                    <span title={entry.path}>
-                      {entry.path}
-                      {entry.origPath && <small>from {entry.origPath}</small>}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <div className="clean">
-                  <span>✓</span>
-                  <p>Working tree clean</p>
-                </div>
-              )}
-              <p className="status-key">Left: index · Right: working tree</p>
+              <WorkingTreePanel key={snapshot.repository.id} />
             </aside>
           </main>
           <footer>

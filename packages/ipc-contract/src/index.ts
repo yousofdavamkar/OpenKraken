@@ -117,7 +117,41 @@ const historyRequests = [
     })
     .strict(),
 ] as const;
+const repoIdSchema = z.string().regex(/^[0-9a-f]{64}$/);
+export const workingStateSchema = z.object({
+  status: statusSchema,
+  head: headSchema,
+  undo: z.object({ id: requestId, label: z.string() }).optional(),
+  redo: z.object({ id: requestId, label: z.string() }).optional(),
+});
+export type WorkingState = z.infer<typeof workingStateSchema>;
+const pathBytesSchema = z
+  .string()
+  .min(1)
+  .max(65536)
+  .regex(/^[A-Za-z0-9+/]+={0,2}$/);
+const workingRequests = [
+  z.object({ id: requestId, method: z.literal('workingState'), repoId: repoIdSchema }).strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('files'),
+      repoId: repoIdSchema,
+      action: z.enum(['stage', 'unstage']),
+      paths: z.array(pathBytesSchema).min(1).max(10000),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('undo'),
+      repoId: repoIdSchema,
+      redo: z.boolean().optional(),
+    })
+    .strict(),
+] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  ...workingRequests,
   z
     .object({
       id: requestId,
@@ -149,6 +183,7 @@ export const requestSchema = z.discriminatedUnion('method', [
 ]);
 const repositoryPath = z.string().min(1).max(32768);
 export const serviceRequestSchema = z.discriminatedUnion('method', [
+  ...workingRequests,
   ...historyRequests,
   z.object({ id: requestId, method: z.literal('open'), path: repositoryPath }).strict(),
   z
@@ -171,6 +206,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('workingState'), state: workingStateSchema }),
   z.object({ kind: z.literal('appearance'), remoteAvatars: z.boolean() }),
   z.object({
     kind: z.literal('avatars'),

@@ -13,6 +13,15 @@ function getService() {
 }
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
   const git = await getService();
+  if (request.method === 'workingState')
+    return { kind: 'workingState', state: await git.workingState(request.repoId, signal) };
+  if (request.method === 'files')
+    return {
+      kind: 'workingState',
+      state: await git.files(request.repoId, request.action, request.paths, signal),
+    };
+  if (request.method === 'undo')
+    return { kind: 'workingState', state: await git.undo(request.repoId, request.redo, signal) };
   if (request.method === 'page')
     return {
       kind: 'page',

@@ -577,3 +577,31 @@ footer {
   color: #b8c9da;
   font-size: 8px;
 }
+.working-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.working-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-top: 16px;
+}
+.working-heading h3 {
+  margin: 8px 0;
+}
+.working-heading button,
+.working-file button,
+.working-actions button {
+  padding: 5px 7px;
+  font-size: 11px;
+}
+.working-file {
+  padding: 8px 0;
+  border-bottom: 1px solid #253142;
+}
+.working-file .status-entry {
+  margin-bottom: 5px;
+}
