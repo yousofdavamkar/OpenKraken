@@ -1,5 +1,13 @@
 import { z } from 'zod';
 import {
+  providerPullSummarySchema,
+  providerPullSourceSchema,
+  providerCreatePullSchema,
+  providerPullRevisionSchema,
+  providerPullTemplatesOptionsSchema,
+  providerPullTemplateOptionsSchema,
+  providerPullTemplatesSchema,
+  providerPullTemplateSchema,
   providerCreateCommentSchema,
   providerPullCommentSchema,
   providerPullCommentsPageSchema,
@@ -1125,6 +1133,38 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerPreviewPull'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerPullSourceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerCreatePull'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerCreatePullSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerPullTemplates'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerPullTemplatesOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerPullTemplate'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerPullTemplateOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerPullComments'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerPullReviewsOptionsSchema,
@@ -1332,6 +1372,21 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('providerPullCreationPreview'),
+      revision: providerPullRevisionSchema,
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal('providerPullCreated'), pullRequest: providerPullSummarySchema })
+    .strict(),
+  z
+    .object({ kind: z.literal('providerPullTemplates'), templates: providerPullTemplatesSchema })
+    .strict(),
+  z
+    .object({ kind: z.literal('providerPullTemplate'), template: providerPullTemplateSchema })
+    .strict(),
   z
     .object({ kind: z.literal('providerPullComments'), page: providerPullCommentsPageSchema })
     .strict(),

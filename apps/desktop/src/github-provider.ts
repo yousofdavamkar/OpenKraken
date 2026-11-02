@@ -1,5 +1,18 @@
 import { Octokit } from '@octokit/rest';
 import {
+  providerPullTemplatesOptionsSchema,
+  providerPullTemplateOptionsSchema,
+  type ProviderPullTemplatesOptions,
+  type ProviderPullTemplateOptions,
+  type ProviderPullTemplates,
+  type ProviderPullTemplate,
+  providerPullSourceSchema,
+  providerCreatePullSchema,
+  providerPullRevisionSchema,
+  type ProviderPullSource,
+  type ProviderCreatePull,
+  type ProviderPullRevision,
+  type ProviderPullSummary,
   providerCreateCommentSchema,
   type ProviderCreateComment,
   type ProviderPullComment,
@@ -33,15 +46,34 @@ import {
   type ProviderRepositoryPage,
 } from '@openkraken/ipc-contract';
 
-export class ProviderError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+import { ProviderError } from './provider-error.js';
+export { ProviderError } from './provider-error.js';
+import { loadPullTemplates, loadPullTemplate } from './github-templates.js';
 export interface ProviderDriver {
+  pullTemplates(
+    origin: string,
+    token: string,
+    options: ProviderPullTemplatesOptions,
+    signal?: AbortSignal,
+  ): Promise<ProviderPullTemplates>;
+  pullTemplate(
+    origin: string,
+    token: string,
+    options: ProviderPullTemplateOptions,
+    signal?: AbortSignal,
+  ): Promise<ProviderPullTemplate>;
+  previewPull(
+    origin: string,
+    token: string,
+    options: ProviderPullSource,
+    signal?: AbortSignal,
+  ): Promise<ProviderPullRevision>;
+  createPull(
+    origin: string,
+    token: string,
+    options: ProviderCreatePull,
+    signal?: AbortSignal,
+  ): Promise<ProviderPullSummary>;
   createComment(
     origin: string,
     token: string,
@@ -148,6 +180,140 @@ export class GitHubProvider implements ProviderDriver {
           'The provider returned an invalid repository page.',
         );
       return result.data;
+    });
+  }
+  async pullTemplates(
+    origin: string,
+    token: string,
+    input: ProviderPullTemplatesOptions,
+    signal?: AbortSignal,
+  ) {
+    const options = providerPullTemplatesOptionsSchema.parse(input);
+    return this.request(origin, token, signal, (client, headers) =>
+      loadPullTemplates(client, headers, options),
+    );
+  }
+  async pullTemplate(
+    origin: string,
+    token: string,
+    input: ProviderPullTemplateOptions,
+    signal?: AbortSignal,
+  ) {
+    const options = providerPullTemplateOptionsSchema.parse(input);
+    return this.request(origin, token, signal, (client, headers) =>
+      loadPullTemplate(client, headers, options),
+    );
+  }
+  async previewPull(
+    origin: string,
+    token: string,
+    input: ProviderPullSource,
+    signal?: AbortSignal,
+  ) {
+    const options = providerPullSourceSchema.parse(input);
+    return this.request(origin, token, signal, async (client, headers) => {
+      const branch = async (repo: ProviderPullSource['repository'], name: string) => {
+        const { data } = await client.repos.getBranch({
+          headers,
+          owner: repo.owner,
+          repo: repo.name,
+          branch: name,
+        });
+        if (data?.name !== name)
+          throw new ProviderError(
+            'PROVIDER_RESPONSE',
+            'The provider returned an unexpected branch.',
+          );
+        return data.commit?.sha;
+      };
+      const parsed = providerPullRevisionSchema.safeParse({
+        head: await branch(options.source, options.head),
+        base: await branch(options.repository, options.base),
+      });
+      if (!parsed.success)
+        throw new ProviderError(
+          'PROVIDER_RESPONSE',
+          'The provider returned invalid branch commits.',
+        );
+      if (parsed.data.head === parsed.data.base)
+        throw new ProviderError(
+          'PROVIDER_PULL_EMPTY',
+          'The selected branches point to the same commit. Push your changes or choose different branches.',
+        );
+      return parsed.data;
+    });
+  }
+  async createPull(origin: string, token: string, input: ProviderCreatePull, signal?: AbortSignal) {
+    const options = providerCreatePullSchema.parse(input);
+    const current = await this.previewPull(
+      origin,
+      token,
+      {
+        repository: options.repository,
+        source: options.source,
+        head: options.head,
+        base: options.base,
+      },
+      signal,
+    );
+    if (current.head !== options.revision.head || current.base !== options.revision.base)
+      throw new ProviderError(
+        'STALE_PROVIDER_PULL',
+        'The branch commits changed. Preview the pull request again before creating it.',
+      );
+    signal?.throwIfAborted();
+    const host = providerOriginSchema.parse(origin);
+    return this.request(host, token, signal, async (client, headers) => {
+      try {
+        const sameRepository =
+          options.repository.owner.toLowerCase() === options.source.owner.toLowerCase() &&
+          options.repository.name.toLowerCase() === options.source.name.toLowerCase();
+        const { data } = await client.pulls.create({
+          headers,
+          owner: options.repository.owner,
+          repo: options.repository.name,
+          head: sameRepository ? options.head : `${options.source.owner}:${options.head}`,
+          ...(sameRepository ? {} : { head_repo: options.source.name }),
+          base: options.base,
+          title: options.title,
+          body: options.body,
+          draft: options.draft,
+          maintainer_can_modify: options.maintainerCanModify,
+        });
+        const summary = pullSummary(host, options.repository, data);
+        const matchesRepository = (
+          actual: typeof data.head.repo,
+          expected: ProviderPullSource['repository'],
+        ) =>
+          actual?.owner?.login?.toLowerCase() === expected.owner.toLowerCase() &&
+          actual?.name?.toLowerCase() === expected.name.toLowerCase();
+        if (
+          data.head?.sha !== options.revision.head ||
+          data.base?.sha !== options.revision.base ||
+          data.head.ref !== options.head ||
+          data.base.ref !== options.base ||
+          !matchesRepository(data.head.repo, options.source) ||
+          !matchesRepository(data.base.repo, options.repository) ||
+          summary.state !== 'open' ||
+          summary.draft !== options.draft
+        )
+          throw new Error('Unexpected PR acknowledgment');
+        return summary;
+      } catch (error) {
+        const status =
+          typeof error === 'object' && error !== null && 'status' in error
+            ? Number(error.status)
+            : 0;
+        if ([400, 401, 403, 404, 422, 429].includes(status))
+          throw new ProviderError(
+            'PROVIDER_PULL_REJECTED',
+            'The provider rejected the pull request. Check permissions, branches and whether a matching pull request already exists.',
+          );
+        throw new ProviderError(
+          'PROVIDER_WRITE_UNCERTAIN',
+          'The provider may have created the pull request. Check existing pull requests before trying again.',
+        );
+      }
     });
   }
   async pullRequests(

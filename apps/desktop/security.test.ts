@@ -401,3 +401,56 @@ test('inline comment IPC accepts only explicit line or reply targets and stays o
       requestSchema.safeParse({ ...request, options: { ...request.options, ...extra } }).success,
     ).toBe(false);
 });
+
+test('PR creation IPC requires reviewed commits and literal branch/template selectors', () => {
+  const common = { id: '00000000-0000-4000-8000-000000000000', accountId: 'a'.repeat(64) };
+  const options = {
+    repository: { owner: 'team', name: 'project' },
+    source: { owner: 'contributor', name: 'fork' },
+    head: 'feature/name',
+    base: 'main',
+    revision: { head: '1'.repeat(40), base: '2'.repeat(40) },
+    title: 'Change',
+    body: '',
+    draft: false,
+    maintainerCanModify: false,
+  };
+  const create = { ...common, method: 'providerCreatePull', options };
+  expect(requestSchema.safeParse(create).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(create).success).toBe(false);
+  for (const extra of [
+    { revision: undefined },
+    { title: ' ' },
+    { title: 'x\ny' },
+    { body: 'x'.repeat(65537) },
+    { head: '../main' },
+    { head: 'feature:other' },
+    { head: 'a@{1}' },
+    { base: '-main' },
+    { url: 'https://other.test' },
+    { token: 'secret' },
+  ])
+    expect(requestSchema.safeParse({ ...create, options: { ...options, ...extra } }).success).toBe(
+      false,
+    );
+  const template = {
+    ...common,
+    method: 'providerPullTemplate',
+    options: {
+      repository: options.repository,
+      revision: options.revision.base,
+      path: '.github/PULL_REQUEST_TEMPLATE/bug.md',
+    },
+  };
+  expect(requestSchema.safeParse(template).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(template).success).toBe(false);
+  for (const path of [
+    '../README.md',
+    '.github/PULL_REQUEST_TEMPLATE/../secret',
+    'README.md',
+    '/pull_request_template.md',
+  ])
+    expect(
+      requestSchema.safeParse({ ...template, options: { ...template.options, path } }).success,
+    ).toBe(false);
+});

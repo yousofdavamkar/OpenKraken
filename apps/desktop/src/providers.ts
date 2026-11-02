@@ -3,6 +3,14 @@ import { mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import {
+  providerPullTemplatesOptionsSchema,
+  providerPullTemplateOptionsSchema,
+  type ProviderPullTemplatesOptions,
+  type ProviderPullTemplateOptions,
+  providerPullSourceSchema,
+  providerCreatePullSchema,
+  type ProviderPullSource,
+  type ProviderCreatePull,
   providerCreateCommentSchema,
   type ProviderCreateComment,
   providerPullReviewsOptionsSchema,
@@ -201,6 +209,34 @@ export class ProviderService {
       providerRepositoryPageNumberSchema.parse(page);
       const { account, token } = await this.authorize(id, signal);
       return this.github.repositories(account.origin, token, page, signal);
+    });
+  }
+  pullTemplates(id: string, input: ProviderPullTemplatesOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerPullTemplatesOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.pullTemplates(account.origin, token, options, signal);
+    });
+  }
+  pullTemplate(id: string, input: ProviderPullTemplateOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerPullTemplateOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.pullTemplate(account.origin, token, options, signal);
+    });
+  }
+  previewPull(id: string, input: ProviderPullSource, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerPullSourceSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.previewPull(account.origin, token, options, signal);
+    });
+  }
+  createPull(id: string, input: ProviderCreatePull, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerCreatePullSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.createPull(account.origin, token, options, signal);
     });
   }
   pullRequests(id: string, input: ProviderPullListOptions, signal?: AbortSignal) {

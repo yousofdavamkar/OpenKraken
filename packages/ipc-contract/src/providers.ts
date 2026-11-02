@@ -359,3 +359,88 @@ export const providerCreateCommentSchema = providerPullOptionsSchema
   .strict();
 export type ProviderCommentTarget = z.infer<typeof providerCommentTargetSchema>;
 export type ProviderCreateComment = z.infer<typeof providerCreateCommentSchema>;
+
+export const providerBranchNameSchema = z
+  .string()
+  .min(1)
+  .max(1024)
+  .refine(
+    (name) =>
+      name !== '@' &&
+      name !== 'HEAD' &&
+      !name.startsWith('-') &&
+      !name.endsWith('.') &&
+      ![...name].some(
+        (char) =>
+          char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127 || '~^:?*[\\'.includes(char),
+      ) &&
+      !name.includes('..') &&
+      !name.includes('@{') &&
+      name.split('/').every((part) => !!part && !part.startsWith('.') && !part.endsWith('.lock')),
+    'Enter a branch name',
+  );
+export const providerPullSourceSchema = z
+  .object({
+    repository: providerRepositoryTargetSchema,
+    source: providerRepositoryTargetSchema,
+    head: providerBranchNameSchema,
+    base: providerBranchNameSchema,
+  })
+  .strict();
+export const providerCreatePullSchema = providerPullSourceSchema
+  .extend({
+    revision: providerPullRevisionSchema,
+    title: z
+      .string()
+      .min(1)
+      .max(256)
+      .refine((value) => !!value.trim() && !/[\r\n]/.test(value), 'Enter a single-line title'),
+    body: z.string().max(65536),
+    draft: z.boolean(),
+    maintainerCanModify: z.boolean(),
+  })
+  .strict();
+export type ProviderPullSource = z.infer<typeof providerPullSourceSchema>;
+export type ProviderCreatePull = z.infer<typeof providerCreatePullSchema>;
+export type ProviderPullRevision = z.infer<typeof providerPullRevisionSchema>;
+export const providerPullTemplatesOptionsSchema = z
+  .object({ repository: providerRepositoryTargetSchema })
+  .strict();
+const providerTemplatePathSchema = z
+  .string()
+  .min(1)
+  .max(4096)
+  .regex(
+    /^(?:(?:\.github|docs)\/)?(?:pull_request_template(?:\.(?:md|txt))?|pull_request_template\/[^/\\]+)$/i,
+  )
+  .refine(
+    (path) =>
+      ![...path].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) &&
+      path.split('/').every((part) => part !== '.' && part !== '..'),
+  );
+export const providerPullTemplatesSchema = z
+  .object({
+    defaultBranch: providerBranchNameSchema,
+    revision: providerCommitSchema,
+    templates: z
+      .array(
+        z
+          .object({
+            path: providerTemplatePathSchema,
+            sha: providerCommitSchema,
+            size: providerCountSchema,
+          })
+          .strict(),
+      )
+      .max(50),
+    limited: z.boolean(),
+  })
+  .strict();
+export const providerPullTemplateOptionsSchema = providerPullTemplatesOptionsSchema
+  .extend({ revision: providerCommitSchema, path: providerTemplatePathSchema })
+  .strict();
+export const providerPullTemplateSchema = z.object({ body: z.string().max(65536) }).strict();
+export type ProviderPullTemplatesOptions = z.infer<typeof providerPullTemplatesOptionsSchema>;
+export type ProviderPullTemplateOptions = z.infer<typeof providerPullTemplateOptionsSchema>;
+export type ProviderPullTemplates = z.infer<typeof providerPullTemplatesSchema>;
+export type ProviderPullTemplate = z.infer<typeof providerPullTemplateSchema>;

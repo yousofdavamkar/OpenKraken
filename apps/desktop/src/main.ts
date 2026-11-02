@@ -244,6 +244,10 @@ else {
           );
         }
         if (
+          request.method === 'providerPreviewPull' ||
+          request.method === 'providerCreatePull' ||
+          request.method === 'providerPullTemplates' ||
+          request.method === 'providerPullTemplate' ||
           request.method === 'providerPullComments' ||
           request.method === 'providerCreateComment' ||
           request.method === 'providerPullFiles' ||
@@ -264,6 +268,43 @@ else {
           providers = getProviders();
           const controller = new AbortController();
           providerRequests.set(request.id, controller);
+
+          if (request.method === 'providerPreviewPull')
+            return resultSchema.parse({
+              kind: 'providerPullCreationPreview',
+              revision: await providers.previewPull(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerCreatePull')
+            return resultSchema.parse({
+              kind: 'providerPullCreated',
+              pullRequest: await providers.createPull(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerPullTemplates')
+            return resultSchema.parse({
+              kind: 'providerPullTemplates',
+              templates: await providers.pullTemplates(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerPullTemplate')
+            return resultSchema.parse({
+              kind: 'providerPullTemplate',
+              template: await providers.pullTemplate(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerPullComments')
             return resultSchema.parse({
               kind: 'providerPullComments',
@@ -426,6 +467,10 @@ else {
         if (
           request.method === 'providerGit' ||
           (request.method === 'clone' && !!request.providerAccountId) ||
+          request.method === 'providerPreviewPull' ||
+          request.method === 'providerCreatePull' ||
+          request.method === 'providerPullTemplates' ||
+          request.method === 'providerPullTemplate' ||
           request.method === 'providerPullComments' ||
           request.method === 'providerCreateComment' ||
           request.method === 'providerPullFiles' ||
