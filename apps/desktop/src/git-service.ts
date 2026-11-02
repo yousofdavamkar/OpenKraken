@@ -92,7 +92,10 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
         ? `Fetch ${request.operation.name}`
         : request.operation.method === 'pull'
           ? 'Pull upstream'
-          : 'Push repository'
+          : request.operation.method === 'deleteRemote' ||
+              request.operation.method === 'deleteRemotePreview'
+            ? 'Delete remote ref'
+            : 'Push repository'
       : request.method === 'clone'
         ? `Clone ${request.options.url}`
         : request.method === 'fetch'
@@ -145,7 +148,11 @@ async function executeGit(
               ? 'Reviewing provider push…'
               : request.operation.method === 'pull'
                 ? 'Pulling provider repository…'
-                : 'Fetching provider repository…';
+                : request.operation.method === 'deleteRemote'
+                  ? 'Deleting provider remote ref…'
+                  : request.operation.method === 'deleteRemotePreview'
+                    ? 'Reviewing provider remote deletion…'
+                    : 'Fetching provider repository…';
     }
     parent!.postMessage({ type: 'gitProgress', id: request.id, text });
   };
@@ -163,9 +170,11 @@ async function executeGit(
     const name =
       operation.method === 'fetch'
         ? operation.name
-        : operation.method === 'pushPreview'
+        : operation.method === 'pushPreview' || operation.method === 'deleteRemotePreview'
           ? operation.selection.name
-          : operation.options.plan.name;
+          : operation.method === 'deleteRemote'
+            ? operation.plan.name
+            : operation.options.plan.name;
     return {
       kind: 'providerGitTarget',
       target: await git.providerRemoteTarget(
@@ -189,6 +198,30 @@ async function executeGit(
         state: await git.pull(
           operation.repoId,
           operation.options,
+          signal,
+          progress,
+          auth,
+          provider,
+        ),
+      };
+    if (operation.method === 'deleteRemotePreview')
+      return {
+        kind: 'deleteRemotePreview',
+        plan: await git.deleteRemotePreview(
+          operation.repoId,
+          operation.selection,
+          signal,
+          progress,
+          auth,
+          provider,
+        ),
+      };
+    if (operation.method === 'deleteRemote')
+      return {
+        kind: 'remotes',
+        state: await git.deleteRemote(
+          operation.repoId,
+          operation.plan,
           signal,
           progress,
           auth,
@@ -547,7 +580,7 @@ parent.on('message', (event) => {
                 request.method === 'providerGit'
                   ? providerGitFailure(
                       error,
-                      request.method === 'providerGit' && request.operation.method === 'pull',
+                      request.method === 'providerGit' ? request.operation.method : 'clone',
                     )
                   : error instanceof Error
                     ? error.message
@@ -574,13 +607,21 @@ async function shutdown() {
   }
 }
 
-function providerGitFailure(error: unknown, pull: boolean) {
+function providerGitFailure(error: unknown, operation: string) {
   const messages: Record<string, string> = {
     PROVIDER_TRANSPORT_REWRITE:
       'Git rewrites this URL. Disable the rewrite or use Git credential helpers.',
-    PUSH_REJECTED: 'Push rejected by the server. Fetch and review the destination before retrying.',
+    PUSH_REJECTED:
+      operation === 'deleteRemote'
+        ? 'Deletion rejected by the server. Check branch protections and review the destination before retrying.'
+        : 'Push rejected by the server. Fetch and review the destination before retrying.',
     PUSH_LEASE_REJECTED:
-      'The destination changed since review. Review the push again before retrying.',
+      operation === 'deleteRemote'
+        ? 'The destination changed since review. Review the deletion again before retrying.'
+        : 'The destination changed since review. Review the push again before retrying.',
+    STALE_REMOTE_DELETE:
+      'The remote configuration or tracking refs changed. Review the deletion again.',
+    REMOTE_REF_MISSING: 'That branch or tag does not exist at the push destination.',
     STALE_PUSH: 'The local tip or remote settings changed. Review the push again.',
     STALE_PROVIDER_REMOTE:
       'The remote configuration or tracking refs changed. Review the remote and retry.',
@@ -594,7 +635,7 @@ function providerGitFailure(error: unknown, pull: boolean) {
   };
   return (
     (error instanceof GitError && messages[error.code]) ||
-    (pull
+    (operation === 'pull'
       ? 'Pull did not complete. Check repository access and review the refreshed branch and any conflicts. Fast-forward-only refuses divergent history.'
       : 'Provider Git operation failed. Check repository access and HTTPS settings, or use Git credential helpers.')
   );

@@ -243,3 +243,52 @@ test('saved pull requires working and remote revisions and resolves its upstream
       requestSchema.safeParse({ ...request, operation: { ...operation, ...extra } }).success,
     ).toBe(false);
 });
+
+test('saved remote deletion requires a reviewed ref and exact tip without caller credentials', () => {
+  const id = '00000000-0000-4000-8000-000000000000',
+    repoId = 'a'.repeat(64),
+    accountId = 'b'.repeat(64),
+    revision = 'c'.repeat(64);
+  const selection = { name: 'origin', destination: 'refs/tags/release' };
+  const preview = {
+    id,
+    method: 'providerGit',
+    accountId,
+    operation: { method: 'deleteRemotePreview', repoId, selection, revision },
+  };
+  expect(requestSchema.safeParse(preview).success).toBe(true);
+  const plan = {
+    ...selection,
+    token: revision,
+    url: 'https://github.com/team/repo.git',
+    remoteOid: '1'.repeat(40),
+  };
+  const request = {
+    id,
+    method: 'providerGit',
+    accountId,
+    operation: { method: 'deleteRemote', repoId, plan },
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  for (const override of [
+    { remoteOid: null },
+    { remoteOid: '' },
+    { token: undefined },
+    { destination: 'refs/notes/private' },
+  ])
+    expect(
+      requestSchema.safeParse({
+        ...request,
+        operation: { ...request.operation, plan: { ...plan, ...override } },
+      }).success,
+    ).toBe(false);
+  for (const extra of [
+    { credential: { password: 'secret' } },
+    { url: 'https://other.test/team/repo.git' },
+    { force: true },
+  ])
+    expect(
+      requestSchema.safeParse({ ...preview, operation: { ...preview.operation, ...extra } })
+        .success,
+    ).toBe(false);
+});

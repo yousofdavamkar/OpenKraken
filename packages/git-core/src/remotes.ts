@@ -333,6 +333,7 @@ export class Remotes {
     const state = await this.state(signal);
     if (!state.remotes.some((remote) => remote.name === selection.name))
       throw new GitError('UNKNOWN_REMOTE', 'Choose an existing remote');
+    await this.checkProvider(selection.name, 'push', signal);
     await this.run(['check-ref-format', selection.destination], { signal });
     const url = await this.pushUrl(selection.name, signal);
     const remoteOid = await this.remoteOid(url, selection.destination, signal);
@@ -351,6 +352,7 @@ export class Remotes {
         'STALE_REMOTE_DELETE',
         'The remote configuration or tracking refs changed. Review the deletion again.',
       );
+    await this.checkProvider(plan.name, 'push', signal);
     await this.pushUrl(plan.name, signal);
     await this.network(
       [

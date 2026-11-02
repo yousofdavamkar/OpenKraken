@@ -218,7 +218,9 @@ else {
             target.target.token !==
             (request.operation.method === 'push'
               ? request.operation.options.plan.token
-              : request.operation.revision)
+              : request.operation.method === 'deleteRemote'
+                ? request.operation.plan.token
+                : request.operation.revision)
           )
             throw new ProviderError(
               'STALE_PROVIDER_REMOTE',

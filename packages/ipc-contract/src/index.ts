@@ -783,6 +783,21 @@ const editorAnswer = z
 export const providerGitOperationSchema = z.discriminatedUnion('method', [
   z
     .object({
+      method: z.literal('deleteRemotePreview'),
+      repoId: repoIdSchema,
+      selection: deleteRemoteSelectionSchema,
+      revision: remoteTokenSchema,
+    })
+    .strict(),
+  z
+    .object({
+      method: z.literal('deleteRemote'),
+      repoId: repoIdSchema,
+      plan: deleteRemotePlanSchema,
+    })
+    .strict(),
+  z
+    .object({
       method: z.literal('pull'),
       repoId: repoIdSchema,
       options: pullOptionsSchema,

@@ -529,8 +529,9 @@ export class RepositoryService {
     signal?: AbortSignal,
     onProgress?: (text: string) => void,
     authentication?: NodeJS.ProcessEnv,
+    provider?: ProviderRemoteAuthorization,
   ) {
-    const { repo, manager } = this.remoteManager(id, onProgress, authentication);
+    const { repo, manager } = this.remoteManager(id, onProgress, authentication, provider);
     return this.queue(repo.commonDir).run(
       false,
       () => manager.deletePreview(selection, signal),
@@ -543,8 +544,9 @@ export class RepositoryService {
     signal?: AbortSignal,
     onProgress?: (text: string) => void,
     authentication?: NodeJS.ProcessEnv,
+    provider?: ProviderRemoteAuthorization,
   ) {
-    const { repo, manager } = this.remoteManager(id, onProgress, authentication);
+    const { repo, manager } = this.remoteManager(id, onProgress, authentication, provider);
     return this.queue(repo.commonDir).run(true, () => manager.delete(plan, signal), signal);
   }
   pushPreview(

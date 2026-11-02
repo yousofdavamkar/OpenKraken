@@ -486,3 +486,87 @@ test('saved-account pull reviews its upstream, guards configuration and integrat
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('saved-account deletion reviews push-side branch and tag tips and refuses changed targets before writing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-provider-delete-'));
+  const source = createFixture(join(root, 'source'));
+  const bare = join(root, 'remote.git');
+  fixtureGit(source, ['clone', '--bare', '.', bare]);
+  const remote = await authenticatedRemote(bare, {
+    basePath: '/team/project.git',
+    password: 'fixture-provider-token',
+  });
+  const local = createFixture(join(root, 'local'));
+  fixtureGit(local, ['remote', 'set-url', '--push', 'origin', remote.url]);
+  const broker = new AskpassBroker(
+    resolve(
+      'apps/desktop/dist/helpers',
+      process.platform === 'win32' ? 'openkraken-askpass.exe' : 'openkraken-askpass',
+    ),
+    () => {
+      throw new Error('Saved deletion must not prompt');
+    },
+  );
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(local);
+    const target = await service.providerRemoteTarget(repo.id, 'origin', 'push');
+    const scope = await broker.open(randomUUID(), 'Delete remote ref', undefined, {
+      url: remote.url,
+      ...remote.credentials,
+    });
+    const environment = {
+      ...scope.environment,
+      GIT_SSL_CAINFO: remote.certificate,
+      GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1',
+    };
+    const provider = { ...target, username: remote.credentials.username };
+    for (const destination of ['refs/heads/main', 'refs/tags/annotated']) {
+      const plan = await service.deleteRemotePreview(
+        repo.id,
+        { name: 'origin', destination },
+        undefined,
+        undefined,
+        environment,
+        provider,
+      );
+      expect(plan.url).toBe(remote.url);
+      expect(plan.remoteOid).toBe(fixtureGit(source, ['rev-parse', destination]));
+      const requests = remote.requests();
+      await expect(
+        service.deleteRemote(repo.id, plan, undefined, undefined, environment, {
+          ...provider,
+          url: remote.url.replace('/team/', '/wrong/'),
+        }),
+      ).rejects.toMatchObject({ code: 'STALE_PROVIDER_REMOTE' });
+      expect(remote.requests()).toBe(requests);
+    }
+    const plan = await service.deleteRemotePreview(
+      repo.id,
+      { name: 'origin', destination: 'refs/heads/main' },
+      undefined,
+      undefined,
+      environment,
+      provider,
+    );
+    const requests = remote.requests();
+    fixtureGit(local, [
+      'remote',
+      'set-url',
+      '--push',
+      'origin',
+      remote.url.replace('/team/', '/changed/'),
+    ]);
+    await expect(
+      service.deleteRemote(repo.id, plan, undefined, undefined, environment, provider),
+    ).rejects.toMatchObject({ code: 'STALE_REMOTE_DELETE' });
+    expect(remote.requests()).toBe(requests);
+    scope.close();
+  } finally {
+    await broker.close();
+    await service.dispose();
+    await remote.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
