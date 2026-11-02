@@ -263,3 +263,60 @@ test('configured external merge tool is available from the conflict editor', asy
     rmSync(root, { recursive: true, force: true });
   }
 });
+test('dragging refs opens an action menu and reviews a merge after switching its destination', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-ref-drop-e2e-'));
+  const path = createFixture(join(root, 'repository'));
+  const original = fixtureGit(path, ['rev-parse', 'HEAD']);
+  fixtureGit(path, ['branch', 'destination']);
+  fixtureGit(path, ['switch', '-c', 'incoming']);
+  writeFileSync(join(path, 'incoming.txt'), 'incoming file\n');
+  fixtureGit(path, ['add', '.']);
+  fixtureGit(path, ['commit', '-m', 'Incoming file']);
+  const target = fixtureGit(path, ['rev-parse', 'HEAD']);
+  fixtureGit(path, ['switch', 'main']);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    const source = page
+      .locator('.ref')
+      .filter({ has: page.getByText('incoming', { exact: true }) });
+    const destination = page
+      .locator('.ref')
+      .filter({ has: page.getByText('destination', { exact: true }) });
+    await source.dragTo(destination);
+    const menu = page.getByRole('dialog', { name: 'Dropped reference actions' });
+    await expect(menu).toBeVisible();
+    expect(fixtureGit(path, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/main');
+    await menu.getByRole('button', { name: 'Merge incoming into destination' }).click();
+    const review = page.getByRole('dialog', { name: 'Integrate commits' });
+    await expect(review).toBeVisible();
+    expect(fixtureGit(path, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/destination');
+    expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(original);
+    await expect(review.getByRole('combobox', { name: 'Target commit' })).toHaveValue(target);
+    await review.getByRole('combobox', { name: 'Merge mode' }).selectOption('ff-only');
+    await review.getByRole('button', { name: 'Start merge' }).click();
+    await expect(review).toHaveCount(0);
+    expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(target);
+    expect(fixtureGit(path, ['rev-parse', 'main'])).toBe(original);
+    const main = page.locator('.ref').filter({ has: page.getByText('main', { exact: true }) });
+    await main.dragTo(source);
+    await menu.getByRole('button', { name: 'Rebase main onto incoming' }).click();
+    await expect(review.getByRole('combobox', { name: 'Operation', exact: true })).toHaveValue(
+      'rebase',
+    );
+    expect(fixtureGit(path, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/main');
+    await expect(review.getByRole('combobox', { name: 'Target commit' })).toHaveValue(target);
+    await review.getByRole('button', { name: 'Start rebase' }).click();
+    await expect(review).toHaveCount(0);
+    expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(target);
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

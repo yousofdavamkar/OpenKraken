@@ -7,21 +7,23 @@ import type {
 } from '@openkraken/ipc-contract';
 import { useRepository, waitForBackground } from './store.js';
 import { GitProgress } from './git-progress.js';
-function IntegrationDialog({
+export function IntegrationDialog({
   snapshot,
   state,
   selected,
+  initialKind = 'merge',
   close,
 }: {
   snapshot: Snapshot;
   state: WorkingState;
   selected?: string;
+  initialKind?: StartOperation['kind'];
   close: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [kind, setKind] = useState<StartOperation['kind']>('merge');
+  const [kind, setKind] = useState<StartOperation['kind']>(initialKind);
   const [mainline, setMainline] = useState('');
-  const [mode, setMode] = useState<'ff' | 'no-ff' | 'squash'>('ff');
+  const [mode, setMode] = useState<'ff' | 'ff-only' | 'no-ff' | 'squash'>('ff');
   const choices = snapshot.refs.filter(
     (ref) => ref.objectType === 'commit' || ref.peeledType === 'commit',
   );
@@ -178,10 +180,17 @@ function IntegrationDialog({
               value={mode}
               onChange={(event) => {
                 const value = event.target.value;
-                if (value === 'ff' || value === 'no-ff' || value === 'squash') setMode(value);
+                if (
+                  value === 'ff' ||
+                  value === 'ff-only' ||
+                  value === 'no-ff' ||
+                  value === 'squash'
+                )
+                  setMode(value);
               }}
             >
               <option value="ff">Fast-forward when possible</option>
+              <option value="ff-only">Fast-forward only</option>
               <option value="no-ff">Always create a merge commit</option>
               <option value="squash">Squash into staged changes</option>
             </select>
@@ -207,9 +216,11 @@ function IntegrationDialog({
               ? 'Create a new commit reversing the selected commit. Reverting a merge also affects what later merges bring in.'
               : kind === 'rebase'
                 ? 'Replay the current branch on the target commit. This changes commit IDs.'
-                : mode === 'squash'
-                  ? 'Stage the combined changes for you to review and commit.'
-                  : 'Integrate the target into the current branch.'}
+                : mode === 'ff-only'
+                  ? 'Advance the branch only if no merge commit is needed. Diverged history is refused.'
+                  : mode === 'squash'
+                    ? 'Stage the combined changes for you to review and commit.'
+                    : 'Integrate the target into the current branch.'}
         </p>
         <p>
           Commit or stash tracked edits first. If conflicts occur, close this dialog to resolve them

@@ -290,3 +290,23 @@ test('merge prediction reports native conflicts without touching HEAD, index or 
     await service.dispose();
   }
 });
+test('ff-only merge refuses divergent history without starting a merge', async () => {
+  const { path, service, repo, original } = await divergent('ff-only');
+  try {
+    const target = fixtureGit(path, ['rev-parse', 'incoming']);
+    const state = await service.workingState(repo.id);
+    await expect(
+      service.startOperation(repo.id, {
+        kind: 'merge',
+        mode: 'ff-only',
+        target,
+        revision: state.revision,
+      }),
+    ).rejects.toMatchObject({ code: 'GIT_FAILED' });
+    expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(original);
+    expect((await service.operationState(repo.id)).kind).toBe('none');
+    expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
+  } finally {
+    await service.dispose();
+  }
+});

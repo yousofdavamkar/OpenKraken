@@ -126,7 +126,7 @@ export const startOperationSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('merge'),
-      mode: z.enum(['ff', 'no-ff', 'squash']),
+      mode: z.enum(['ff', 'ff-only', 'no-ff', 'squash']),
       target: oidSchema,
       revision: z.string().regex(/^[0-9a-f]{64}$/),
     })

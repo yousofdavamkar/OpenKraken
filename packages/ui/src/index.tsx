@@ -14,6 +14,7 @@ import { Reset } from './reset.js';
 import { Integration } from './integration.js';
 import { Pull } from './pull.js';
 import { ManageRemotes } from './remotes.js';
+import { ReferenceDropActions, referenceDragProps } from './reference-drop.js';
 import { RefControls } from './ref-controls.js';
 import { useRepository } from './store.js';
 import './style.css';
@@ -80,6 +81,7 @@ function App() {
       </header>
       <GitProgress />
       <Authentication />
+      <ReferenceDropActions key={snapshot?.repository.id} />
       {init && (
         <form
           className="init-form"
@@ -159,6 +161,7 @@ function App() {
                       <div
                         className={`ref ${ref.isHead ? 'current' : ''} ${snapshot.view.hiddenRefs.includes(ref.name) ? 'hidden-ref' : ''}`}
                         key={ref.name}
+                        {...referenceDragProps(ref, snapshot.repository.id, !!busy)}
                         title={`${ref.name}\n${ref.target}`}
                       >
                         <div className="ref-label">
