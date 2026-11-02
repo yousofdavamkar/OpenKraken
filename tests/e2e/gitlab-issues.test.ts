@@ -130,7 +130,7 @@ test('GitLab issues preserve native visibility and note activity through paging,
     });
     await dialog.getByRole('button', { name: 'Retry issues', exact: true }).click();
     await expect(dialog).toContainText('100 issues loaded');
-    await expect(dialog.getByRole('button', { name: 'New issue', exact: true })).toHaveCount(0);
+    await expect(dialog.getByRole('button', { name: 'New issue', exact: true })).toBeEnabled();
     const list = dialog.getByRole('listbox', { name: 'Issues', exact: true });
     expect(await list.getByRole('option').count()).toBeLessThan(30);
     await dialog.getByRole('button', { name: 'Load more issues', exact: true }).click();
@@ -151,7 +151,7 @@ test('GitLab issues preserve native visibility and note activity through paging,
     await expect(detail.locator('script')).toHaveCount(0);
     await expect(
       detail.getByRole('button', { name: 'Write issue comment', exact: true }),
-    ).toHaveCount(0);
+    ).toBeEnabled();
     await detail.getByRole('button', { name: 'Notes', exact: true }).click();
     const notes = detail.getByRole('region', { name: 'Issue notes', exact: true });
     await expect(notes.getByRole('status')).toContainText('100 notes loaded');

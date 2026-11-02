@@ -323,7 +323,7 @@ function IssueDetails({
             {detail.locked ? ' · Conversation locked' : ''}
           </p>
           <div className="dialog-actions">
-            {target.provider === 'github' && (
+            {
               <>
                 <IssueAction
                   target={target}
@@ -343,7 +343,7 @@ function IssueDetails({
                   }}
                 />
               </>
-            )}
+            }
             <button aria-pressed={tab === 'details'} onClick={() => setTab('details')}>
               Details
             </button>
@@ -660,7 +660,7 @@ function IssueDialog({ close }: { close: () => void }) {
             {target.origin}/{target.repository.owner}/{target.repository.name}
           </p>
           <div className="dialog-actions">
-            {target.provider === 'github' && (
+            {
               <IssueAction
                 target={target}
                 intent={{ action: 'create' }}
@@ -671,8 +671,7 @@ function IssueDialog({ close }: { close: () => void }) {
                   }
                 }}
               />
-            )}
-            {target.provider === 'gitlab' && <span>Read-only GitLab issues</span>}
+            }
             <button onClick={() => setTarget(undefined)}>Choose repository</button>
             <label>
               Issue state{' '}

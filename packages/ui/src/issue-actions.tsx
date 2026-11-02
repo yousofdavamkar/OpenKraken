@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   providerWriteIssueSchema,
+  providerGitLabIssueIntentSchema,
+  type ProviderGitLabIssueActionPreview,
+  type ProviderWriteGitLabIssue,
+  type ProviderAccount,
   type ProviderWriteIssue,
   type ProviderIssueActionPreview,
   type ProviderIssueWriteResult,
@@ -10,6 +14,7 @@ import {
   type ProviderIssueOptions,
 } from '@openkraken/ipc-contract';
 export type IssueTarget = {
+  provider: ProviderAccount['provider'];
   accountId: string;
   origin: string;
   repository: ProviderIssueOptions['repository'];
@@ -35,13 +40,18 @@ function IssueActionDialog({
     request = useRef<string | undefined>(undefined);
   const [title, setTitle] = useState(''),
     [body, setBody] = useState('');
+  const gitlab = target.provider === 'gitlab';
+  const [confidential, setConfidential] = useState(false);
+  const [internal, setInternal] = useState(false);
   const [reason, setReason] = useState<'completed' | 'not_planned'>('completed');
   const [dirty, setDirty] = useState(false),
     [discard, setDiscard] = useState(false);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
-  const [preview, setPreview] = useState<ProviderIssueActionPreview>();
-  const [prepared, setPrepared] = useState<ProviderWriteIssue>();
+  const [preview, setPreview] = useState<
+    ProviderIssueActionPreview | ProviderGitLabIssueActionPreview
+  >();
+  const [prepared, setPrepared] = useState<ProviderWriteIssue | ProviderWriteGitLabIssue>();
   const [result, setResult] = useState<ProviderIssueWriteResult>();
   const [uncertain, setUncertain] = useState(false),
     [changed, setChanged] = useState(false);
@@ -60,31 +70,51 @@ function IssueActionDialog({
         ? `Comment on issue #${intent.number}`
         : `${intent.state === 'closed' ? 'Close' : 'Reopen'} issue #${intent.number}`;
   const draft = (revision: string) =>
-    intent.action === 'create'
-      ? { action: 'create', repository: target.repository, title, body }
-      : intent.action === 'comment'
-        ? {
-            action: 'comment',
-            repository: target.repository,
-            number: intent.number,
-            revision,
-            body,
-          }
-        : {
-            action: 'state',
-            repository: target.repository,
-            number: intent.number,
-            revision,
-            state: intent.state,
-            reason: intent.state === 'open' ? 'reopened' : reason,
-          };
-  const valid = providerWriteIssueSchema.safeParse(draft('a'.repeat(64))).success;
+    gitlab
+      ? intent.action === 'create'
+        ? { action: 'create', repository: target.repository, title, body, confidential }
+        : intent.action === 'comment'
+          ? {
+              action: 'comment',
+              repository: target.repository,
+              number: intent.number,
+              body,
+              internal,
+            }
+          : {
+              action: 'state',
+              repository: target.repository,
+              number: intent.number,
+              state: intent.state,
+            }
+      : intent.action === 'create'
+        ? { action: 'create', repository: target.repository, title, body }
+        : intent.action === 'comment'
+          ? {
+              action: 'comment',
+              repository: target.repository,
+              number: intent.number,
+              revision,
+              body,
+            }
+          : {
+              action: 'state',
+              repository: target.repository,
+              number: intent.number,
+              revision,
+              state: intent.state,
+              reason: intent.state === 'open' ? 'reopened' : reason,
+            };
+  const valid = (gitlab ? providerGitLabIssueIntentSchema : providerWriteIssueSchema).safeParse(
+    draft('a'.repeat(64)),
+  ).success;
+  const preparedIntent = prepared && ('intent' in prepared ? prepared.intent : prepared);
   const review = async () => {
     if (request.current || !valid) return;
     setError('');
     setPrepared(undefined);
     setPreview(undefined);
-    if (intent.action === 'create') {
+    if (intent.action === 'create' && !gitlab) {
       const parsed = providerWriteIssueSchema.safeParse(draft(''));
       if (parsed.success) {
         setPrepared(parsed.data);
@@ -96,6 +126,23 @@ function IssueActionDialog({
     request.current = id;
     setBusy(true);
     try {
+      if (gitlab) {
+        const parsed = providerGitLabIssueIntentSchema.parse(draft(''));
+        const response = await window.openkraken.request({
+          id,
+          method: 'providerGitLabIssueActionPreview',
+          accountId: target.accountId,
+          options: parsed,
+        });
+        if (response.kind === 'providerGitLabIssueActionPreview') {
+          setPreview(response.preview);
+          setPrepared({ intent: parsed, revision: response.preview.revision });
+          if (parsed.action === 'create') setTitle(parsed.title);
+        } else if (response.kind === 'error') setError(response.message);
+        else if (response.kind === 'cancelled') setError('Issue review cancelled.');
+        return;
+      }
+      if (intent.action === 'create') return;
       const response = await window.openkraken.request({
         id,
         method: 'providerIssueActionPreview',
@@ -132,12 +179,21 @@ function IssueActionDialog({
     setBusy(true);
     setError('');
     try {
-      const response = await window.openkraken.request({
-        id,
-        method: 'providerWriteIssue',
-        accountId: target.accountId,
-        options: prepared,
-      });
+      const response = await window.openkraken.request(
+        'intent' in prepared
+          ? {
+              id,
+              method: 'providerWriteGitLabIssue',
+              accountId: target.accountId,
+              options: prepared,
+            }
+          : {
+              id,
+              method: 'providerWriteIssue',
+              accountId: target.accountId,
+              options: prepared,
+            },
+      );
       if (response.kind === 'providerIssueWritten') {
         setResult(response.result);
         setChanged(true);
@@ -238,7 +294,7 @@ function IssueActionDialog({
           <label>
             Issue title
             <input
-              maxLength={256}
+              maxLength={gitlab ? 255 : 256}
               value={title}
               onChange={(event) => {
                 setTitle(event.target.value);
@@ -261,8 +317,36 @@ function IssueActionDialog({
             />
           </label>
         )}
+        {gitlab && intent.action === 'create' && (
+          <label>
+            <input
+              type="checkbox"
+              checked={confidential}
+              onChange={(event) => {
+                setConfidential(event.target.checked);
+                setDirty(true);
+              }}
+            />{' '}
+            Confidential issue
+          </label>
+        )}
+        {gitlab && intent.action === 'comment' && (
+          <label>
+            <input
+              type="checkbox"
+              checked={internal}
+              onChange={(event) => {
+                setInternal(event.target.checked);
+                setDirty(true);
+              }}
+            />{' '}
+            Internal note
+          </label>
+        )}
         {intent.action === 'state' &&
-          (intent.state === 'closed' ? (
+          (gitlab ? (
+            <p>{intent.state === 'closed' ? 'Close' : 'Reopen'} this issue.</p>
+          ) : intent.state === 'closed' ? (
             <label>
               Closing reason
               <select
@@ -280,10 +364,10 @@ function IssueActionDialog({
             <p>Reopen this issue.</p>
           ))}
       </fieldset>
-      {prepared && !result && (
+      {preparedIntent && !result && (
         <section aria-label="Confirm issue action">
           <h3>{actionLabel}</h3>
-          {preview && (
+          {preview?.issue && (
             <>
               <p>
                 Reviewing #{preview.issue.number}: {preview.issue.title} · {preview.issue.state}
@@ -301,12 +385,31 @@ function IssueActionDialog({
               </details>
             </>
           )}
-          {prepared.action === 'create' && <h3>{prepared.title}</h3>}
-          {prepared.action !== 'state' ? (
-            <pre>{prepared.body || 'No description'}</pre>
+          {preview && 'project' in preview && (
+            <p>
+              Project #{preview.project.id} · Issue access:{' '}
+              {preview.project.issuesAccessLevel ?? 'Not reported'}
+            </p>
+          )}
+          {preparedIntent.action === 'create' && <h3>{preparedIntent.title}</h3>}
+          {'confidential' in preparedIntent && (
+            <p>{preparedIntent.confidential ? 'Confidential issue' : 'Non-confidential issue'}</p>
+          )}
+          {'internal' in preparedIntent && (
+            <p>{preparedIntent.internal ? 'Internal note' : 'Ordinary note'}</p>
+          )}
+          {preview?.issue && 'provider' in preview.issue && (
+            <p>
+              {preview.issue.confidential ? 'Confidential issue' : 'Non-confidential issue'} ·{' '}
+              {preview.issue.issueType}
+            </p>
+          )}
+          {preparedIntent.action !== 'state' ? (
+            <pre>{preparedIntent.body || 'No description'}</pre>
           ) : (
             <p>
-              New state: {prepared.state} · {prepared.reason}
+              New state: {preparedIntent.state}
+              {'reason' in preparedIntent ? ` · ${preparedIntent.reason}` : ''}
             </p>
           )}
           <p>
@@ -365,6 +468,16 @@ function IssueActionDialog({
                             #{comment.id} · {comment.author ?? 'Deleted account'} ·{' '}
                             {new Date(comment.createdAt).toLocaleString()}
                           </summary>
+                          {'provider' in comment && (
+                            <p>
+                              {comment.system ? 'System activity' : 'User note'}
+                              {comment.internal === true
+                                ? ' · Internal note'
+                                : comment.confidential === true
+                                  ? ' · Confidential note'
+                                  : ''}
+                            </p>
+                          )}
                           <pre>{comment.body}</pre>
                         </details>
                       ))
