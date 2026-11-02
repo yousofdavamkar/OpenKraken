@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ProviderAccounts, Request } from '@openkraken/ipc-contract';
+import { GitLabSignIn } from './gitlab-sign-in.js';
 import { GitHubSignIn } from './github-sign-in.js';
 type ProviderRequest = Extract<
   Request,
@@ -12,6 +13,7 @@ function AccountsDialog({ close }: { close: () => void }) {
   const active = useRef<string | undefined>(undefined);
   const alive = useRef(true);
   const [state, setState] = useState<ProviderAccounts>();
+  const [provider, setProvider] = useState<'github' | 'gitlab'>('github');
   const [origin, setOrigin] = useState('https://github.com');
   const [pending, setPending] = useState(false);
   const [deviceBusy, setDeviceBusy] = useState(false);
@@ -52,14 +54,16 @@ function AccountsDialog({ close }: { close: () => void }) {
       }}
     >
       <h2>Provider accounts</h2>
-      <p>Connect GitHub or GitHub Enterprise to your local app.</p>
+      <p>Connect GitHub, GitHub Enterprise, or GitLab to your local app.</p>
       {state && !state.keychainAvailable && (
         <p role="status">Unlock or enable your operating-system keychain to connect a provider.</p>
       )}
       {state?.accounts.map((account) => (
         <section key={account.id} className="remote-entry">
           <strong>{account.login}</strong>
-          <p>{account.origin}</p>
+          <p>
+            {account.provider === 'gitlab' ? 'GitLab' : 'GitHub'} · {account.origin}
+          </p>
           <button
             disabled={pending || deviceBusy}
             onClick={() =>
@@ -87,15 +91,58 @@ function AccountsDialog({ close }: { close: () => void }) {
         </section>
       ))}
       {state?.accounts.length === 0 && <p>No provider accounts connected.</p>}
-      <GitHubSignIn
-        enabled={!!state?.keychainAvailable && !pending}
-        onBusy={setDeviceBusy}
-        onConnected={(state) => {
-          setState(state);
-          setError(undefined);
-        }}
-      />
+      <label>
+        Provider type
+        <select
+          aria-label="Provider type"
+          value={provider}
+          disabled={pending || deviceBusy}
+          onChange={(event) => {
+            const selected = event.target.value === 'gitlab' ? 'gitlab' : 'github';
+            setProvider(selected);
+            setOrigin(selected === 'gitlab' ? 'https://gitlab.com' : 'https://github.com');
+            if (token.current) token.current.value = '';
+            setError(undefined);
+          }}
+        >
+          <option value="github">GitHub / GitHub Enterprise</option>
+          <option value="gitlab">GitLab / Self-Managed</option>
+        </select>
+      </label>
+      <label>
+        Provider host
+        <input
+          type="url"
+          form="provider-token-form"
+          required
+          value={origin}
+          maxLength={2048}
+          disabled={pending || deviceBusy}
+          onChange={(event) => setOrigin(event.target.value)}
+        />
+      </label>
+      {provider === 'github' ? (
+        <GitHubSignIn
+          enabled={!!state?.keychainAvailable && !pending}
+          onBusy={setDeviceBusy}
+          onConnected={(state) => {
+            setState(state);
+            setError(undefined);
+          }}
+        />
+      ) : (
+        <GitLabSignIn
+          origin={origin}
+          enabled={!!state?.keychainAvailable && !pending}
+          onBusy={setDeviceBusy}
+          onConnected={(state) => {
+            setState(state);
+            setError(undefined);
+          }}
+        />
+      )}
       <form
+        id="provider-token-form"
         onSubmit={(event) => {
           event.preventDefault();
           const value = token.current?.value ?? '';
@@ -103,21 +150,10 @@ function AccountsDialog({ close }: { close: () => void }) {
           void perform({
             id: crypto.randomUUID(),
             method: 'providerConnect',
-            options: { provider: 'github', origin, token: value },
+            options: { provider, origin, token: value },
           });
         }}
       >
-        <label>
-          Provider host
-          <input
-            type="url"
-            required
-            value={origin}
-            maxLength={2048}
-            disabled={pending || deviceBusy}
-            onChange={(event) => setOrigin(event.target.value)}
-          />
-        </label>
         <label>
           Personal access token
           <input

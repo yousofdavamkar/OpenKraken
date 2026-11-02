@@ -88,6 +88,46 @@ test('device IPC accepts only session IDs for browser opening and rejects privat
   ).toBe(false);
 });
 
+test('GitLab IPC exposes only bounded loopback metadata and cannot open arbitrary URLs or accept private PKCE material', () => {
+  const id = '00000000-0000-4000-8000-000000000000';
+  const options = { origin: 'https://gitlab.com', clientId: 'public-client', callbackPort: 47653 };
+  const start = { id, method: 'providerGitLabStart', options };
+  expect(requestSchema.safeParse(start).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(start).success).toBe(false);
+  for (const fields of [
+    { callbackPort: 80 },
+    { callbackPort: 65536 },
+    { redirectUri: 'https://attacker.test' },
+    { codeVerifier: 'secret' },
+    { clientSecret: 'secret' },
+    { origin: 'http://gitlab.com' },
+  ])
+    expect(requestSchema.safeParse({ ...start, options: { ...options, ...fields } }).success).toBe(
+      false,
+    );
+  const open = { id, method: 'providerGitLabOpen', challengeId: id };
+  expect(requestSchema.safeParse(open).success).toBe(true);
+  expect(requestSchema.safeParse({ ...open, url: 'https://attacker.test' }).success).toBe(false);
+  const challenge = {
+    id,
+    origin: options.origin,
+    redirectUri: 'http://127.0.0.1:47653/callback',
+    expiresAt: 600000,
+  };
+  expect(resultSchema.safeParse({ kind: 'providerGitLab', challenge }).success).toBe(true);
+  for (const fields of [
+    { state: 'secret' },
+    { codeVerifier: 'secret' },
+    { code: 'secret' },
+    { redirectUri: 'http://localhost:47653/callback' },
+    { redirectUri: 'http://127.0.0.1:80/callback' },
+  ])
+    expect(
+      resultSchema.safeParse({ kind: 'providerGitLab', challenge: { ...challenge, ...fields } })
+        .success,
+    ).toBe(false);
+});
+
 test('repository browsing accepts bounded page numbers without renderer-supplied hosts or tokens', () => {
   const request = {
     id: '00000000-0000-4000-8000-000000000000',

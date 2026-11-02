@@ -43,6 +43,8 @@ import {
   providerRepositoryPageNumberSchema,
   providerRepositoryPageSchema,
   providerConnectSchema,
+  gitlabStartSchema,
+  gitlabChallengeSchema,
   deviceStartSchema,
   deviceChallengeSchema,
 } from './providers.js';
@@ -1315,6 +1317,30 @@ export const requestSchema = z.discriminatedUnion('method', [
     })
     .strict(),
   z
+    .object({ id: requestId, method: z.literal('providerGitLabStart'), options: gitlabStartSchema })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerGitLabPoll'),
+      challengeId: z.string().uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerGitLabOpen'),
+      challengeId: z.string().uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerGitLabCancel'),
+      challengeId: z.string().uuid(),
+    })
+    .strict(),
+  z
     .object({ id: requestId, method: z.literal('providerDeviceStart'), options: deviceStartSchema })
     .strict(),
   z
@@ -1518,6 +1544,8 @@ export const resultSchema = z.discriminatedUnion('kind', [
     })
     .strict(),
   z.object({ kind: z.literal('providerGitTarget'), target: providerRemoteTargetSchema }).strict(),
+  z.object({ kind: z.literal('providerGitLab'), challenge: gitlabChallengeSchema }).strict(),
+  z.object({ kind: z.literal('providerGitLabOpened') }).strict(),
   z.object({ kind: z.literal('providerDevice'), challenge: deviceChallengeSchema }),
   z.object({ kind: z.literal('providerDeviceOpened') }).strict(),
   z.object({ kind: z.literal('providerAccounts'), state: providerAccountsSchema }),

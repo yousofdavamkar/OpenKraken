@@ -190,6 +190,44 @@ test('GitLab reports an occupied callback port without replacing or contacting t
   }
 });
 
+test('cancelling an in-flight GitLab exchange prevents late credential storage', async () => {
+  const { service } = serviceFor('cancel-exchange');
+  const origin = 'https://gitlab.com';
+  const challenge = await service.gitlabStart({
+    origin,
+    clientId: 'cancel-client',
+    callbackPort: await port(),
+  });
+  const state = new URL(service.gitlabAuthorizationUri(challenge.id)).searchParams.get('state')!;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  server.use(
+    http.post(`${origin}/oauth/token`, async ({ request }) => {
+      entered();
+      await new Promise<void>((resolve) =>
+        request.signal.addEventListener('abort', () => resolve(), { once: true }),
+      );
+      return HttpResponse.json({
+        access_token: 'late-secret',
+        refresh_token: 'late-refresh',
+        token_type: 'bearer',
+        expires_in: 7200,
+      });
+    }),
+  );
+  await fetch(`${challenge.redirectUri}?state=${state}&code=cancel-code`);
+  const pending = expect(service.gitlabPoll(challenge.id)).rejects.toMatchObject({
+    code: 'CANCELLED',
+  });
+  await started;
+  service.gitlabCancel(challenge.id);
+  await pending;
+  expect((await service.accounts()).accounts).toEqual([]);
+  await expect(fetch(challenge.redirectUri)).rejects.toThrow();
+});
+
 test('GitLab saves refresh rotation before an interrupted identity check and recovers on restart', async () => {
   let now = Date.now();
   const { service, directory, vault } = serviceFor('refresh', () => now);

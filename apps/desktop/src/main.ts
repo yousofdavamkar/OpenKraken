@@ -29,6 +29,7 @@ import { fetchAvatar } from './avatar-provider.js';
 import { isTrustedDocument, windowPreferences } from './security.js';
 import { ProviderService } from './providers.js';
 import { GitHubProvider, ProviderError } from './github-provider.js';
+import { GitLabOAuth } from './gitlab-oauth.js';
 import { GitLabProvider } from './gitlab-provider.js';
 import { GitHubOAuth } from './github-device.js';
 import {
@@ -61,6 +62,7 @@ function getProviders() {
     new GitHubOAuth(fetchProvider),
     Date.now,
     new GitLabProvider(fetchProvider),
+    new GitLabOAuth(fetchProvider),
   ));
 }
 function startService() {
@@ -172,6 +174,15 @@ function createWindow() {
     });
     if (choice === 1) event.preventDefault();
   });
+  const cancelProviderSignIn = () => {
+    for (const controller of providerRequests.values()) controller.abort();
+    providers?.deviceCancel();
+    providers?.gitlabCancel();
+  };
+  window.webContents.on('render-process-gone', cancelProviderSignIn);
+  window.webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame) cancelProviderSignIn();
+  });
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   window.on('closed', () => {
@@ -179,6 +190,7 @@ function createWindow() {
     for (const id of pending.keys()) service?.postMessage({ id });
     for (const controller of providerRequests.values()) controller.abort();
     providers?.deviceCancel();
+    providers?.gitlabCancel();
   });
   void window.loadFile(htmlPath);
 }
@@ -272,6 +284,10 @@ else {
           request.method === 'providerConnect' ||
           request.method === 'providerDisconnect' ||
           request.method === 'providerVerify' ||
+          request.method === 'providerGitLabStart' ||
+          request.method === 'providerGitLabPoll' ||
+          request.method === 'providerGitLabOpen' ||
+          request.method === 'providerGitLabCancel' ||
           request.method === 'providerDeviceStart' ||
           request.method === 'providerDevicePoll' ||
           request.method === 'providerDeviceCancel' ||
@@ -459,6 +475,23 @@ else {
                 controller.signal,
               ),
             });
+          if (request.method === 'providerGitLabStart')
+            return resultSchema.parse({
+              kind: 'providerGitLab',
+              challenge: await providers.gitlabStart(request.options, controller.signal),
+            });
+          if (request.method === 'providerGitLabPoll')
+            return resultSchema.parse(
+              await providers.gitlabPoll(request.challengeId, controller.signal),
+            );
+          if (request.method === 'providerGitLabOpen') {
+            await shell.openExternal(providers.gitlabAuthorizationUri(request.challengeId));
+            return { kind: 'providerGitLabOpened' };
+          }
+          if (request.method === 'providerGitLabCancel') {
+            providers.gitlabCancel(request.challengeId);
+            return { kind: 'cancelled' };
+          }
           if (request.method === 'providerDeviceStart')
             return {
               kind: 'providerDevice',
@@ -574,6 +607,10 @@ else {
           request.method === 'providerConnect' ||
           request.method === 'providerDisconnect' ||
           request.method === 'providerVerify' ||
+          request.method === 'providerGitLabStart' ||
+          request.method === 'providerGitLabPoll' ||
+          request.method === 'providerGitLabOpen' ||
+          request.method === 'providerGitLabCancel' ||
           request.method === 'providerDeviceStart' ||
           request.method === 'providerDevicePoll' ||
           request.method === 'providerDeviceCancel' ||
@@ -633,6 +670,7 @@ else {
   app.on('will-quit', (event) => {
     avatars?.close();
     providers?.deviceCancel();
+    providers?.gitlabCancel();
     for (const controller of providerRequests.values()) controller.abort();
     if ((!service && !providers) || quitting) return;
     event.preventDefault();
