@@ -114,3 +114,9 @@ See the [M3 completion report](docs/verification/m3-completion.md) and [transpor
 Open commit details and select a changed file to compare it with its parent; merge commits offer parent selection. Hunk, inline and split views share native Git changes, whitespace controls and word highlighting. Supported raster images offer side-by-side and overlay views. Large files require explicit loading within fixed byte/line limits; the encoding selector changes display only. **File history** follows renames across pages, and **Blame** streams attribution for supported UTF-8 files.
 
 From a staged or unstaged file, choose **View**, then **Full comparison** for the same rich views. **Select lines to stage/unstage** requests a fresh review of the exact changes before staging. **Edit** opens a working-file draft with filename-based syntax highlighting, local text Undo/Redo and explicit save. Saves preserve supported encodings and line endings, refuse stale file/index state, and participate in repository Undo. Closing an unsaved draft or quitting the app asks whether to keep editing or discard it.
+
+## Provider accounts (M6 in progress)
+
+Use **Provider accounts** to connect GitHub or GitHub Enterprise with a personal access token. Enter an HTTPS host origin and the token; OpenKraken validates the account before storing the credential with operating-system protection. Linux plaintext storage is refused. Account metadata remains available offline; **Forget** removes the local connection without revoking the remote token. Closing the dialog cancels an unfinished validation.
+
+Device authorization, provider repository/PR workflows and supplying these credentials to Git remain in development. Existing Git credential helpers and SSH agents continue to handle clone/fetch/push. See [M6 progress](docs/verification/m6-progress.md).

@@ -7,6 +7,7 @@ import { History } from './history.js';
 import { NewReferences, ReferenceActions } from './references.js';
 import { GitProgress } from './git-progress.js';
 import { Clone } from './clone.js';
+import { ProviderAccountsControl } from './providers.js';
 import { Authentication } from './authentication.js';
 import { GitEditors } from './git-editor.js';
 import { Stashes } from './stashes.js';
@@ -52,6 +53,7 @@ function App() {
         <div className="toolbar">
           <AvatarSettings />
           <Clone />
+          <ProviderAccountsControl />
           <NewReferences />
           <ManageRemotes />
           <Pull />

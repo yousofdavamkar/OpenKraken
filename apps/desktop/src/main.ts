@@ -1,4 +1,12 @@
-import { app, BrowserWindow, dialog, ipcMain, utilityProcess, session } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  utilityProcess,
+  session,
+  safeStorage,
+} from 'electron';
 import type { IpcMainInvokeEvent, UtilityProcess } from 'electron';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -10,16 +18,26 @@ import {
   requestSchema,
   cancelSchema,
   serviceResponseSchema,
+  providerAccountsSchema,
 } from '@openkraken/ipc-contract';
 import type { Result, ServiceRequest } from '@openkraken/ipc-contract';
 import { AvatarCache } from './avatars.js';
 import { fetchAvatar } from './avatar-provider.js';
 import { isTrustedDocument, windowPreferences } from './security.js';
+import { ProviderService } from './providers.js';
+import { GitHubProvider, ProviderError } from './github-provider.js';
+import {
+  ProviderVault,
+  ProviderCredentialError,
+  electronSecretProtection,
+} from './provider-vault.js';
 const htmlPath = join(__dirname, 'renderer', 'index.html');
 const documentUrl = pathToFileURL(htmlPath).href;
 let window: BrowserWindow | undefined;
 let service: UtilityProcess | undefined;
 let avatars: AvatarCache | undefined;
+let providers: ProviderService | undefined;
+const providerRequests = new Map<string, AbortController>();
 const pending = new Map<
   string,
   { resolve: (result: Result) => void; timer: ReturnType<typeof setTimeout> }
@@ -137,6 +155,7 @@ function createWindow() {
   window.on('closed', () => {
     window = undefined;
     for (const id of pending.keys()) service?.postMessage({ id });
+    for (const controller of providerRequests.values()) controller.abort();
   });
   void window.loadFile(htmlPath);
 }
@@ -165,6 +184,30 @@ else {
         return { kind: 'error', code: 'BUSY', message: 'Too many pending operations' };
       inFlight.add(request.id);
       try {
+        if (
+          request.method === 'providerAccounts' ||
+          request.method === 'providerConnect' ||
+          request.method === 'providerDisconnect'
+        ) {
+          providers ??= new ProviderService(
+            app.getPath('userData'),
+            new ProviderVault(app.getPath('userData'), electronSecretProtection(safeStorage)),
+            new GitHubProvider((input, init) =>
+              session
+                .fromPartition('openkraken-providers')
+                .fetch(input instanceof Request ? input.url : String(input), init),
+            ),
+          );
+          const controller = new AbortController();
+          providerRequests.set(request.id, controller);
+          const state =
+            request.method === 'providerAccounts'
+              ? await providers.accounts()
+              : request.method === 'providerConnect'
+                ? await providers.connect(request.options, controller.signal)
+                : await providers.disconnect(request.accountId);
+          return { kind: 'providerAccounts', state: providerAccountsSchema.parse(state) };
+        }
         avatars ??= new AvatarCache(app.getPath('userData'), fetchAvatar);
         if (request.method === 'appearance')
           return {
@@ -207,12 +250,35 @@ else {
             : request,
         );
       } catch (error) {
+        if (
+          request.method === 'providerAccounts' ||
+          request.method === 'providerConnect' ||
+          request.method === 'providerDisconnect'
+        ) {
+          if (
+            (error instanceof ProviderError && error.code === 'CANCELLED') ||
+            (error instanceof Error && error.name === 'AbortError')
+          )
+            return { kind: 'cancelled' };
+          return {
+            kind: 'error',
+            code:
+              error instanceof ProviderError || error instanceof ProviderCredentialError
+                ? error.code
+                : 'PROVIDER_REQUEST',
+            message:
+              error instanceof ProviderError || error instanceof ProviderCredentialError
+                ? error.message
+                : 'The provider account request could not be completed.',
+          };
+        }
         return {
           kind: 'error',
           code: 'REQUEST_FAILED',
           message: error instanceof Error ? error.message : String(error),
         };
       } finally {
+        providerRequests.delete(request.id);
         inFlight.delete(request.id);
         cancelled.delete(request.id);
       }
@@ -223,6 +289,7 @@ else {
       if (inFlight.has(id)) {
         cancelled.add(id);
         service?.postMessage({ id });
+        providerRequests.get(id)?.abort();
       }
     });
     startService();
@@ -238,18 +305,22 @@ else {
   // Keep the service and caches alive if a renderer cancels the window close.
   app.on('will-quit', (event) => {
     avatars?.close();
-    if (!service || quitting) return;
+    for (const controller of providerRequests.values()) controller.abort();
+    if ((!service && !providers) || quitting) return;
     event.preventDefault();
     quitting = true;
     const child = service;
     const deadline = setTimeout(() => {
-      child.kill();
+      child?.kill();
       app.quit();
     }, 1500);
-    child.once('exit', () => {
+    const stopped = child
+      ? new Promise<void>((resolve) => child.once('exit', () => resolve()))
+      : Promise.resolve();
+    void Promise.all([stopped, providers?.idle()]).finally(() => {
       clearTimeout(deadline);
       app.quit();
     });
-    child.postMessage({ shutdown: true });
+    child?.postMessage({ shutdown: true });
   });
 }
