@@ -6,6 +6,35 @@ import {
   serviceResponseSchema,
   resultSchema,
 } from '../../packages/ipc-contract/src/index.js';
+test('Bitbucket workspace IPC keeps scoped reads in main and rejects arbitrary URLs and numeric identities', () => {
+  const id = '00000000-0000-4000-8000-000000000000';
+  const accountId = 'a'.repeat(64);
+  const workspace = { id: '{20000000-0000-4000-8000-000000000001}', slug: 'team' };
+  const request = {
+    id,
+    accountId,
+    method: 'providerBitbucketRepositories',
+    options: { workspace, page: 1 },
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  for (const options of [
+    { workspace: { ...workspace, id: '1' }, page: 1 },
+    { workspace: { ...workspace, slug: '../team' }, page: 1 },
+    { workspace, page: 101 },
+    { workspace, page: 1, url: 'https://attacker.test' },
+  ])
+    expect(requestSchema.safeParse({ ...request, options }).success).toBe(false);
+  const list = { id, accountId, method: 'providerBitbucketWorkspaces', page: 1 };
+  expect(requestSchema.safeParse(list).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(list).success).toBe(false);
+  const result = {
+    kind: 'providerBitbucketWorkspaces',
+    page: { workspaces: [workspace], nextPage: null, limited: false },
+  };
+  expect(resultSchema.safeParse(result).success).toBe(true);
+  expect(resultSchema.safeParse({ ...result, token: 'secret' }).success).toBe(false);
+});
 test('exact top-level document only', () => {
   const url = 'file:///app/index.html';
   expect(isTrustedDocument({ url, parent: null }, url, true)).toBe(true);

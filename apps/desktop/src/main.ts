@@ -1,3 +1,4 @@
+import { BitbucketProvider } from './bitbucket-provider.js';
 import {
   app,
   BrowserWindow,
@@ -63,6 +64,7 @@ function getProviders() {
     Date.now,
     new GitLabProvider(fetchProvider),
     new GitLabOAuth(fetchProvider),
+    new BitbucketProvider(fetchProvider),
   ));
 }
 function startService() {
@@ -297,6 +299,8 @@ else {
           request.method === 'providerWriteMergeApproval' ||
           request.method === 'providerMergeDiscussionPreview' ||
           request.method === 'providerWriteMergeDiscussion' ||
+          request.method === 'providerBitbucketWorkspaces' ||
+          request.method === 'providerBitbucketRepositories' ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerPollingPolicy' ||
@@ -656,6 +660,24 @@ else {
                 controller.signal,
               ),
             });
+          if (request.method === 'providerBitbucketWorkspaces')
+            return resultSchema.parse({
+              kind: 'providerBitbucketWorkspaces',
+              page: await providers.bitbucketWorkspaces(
+                request.accountId,
+                request.page,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerBitbucketRepositories')
+            return resultSchema.parse({
+              kind: 'providerRepositories',
+              page: await providers.bitbucketRepositories(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerRepositories')
             return resultSchema.parse({
               kind: 'providerRepositories',
@@ -810,6 +832,8 @@ else {
           request.method === 'providerWriteMergeApproval' ||
           request.method === 'providerMergeDiscussionPreview' ||
           request.method === 'providerWriteMergeDiscussion' ||
+          request.method === 'providerBitbucketWorkspaces' ||
+          request.method === 'providerBitbucketRepositories' ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerPollingPolicy' ||

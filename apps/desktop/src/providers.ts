@@ -1,4 +1,9 @@
 import {
+  providerBitbucketRepositoriesOptionsSchema,
+  type ProviderBitbucketRepositoriesOptions,
+} from '@openkraken/ipc-contract';
+import { BitbucketProvider } from './bitbucket-provider.js';
+import {
   providerGitLabIssueIntentSchema,
   providerWriteGitLabIssueSchema,
   type ProviderGitLabIssueIntent,
@@ -123,6 +128,7 @@ export class ProviderService {
     private now = Date.now,
     private gitlab = new GitLabProvider(),
     private gitlabOAuth = new GitLabOAuth(),
+    private bitbucket = new BitbucketProvider(),
   ) {
     this.manifest = join(directory, 'provider-accounts.json');
     this.gitlabFlow = new GitLabFlow(
@@ -147,7 +153,19 @@ export class ProviderService {
     );
   }
   private accountDriver(provider: ProviderAccount['provider']) {
-    return provider === 'gitlab' ? this.gitlab : this.github;
+    return provider === 'bitbucket'
+      ? this.bitbucket
+      : provider === 'gitlab'
+        ? this.gitlab
+        : this.github;
+  }
+  private repositoryDriver(account: ProviderAccount) {
+    if (account.provider === 'bitbucket')
+      throw new ProviderError(
+        'PROVIDER_UNSUPPORTED',
+        'Choose a Bitbucket workspace to browse repositories. Collaboration is not available yet.',
+      );
+    return account.provider === 'gitlab' ? this.gitlab : this.github;
   }
   private collaborationDriver(account: ProviderAccount) {
     if (account.provider !== 'github')
@@ -323,11 +341,33 @@ export class ProviderService {
       );
     });
   }
+  bitbucketWorkspaces(id: string, page: number, signal?: AbortSignal) {
+    return this.run(async () => {
+      providerRepositoryPageNumberSchema.parse(page);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'bitbucket')
+        throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
+      return this.bitbucket.workspaces(account.origin, token, page, signal);
+    });
+  }
+  bitbucketRepositories(
+    id: string,
+    input: ProviderBitbucketRepositoriesOptions,
+    signal?: AbortSignal,
+  ) {
+    return this.run(async () => {
+      const options = providerBitbucketRepositoriesOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'bitbucket')
+        throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
+      return this.bitbucket.repositories(account.origin, token, options, signal);
+    });
+  }
   repositories(id: string, page: number, signal?: AbortSignal) {
     return this.run(async () => {
       providerRepositoryPageNumberSchema.parse(page);
       const { account, token } = await this.authorize(id, signal);
-      return this.accountDriver(account.provider).repositories(account.origin, token, page, signal);
+      return this.repositoryDriver(account).repositories(account.origin, token, page, signal);
     });
   }
   pullTemplates(id: string, input: ProviderPullTemplatesOptions, signal?: AbortSignal) {
@@ -381,12 +421,7 @@ export class ProviderService {
     return this.run(async () => {
       const options = providerPullListOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.accountDriver(account.provider).pullRequests(
-        account.origin,
-        token,
-        options,
-        signal,
-      );
+      return this.repositoryDriver(account).pullRequests(account.origin, token, options, signal);
     });
   }
   pullRequest(id: string, input: ProviderPullOptions, signal?: AbortSignal) {
@@ -692,26 +727,21 @@ export class ProviderService {
     return this.run(async () => {
       const options = providerIssueListOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.accountDriver(account.provider).issues(account.origin, token, options, signal);
+      return this.repositoryDriver(account).issues(account.origin, token, options, signal);
     });
   }
   issue(id: string, input: ProviderIssueOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerIssueOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.accountDriver(account.provider).issue(account.origin, token, options, signal);
+      return this.repositoryDriver(account).issue(account.origin, token, options, signal);
     });
   }
   issueComments(id: string, input: ProviderIssueCommentsOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerIssueCommentsOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.accountDriver(account.provider).issueComments(
-        account.origin,
-        token,
-        options,
-        signal,
-      );
+      return this.repositoryDriver(account).issueComments(account.origin, token, options, signal);
     });
   }
   writeIssue(id: string, input: ProviderWriteIssue, signal?: AbortSignal) {
@@ -790,14 +820,19 @@ export class ProviderService {
           'Choose a canonical HTTPS repository URL for this provider account.',
         );
       const { account, token } = await this.authorize(id, signal, new URL(parsed.data).origin);
-      if (account.provider === 'github' && new URL(parsed.data).pathname.split('/').length !== 3)
+      if (account.provider !== 'gitlab' && new URL(parsed.data).pathname.split('/').length !== 3)
         throw new ProviderError(
           'PROVIDER_CLONE_URL',
-          'Choose a GitHub repository URL with one owner and repository name.',
+          'Choose a repository URL with one workspace or owner and repository name.',
         );
       const credential = providerGitCredentialSchema.safeParse({
         url: parsed.data,
-        username: account.authentication === 'pkce' ? 'oauth2' : account.login,
+        username:
+          account.provider === 'bitbucket'
+            ? 'x-bitbucket-api-token-auth'
+            : account.authentication === 'pkce'
+              ? 'oauth2'
+              : account.login,
         password: token,
       });
       if (!credential.success) throw new ProviderCredentialError('CREDENTIAL_INVALID');

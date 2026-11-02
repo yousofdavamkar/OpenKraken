@@ -31,12 +31,16 @@ export const providerOriginSchema = z
     );
   }, 'Use an HTTPS provider origin without credentials, a path or query parameters')
   .transform((value) => new URL(value).origin);
+export const providerBitbucketIdSchema = z
+  .string()
+  .regex(/^\{[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}$/);
+const providerNumericIdSchema = z.string().regex(/^[1-9][0-9]{0,19}$/);
 export const providerAccountSchema = z
   .object({
     id: z.string().regex(/^[0-9a-f]{64}$/),
-    provider: z.enum(['github', 'gitlab']),
+    provider: z.enum(['github', 'gitlab', 'bitbucket']),
     origin: providerOriginSchema,
-    providerUserId: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    providerUserId: z.union([providerNumericIdSchema, providerBitbucketIdSchema]),
     login: z.string().min(1).max(255),
     authentication: z.enum(['device', 'pkce']).optional(),
     expiresAt: z.number().int().positive().optional(),
@@ -46,7 +50,11 @@ export const providerAccountSchema = z
     (account) =>
       (account.authentication !== 'device' ||
         (account.provider === 'github' && account.origin === 'https://github.com')) &&
-      (account.authentication !== 'pkce' || account.provider === 'gitlab'),
+      (account.authentication !== 'pkce' || account.provider === 'gitlab') &&
+      (account.provider === 'bitbucket'
+        ? account.origin === 'https://bitbucket.org' &&
+          providerBitbucketIdSchema.safeParse(account.providerUserId).success
+        : providerNumericIdSchema.safeParse(account.providerUserId).success),
   );
 export const providerAccountsSchema = z
   .object({
@@ -56,7 +64,7 @@ export const providerAccountsSchema = z
   .strict();
 export const providerConnectSchema = z
   .object({
-    provider: z.enum(['github', 'gitlab']),
+    provider: z.enum(['github', 'gitlab', 'bitbucket']),
     origin: providerOriginSchema,
     token: z
       .string()
@@ -64,7 +72,8 @@ export const providerConnectSchema = z
       .max(16384)
       .regex(/^[\x21-\x7e]+$/),
   })
-  .strict();
+  .strict()
+  .refine((input) => input.provider !== 'bitbucket' || input.origin === 'https://bitbucket.org');
 export type ProviderAccount = z.infer<typeof providerAccountSchema>;
 export type ProviderAccounts = z.infer<typeof providerAccountsSchema>;
 export type ProviderConnect = z.infer<typeof providerConnectSchema>;
@@ -137,9 +146,32 @@ export const providerNamespaceSchema = z
     value.split('/').every((part) => providerRepositoryPathComponentSchema.safeParse(part).success),
   );
 export const providerRepositoryPageNumberSchema = z.number().int().min(1).max(100);
+export const providerBitbucketWorkspaceSchema = z
+  .object({
+    id: providerBitbucketIdSchema,
+    slug: providerRepositoryPathComponentSchema,
+  })
+  .strict();
+export const providerBitbucketWorkspacePageSchema = z
+  .object({
+    workspaces: z.array(providerBitbucketWorkspaceSchema).max(100),
+    nextPage: providerRepositoryPageNumberSchema.nullable(),
+    limited: z.boolean(),
+  })
+  .strict();
+export const providerBitbucketRepositoriesOptionsSchema = z
+  .object({
+    workspace: providerBitbucketWorkspaceSchema,
+    page: providerRepositoryPageNumberSchema,
+  })
+  .strict();
+export type ProviderBitbucketWorkspace = z.infer<typeof providerBitbucketWorkspaceSchema>;
+export type ProviderBitbucketRepositoriesOptions = z.infer<
+  typeof providerBitbucketRepositoriesOptionsSchema
+>;
 export const providerRepositorySchema = z
   .object({
-    id: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    id: z.union([providerNumericIdSchema, providerBitbucketIdSchema]),
     owner: providerNamespaceSchema,
     name: providerRepositoryPathComponentSchema,
     description: z.string().max(4096),
@@ -154,6 +186,8 @@ export const providerRepositorySchema = z
       const url = new URL(repo.cloneUrl);
       return (
         providerOriginSchema.safeParse(url.origin).success &&
+        (!providerBitbucketIdSchema.safeParse(repo.id).success ||
+          (url.origin === 'https://bitbucket.org' && !repo.owner.includes('/'))) &&
         (repo.visibility === undefined || repo.private === (repo.visibility !== 'public')) &&
         repo.cloneUrl === `${url.origin}/${repo.owner}/${repo.name}.git`
       );

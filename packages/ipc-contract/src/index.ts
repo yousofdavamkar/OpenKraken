@@ -71,6 +71,8 @@ import {
   providerAccountsSchema,
   providerGitCredentialSchema,
   providerRemoteTargetSchema,
+  providerBitbucketWorkspacePageSchema,
+  providerBitbucketRepositoriesOptionsSchema,
   providerRepositoryPageNumberSchema,
   providerRepositoryPageSchema,
   providerConnectSchema,
@@ -1495,6 +1497,22 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerBitbucketWorkspaces'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      page: providerRepositoryPageNumberSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerBitbucketRepositories'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerBitbucketRepositoriesOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerRepositories'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       page: providerRepositoryPageNumberSchema,
@@ -1831,6 +1849,12 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('providerAccounts'), state: providerAccountsSchema }),
   z
     .object({ kind: z.literal('providerPollingPolicy'), policy: providerPollingPolicySchema })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerBitbucketWorkspaces'),
+      page: providerBitbucketWorkspacePageSchema,
+    })
     .strict(),
   z
     .object({ kind: z.literal('providerRepositories'), page: providerRepositoryPageSchema })
