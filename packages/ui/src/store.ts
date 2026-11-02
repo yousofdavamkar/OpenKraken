@@ -212,9 +212,15 @@ export const useRepository = create<State>()(
           const query = sameRepository ? previous.query : '';
           set((s) => {
             s.snapshot = result.snapshot;
-            // A new snapshot starts a new status read. Do not let action dialogs
-            // freeze the previous HEAD/index revision during that handoff.
-            s.workingState = undefined;
+            // Invalidate an outdated review, but keep matching state usable while
+            // an unchanged background snapshot is refreshed.
+            if (
+              !sameRepository ||
+              JSON.stringify(s.workingState?.head) !==
+                JSON.stringify(result.snapshot.repository.head) ||
+              JSON.stringify(s.workingState?.status) !== JSON.stringify(result.snapshot.status)
+            )
+              s.workingState = undefined;
             if (!sameRepository) {
               s.watcherMode = undefined;
             }
