@@ -89,7 +89,7 @@ M1 is implemented: Canvas graph, append-only paging, search, keyboard/selection 
 
 An uncached shallow repository can still exceed the 500 ms first-paint target. The profile cache accelerates subsequent opens without modifying repositories. Refresh reloads the initial 2,000-commit window. macOS/Windows execution remains to be verified on their runners.
 
-Working-tree operations, watchers, a profile-based undo journal, branching, remotes and credentials are implemented through M3. Full commit/file diff viewing remains M5; M2 includes the staging diff.
+M0–M5 are implemented for the verified Linux scope: working-tree operations, watchers, guarded Undo/Redo, branching, remotes, merge/rebase/conflict workflows, file comparisons, blame, history and WIP editing. Provider integrations, productivity features and release hardening remain M6–M8. See the [M4 completion report](docs/verification/m4-completion.md) and [M5 completion report](docs/verification/m5-completion.md) for evidence and supported bounds.
 
 Public references: [Git status](https://git-scm.com/docs/git-status), [for-each-ref](https://git-scm.com/docs/git-for-each-ref), [rev-list](https://git-scm.com/docs/git-rev-list), [Electron security](https://www.electronjs.org/docs/latest/tutorial/security), [utilityProcess](https://www.electronjs.org/docs/latest/api/utility-process).
 
@@ -103,8 +103,14 @@ Use **Stage** or **Unstage** for an entire file, or **View** to select individua
 
 Create, switch, rename and delete branches, configure upstreams, and create or delete local tags. Reference actions use guarded Undo. Stashes support selected paths, untracked files, staged-only creation, apply/pop, message editing and reviewed drop. Workspace Undo after stash creation retains the stash copy.
 
-Use **Manage remotes** for URLs, fetch, remote removal or reviewed server branch/tag deletion. Push first reviews the destination tip; replacing history requires an explicit force-with-lease selection. Server deletions also use an exact lease and have no Undo. **Pull** saves a per-repository fast-forward-only, merge or rebase preference. Commit or stash tracked edits before pulling; native conflicts remain available to resolve or abort with Git while M4's controls are developed.
+Use **Manage remotes** for URLs, fetch, remote removal or reviewed server branch/tag deletion. Push first reviews the destination tip; replacing history requires an explicit force-with-lease selection. Server deletions also use an exact lease and have no Undo. **Pull** saves a per-repository fast-forward-only, merge or rebase preference. Commit or stash tracked edits before pulling; the operation panel offers conflict resolution and reviewed Continue/Skip/Abort actions when applicable.
 
 **Clone** supports shallow history, a selected branch/tag, sparse directories and on-demand blobs. Git credential helpers and SSH agents remain supported. Native authentication prompts use a private local socket; changed SSH host keys stop the connection and show a dedicated diagnostic. TLS verification stays enabled. Automatic fetch is opt-in, avoids foreground work and dialogs, and backs off failed attempts up to one hour.
 
 See the [M3 completion report](docs/verification/m3-completion.md) and [transport acceptance report](docs/verification/m3-gitea.md). To run its disposable Linux Gitea container fixture after building, use `OPENKRAKEN_GITEA_TEST=1 xvfb-run -a pnpm exec playwright test tests/e2e/gitea.test.ts`; Docker is the default engine, with `OPENKRAKEN_CONTAINER_ENGINE` available for Podman.
+
+## File inspection and editing
+
+Open commit details and select a changed file to compare it with its parent; merge commits offer parent selection. Hunk, inline and split views share native Git changes, whitespace controls and word highlighting. Supported raster images offer side-by-side and overlay views. Large files require explicit loading within fixed byte/line limits; the encoding selector changes display only. **File history** follows renames across pages, and **Blame** streams attribution for supported UTF-8 files.
+
+From a staged or unstaged file, choose **View**, then **Full comparison** for the same rich views. **Select lines to stage/unstage** requests a fresh review of the exact changes before staging. **Edit** opens a working-file draft with filename-based syntax highlighting, local text Undo/Redo and explicit save. Saves preserve supported encodings and line endings, refuse stale file/index state, and participate in repository Undo. Closing an unsaved draft or quitting the app asks whether to keep editing or discard it.

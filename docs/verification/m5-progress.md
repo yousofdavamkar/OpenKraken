@@ -1,5 +1,7 @@
 # M5 progress — file inspection
 
+Historical checkpoint; superseded by the [M5 completion report](m5-completion.md).
+
 M5 is in progress as of 2026-11-01. The verified implementation checkpoint is `1281780`, including guarded WIP editing and editor lifecycle protection. M0–M4 retain their documented Linux acceptance scope. M6–M8 remain open. React 19.3.1 and TypeScript 7.0.2 are unchanged.
 
 ## Implemented
