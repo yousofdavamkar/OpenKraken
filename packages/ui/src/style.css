@@ -1518,3 +1518,28 @@ footer {
   white-space: pre-wrap;
   font: inherit;
 }
+
+.issue-action-dialog {
+  width: min(720px, calc(100vw - 64px));
+}
+.issue-action-dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-block: 10px;
+}
+.issue-action-dialog textarea {
+  resize: vertical;
+}
+.issue-action-dialog pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+  font: inherit;
+}
+.issue-action-results {
+  max-height: 260px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}

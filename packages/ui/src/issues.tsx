@@ -6,6 +6,7 @@ import type {
   ProviderIssueSummary,
   ProviderIssueComment,
 } from '@openkraken/ipc-contract';
+import { IssueAction } from './issue-actions.js';
 import { ProviderRepositoryPicker } from './provider-repositories.js';
 
 type RepositorySelection = {
@@ -158,7 +159,15 @@ function IssueComments({ target, number }: { target: RepositorySelection; number
     </section>
   );
 }
-function IssueDetails({ target, number }: { target: RepositorySelection; number: number }) {
+function IssueDetails({
+  target,
+  number,
+  refreshList,
+}: {
+  target: RepositorySelection;
+  number: number;
+  refreshList: () => void;
+}) {
   const [detail, setDetail] = useState<ProviderIssueDetails>();
   const [tab, setTab] = useState<'details' | 'comments'>('details');
   const [attempt, setAttempt] = useState(0),
@@ -220,6 +229,23 @@ function IssueDetails({ target, number }: { target: RepositorySelection; number:
             {detail.locked ? ' · Conversation locked' : ''}
           </p>
           <div className="dialog-actions">
+            <IssueAction
+              target={target}
+              intent={{ action: 'comment', number }}
+              finished={() => setAttempt((value) => value + 1)}
+            />
+            <IssueAction
+              target={target}
+              intent={{
+                action: 'state',
+                number,
+                state: detail.state === 'open' ? 'closed' : 'open',
+              }}
+              finished={(changed) => {
+                if (changed) refreshList();
+                else setAttempt((value) => value + 1);
+              }}
+            />
             <button aria-pressed={tab === 'details'} onClick={() => setTab('details')}>
               Details
             </button>
@@ -443,7 +469,20 @@ function IssuePages({
         <p>Search covers loaded results. Use arrow keys and Enter to open details.</p>
       </section>
       {selected !== undefined ? (
-        <IssueDetails key={selected} target={target} number={selected} />
+        <IssueDetails
+          key={selected}
+          target={target}
+          number={selected}
+          refreshList={() => {
+            setIssues([]);
+            setSelected(undefined);
+            setNext(null);
+            setPage(1);
+            setAttempt((value) => value + 1);
+            setActive(0);
+            scroll.current?.scrollTo(0, 0);
+          }}
+        />
       ) : (
         <p>Select an issue to view its details.</p>
       )}
@@ -453,6 +492,7 @@ function IssuePages({
 function IssueDialog({ close }: { close: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [target, setTarget] = useState<RepositorySelection>();
+  const [version, setVersion] = useState(0);
   const [state, setState] = useState<ProviderIssueListOptions['state']>('open');
   useEffect(() => {
     dialog.current?.showModal();
@@ -474,6 +514,16 @@ function IssueDialog({ close }: { close: () => void }) {
             {target.origin}/{target.repository.owner}/{target.repository.name}
           </p>
           <div className="dialog-actions">
+            <IssueAction
+              target={target}
+              intent={{ action: 'create' }}
+              finished={(changed) => {
+                if (changed) {
+                  setState('open');
+                  setVersion((value) => value + 1);
+                }
+              }}
+            />
             <button onClick={() => setTarget(undefined)}>Choose repository</button>
             <label>
               Issue state{' '}
@@ -492,7 +542,7 @@ function IssueDialog({ close }: { close: () => void }) {
             </label>
           </div>
           <IssuePages
-            key={`${target.accountId}/${target.repository.owner}/${target.repository.name}/${state}`}
+            key={`${target.accountId}/${target.repository.owner}/${target.repository.name}/${state}/${version}`}
             target={target}
             state={state}
           />
