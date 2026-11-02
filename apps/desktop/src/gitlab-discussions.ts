@@ -122,7 +122,9 @@ export async function loadMergeRequestDiscussions(
             if (
               String(note.project_id) !== merge.target.projectId ||
               String(note.noteable_id) !== merge.id ||
-              (note.noteable_iid != null && note.noteable_iid !== merge.number)
+              (note.noteable_iid !== null &&
+                note.noteable_iid !== undefined &&
+                note.noteable_iid !== merge.number)
             )
               throw new ProviderError(
                 'PROVIDER_RESPONSE',

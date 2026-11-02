@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ProviderMergeRequestDetails, ProviderPullOptions } from '@openkraken/ipc-contract';
+import { MergeRequestDiscussions } from './merge-request-discussions.js';
 import { MergeRequestFiles } from './merge-request-files.js';
 import { useProviderPoll } from './provider-polling.js';
 
@@ -10,7 +11,7 @@ export function MergeRequestDetails({
   target: { accountId: string; repository: ProviderPullOptions['repository'] };
   number: number;
 }) {
-  const [tab, setTab] = useState<'details' | 'files'>('details');
+  const [tab, setTab] = useState<'details' | 'files' | 'discussions'>('details');
   const [detail, setDetail] = useState<ProviderMergeRequestDetails>();
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
@@ -145,9 +146,19 @@ export function MergeRequestDetails({
             >
               Files
             </button>
+            <button aria-pressed={tab === 'discussions'} onClick={() => setTab('discussions')}>
+              Discussions
+            </button>
           </div>
           {tab === 'details' ? (
             <pre className="pull-body">{detail.body || 'No description.'}</pre>
+          ) : tab === 'discussions' ? (
+            <MergeRequestDiscussions
+              accountId={target.accountId}
+              repository={target.repository}
+              number={number}
+              revision={detail.diffRefs}
+            />
           ) : (
             detail.diffRefs && (
               <MergeRequestFiles
