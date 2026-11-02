@@ -127,4 +127,6 @@ In **Manage remotes**, **Fetch authentication** lets you choose a saved account 
 
 **Push authentication** also offers saved accounts. Review shows the configured push destination and tips, then locks the account choice. A rejected push can be retried with explicit force-with-lease; a changed remote tip requires a new review. **Review again** reloads remote metadata.
 
-PR workflows, repository creation/forking, other providers and saved-account authentication for pull remain in development. A real OAuth application registration and live sign-in still require environment-specific verification. Existing Git credential helpers and SSH agents remain available for manual clone/fetch/push. See [M6 progress](docs/verification/m6-progress.md).
+**Pull authentication** offers saved accounts with a separate review of the branch, upstream, HTTPS fetch URL and integration policy. Changes to the reviewed branch, index or remote settings require another review. The existing fast-forward-only, merge/rebase and Undo behavior remains available.
+
+PR workflows, repository creation/forking, other providers and saved-account authentication for remote deletion remain in development. A real OAuth application registration and live sign-in still require environment-specific verification. Existing Git credential helpers and SSH agents remain available for manual clone/fetch/push. See [M6 progress](docs/verification/m6-progress.md).
