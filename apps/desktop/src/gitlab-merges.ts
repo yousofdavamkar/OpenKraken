@@ -45,7 +45,7 @@ async function resolveProject(read: GitLabRead, repository: ProviderPullOptions[
     );
   return project.id;
 }
-function summary(
+export function mergeRequestSummary(
   value: unknown,
   projectId: number,
   origin: string,
@@ -101,7 +101,9 @@ export async function loadMergeRequests(
         'GitLab returned merge requests in another state.',
       );
     return providerPullPageSchema.parse({
-      pullRequests: data.map((item) => summary(item, projectId, origin, options.repository)),
+      pullRequests: data.map((item) =>
+        mergeRequestSummary(item, projectId, origin, options.repository),
+      ),
       nextPage: data.length === 100 && options.page < 100 ? options.page + 1 : null,
       limited: data.length === 100 && options.page === 100,
     });
@@ -142,7 +144,7 @@ export async function loadMergeRequest(
       throw new ProviderError('PROVIDER_RESPONSE', 'GitLab returned another merge request.');
     const refs = data.diff_refs;
     return providerMergeRequestDetailsSchema.parse({
-      ...summary(data, projectId, origin, options.repository),
+      ...mergeRequestSummary(data, projectId, origin, options.repository),
       provider: 'gitlab',
       id: String(data.id),
       body: data.description ?? '',

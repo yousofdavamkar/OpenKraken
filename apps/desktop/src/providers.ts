@@ -1,3 +1,13 @@
+import {
+  providerMergeTemplateOptionsSchema,
+  type ProviderMergeTemplateOptions,
+} from '@openkraken/ipc-contract';
+import {
+  providerMergeCreationIntentSchema,
+  providerCreateMergeRequestSchema,
+  type ProviderMergeCreationIntent,
+  type ProviderCreateMergeRequest,
+} from '@openkraken/ipc-contract';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -403,6 +413,66 @@ export class ProviderService {
           'Choose a GitLab account to read merge requests.',
         );
       return this.gitlab.mergeRequestDiscussions(account.origin, token, options, signal);
+    });
+  }
+  mergeTemplates(id: string, input: ProviderPullTemplatesOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerPullTemplatesOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to read merge-request templates.',
+        );
+      return this.gitlab.mergeTemplates(account.origin, token, options, signal);
+    });
+  }
+  mergeTemplate(id: string, input: ProviderMergeTemplateOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerMergeTemplateOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to read merge-request templates.',
+        );
+      return this.gitlab.mergeTemplate(account.origin, token, options, signal);
+    });
+  }
+  previewMergeCreation(id: string, input: ProviderMergeCreationIntent, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerMergeCreationIntentSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to create merge requests.',
+        );
+      return this.gitlab.previewMergeCreation(
+        account.origin,
+        token,
+        account.providerUserId,
+        options,
+        signal,
+      );
+    });
+  }
+  createMergeRequest(id: string, input: ProviderCreateMergeRequest, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerCreateMergeRequestSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to create merge requests.',
+        );
+      return this.gitlab.createMergeRequest(
+        account.origin,
+        token,
+        account.providerUserId,
+        options,
+        signal,
+      );
     });
   }
   mergeApprovals(id: string, input: ProviderPullOptions, signal?: AbortSignal) {

@@ -755,6 +755,24 @@ export const providerCreatePullSchema = providerPullSourceSchema
 export type ProviderPullSource = z.infer<typeof providerPullSourceSchema>;
 export type ProviderCreatePull = z.infer<typeof providerCreatePullSchema>;
 export type ProviderPullRevision = z.infer<typeof providerPullRevisionSchema>;
+export const providerMergeCreationIntentSchema = providerCreatePullSchema.omit({ revision: true });
+export const providerMergeCreationPreviewSchema = providerPullRevisionSchema
+  .extend({
+    sourceProjectId: z.string().regex(/^[1-9][0-9]*$/),
+    targetProjectId: z.string().regex(/^[1-9][0-9]*$/),
+    title: z.string().min(1).max(255),
+    revision: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .strict();
+export const providerCreateMergeRequestSchema = z
+  .object({
+    intent: providerMergeCreationIntentSchema,
+    revision: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .strict();
+export type ProviderMergeCreationIntent = z.infer<typeof providerMergeCreationIntentSchema>;
+export type ProviderMergeCreationPreview = z.infer<typeof providerMergeCreationPreviewSchema>;
+export type ProviderCreateMergeRequest = z.infer<typeof providerCreateMergeRequestSchema>;
 export const providerPullTemplatesOptionsSchema = z
   .object({ repository: providerRepositoryTargetSchema })
   .strict();
@@ -796,6 +814,35 @@ export type ProviderPullTemplatesOptions = z.infer<typeof providerPullTemplatesO
 export type ProviderPullTemplateOptions = z.infer<typeof providerPullTemplateOptionsSchema>;
 export type ProviderPullTemplates = z.infer<typeof providerPullTemplatesSchema>;
 export type ProviderPullTemplate = z.infer<typeof providerPullTemplateSchema>;
+
+const mergeTemplateKeySchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .refine(
+    (key) =>
+      key !== '.' &&
+      key !== '..' &&
+      !key.includes('/') &&
+      !key.includes('\\') &&
+      ![...key].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127),
+    'Invalid template key',
+  );
+export const providerMergeTemplatesSchema = z
+  .object({
+    defaultBranch: providerBranchNameSchema.nullable(),
+    revision: z.string().regex(/^[0-9a-f]{64}$/),
+    templates: z
+      .array(z.object({ key: mergeTemplateKeySchema, name: z.string().min(1).max(1024) }).strict())
+      .max(50),
+    limited: z.boolean(),
+  })
+  .strict();
+export const providerMergeTemplateOptionsSchema = providerPullTemplatesOptionsSchema
+  .extend({ revision: z.string().regex(/^[0-9a-f]{64}$/), key: mergeTemplateKeySchema })
+  .strict();
+export type ProviderMergeTemplates = z.infer<typeof providerMergeTemplatesSchema>;
+export type ProviderMergeTemplateOptions = z.infer<typeof providerMergeTemplateOptionsSchema>;
 
 export const providerMergeMethodSchema = z.enum(['merge', 'squash', 'rebase']);
 export const providerMergePreviewSchema = z

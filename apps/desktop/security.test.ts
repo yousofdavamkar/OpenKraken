@@ -891,3 +891,49 @@ test('GitLab approval IPC requires a reviewed commit and keeps approval password
     }).success,
   ).toBe(true);
 });
+test('GitLab creation and template IPC bind drafts and reviewed selections without Git-service access', () => {
+  const envelope = { id: '00000000-0000-4000-8000-000000000000', accountId: 'a'.repeat(64) };
+  const repository = { owner: 'group/subgroup', name: 'project' };
+  const intent = {
+    repository,
+    source: repository,
+    head: 'feature/topic',
+    base: 'main',
+    title: 'Title',
+    body: 'Body',
+    draft: true,
+    maintainerCanModify: false,
+  };
+  const write = {
+    ...envelope,
+    method: 'providerCreateMergeRequest',
+    options: { intent, revision: 'b'.repeat(64) },
+  };
+  expect(requestSchema.safeParse(write).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(write).success).toBe(false);
+  expect(requestSchema.safeParse({ ...write, options: { intent } }).success).toBe(false);
+  expect(
+    requestSchema.safeParse({
+      ...write,
+      options: { ...write.options, intent: { ...intent, head: '../bad' } },
+    }).success,
+  ).toBe(false);
+  expect(
+    requestSchema.safeParse({
+      ...envelope,
+      method: 'providerPreviewMergeCreation',
+      options: intent,
+    }).success,
+  ).toBe(true);
+  const template = {
+    ...envelope,
+    method: 'providerMergeTemplate',
+    options: { repository, revision: 'c'.repeat(64), key: 'Feature' },
+  };
+  expect(requestSchema.safeParse(template).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(template).success).toBe(false);
+  for (const key of ['..', '.', '../outside', 'bad\\name', 'bad\nname'])
+    expect(
+      requestSchema.safeParse({ ...template, options: { ...template.options, key } }).success,
+    ).toBe(false);
+});

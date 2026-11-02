@@ -1,5 +1,10 @@
 import { z } from 'zod';
 import {
+  providerMergeCreationIntentSchema,
+  providerMergeCreationPreviewSchema,
+  providerCreateMergeRequestSchema,
+  providerMergeTemplatesSchema,
+  providerMergeTemplateOptionsSchema,
   providerPollingPolicySchema,
   providerRetryAtSchema,
   providerPullChecksOptionsSchema,
@@ -1318,6 +1323,38 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerPreviewMergeCreation'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerMergeCreationIntentSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerCreateMergeRequest'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerCreateMergeRequestSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerMergeTemplates'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerPullTemplatesOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerMergeTemplate'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerMergeTemplateOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerMergeApprovals'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerPullOptionsSchema,
@@ -1610,6 +1647,21 @@ export const resultSchema = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({ kind: z.literal('providerReviewSubmitted'), review: providerPullReviewSchema })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerMergeCreationPreview'),
+      preview: providerMergeCreationPreviewSchema,
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal('providerMergeCreated'), mergeRequest: providerPullSummarySchema })
+    .strict(),
+  z
+    .object({ kind: z.literal('providerMergeTemplates'), templates: providerMergeTemplatesSchema })
+    .strict(),
+  z
+    .object({ kind: z.literal('providerMergeTemplate'), template: providerPullTemplateSchema })
     .strict(),
   z
     .object({ kind: z.literal('providerMergeApprovals'), approvals: providerMergeApprovalsSchema })

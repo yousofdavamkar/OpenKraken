@@ -281,6 +281,10 @@ else {
           request.method === 'providerMergeRequest' ||
           request.method === 'providerMergeRequestFiles' ||
           request.method === 'providerMergeRequestDiscussions' ||
+          request.method === 'providerPreviewMergeCreation' ||
+          request.method === 'providerCreateMergeRequest' ||
+          request.method === 'providerMergeTemplates' ||
+          request.method === 'providerMergeTemplate' ||
           request.method === 'providerMergeApprovals' ||
           request.method === 'providerMergeApprovalPreview' ||
           request.method === 'providerWriteMergeApproval' ||
@@ -492,6 +496,42 @@ else {
                 controller.signal,
               ),
             });
+          if (request.method === 'providerPreviewMergeCreation')
+            return resultSchema.parse({
+              kind: 'providerMergeCreationPreview',
+              preview: await providers.previewMergeCreation(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerCreateMergeRequest')
+            return resultSchema.parse({
+              kind: 'providerMergeCreated',
+              mergeRequest: await providers.createMergeRequest(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerMergeTemplates')
+            return resultSchema.parse({
+              kind: 'providerMergeTemplates',
+              templates: await providers.mergeTemplates(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerMergeTemplate')
+            return resultSchema.parse({
+              kind: 'providerMergeTemplate',
+              template: await providers.mergeTemplate(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerMergeApprovals')
             return resultSchema.parse({
               kind: 'providerMergeApprovals',
@@ -684,6 +724,10 @@ else {
           request.method === 'providerMergeRequest' ||
           request.method === 'providerMergeRequestFiles' ||
           request.method === 'providerMergeRequestDiscussions' ||
+          request.method === 'providerPreviewMergeCreation' ||
+          request.method === 'providerCreateMergeRequest' ||
+          request.method === 'providerMergeTemplates' ||
+          request.method === 'providerMergeTemplate' ||
           request.method === 'providerMergeApprovals' ||
           request.method === 'providerMergeApprovalPreview' ||
           request.method === 'providerWriteMergeApproval' ||

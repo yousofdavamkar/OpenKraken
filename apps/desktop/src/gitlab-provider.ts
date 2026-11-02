@@ -1,3 +1,5 @@
+import { loadMergeTemplates, loadMergeTemplate } from './gitlab-templates.js';
+import { previewMergeCreation, createMergeRequest } from './gitlab-create.js';
 import { previewMergeDiscussionAction, writeMergeDiscussion } from './gitlab-discussion-actions.js';
 import {
   loadMergeApprovals,
@@ -20,6 +22,10 @@ import { loadMergeRequestDiscussions } from './gitlab-discussions.js';
 import { loadMergeRequestFiles } from './gitlab-files.js';
 import { loadMergeRequest, loadMergeRequests } from './gitlab-merges.js';
 import type {
+  ProviderPullTemplatesOptions,
+  ProviderMergeTemplateOptions,
+  ProviderMergeCreationIntent,
+  ProviderCreateMergeRequest,
   ProviderMergeApprovalOptions,
   ProviderWriteMergeApproval,
   ProviderMergeDiscussionAction,
@@ -156,6 +162,62 @@ export class GitLabProvider {
     return loadMergeRequestDiscussions(
       (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
       providerOriginSchema.parse(origin),
+      input,
+    );
+  }
+  mergeTemplates(
+    origin: string,
+    token: string,
+    input: ProviderPullTemplatesOptions,
+    signal?: AbortSignal,
+  ) {
+    return loadMergeTemplates(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      origin,
+      input,
+    );
+  }
+  mergeTemplate(
+    origin: string,
+    token: string,
+    input: ProviderMergeTemplateOptions,
+    signal?: AbortSignal,
+  ) {
+    this.cache.clear();
+    return loadMergeTemplate(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      origin,
+      input,
+    );
+  }
+  previewMergeCreation(
+    origin: string,
+    token: string,
+    userId: string,
+    input: ProviderMergeCreationIntent,
+    signal?: AbortSignal,
+  ) {
+    this.cache.clear();
+    return previewMergeCreation(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      origin,
+      userId,
+      input,
+    );
+  }
+  createMergeRequest(
+    origin: string,
+    token: string,
+    userId: string,
+    input: ProviderCreateMergeRequest,
+    signal?: AbortSignal,
+  ) {
+    this.cache.clear();
+    return createMergeRequest(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      (endpoint, method, perform) => this.request(origin, token, signal, perform, endpoint, method),
+      origin,
+      userId,
       input,
     );
   }
