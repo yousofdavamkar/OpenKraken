@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useRepository } from './store.js';
+import { useRepository, waitForBackground } from './store.js';
 const choices = [0, 5, 15, 30];
 export function AutomaticFetch({ repoId }: { repoId: string }) {
   const key = `openkraken.autoFetch.${repoId}`;
@@ -16,7 +16,14 @@ export function AutomaticFetch({ repoId }: { repoId: string }) {
     if (!minutes) return;
     let stopped = false;
     let requestId: string | undefined;
+    let failures = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const delayMinutes = () => Math.min(60, minutes * 2 ** failures);
+    const schedule = () => {
+      timer = setTimeout(() => void fetch(), delayMinutes() * 60000);
+    };
     const fetch = async () => {
+      if (useRepository.getState().syncing) await waitForBackground();
       const state = useRepository.getState();
       if (
         stopped ||
@@ -26,8 +33,11 @@ export function AutomaticFetch({ repoId }: { repoId: string }) {
         state.searching ||
         state.snapshot?.repository.id !== repoId ||
         document.querySelector('dialog[open]')
-      )
+      ) {
+        if (!stopped) schedule();
         return;
+      }
+      let outcome: string | undefined;
       try {
         requestId = crypto.randomUUID();
         useRepository.setState({ busy: requestId });
@@ -38,7 +48,10 @@ export function AutomaticFetch({ repoId }: { repoId: string }) {
           repoId,
         });
         if (remotes.kind === 'error') throw new Error(remotes.message);
-        if (remotes.kind !== 'remotes' || stopped) return;
+        if (remotes.kind !== 'remotes' || stopped) {
+          outcome = 'Automatic fetch cancelled';
+          return;
+        }
         for (const remote of remotes.state.remotes) {
           if (stopped) return;
           requestId = crypto.randomUUID();
@@ -52,16 +65,16 @@ export function AutomaticFetch({ repoId }: { repoId: string }) {
           });
           if (result.kind === 'error') throw new Error(result.message);
           if (result.kind === 'cancelled') {
-            setNotice('Automatic fetch cancelled');
+            failures = 0;
+            outcome = 'Automatic fetch cancelled';
             return;
           }
         }
-        if (!stopped) setNotice('Automatic fetch completed');
+        failures = 0;
+        outcome = 'Automatic fetch completed';
       } catch (error) {
-        if (!stopped)
-          setNotice(
-            `Automatic fetch failed: ${error instanceof Error ? error.message : String(error)}`,
-          );
+        failures = Math.min(failures + 1, 6);
+        outcome = `Automatic fetch failed: ${error instanceof Error ? error.message : String(error)}. Retrying in ${delayMinutes()} minutes.`;
       } finally {
         if (useRepository.getState().busy === requestId)
           useRepository.setState({ busy: undefined });
@@ -70,12 +83,16 @@ export function AutomaticFetch({ repoId }: { repoId: string }) {
           await useRepository
             .getState()
             .run({ id: crypto.randomUUID(), method: 'refresh', repoId }, true);
+        if (!stopped) {
+          schedule();
+          if (outcome) setNotice(outcome);
+        }
       }
     };
-    const timer = setInterval(() => void fetch(), minutes * 60000);
+    schedule();
     return () => {
       stopped = true;
-      clearInterval(timer);
+      clearTimeout(timer);
       if (requestId) void window.openkraken.cancel(requestId);
     };
   }, [repoId, minutes]);

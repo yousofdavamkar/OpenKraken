@@ -16,7 +16,7 @@ Implemented and exercised against real Git and Electron:
 - Clone with shallow history, a branch/tag, on-demand blobs and sparse directories; bounded transport progress and cancellation.
 - Native askpass helper over a private Unix socket or Windows named pipe, typed username/password and SSH confirmation prompts, cancellation and existing credential-helper/agent compatibility.
 
-Remaining for M3: automatic-fetch failure backoff from the parity matrix, followed by a final verification pass. The [Gitea HTTPS/SSH acceptance test](m3-gitea.md) passes, including encrypted SSH keys and host-key consent and changed-key refusal. The current push/deletion dialogs require a single push URL per remote.
+All M3 feature slices are implemented; the final verification pass is running. Automatic fetch now doubles failed retry delays up to one hour and resets after success. The [Gitea HTTPS/SSH acceptance test](m3-gitea.md) passes, including encrypted SSH keys and host-key consent and changed-key refusal. The current push/deletion dialogs require a single push URL per remote.
 
 Latest full regression after server-ref deletion: 132 Vitest tests passed, 27 Electron tests passed (including Gitea) and the dedicated large-repository benchmark was skipped. Type checking, lint, build, Linux packaging and packaged renderer/native-helper smoke checks passed. The Windows helper cross-compiles; runtime behavior still needs a Windows runner. The graph suite measured 279.1 ms first paint, 154.0 ms for a 5,000-commit page, and 16.7 ms p95 scrolling on this Linux run. These are local results, not macOS/Windows verification.
 

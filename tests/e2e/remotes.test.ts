@@ -1,6 +1,6 @@
 import { _electron as electron, expect, test } from '@playwright/test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createFixture, fixtureGit } from '../../packages/test-fixtures/src/index.js';
 test('manage remote URLs and confirm local removal through the desktop', async () => {
@@ -135,6 +135,78 @@ test('server branch deletion requires reviewing its tip and a separate confirmat
     expect(fixtureGit(local, ['rev-parse', 'HEAD'])).toBe(tip);
   } finally {
     await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+test('automatic fetch backs off after failures and resets its interval after recovery', async () => {
+  const { createServer } = await import('node:http');
+  let requests = 0;
+  let failing = true;
+  const server = createServer((request, response) => {
+    if (failing) {
+      requests++;
+      response.writeHead(503).end('Temporarily unavailable');
+      return;
+    }
+    const path = resolve(
+      remote,
+      '.' + new URL(request.url!, 'http://fixture').pathname.slice('/repo.git'.length),
+    );
+    if (!path.startsWith(resolve(remote) + sep)) {
+      response.writeHead(404).end();
+      return;
+    }
+    try {
+      response.end(readFileSync(path));
+    } catch {
+      response.writeHead(404).end();
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Expected TCP listener');
+  const url = `http://127.0.0.1:${address.port}/repo.git`;
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-auto-backoff-'));
+  const repo = createFixture(join(root, 'repo'));
+  const remote = join(root, 'remote.git');
+  fixtureGit(repo, ['clone', '--bare', '.', remote]);
+  fixtureGit(remote, ['branch', 'recovered']);
+  fixtureGit(remote, ['update-server-info']);
+  fixtureGit(repo, ['remote', 'set-url', 'origin', url]);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await page.clock.install();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, repo);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Automatic fetch', exact: true }).selectOption('5');
+    await page.clock.fastForward(300001);
+    await expect(page.getByText(/Retrying in 10 minutes/)).toBeVisible();
+    expect(requests).toBe(1);
+    await page.clock.fastForward(300001);
+    await expect(page.getByText(/Retrying in 10 minutes/)).toBeVisible();
+    expect(requests).toBe(1);
+    await page.clock.fastForward(300001);
+    await expect(page.getByText(/Retrying in 20 minutes/)).toBeVisible();
+    expect(requests).toBe(2);
+    failing = false;
+    await page.clock.fastForward(1200001);
+    await expect(page.getByText('Automatic fetch completed', { exact: true })).toBeVisible();
+    expect(fixtureGit(repo, ['rev-parse', 'origin/recovered'])).toBe(
+      fixtureGit(remote, ['rev-parse', 'recovered']),
+    );
+    failing = true;
+    await page.clock.fastForward(300001);
+    await expect(page.getByText(/Retrying in 10 minutes/)).toBeVisible();
+    expect(requests).toBe(3);
+  } finally {
+    await app.close();
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     rmSync(root, { recursive: true, force: true });
   }
 });
