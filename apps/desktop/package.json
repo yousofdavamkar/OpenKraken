@@ -5,6 +5,8 @@
   "type": "module",
   "main": "dist/main.cjs",
   "dependencies": {
+    "@gitbeaker/requester-utils": "43.8.0",
+    "@gitbeaker/rest": "43.8.0",
     "@octokit/rest": "22.0.1",
     "@openkraken/git-core": "workspace:*",
     "@openkraken/ipc-contract": "workspace:*",

@@ -47,6 +47,7 @@ import {
   type DeviceStart,
 } from '@openkraken/ipc-contract';
 import { GitHubProvider, ProviderError, type ProviderDriver } from './github-provider.js';
+import { GitLabProvider } from './gitlab-provider.js';
 import { ProviderCredentialError, ProviderVault } from './provider-vault.js';
 import {
   GitHubDeviceFlow,
@@ -72,6 +73,7 @@ export class ProviderService {
     private github: ProviderDriver = new GitHubProvider(),
     private oauth = new GitHubOAuth(),
     private now = Date.now,
+    private gitlab = new GitLabProvider(),
   ) {
     this.manifest = join(directory, 'provider-accounts.json');
     this.device = new GitHubDeviceFlow(
@@ -84,6 +86,17 @@ export class ProviderService {
       oauth,
       now,
     );
+  }
+  private identityDriver(provider: ProviderAccount['provider']) {
+    return provider === 'gitlab' ? this.gitlab : this.github;
+  }
+  private collaborationDriver(account: ProviderAccount) {
+    if (account.provider !== 'github')
+      throw new ProviderError(
+        'PROVIDER_UNSUPPORTED',
+        'GitLab repository browsing and collaboration are not available yet.',
+      );
+    return this.github;
   }
   private run<T>(work: () => Promise<T>) {
     const pending = this.queue.then(work, work);
@@ -180,8 +193,9 @@ export class ProviderService {
         throw new ProviderCredentialError('KEYCHAIN_UNAVAILABLE');
       signal?.throwIfAborted();
       const accounts = await this.load();
-      this.github.clearReadCache();
-      const identity = await this.github.identity(options.origin, options.token, signal);
+      const driver = this.identityDriver(options.provider);
+      driver.clearReadCache();
+      const identity = await driver.identity(options.origin, options.token, signal);
       const fields = {
         provider: options.provider,
         origin: options.origin,
@@ -227,147 +241,169 @@ export class ProviderService {
           'This provider account is no longer connected.',
         );
       const { token } = await this.storedCredential(account);
-      return providerPollingPolicySchema.parse(this.github.pollingPolicy(account.origin, token));
+      return providerPollingPolicySchema.parse(
+        this.identityDriver(account.provider).pollingPolicy(account.origin, token),
+      );
     });
   }
   repositories(id: string, page: number, signal?: AbortSignal) {
     return this.run(async () => {
       providerRepositoryPageNumberSchema.parse(page);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.repositories(account.origin, token, page, signal);
+      return this.collaborationDriver(account).repositories(account.origin, token, page, signal);
     });
   }
   pullTemplates(id: string, input: ProviderPullTemplatesOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerPullTemplatesOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.pullTemplates(account.origin, token, options, signal);
+      return this.collaborationDriver(account).pullTemplates(
+        account.origin,
+        token,
+        options,
+        signal,
+      );
     });
   }
   pullTemplate(id: string, input: ProviderPullTemplateOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerPullTemplateOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.pullTemplate(account.origin, token, options, signal);
+      return this.collaborationDriver(account).pullTemplate(account.origin, token, options, signal);
     });
   }
   previewMerge(id: string, input: ProviderPullOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerPullOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.previewMerge(account.origin, token, options, signal);
+      return this.collaborationDriver(account).previewMerge(account.origin, token, options, signal);
     });
   }
   mergePull(id: string, input: ProviderMergePull, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerMergePullSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.mergePull(account.origin, token, options, signal);
+      return this.collaborationDriver(account).mergePull(account.origin, token, options, signal);
     });
   }
   previewPull(id: string, input: ProviderPullSource, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerPullSourceSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.previewPull(account.origin, token, options, signal);
+      return this.collaborationDriver(account).previewPull(account.origin, token, options, signal);
     });
   }
   createPull(id: string, input: ProviderCreatePull, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerCreatePullSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.createPull(account.origin, token, options, signal);
+      return this.collaborationDriver(account).createPull(account.origin, token, options, signal);
     });
   }
   pullRequests(id: string, input: ProviderPullListOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerPullListOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.pullRequests(account.origin, token, options, signal);
+      return this.collaborationDriver(account).pullRequests(account.origin, token, options, signal);
     });
   }
   pullRequest(id: string, input: ProviderPullOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerPullOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.pullRequest(account.origin, token, options, signal);
+      return this.collaborationDriver(account).pullRequest(account.origin, token, options, signal);
     });
   }
   issues(id: string, input: ProviderIssueListOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerIssueListOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.issues(account.origin, token, options, signal);
+      return this.collaborationDriver(account).issues(account.origin, token, options, signal);
     });
   }
   issue(id: string, input: ProviderIssueOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerIssueOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.issue(account.origin, token, options, signal);
+      return this.collaborationDriver(account).issue(account.origin, token, options, signal);
     });
   }
   issueComments(id: string, input: ProviderIssueCommentsOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerIssueCommentsOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.issueComments(account.origin, token, options, signal);
+      return this.collaborationDriver(account).issueComments(
+        account.origin,
+        token,
+        options,
+        signal,
+      );
     });
   }
   writeIssue(id: string, input: ProviderWriteIssue, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerWriteIssueSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.writeIssue(account.origin, token, options, signal);
+      return this.collaborationDriver(account).writeIssue(account.origin, token, options, signal);
     });
   }
   previewIssueAction(id: string, input: ProviderIssueOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerIssueOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.previewIssueAction(account.origin, token, options, signal);
+      return this.collaborationDriver(account).previewIssueAction(
+        account.origin,
+        token,
+        options,
+        signal,
+      );
     });
   }
   pullChecks(id: string, input: ProviderPullChecksOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerPullChecksOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.pullChecks(account.origin, token, options, signal);
+      return this.collaborationDriver(account).pullChecks(account.origin, token, options, signal);
     });
   }
   pullFiles(id: string, input: ProviderPullFilesOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerPullFilesOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.pullFiles(account.origin, token, options, signal);
+      return this.collaborationDriver(account).pullFiles(account.origin, token, options, signal);
     });
   }
   createComment(id: string, input: ProviderCreateComment, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerCreateCommentSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.createComment(account.origin, token, options, signal);
+      return this.collaborationDriver(account).createComment(
+        account.origin,
+        token,
+        options,
+        signal,
+      );
     });
   }
   pullComments(id: string, input: ProviderPullReviewsOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerPullReviewsOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.pullComments(account.origin, token, options, signal);
+      return this.collaborationDriver(account).pullComments(account.origin, token, options, signal);
     });
   }
   pullReviews(id: string, input: ProviderPullReviewsOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerPullReviewsOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.pullReviews(account.origin, token, options, signal);
+      return this.collaborationDriver(account).pullReviews(account.origin, token, options, signal);
     });
   }
   submitReview(id: string, input: ProviderSubmitReview, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerSubmitReviewSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.github.submitReview(account.origin, token, options, signal);
+      return this.collaborationDriver(account).submitReview(account.origin, token, options, signal);
     });
   }
   /** Internal main-process API; the result must never be returned to the renderer. */
@@ -410,7 +446,7 @@ export class ProviderService {
       credential = await this.oauth.refresh(credential, signal);
       rotated = true;
     }
-    const identity = await this.github.identity(
+    const identity = await this.identityDriver(account.provider).identity(
       account.origin,
       credential?.accessToken ?? stored.token,
       signal,
@@ -453,7 +489,7 @@ export class ProviderService {
           'PROVIDER_ACCOUNT',
           'This provider account is no longer connected.',
         );
-      this.github.clearReadCache();
+      this.identityDriver(account.provider).clearReadCache();
       await this.vault.remove(scope(account));
       const remaining = accounts.filter((item) => item.id !== id);
       await this.save(remaining);

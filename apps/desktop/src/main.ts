@@ -29,6 +29,7 @@ import { fetchAvatar } from './avatar-provider.js';
 import { isTrustedDocument, windowPreferences } from './security.js';
 import { ProviderService } from './providers.js';
 import { GitHubProvider, ProviderError } from './github-provider.js';
+import { GitLabProvider } from './gitlab-provider.js';
 import { GitHubOAuth } from './github-device.js';
 import {
   ProviderVault,
@@ -58,6 +59,8 @@ function getProviders() {
     new ProviderVault(app.getPath('userData'), electronSecretProtection(safeStorage)),
     new GitHubProvider(fetchProvider),
     new GitHubOAuth(fetchProvider),
+    Date.now,
+    new GitLabProvider(fetchProvider),
   ));
 }
 function startService() {

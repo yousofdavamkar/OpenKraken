@@ -34,14 +34,19 @@ export const providerOriginSchema = z
 export const providerAccountSchema = z
   .object({
     id: z.string().regex(/^[0-9a-f]{64}$/),
-    provider: z.literal('github'),
+    provider: z.enum(['github', 'gitlab']),
     origin: providerOriginSchema,
     providerUserId: z.string().regex(/^[1-9][0-9]{0,19}$/),
     login: z.string().min(1).max(255),
     authentication: z.literal('device').optional(),
     expiresAt: z.number().int().positive().optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (account) =>
+      account.authentication !== 'device' ||
+      (account.provider === 'github' && account.origin === 'https://github.com'),
+  );
 export const providerAccountsSchema = z
   .object({
     keychainAvailable: z.boolean(),
@@ -50,7 +55,7 @@ export const providerAccountsSchema = z
   .strict();
 export const providerConnectSchema = z
   .object({
-    provider: z.literal('github'),
+    provider: z.enum(['github', 'gitlab']),
     origin: providerOriginSchema,
     token: z
       .string()
