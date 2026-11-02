@@ -1,3 +1,5 @@
+import { commandIdSchema, commandUsageSchema, commandPreferencesSchema } from './commands.js';
+export * from './commands.js';
 import {
   providerBitbucketCommentsOptionsSchema,
   providerBitbucketCommentsPageSchema,
@@ -1193,6 +1195,26 @@ const workingRequests = [
     .strict(),
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  z.object({ id: requestId, method: z.literal('commandPreferences') }).strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('commandKeymapSave'),
+      revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      keymap: z.string().max(32768),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('commandPreferencesMigrate'),
+      keymap: z.string().max(32768),
+      usage: commandUsageSchema,
+    })
+    .strict(),
+  z
+    .object({ id: requestId, method: z.literal('commandInvoked'), command: commandIdSchema })
+    .strict(),
   z
     .object({
       id: requestId,
@@ -1730,6 +1752,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('commandPreferences'), state: commandPreferencesSchema }).strict(),
   z
     .object({ kind: z.literal('providerMergePreview'), preview: providerMergePreviewSchema })
     .strict(),

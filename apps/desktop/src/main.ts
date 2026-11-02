@@ -1,3 +1,4 @@
+import { CommandSettings } from './command-settings.js';
 import { BitbucketProvider } from './bitbucket-provider.js';
 import {
   app,
@@ -43,6 +44,7 @@ const documentUrl = pathToFileURL(htmlPath).href;
 let window: BrowserWindow | undefined;
 let service: UtilityProcess | undefined;
 let avatars: AvatarCache | undefined;
+let commandSettings: CommandSettings | undefined;
 let providers: ProviderService | undefined;
 const providerRequests = new Map<string, AbortController>();
 const pending = new Map<
@@ -221,6 +223,32 @@ else {
         return { kind: 'error', code: 'BUSY', message: 'Too many pending operations' };
       inFlight.add(request.id);
       try {
+        if (
+          request.method === 'commandPreferences' ||
+          request.method === 'commandKeymapSave' ||
+          request.method === 'commandPreferencesMigrate' ||
+          request.method === 'commandInvoked'
+        ) {
+          const settings = (commandSettings ??= new CommandSettings(app.getPath('userData')));
+          try {
+            const state =
+              request.method === 'commandKeymapSave'
+                ? await settings.save(request.keymap, request.revision)
+                : request.method === 'commandPreferencesMigrate'
+                  ? await settings.migrate(request.keymap, request.usage)
+                  : request.method === 'commandInvoked'
+                    ? await settings.record(request.command)
+                    : await settings.read();
+            return resultSchema.parse({ kind: 'commandPreferences', state });
+          } catch {
+            return {
+              kind: 'error',
+              code: 'COMMAND_SETTINGS',
+              message:
+                'Command settings could not be saved. Check the keymap and settings file, then reopen the dialog or restart.',
+            };
+          }
+        }
         if (request.method === 'providerGit') {
           const controller = new AbortController();
           providerRequests.set(request.id, controller);
@@ -949,7 +977,7 @@ else {
     providers?.deviceCancel();
     providers?.gitlabCancel();
     for (const controller of providerRequests.values()) controller.abort();
-    if ((!service && !providers) || quitting) return;
+    if ((!service && !providers && !commandSettings) || quitting) return;
     event.preventDefault();
     quitting = true;
     const child = service;
@@ -960,7 +988,7 @@ else {
     const stopped = child
       ? new Promise<void>((resolve) => child.once('exit', () => resolve()))
       : Promise.resolve();
-    void Promise.all([stopped, providers?.idle()]).finally(() => {
+    void Promise.all([stopped, providers?.idle(), commandSettings?.idle()]).finally(() => {
       clearTimeout(deadline);
       app.quit();
     });

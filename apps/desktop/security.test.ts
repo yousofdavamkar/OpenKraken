@@ -1182,3 +1182,40 @@ test('Bitbucket comment pages require a repository UUID and keep all credentials
     }).success,
   ).toBe(false);
 });
+
+test('command preferences accept only bounded known data on strict main-only routes', () => {
+  const id = '00000000-0000-4000-8000-000000000000';
+  const requests = [
+    { id, method: 'commandPreferences' },
+    { id, method: 'commandKeymapSave', revision: 0, keymap: '{}' },
+    {
+      id,
+      method: 'commandPreferencesMigrate',
+      keymap: '{}',
+      usage: { 'repository.clone': { weight: 1, time: 100 } },
+    },
+    { id, method: 'commandInvoked', command: 'repository.clone' },
+  ];
+  for (const request of requests) {
+    expect(requestSchema.safeParse(request).success).toBe(true);
+    expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+    expect(requestSchema.safeParse({ ...request, path: '/tmp/arbitrary' }).success).toBe(false);
+  }
+  expect(requestSchema.safeParse({ ...requests[1], keymap: 'x'.repeat(32769) }).success).toBe(
+    false,
+  );
+  expect(requestSchema.safeParse({ ...requests[1], revision: -1 }).success).toBe(false);
+  expect(
+    requestSchema.safeParse({
+      ...requests[2],
+      usage: { 'unknown.command': { weight: 1, time: 1 } },
+    }).success,
+  ).toBe(false);
+  expect(requestSchema.safeParse({ ...requests[3], command: 'shell.run' }).success).toBe(false);
+  expect(
+    resultSchema.safeParse({
+      kind: 'commandPreferences',
+      state: { revision: 0, keymap: '{}', usage: {}, initialized: true, warning: null },
+    }).success,
+  ).toBe(true);
+});

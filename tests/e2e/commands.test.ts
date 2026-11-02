@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test } from '@playwright/test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createFixture, fixtureGit } from '../../packages/test-fixtures/src/index.js';
@@ -10,9 +10,7 @@ test('command palette searches by category, respects availability and dialogs, a
   let app = await electron.launch({ args });
   try {
     let page = await app.firstWindow();
-    await expect(page.getByRole('button', { name: 'Commands', exact: true })).toBeVisible({
-      timeout: 1000,
-    });
+    await expect(page.getByRole('button', { name: 'Commands', exact: true })).toBeEnabled();
     await page.keyboard.press('Control+P');
     let palette = page.getByRole('dialog', { name: 'Command palette' });
     await expect(palette).toBeVisible();
@@ -58,9 +56,7 @@ test('JSON keybindings reject conflicts atomically, dispatch existing actions, a
   let app = await electron.launch({ args });
   try {
     let page = await app.firstWindow();
-    await expect(page.getByRole('button', { name: 'Keybindings', exact: true })).toBeVisible({
-      timeout: 1000,
-    });
+    await expect(page.getByRole('button', { name: 'Keybindings', exact: true })).toBeEnabled();
     await page.getByRole('button', { name: 'Keybindings', exact: true }).click();
     let editor = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
     const draft = (bindings: Record<string, string | null>) =>
@@ -99,7 +95,7 @@ test('JSON keybindings reject conflicts atomically, dispatch existing actions, a
     await app.close();
     app = await electron.launch({ args });
     page = await app.firstWindow();
-    await page.getByRole('button', { name: 'Commands', exact: true }).waitFor();
+    await expect(page.getByRole('button', { name: 'Commands', exact: true })).toBeEnabled();
     await page.keyboard.press('Control+P');
     clone = page.getByRole('dialog', { name: 'Clone repository', exact: true });
     await expect(clone).toBeVisible();
@@ -182,13 +178,15 @@ test('a damaged saved keymap falls back to defaults and can be repaired', async 
   let app = await electron.launch({ args });
   try {
     let page = await app.firstWindow();
-    await page.getByRole('button', { name: 'Commands', exact: true }).waitFor();
-    // Simulate a damaged preferences file at the renderer persistence boundary.
-    await page.evaluate(() => localStorage.setItem('openkraken.keymap.v1', '{broken'));
+    await expect(page.getByRole('button', { name: 'Commands', exact: true })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Commands', exact: true })).toBeEnabled();
     await app.close();
+    const settings = JSON.parse(readFileSync(join(root, 'settings.json'), 'utf8'));
+    settings.commands.keymap = '{broken';
+    writeFileSync(join(root, 'settings.json'), JSON.stringify(settings));
     app = await electron.launch({ args });
     page = await app.firstWindow();
-    await page.getByRole('button', { name: 'Commands', exact: true }).waitFor();
+    await expect(page.getByRole('button', { name: 'Commands', exact: true })).toBeEnabled();
     await page.keyboard.press('Control+P');
     const palette = page.getByRole('dialog', { name: 'Command palette' });
     await expect(palette).toBeVisible();

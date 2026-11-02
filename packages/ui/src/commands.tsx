@@ -11,12 +11,82 @@ import {
 } from 'react';
 import fuzzysort from 'fuzzysort';
 import { commandCatalog, commandIds, isCommandId, type CommandId } from './command-catalog.js';
-import { bindingFor, emptyKeymap, loadKeymap, matchesShortcut, saveKeymap } from './keymap.js';
+import { bindingFor, emptyKeymap, matchesShortcut, parseKeymap } from './keymap.js';
+import type { Bindings, CommandPreferences } from '@openkraken/ipc-contract';
 const usageKey = 'openkraken.commandUsage.v1';
 const halfLife = 14 * 24 * 60 * 60 * 1000;
 type Usage = { weight: number; time: number };
 class CommandRegistry {
-  keymap = loadKeymap();
+  keymap: { bindings: Bindings; raw: string; error: string } = {
+    bindings: {},
+    raw: emptyKeymap,
+    error: '',
+  };
+  ready = false;
+  revision = 0;
+  private initialization?: Promise<void>;
+  private writes: Promise<void> = Promise.resolve();
+  initialize() {
+    return (this.initialization ??= this.loadPreferences());
+  }
+  private accept(state: CommandPreferences) {
+    this.revision = state.revision;
+    let bindings: Bindings = {};
+    let error =
+      state.warning === 'unreadable'
+        ? 'Saved settings cannot be read. Check the settings file and restart before saving changes.'
+        : state.warning
+          ? 'Saved settings could not be read. Default shortcuts are active; Apply will preserve a copy of damaged settings before repair.'
+          : '';
+    try {
+      bindings = parseKeymap(state.keymap);
+    } catch {
+      error =
+        'Saved keymap is invalid. Default shortcuts are active; repair the JSON or restore defaults.';
+    }
+    this.keymap = { bindings, raw: state.keymap, error };
+    this.usage = new Map(Object.entries(state.usage) as [CommandId, Usage][]);
+    this.changed();
+  }
+  private async loadPreferences() {
+    try {
+      let result = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'commandPreferences',
+      });
+      if (result.kind !== 'commandPreferences')
+        throw new Error('Command settings could not be read.');
+      if (!result.state.initialized) {
+        let raw = emptyKeymap;
+        try {
+          raw = localStorage.getItem('openkraken.keymap.v1')?.slice(0, 32768) ?? raw;
+        } catch {
+          /* Defaults remain available. */
+        }
+        result = await window.openkraken.request({
+          id: crypto.randomUUID(),
+          method: 'commandPreferencesMigrate',
+          keymap: raw,
+          usage: Object.fromEntries(this.usage),
+        });
+        if (result.kind !== 'commandPreferences')
+          throw new Error('Command settings could not be migrated.');
+        try {
+          localStorage.removeItem('openkraken.keymap.v1');
+          localStorage.removeItem(usageKey);
+        } catch {
+          /* Main settings remain authoritative. */
+        }
+      }
+      this.accept(result.state);
+    } catch {
+      this.keymap.error =
+        'Command settings could not be loaded. Default shortcuts are active; restart to retry.';
+    } finally {
+      this.ready = true;
+      this.changed();
+    }
+  }
   buttons = new Map<CommandId, HTMLButtonElement>();
   listeners = new Set<() => void>();
   version = 0;
@@ -69,9 +139,34 @@ class CommandRegistry {
   shortcut(id: CommandId) {
     return bindingFor(this.keymap.bindings, id);
   }
-  saveBindings(raw: string) {
-    this.keymap = saveKeymap(raw);
-    this.changed();
+  async refresh() {
+    await this.writes;
+    try {
+      const result = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'commandPreferences',
+      });
+      if (result.kind !== 'commandPreferences') throw new Error('Settings unavailable.');
+      this.accept(result.state);
+    } catch {
+      this.keymap.error = 'Command settings could not be read. Restart to retry.';
+      this.changed();
+    }
+  }
+  async saveBindings(raw: string) {
+    parseKeymap(raw);
+    await this.writes;
+    const result = await window.openkraken.request({
+      id: crypto.randomUUID(),
+      method: 'commandKeymapSave',
+      keymap: raw,
+      revision: this.revision,
+    });
+    if (result.kind !== 'commandPreferences')
+      throw new Error(
+        result.kind === 'error' ? result.message : 'Command settings could not be saved.',
+      );
+    this.accept(result.state);
   }
   available(id: CommandId) {
     const button = this.buttons.get(id);
@@ -83,15 +178,27 @@ class CommandRegistry {
   }
   record(id: CommandId) {
     this.usage.set(id, { weight: Math.min(1000, this.score(id) + 1), time: Date.now() });
-    try {
-      localStorage.setItem(usageKey, JSON.stringify(Object.fromEntries(this.usage)));
-    } catch {
-      /* Still useful for this session. */
+    if (this.ready) {
+      this.writes = this.writes
+        .catch(() => {})
+        .then(async () => {
+          const result = await window.openkraken.request({
+            id: crypto.randomUUID(),
+            method: 'commandInvoked',
+            command: id,
+          });
+          if (result.kind === 'error') throw new Error(result.message);
+        })
+        .catch(() => {
+          this.keymap.error =
+            'Command usage could not be saved. This session still keeps its usage history.';
+          this.changed();
+        });
     }
     this.changed();
   }
   execute(id: CommandId) {
-    if (document.querySelector('dialog[open]') || !this.available(id)) return false;
+    if (!this.ready || document.querySelector('dialog[open]') || !this.available(id)) return false;
     const button = this.buttons.get(id)!;
     button.focus();
     button.click();
@@ -106,6 +213,9 @@ function useCommands() {
 }
 export function CommandProvider({ children }: { children: ReactNode }) {
   const [registry] = useState(() => new CommandRegistry());
+  useEffect(() => {
+    void registry.initialize();
+  }, [registry]);
   return <Context.Provider value={registry}>{children}</Context.Provider>;
 }
 export function CommandButton({
@@ -124,7 +234,10 @@ export function CommandButton({
     <button
       {...props}
       ref={button}
-      disabled={disabled}
+      disabled={
+        disabled ||
+        (!registry.ready && (command === 'app.commands' || command === 'app.keybindings'))
+      }
       title={props.title ?? registry.shortcut(command) ?? undefined}
       onClick={(event) => {
         registry.record(command);
@@ -298,6 +411,7 @@ function KeymapEditor({ close }: { close: () => void }) {
   const [draft, setDraft] = useState(registry.keymap.raw);
   const [error, setError] = useState(registry.keymap.error);
   const [notice, setNotice] = useState('');
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
     dialog.current?.showModal();
     input.current?.focus();
@@ -332,6 +446,7 @@ function KeymapEditor({ close }: { close: () => void }) {
           value={draft}
           maxLength={32768}
           rows={12}
+          disabled={saving}
           spellCheck={false}
           onChange={(event) => {
             setDraft(event.target.value);
@@ -343,9 +458,11 @@ function KeymapEditor({ close }: { close: () => void }) {
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
       <button
-        onClick={() => {
+        disabled={saving}
+        onClick={async () => {
+          setSaving(true);
           try {
-            registry.saveBindings(draft);
+            await registry.saveBindings(draft);
             setDraft(registry.keymap.raw);
             setError('');
             setNotice('Keyboard shortcuts saved.');
@@ -354,12 +471,15 @@ function KeymapEditor({ close }: { close: () => void }) {
               reason instanceof Error ? reason.message : 'Keyboard shortcuts could not be saved.',
             );
             setNotice('');
+          } finally {
+            setSaving(false);
           }
         }}
       >
         Apply
       </button>
       <button
+        disabled={saving}
         onClick={() => {
           setDraft(emptyKeymap);
           setError('');
@@ -433,7 +553,13 @@ export function CommandControls() {
       <CommandButton command="app.commands" onClick={() => setOpened(true)}>
         Commands
       </CommandButton>
-      <CommandButton command="app.keybindings" onClick={() => setEditing(true)}>
+      <CommandButton
+        command="app.keybindings"
+        onClick={async () => {
+          await registry.refresh();
+          if (!document.querySelector('dialog[open]')) setEditing(true);
+        }}
+      >
         Keybindings
       </CommandButton>
       {opened && <Palette close={() => setOpened(false)} />}
