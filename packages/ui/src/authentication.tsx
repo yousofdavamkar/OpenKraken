@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AuthenticationEvent } from '@openkraken/ipc-contract';
+import type { AuthenticationEvent, DesktopEvent } from '@openkraken/ipc-contract';
 import { useRepository } from './store.js';
 type Prompt = Extract<AuthenticationEvent, { type: 'authenticationPrompt' }>;
 function AuthenticationDialog({ prompt }: { prompt: Prompt }) {
@@ -90,12 +90,40 @@ function AuthenticationDialog({ prompt }: { prompt: Prompt }) {
     </dialog>
   );
 }
+type TransportProblem = Extract<DesktopEvent, { type: 'transportProblem' }>;
+function HostKeyProblem({ problem, close }: { problem: TransportProblem; close: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    dialog.current?.showModal();
+  }, []);
+  return (
+    <dialog
+      ref={dialog}
+      className="reference-dialog"
+      aria-label="SSH host key changed"
+      onCancel={(event) => {
+        event.preventDefault();
+        close();
+      }}
+    >
+      <h2>SSH host key changed</h2>
+      <p>
+        The connection was stopped. Verify the new fingerprint with your server administrator before
+        updating your SSH known_hosts entry.
+      </p>
+      <pre className="authentication-message">{problem.message}</pre>
+      <button onClick={close}>Close</button>
+    </dialog>
+  );
+}
 export function Authentication() {
   const busy = useRepository((state) => state.busy);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [problem, setProblem] = useState<TransportProblem>();
   useEffect(
     () =>
       window.openkraken.subscribe((event) => {
+        if (event.type === 'transportProblem') setProblem(event);
         if (event.type === 'authenticationPrompt')
           setPrompts((current) => [
             ...current.filter((item) => item.promptId !== event.promptId),
@@ -107,5 +135,12 @@ export function Authentication() {
     [],
   );
   const prompt = prompts.find((item) => item.id === busy);
-  return prompt ? <AuthenticationDialog key={prompt.promptId} prompt={prompt} /> : null;
+  return (
+    <>
+      {prompt && <AuthenticationDialog key={prompt.promptId} prompt={prompt} />}
+      {problem && (
+        <HostKeyProblem key={problem.id} problem={problem} close={() => setProblem(undefined)} />
+      )}
+    </>
+  );
 }

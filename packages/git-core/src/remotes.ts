@@ -49,6 +49,36 @@ function validateUrl(value: string) {
     throw new GitError('INVALID_REMOTE_URL', 'External transport helper URLs are not supported');
   }
 }
+function transportError(error: GitError) {
+  const message = displayUrl(error.message);
+  let code = error.code;
+  if (code === 'GIT_FAILED') {
+    if (/REMOTE HOST IDENTIFICATION HAS CHANGED|Host key for .+ has changed/i.test(message))
+      code = 'SSH_HOST_KEY_CHANGED';
+    else if (
+      /certificate.*(?:verif|invalid|expired|untrusted|self.signed|not trusted)|SSL certificate problem/i.test(
+        message,
+      )
+    )
+      code = 'TLS_CERTIFICATE_INVALID';
+    else if (
+      /Authentication failed|could not read (?:Username|Password)|unable to (?:get|read) (?:username|password)|Permission denied.*(?:publickey|password)|terminal prompts disabled/i.test(
+        message,
+      )
+    )
+      code = 'AUTHENTICATION_FAILED';
+    else if (/Host key verification failed/i.test(message)) code = 'SSH_HOST_KEY_UNTRUSTED';
+    else if (
+      /Could not resolve host|Could not resolve hostname|Failed to connect|Connection refused|Connection timed out|Network is unreachable/i.test(
+        message,
+      )
+    )
+      code = 'REMOTE_UNREACHABLE';
+    else if (/\[rejected\].*stale info/i.test(message)) code = 'PUSH_LEASE_REJECTED';
+    else if (/\[rejected\]|\[remote rejected\]/i.test(message)) code = 'PUSH_REJECTED';
+  }
+  return new GitError(code, message, error.exitCode);
+}
 export class Remotes {
   constructor(
     private run: (args: string[], options?: RunOptions) => ReturnType<typeof runGit>,
@@ -198,8 +228,7 @@ export class Remotes {
         );
       return result;
     } catch (error) {
-      if (error instanceof GitError)
-        throw new GitError(error.code, displayUrl(error.message), error.exitCode);
+      if (error instanceof GitError) throw transportError(error);
       throw error;
     } finally {
       progress?.end();

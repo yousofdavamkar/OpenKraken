@@ -262,6 +262,17 @@ parent.on('message', (event) => {
       }
     })
     .catch((error: unknown) => {
+      if (
+        error instanceof GitError &&
+        error.code === 'SSH_HOST_KEY_CHANGED' &&
+        !(request.method === 'fetch' && request.background)
+      )
+        parent.postMessage({
+          type: 'transportProblem',
+          id: request.id,
+          code: error.code,
+          message: error.message.slice(0, 8192),
+        });
       const result: Result =
         error instanceof GitError && error.code === 'CANCELLED'
           ? { kind: 'cancelled' }

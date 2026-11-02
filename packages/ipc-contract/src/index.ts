@@ -741,6 +741,14 @@ export const authenticationClosedSchema = z
   .strict();
 export type AuthenticationEvent =
   z.infer<typeof authenticationPromptSchema> | z.infer<typeof authenticationClosedSchema>;
+export const transportProblemSchema = z
+  .object({
+    type: z.literal('transportProblem'),
+    id: requestId,
+    code: z.literal('SSH_HOST_KEY_CHANGED'),
+    message: z.string().max(8192),
+  })
+  .strict();
 export const gitProgressEventSchema = z
   .object({ type: z.literal('gitProgress'), id: requestId, text: z.string().max(4096) })
   .strict();
@@ -749,5 +757,6 @@ export const desktopEventSchema = z.discriminatedUnion('type', [
   gitProgressEventSchema,
   authenticationPromptSchema,
   authenticationClosedSchema,
+  transportProblemSchema,
 ]);
 export type DesktopEvent = z.infer<typeof desktopEventSchema>;

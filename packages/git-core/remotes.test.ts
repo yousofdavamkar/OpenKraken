@@ -143,7 +143,10 @@ test('fetch refuses untrusted TLS even with URL-specific sslVerify=false and blo
     fixtureGit(path, ['remote', 'set-url', 'origin', url]);
     fixtureGit(path, ['config', `http.${url}.sslVerify`, 'false']);
     const repo = await service.open(path);
-    await expect(service.fetch(repo.id, 'origin')).rejects.toThrow(/certificate|SSL|TLS/i);
+    await expect(service.fetch(repo.id, 'origin')).rejects.toMatchObject({
+      code: 'TLS_CERTIFICATE_INVALID',
+      message: expect.stringMatching(/certificate|SSL|TLS/i),
+    });
     fixtureGit(path, ['remote', 'set-url', 'origin', 'ext::echo should-not-run']);
     await expect(service.fetch(repo.id, 'origin')).rejects.toThrow(/transport.*ext.*not allowed/i);
   } finally {
@@ -179,7 +182,7 @@ test.skipIf(process.platform === 'win32')(
       expect(await readFile(marker, 'utf8')).toBe('');
       await rm(marker);
       await expect(service.fetch(repo.id, 'origin', undefined, true)).rejects.toMatchObject({
-        code: 'GIT_FAILED',
+        code: 'AUTHENTICATION_FAILED',
       });
       await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {

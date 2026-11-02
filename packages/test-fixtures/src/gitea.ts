@@ -158,7 +158,7 @@ export async function startGitea(root: string) {
       GIT_SSL_CAINFO: certificate,
       GIT_CONFIG_NOSYSTEM: '1',
       GIT_CONFIG_GLOBAL: '/dev/null',
-      GIT_SSH_COMMAND: `ssh -F /dev/null -o IdentityAgent=none -o IdentitiesOnly=yes -o StrictHostKeyChecking=ask -o UserKnownHostsFile=${quote(join(root, 'known hosts'))} -i ${quote(key)}`,
+      GIT_SSH_COMMAND: `ssh -F /dev/null -o IdentityAgent=none -o IdentitiesOnly=yes -o StrictHostKeyChecking=ask -o UserKnownHostsFile=${quote(join(root, 'known_hosts'))} -i ${quote(key)}`,
     };
     const push = async (source: string) => {
       await exec(

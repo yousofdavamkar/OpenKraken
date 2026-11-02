@@ -8,6 +8,7 @@ The test creates a private repository and exercises the real desktop, Git servic
 - Push review and rejection when the server has newer commits; the local branch is unchanged. A subsequent authenticated HTTPS pull fast-forwards to the server tip.
 - SSH clone with an unknown host key: declining refuses the connection, then explicit confirmation permits it.
 - An encrypted Ed25519 key prompts for its passphrase and completes the SSH clone.
+- A changed known host key blocks cloning, opens the dedicated warning dialog and leaves the known-hosts file intact.
 
 All credentials and keys are disposable fixtures. HTTPS and SSH bind only loopback, use random ports and leave system Git/SSH configuration alone. Containers and temporary repositories are removed after the test. No TLS bypass is used. Ordinary tests skip this optional fixture; the Linux CI job enables it explicitly. The existing bare-remote suite covers normal push, stale reviews and force-with-lease rejection.
 

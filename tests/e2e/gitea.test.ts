@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test, type Page } from '@playwright/test';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createFixture, fixtureGit } from '../../packages/test-fixtures/src/index.js';
@@ -93,6 +93,30 @@ test('Gitea container: verified HTTPS auth, rejected push, SSH host-key consent 
     expect(fixtureGit(sshTarget, ['rev-parse', 'HEAD'])).toBe(
       fixtureGit(source, ['rev-parse', 'HEAD']),
     );
+    const knownHosts = join(root, 'known_hosts');
+    const changed =
+      readFileSync(knownHosts, 'utf8').split(' ')[0] +
+      ' ' +
+      readFileSync(join(root, 'encrypted key.pub'), 'utf8').split(' ').slice(0, 2).join(' ') +
+      '\n';
+    writeFileSync(knownHosts, changed);
+    const changedTarget = join(root, 'changed-host-clone');
+    mkdirSync(changedTarget);
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, changedTarget);
+    await page.getByRole('button', { name: 'Clone', exact: true }).click();
+    await clone
+      .getByRole('textbox', { name: 'Repository URL or absolute path', exact: true })
+      .fill(remote.sshUrl);
+    await clone.getByRole('button', { name: 'Choose folder and clone', exact: true }).click();
+    const problem = page.getByRole('dialog', { name: 'SSH host key changed', exact: true });
+    await expect(problem).toBeVisible();
+    await expect(problem).toContainText('fingerprint');
+    expect(readFileSync(knownHosts, 'utf8')).toBe(changed);
+    await expect(problem.getByRole('button', { name: 'Confirm', exact: true })).toHaveCount(0);
+    await problem.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(clone.getByRole('alert')).toContainText(/HOST IDENTIFICATION HAS CHANGED/i);
   } finally {
     await app?.close();
     await remote?.stop();
