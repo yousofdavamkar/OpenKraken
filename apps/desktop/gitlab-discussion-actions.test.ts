@@ -235,3 +235,31 @@ test('GitLab discussion actions reject foreign targets, system notes and nonreso
     });
   }
 });
+
+test('GitLab does not report a created discussion from an asynchronous or unexpected success status', async () => {
+  const { service, account, origin } = await setup('ack-status');
+  const intent = { action: 'comment' as const, repository, number: 7, body: 'Comment' };
+  const preview = await service.previewMergeDiscussionAction(account.id, intent);
+  const discussion = gitlabDiscussionFixture();
+  let writes = 0;
+  for (const status of [200, 202]) {
+    server.use(
+      http.post(`${origin}/api/v4/projects/77/merge_requests/7/discussions`, () => {
+        writes++;
+        return HttpResponse.json(
+          {
+            ...discussion,
+            notes: [
+              { ...discussion.notes[0], type: 'DiscussionNote', position: null, body: 'Comment' },
+            ],
+          },
+          { status },
+        );
+      }),
+    );
+    await expect(
+      service.writeMergeDiscussion(account.id, { intent, revision: preview.revision }),
+    ).rejects.toMatchObject({ code: 'PROVIDER_WRITE_UNCERTAIN' });
+  }
+  expect(writes).toBe(2);
+});

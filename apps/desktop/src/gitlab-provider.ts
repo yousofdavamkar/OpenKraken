@@ -262,6 +262,14 @@ export class GitLabProvider {
                     : 'The GitLab request failed. Check the connection and try again.',
                 );
               }
+              if (
+                (method === 'POST' && response.status !== 201) ||
+                (method === 'PUT' && response.status !== 200)
+              )
+                throw new ProviderError(
+                  'PROVIDER_WRITE_UNCERTAIN',
+                  'GitLab did not acknowledge completion of this action.',
+                );
               if (reader && response.status !== 304)
                 for (;;) {
                   const chunk = await reader.read();
