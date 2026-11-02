@@ -281,6 +281,9 @@ else {
           request.method === 'providerMergeRequest' ||
           request.method === 'providerMergeRequestFiles' ||
           request.method === 'providerMergeRequestDiscussions' ||
+          request.method === 'providerMergeApprovals' ||
+          request.method === 'providerMergeApprovalPreview' ||
+          request.method === 'providerWriteMergeApproval' ||
           request.method === 'providerMergeDiscussionPreview' ||
           request.method === 'providerWriteMergeDiscussion' ||
           request.method === 'providerRepositories' ||
@@ -489,6 +492,33 @@ else {
                 controller.signal,
               ),
             });
+          if (request.method === 'providerMergeApprovals')
+            return resultSchema.parse({
+              kind: 'providerMergeApprovals',
+              approvals: await providers.mergeApprovals(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerMergeApprovalPreview')
+            return resultSchema.parse({
+              kind: 'providerMergeApprovalPreview',
+              preview: await providers.previewMergeApproval(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerWriteMergeApproval')
+            return resultSchema.parse({
+              kind: 'providerMergeApprovalWritten',
+              state: await providers.writeMergeApproval(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerMergeDiscussionPreview')
             return resultSchema.parse({
               kind: 'providerMergeDiscussionPreview',
@@ -654,6 +684,9 @@ else {
           request.method === 'providerMergeRequest' ||
           request.method === 'providerMergeRequestFiles' ||
           request.method === 'providerMergeRequestDiscussions' ||
+          request.method === 'providerMergeApprovals' ||
+          request.method === 'providerMergeApprovalPreview' ||
+          request.method === 'providerWriteMergeApproval' ||
           request.method === 'providerMergeDiscussionPreview' ||
           request.method === 'providerWriteMergeDiscussion' ||
           request.method === 'providerRepositories' ||

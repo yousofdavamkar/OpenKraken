@@ -3,6 +3,10 @@ import { mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import {
+  providerMergeApprovalOptionsSchema,
+  providerWriteMergeApprovalSchema,
+  type ProviderMergeApprovalOptions,
+  type ProviderWriteMergeApproval,
   providerMergeDiscussionActionSchema,
   providerWriteMergeDiscussionSchema,
   type ProviderMergeDiscussionAction,
@@ -399,6 +403,60 @@ export class ProviderService {
           'Choose a GitLab account to read merge requests.',
         );
       return this.gitlab.mergeRequestDiscussions(account.origin, token, options, signal);
+    });
+  }
+  mergeApprovals(id: string, input: ProviderPullOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerPullOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to manage approvals.',
+        );
+      return this.gitlab.mergeApprovals(
+        account.origin,
+        token,
+        account.providerUserId,
+        options,
+        signal,
+      );
+    });
+  }
+  previewMergeApproval(id: string, input: ProviderMergeApprovalOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerMergeApprovalOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to manage approvals.',
+        );
+      return this.gitlab.previewMergeApproval(
+        account.origin,
+        token,
+        account.providerUserId,
+        options,
+        signal,
+      );
+    });
+  }
+  writeMergeApproval(id: string, input: ProviderWriteMergeApproval, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerWriteMergeApprovalSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to manage approvals.',
+        );
+      return this.gitlab.writeMergeApproval(
+        account.origin,
+        token,
+        account.providerUserId,
+        options,
+        signal,
+      );
     });
   }
   previewMergeDiscussionAction(

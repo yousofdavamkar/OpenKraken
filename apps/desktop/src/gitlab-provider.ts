@@ -1,4 +1,9 @@
 import { previewMergeDiscussionAction, writeMergeDiscussion } from './gitlab-discussion-actions.js';
+import {
+  loadMergeApprovals,
+  previewMergeApproval,
+  writeMergeApproval,
+} from './gitlab-approvals.js';
 import { Users, Projects } from '@gitbeaker/rest';
 import { createRequesterFn, type BaseResourceOptions } from '@gitbeaker/requester-utils';
 import { z } from 'zod';
@@ -15,6 +20,8 @@ import { loadMergeRequestDiscussions } from './gitlab-discussions.js';
 import { loadMergeRequestFiles } from './gitlab-files.js';
 import { loadMergeRequest, loadMergeRequests } from './gitlab-merges.js';
 import type {
+  ProviderMergeApprovalOptions,
+  ProviderWriteMergeApproval,
   ProviderMergeDiscussionAction,
   ProviderWriteMergeDiscussion,
   ProviderMergeRequestDiscussionsOptions,
@@ -149,6 +156,51 @@ export class GitLabProvider {
     return loadMergeRequestDiscussions(
       (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
       providerOriginSchema.parse(origin),
+      input,
+    );
+  }
+  mergeApprovals(
+    origin: string,
+    token: string,
+    userId: string,
+    input: ProviderPullOptions,
+    signal?: AbortSignal,
+  ) {
+    return loadMergeApprovals(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      origin,
+      userId,
+      input,
+    );
+  }
+  previewMergeApproval(
+    origin: string,
+    token: string,
+    userId: string,
+    input: ProviderMergeApprovalOptions,
+    signal?: AbortSignal,
+  ) {
+    this.cache.clear();
+    return previewMergeApproval(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      origin,
+      userId,
+      input,
+    );
+  }
+  writeMergeApproval(
+    origin: string,
+    token: string,
+    userId: string,
+    input: ProviderWriteMergeApproval,
+    signal?: AbortSignal,
+  ) {
+    this.cache.clear();
+    return writeMergeApproval(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      (endpoint, method, perform) => this.request(origin, token, signal, perform, endpoint, method),
+      origin,
+      userId,
       input,
     );
   }

@@ -855,3 +855,39 @@ test('GitLab inline discussion selectors require exact three-SHA locations and b
   ])
     expect(requestSchema.safeParse({ ...request, options: invalid }).success).toBe(false);
 });
+
+test('GitLab approval IPC requires a reviewed commit and keeps approval passwords out of reads and revocations', () => {
+  const options = {
+    repository: { owner: 'group/subgroup', name: 'project' },
+    number: 7,
+    head: '1'.repeat(40),
+    action: 'approve',
+    revision: 'a'.repeat(64),
+    password: 'transient-password',
+  };
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    method: 'providerWriteMergeApproval',
+    accountId: 'a'.repeat(64),
+    options,
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  for (const invalid of [
+    { ...options, head: '' },
+    { ...options, revision: undefined },
+    { ...options, action: 'unapprove' },
+    { ...options, action: 'reset' },
+  ])
+    expect(requestSchema.safeParse({ ...request, options: invalid }).success).toBe(false);
+  expect(
+    requestSchema.safeParse({ ...request, method: 'providerMergeApprovalPreview' }).success,
+  ).toBe(false);
+  expect(
+    requestSchema.safeParse({
+      ...request,
+      method: 'providerMergeApprovals',
+      options: { repository: options.repository, number: 7 },
+    }).success,
+  ).toBe(true);
+});

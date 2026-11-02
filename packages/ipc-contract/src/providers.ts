@@ -469,6 +469,60 @@ export type ProviderMergeRequestDiscussionsOptions = z.infer<
 >;
 export type ProviderMergeRequestDiscussion = z.infer<typeof providerMergeRequestDiscussionSchema>;
 export type ProviderMergeRequestPosition = z.infer<typeof providerMergeRequestPositionSchema>;
+const mergeApprovalRuleSchema = z
+  .object({
+    id: z.string().regex(/^[1-9][0-9]*$/),
+    name: z.string().min(1).max(1024),
+    type: z.string().min(1).max(64),
+  })
+  .strict();
+export const providerMergeApprovalStateSchema = z
+  .object({
+    approved: z.boolean(),
+    canApprove: z.boolean(),
+    hasApproved: z.boolean(),
+    approvedBy: z
+      .array(
+        z
+          .object({
+            id: z.string().regex(/^[1-9][0-9]*$/),
+            login: z.string().min(1).max(255),
+            approvedAt: providerDateSchema.nullable(),
+          })
+          .strict(),
+      )
+      .max(1000),
+    required: providerCountSchema.nullable(),
+    remaining: providerCountSchema.nullable(),
+    passwordRequired: z.boolean().nullable(),
+    rulesLeft: z.array(mergeApprovalRuleSchema).max(1000).nullable(),
+    invalidRules: z.array(mergeApprovalRuleSchema).max(1000).nullable(),
+  })
+  .strict();
+export const providerMergeApprovalsSchema = z
+  .object({
+    mergeRequest: providerMergeRequestDetailsSchema,
+    state: providerMergeApprovalStateSchema,
+  })
+  .strict();
+export const providerMergeApprovalOptionsSchema = providerPullOptionsSchema
+  .extend({ action: z.enum(['approve', 'unapprove']), head: providerCommitSchema })
+  .strict();
+export const providerMergeApprovalPreviewSchema = providerMergeApprovalsSchema
+  .extend({ revision: z.string().regex(/^[0-9a-f]{64}$/) })
+  .strict();
+export const providerWriteMergeApprovalSchema = providerMergeApprovalOptionsSchema
+  .extend({
+    revision: z.string().regex(/^[0-9a-f]{64}$/),
+    password: z.string().min(1).max(4096).optional(),
+  })
+  .strict()
+  .refine((options) => options.action === 'approve' || options.password === undefined);
+export type ProviderMergeApprovalOptions = z.infer<typeof providerMergeApprovalOptionsSchema>;
+export type ProviderMergeApprovalPreview = z.infer<typeof providerMergeApprovalPreviewSchema>;
+export type ProviderWriteMergeApproval = z.infer<typeof providerWriteMergeApprovalSchema>;
+export type ProviderMergeApprovalState = z.infer<typeof providerMergeApprovalStateSchema>;
+export type ProviderMergeApprovals = z.infer<typeof providerMergeApprovalsSchema>;
 const mergeDiscussionBodySchema = z
   .string()
   .min(1)
