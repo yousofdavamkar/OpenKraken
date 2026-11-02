@@ -891,56 +891,30 @@ export class WorkingTree {
           .toString()
           .trim(),
       );
-      const before = await this.saved(indexFile);
-      const pending = join(this.directory, `pending-${randomUUID()}.json`);
-      const record = { label: `Pull (${options.mode})`, target, before };
-      await atomic(pending, JSON.stringify(record));
-      const progress = onProgress ? new GitProgressLines(onProgress) : undefined;
-      let failure: unknown;
-      try {
-        const result = await this.run(
-          options.mode === 'rebase'
-            ? [
-                'rebase',
-                '--merge',
-                '--no-autostash',
-                '--no-update-refs',
-                '--no-rebase-merges',
-                target,
-              ]
-            : [
-                'merge',
-                options.mode === 'ff-only' ? '--ff-only' : '--ff',
-                '--no-autostash',
-                '--no-edit',
-                target,
-              ],
-          {
-            indexFile,
-            signal,
-            readOnly: false,
-            allowedExitCodes: [0, 1],
-            timeoutMs: 180000,
-            env: { GIT_EDITOR: 'true' },
-            onStderr: progress ? (chunk) => progress.push(chunk) : undefined,
-          },
-        );
-        if (result.exitCode)
-          throw new GitError(
-            'GIT_FAILED',
-            redactGitMessage(`${result.stdout.toString()}\n${result.stderr}`.trim()),
-          );
-      } catch (error) {
-        failure = error;
-      } finally {
-        progress?.end();
-      }
-      const after = await this.saved(indexFile);
-      await atomic(pending, JSON.stringify({ ...record, after }));
-      if (!sameHead(before.head, after.head) || before.signature !== after.signature)
-        await publish();
-      await rm(pending, { force: true });
-      if (failure) throw failure;
+      await this.runOperation(
+        options.mode === 'rebase'
+          ? [
+              'rebase',
+              '--merge',
+              '--no-autostash',
+              '--no-update-refs',
+              '--no-rebase-merges',
+              target,
+            ]
+          : [
+              'merge',
+              options.mode === 'ff-only' ? '--ff-only' : '--ff',
+              '--no-autostash',
+              '--no-edit',
+              target,
+            ],
+        `Pull (${options.mode})`,
+        indexFile,
+        publish,
+        signal,
+        onProgress,
+        true,
+      );
     }, signal);
     return this.state();
   }

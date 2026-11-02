@@ -29,6 +29,13 @@ test('ff-only pull fetches its upstream, updates files and rejects divergent his
     const result = await service.pull(repo.id, { mode: 'ff-only', revision: state.revision });
     expect(result.head.oid).toBe(fixtureGit(source, ['rev-parse', 'HEAD']));
     expect(await readFile(join(local, 'new.txt'), 'utf8')).toBe('remote content\n');
+    expect(result.undo?.label).toBe('Pull (ff-only)');
+    await service.undo(repo.id);
+    expect(fixtureGit(local, ['rev-parse', 'HEAD'])).toBe(state.head.oid);
+    await expect(readFile(join(local, 'new.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(fixtureGit(local, ['rev-parse', 'origin/main'])).toBe(result.head.oid);
+    await service.undo(repo.id, true);
+    expect(await readFile(join(local, 'new.txt'), 'utf8')).toBe('remote content\n');
     fixtureGit(local, ['commit', '--allow-empty', '-m', 'Local divergence']);
     fixtureGit(source, ['commit', '--allow-empty', '-m', 'Remote divergence']);
     fixtureGit(source, ['push', remote, 'main']);
@@ -74,6 +81,15 @@ test.each(['merge', 'rebase'] as const)(
       expect(await readFile(join(local, 'remote.txt'), 'utf8')).toBe('remote work\n');
       expect(fixtureGit(local, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/main');
       expect(fixtureGit(local, ['status', '--porcelain'])).toBe('');
+      const integrated = fixtureGit(local, ['rev-parse', 'HEAD']);
+      await service.undo(repo.id);
+      expect(fixtureGit(local, ['rev-parse', 'HEAD'])).toBe(oldLocal);
+      expect(await readFile(join(local, 'local.txt'), 'utf8')).toBe('local work\n');
+      await expect(readFile(join(local, 'remote.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(fixtureGit(local, ['rev-parse', 'origin/main'])).toBe(remoteTip);
+      await service.undo(repo.id, true);
+      expect(fixtureGit(local, ['rev-parse', 'HEAD'])).toBe(integrated);
+      expect(await readFile(join(local, 'remote.txt'), 'utf8')).toBe('remote work\n');
     } finally {
       await service.dispose();
     }
