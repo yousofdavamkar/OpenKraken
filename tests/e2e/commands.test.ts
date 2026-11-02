@@ -205,3 +205,49 @@ test('a damaged saved keymap falls back to defaults and can be repaired', async 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('commit search participates in keymap conflicts and respects remapping and modal focus', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-command-search-'));
+  const repo = createFixture(join(root, 'repo'));
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, repo);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await expect(page.getByTestId('head')).toHaveText('main');
+    await page.getByRole('button', { name: 'Keybindings', exact: true }).click();
+    const editor = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+    await editor
+      .getByLabel('Keymap JSON')
+      .fill(JSON.stringify({ version: 1, bindings: { 'repository.clone': 'Mod+F' } }));
+    await editor.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(editor.getByRole('alert')).toContainText('conflict', { timeout: 1000 });
+    await editor
+      .getByLabel('Keymap JSON')
+      .fill(JSON.stringify({ version: 1, bindings: { 'history.search': 'Mod+Shift+F' } }));
+    await editor.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(editor.getByRole('status')).toHaveText('Keyboard shortcuts saved.');
+    await editor.getByLabel('Keymap JSON').focus();
+    await page.keyboard.press('Control+Shift+F');
+    await expect(editor.getByLabel('Keymap JSON')).toBeFocused();
+    await editor.getByRole('button', { name: 'Close', exact: true }).click();
+    const search = page.getByLabel('Search commits', { exact: true });
+    await page.keyboard.press('Control+F');
+    await expect(search).not.toBeFocused();
+    await page.keyboard.press('Control+Shift+F');
+    await expect(search).toBeFocused();
+    await page.getByRole('button', { name: 'Commands', exact: true }).click();
+    const palette = page.getByRole('dialog', { name: 'Command palette' });
+    await palette.getByLabel('Search commands').fill('Search commits');
+    await palette.getByLabel('Search commands').press('Enter');
+    await expect(palette).toHaveCount(0);
+    await expect(search).toBeFocused();
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

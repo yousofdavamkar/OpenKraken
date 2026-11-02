@@ -6,6 +6,7 @@ export const defaultBindings: Bindings = {
   'app.keybindings': 'Mod+Alt+K',
   'repository.open': 'Mod+O',
   'repository.refresh': 'F5',
+  'history.search': 'Mod+F',
 };
 export const emptyKeymap = JSON.stringify({ version: 1, bindings: {} }, null, 2);
 const storageKey = 'openkraken.keymap.v1';

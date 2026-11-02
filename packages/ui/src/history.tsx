@@ -5,6 +5,7 @@ import { passageBuckets } from '@openkraken/graph';
 import { paintGraph, ROW_HEIGHT, LANE_WIDTH, GRAPH_PADDING } from '@openkraken/graph/canvas';
 import { navigationTarget, refBadges, refNavigationTargets } from './history-model.js';
 import { AuthorAvatar, useVisibleAvatars } from './avatars.js';
+import { CommandButton } from './commands.js';
 import { useRepository } from './store.js';
 const dateFormatter = new Intl.DateTimeFormat();
 export function History() {
@@ -104,17 +105,6 @@ export function History() {
     const index = rows.findIndex((r) => r.oid === selection.focus);
     if (index >= 0) virtual.scrollToIndex(index, { align: 'auto' });
   }, [selection.focus, snapshot?.cursor]);
-  useEffect(() => {
-    const shortcut = (event: globalThis.KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
-        event.preventDefault();
-        search.current?.focus();
-        search.current?.select();
-      }
-    };
-    window.addEventListener('keydown', shortcut);
-    return () => window.removeEventListener('keydown', shortcut);
-  }, []);
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (!snapshot) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
@@ -154,6 +144,15 @@ export function History() {
   return (
     <>
       <div className="history-search">
+        <CommandButton
+          command="history.search"
+          onClick={() => {
+            search.current?.focus();
+            search.current?.select();
+          }}
+        >
+          Find commits
+        </CommandButton>
         <input
           ref={search}
           aria-label="Search commits"
@@ -174,7 +173,7 @@ export function History() {
           }}
         />
         <span aria-live="polite">
-          {query.trim() ? `${matches?.length ?? 0} loaded matches` : 'Ctrl/Cmd+F to search'}
+          {query.trim() ? `${matches?.length ?? 0} loaded matches` : ''}
         </span>
         {query.trim() && (
           <button disabled={!!searching || !!busy} onClick={() => void state.searchAll()}>

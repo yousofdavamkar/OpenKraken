@@ -54,6 +54,11 @@ export const commandCatalog = {
     category: 'References',
     keywords: 'new annotated signed tag',
   },
+  'history.search': {
+    label: 'Search commits',
+    category: 'History',
+    keywords: 'find log commit author message hash',
+  },
   'history.integrate': {
     label: 'Integrate commits',
     category: 'History',

@@ -92,7 +92,9 @@ class CommandRegistry {
   }
   execute(id: CommandId) {
     if (document.querySelector('dialog[open]') || !this.available(id)) return false;
-    this.buttons.get(id)!.click();
+    const button = this.buttons.get(id)!;
+    button.focus();
+    button.click();
     return true;
   }
 }
@@ -141,11 +143,16 @@ function Palette({ close }: { close: () => void }) {
   const [active, setActive] = useState(0);
   const [notice, setNotice] = useState('');
   const previous = useRef(document.activeElement);
+  const restoreFocus = useRef(true);
   useEffect(() => {
     dialog.current?.showModal();
     input.current?.focus();
     return () => {
-      if (previous.current instanceof HTMLElement && previous.current.isConnected)
+      if (
+        restoreFocus.current &&
+        previous.current instanceof HTMLElement &&
+        previous.current.isConnected
+      )
         previous.current.focus();
     };
   }, []);
@@ -180,8 +187,10 @@ function Palette({ close }: { close: () => void }) {
       return;
     }
     dialog.current?.close();
+    restoreFocus.current = false;
     if (registry.execute(id)) close();
     else {
+      restoreFocus.current = true;
       dialog.current?.showModal();
       setNotice('The command is no longer available.');
     }
@@ -313,7 +322,7 @@ function KeymapEditor({ close }: { close: () => void }) {
       </p>
       <p>
         Use physical keys: letters A–Z, digits, F1–F24, or named punctuation (for example Comma).
-        Shortcuts pause in dialogs. Action shortcuts also pause while editing text.
+        Shortcuts pause in dialogs. Other action shortcuts also pause while editing text.
       </p>
       <label>
         Keymap JSON
@@ -405,7 +414,11 @@ export function CommandControls() {
         );
       for (const id of commandIds) {
         const shortcut = registry.shortcut(id);
-        if (!shortcut || (typing && id !== 'app.commands') || !matchesShortcut(event, shortcut))
+        if (
+          !shortcut ||
+          (typing && id !== 'app.commands' && id !== 'history.search') ||
+          !matchesShortcut(event, shortcut)
+        )
           continue;
         if (registry.execute(id)) event.preventDefault();
         return;

@@ -8,12 +8,12 @@ A shortcut consists of unique modifiers (Mod/Ctrl/Alt/Shift/Meta) and one physic
 
 Validation and persistence complete before the active mapping changes. Storage failure leaves the previous map active. Invalid saved data falls back to defaults and remains visible in the editor for repair; merely invoking a command does not overwrite it. Restore defaults edits the draft and requires Apply. Preferences are local to the profile.
 
-Renderer dispatch ignores handled/repeated/composing/AltGraph events, open dialogs, and (except opening the palette) text-editing targets. Dispatch reuses the same context-aware registry as the palette. The editor lists all IDs and effective bindings, and palette rows/button tooltips show assigned shortcuts.
+Renderer dispatch ignores handled/repeated/composing/AltGraph events, open dialogs, and (except opening the palette or focusing commit search) text-editing targets. Dispatch reuses the same context-aware registry as the palette. The editor lists all IDs and effective bindings, and palette rows/button tooltips show assigned shortcuts.
 
 ## Scope and follow-up
 
-This implements renderer keybindings only. Native menu accelerators and bringing the existing history-search shortcut into the catalogue remain follow-up work. Terminal/editor contexts retain their own shortcuts. Cross-platform validation is implemented, but desktop execution is currently verified on Linux only.
+This implements renderer keybindings only. Native menu accelerators remain follow-up work. Commit search now belongs to the catalogue with Mod+F as its overridable default; its previous global shortcut handler is removed. Terminal/editor contexts retain their own shortcuts. Cross-platform validation is implemented, but desktop execution is currently verified on Linux only.
 
 ## Evidence
 
-Real Electron tests exercise conflicts with inherited defaults, unknown IDs, unsafe bare typing keys, valid remapping and null overrides, atomic Apply, modal suppression, restart persistence, restoring defaults, damaged-data recovery, and ignoring action shortcuts inside commit search. A repository fixture test checks that selecting Create branch opens the existing dialog without altering refs, and cancel preserves the refs.
+Real Electron tests exercise conflicts with inherited defaults, unknown IDs, unsafe bare typing keys, valid remapping and null overrides, atomic Apply, modal suppression, restart persistence, restoring defaults, damaged-data recovery, and ignoring action shortcuts inside commit search. Dispatch focuses the action button before invoking it; a successful palette action owns focus, while dismissal restores the previous element. The commit-search test checks inherited shortcut conflicts, remapping, modal focus, and focus transfer from palette to search. A repository fixture test checks that selecting Create branch opens the existing dialog without altering refs, and cancel preserves the refs.
