@@ -445,7 +445,7 @@ export const workingFileSchema = z
     text: z.string().max(2097152),
     encoding: textEncodingSchema,
     bom: z.boolean(),
-    newline: z.enum(['lf', 'crlf', 'mixed']),
+    newline: z.enum(['lf', 'crlf', 'cr', 'mixed']),
     token: z.string().regex(/^[0-9a-f]{64}$/),
   })
   .strict();
@@ -765,6 +765,22 @@ const editorAnswer = z
   })
   .strict();
 const workingRequests = [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('workingFile'),
+      repoId: repoIdSchema,
+      options: workingFileOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('saveWorkingFile'),
+      repoId: repoIdSchema,
+      options: saveWorkingFileSchema,
+    })
+    .strict(),
   z
     .object({
       id: requestId,
@@ -1103,6 +1119,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('commitFiles'), files: commitFilesSchema }),
   z.object({ kind: z.literal('fileComparison'), comparison: fileComparisonSchema }),
   z.object({ kind: z.literal('fileHistory'), page: fileHistoryPageSchema }),
+  z.object({ kind: z.literal('workingFile'), file: workingFileSchema }),
   z.object({ kind: z.literal('blameComplete'), lines: z.number().int().min(0).max(50000) }),
   z.object({ kind: z.literal('workingState'), state: workingStateSchema }),
   z.object({ kind: z.literal('conflictPreview'), preview: conflictPreviewSchema }),

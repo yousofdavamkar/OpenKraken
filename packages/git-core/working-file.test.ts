@@ -160,3 +160,22 @@ test.skipIf(process.platform === 'win32')(
     }
   },
 );
+
+test('editor identifies mixed and CR endings and applies its line cap to CR-only files', async () => {
+  const path = createFixture(join(root, 'line-endings'));
+  await writeFile(join(path, 'mixed.txt'), 'first\r\nsecond\nthird\r');
+  await writeFile(join(path, 'cr.txt'), 'first\rsecond\r');
+  await writeFile(join(path, 'too-many.txt'), 'line\r'.repeat(50001));
+  const service = new RepositoryService('git', { dataDir: join(root, 'line-ending-profile') });
+  try {
+    const repo = await service.open(path);
+    const selection = (name: string) => ({ pathBytes: Buffer.from(name).toString('base64') });
+    expect((await service.workingFile(repo.id, selection('mixed.txt'))).newline).toBe('mixed');
+    expect((await service.workingFile(repo.id, selection('cr.txt'))).newline).toBe('cr');
+    await expect(service.workingFile(repo.id, selection('too-many.txt'))).rejects.toMatchObject({
+      code: 'EDITOR_LIMIT',
+    });
+  } finally {
+    await service.dispose();
+  }
+});

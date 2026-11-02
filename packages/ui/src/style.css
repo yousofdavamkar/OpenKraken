@@ -1162,3 +1162,37 @@ footer {
 .blame-line > code {
   white-space: pre;
 }
+
+.working-editor-dialog {
+  width: min(1200px, 92vw);
+  height: 82vh;
+  max-width: 92vw;
+}
+.working-editor-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.working-editor-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.working-editor-dialog h2,
+.working-editor-dialog p {
+  margin: 0;
+}
+.working-code-editor {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  border: 1px solid #304358;
+}
+.editor-close-review {
+  border: 1px solid #c98f50;
+  padding: 12px;
+}
+.editor-close-review button {
+  margin: 8px 12px 0 0;
+}

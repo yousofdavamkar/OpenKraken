@@ -12,7 +12,10 @@ import { GitError, type RunOptions, type runGit } from './runner.js';
 type Run = (args: string[], options?: RunOptions) => ReturnType<typeof runGit>;
 const MAX_BYTES = 2 * 1024 * 1024;
 function checkText(text: string) {
-  const lines = text ? text.split('\n').length - (text.endsWith('\n') ? 1 : 0) : 0;
+  let lines = text.length && !/[\r\n]$/.test(text) ? 1 : 0;
+  for (const _match of text.matchAll(/\r\n|\r|\n/g)) {
+    if (++lines > 50000) break;
+  }
   if (text.includes('\0') || lines > 50000)
     throw new GitError(
       'EDITOR_LIMIT',
@@ -58,15 +61,16 @@ export async function readWorkingFile(
     (decoded.encoding === 'UTF-16BE' && bytes[0] === 0xfe && bytes[1] === 0xff);
   const text = bom ? decoded.text.replace(/^\ufeff/, '') : decoded.text;
   checkText(text);
-  const crlf = text.includes('\r\n'),
-    lf = /(?<!\r)\n/.test(text);
+  const endings = new Set(text.match(/\r\n|\r|\n/g));
+  const newline =
+    endings.size > 1 ? 'mixed' : endings.has('\r\n') ? 'crlf' : endings.has('\r') ? 'cr' : 'lf';
   const preview = workingFileSchema.parse({
     path: Buffer.from(pathBytes, 'base64').toString('utf8'),
     pathBytes,
     text,
     encoding: decoded.encoding,
     bom,
-    newline: crlf && lf ? 'mixed' : crlf ? 'crlf' : 'lf',
+    newline,
     token: createHash('sha256')
       .update(revision + JSON.stringify(image) + attribute + decoded.encoding)
       .digest('hex'),

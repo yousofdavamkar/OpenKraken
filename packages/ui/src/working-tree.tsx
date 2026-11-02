@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type {
   Request,
   WorkingState,
@@ -11,9 +11,13 @@ import { OperationPanel } from './operation.js';
 import { DiscardDialog } from './discard-dialog.js';
 import { WorkingDiffDialog } from './working-diff.js';
 import { useRepository, waitForBackground } from './store.js';
+const WorkingFileEditor = lazy(() =>
+  import('./working-file-editor.js').then((module) => ({ default: module.WorkingFileEditor })),
+);
 export function WorkingTreePanel() {
   const { snapshot, busy: active, syncing, workingState: state } = useRepository();
   const busy = syncing ? undefined : active;
+  const [editorPath, setEditorPath] = useState<string>();
   const [discard, setDiscard] = useState<{ preview: DiscardPreview; paths: string[] }>();
   const [conflict, setConflict] = useState<ConflictPreview>();
   const [preview, setPreview] = useState<WorkingDiff>();
@@ -187,6 +191,24 @@ export function WorkingTreePanel() {
           }}
         />
       )}
+      {editorPath && (
+        <Suspense fallback={<p role="status">Opening editor…</p>}>
+          <WorkingFileEditor
+            key={`${repoId}:${editorPath}`}
+            repoId={repoId}
+            pathBytes={editorPath}
+            busy={!!busy}
+            error={error}
+            onClose={() => {
+              setEditorPath(undefined);
+              setError(undefined);
+            }}
+            onSave={(options) =>
+              mutate({ id: crypto.randomUUID(), method: 'saveWorkingFile', repoId, options })
+            }
+          />
+        </Suspense>
+      )}
       {preview && (
         <WorkingDiffDialog
           key={preview.token}
@@ -301,6 +323,22 @@ export function WorkingTreePanel() {
                   >
                     {action === 'stage' ? 'Stage' : 'Unstage'}
                   </button>{' '}
+                  <button
+                    disabled={
+                      !!busy ||
+                      previewBusy ||
+                      entry.kind === 'conflict' ||
+                      entry.submodule.startsWith('S') ||
+                      state?.operation?.kind !== 'none'
+                    }
+                    aria-label={`Edit ${entry.path}`}
+                    onClick={() => {
+                      setError(undefined);
+                      setEditorPath(entry.pathBytes);
+                    }}
+                  >
+                    Edit file
+                  </button>
                   {action === 'stage' && (
                     <button
                       className="danger"

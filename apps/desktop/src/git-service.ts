@@ -127,6 +127,16 @@ async function executeGit(
         parent!.postMessage({ type: 'blameLines', id: request.id, lines }),
       )),
     };
+  if (request.method === 'workingFile')
+    return {
+      kind: 'workingFile',
+      file: await git.workingFile(request.repoId, request.options, signal),
+    };
+  if (request.method === 'saveWorkingFile')
+    return {
+      kind: 'workingState',
+      state: await git.saveWorkingFile(request.repoId, request.options, signal),
+    };
   if (request.method === 'fileHistory')
     return {
       kind: 'fileHistory',
