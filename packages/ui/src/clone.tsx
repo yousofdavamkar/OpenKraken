@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import { ProviderRepositoryPicker } from './provider-repositories.js';
 import { GitProgress } from './git-progress.js';
 import { useRepository } from './store.js';
 function CloneDialog({ close }: { close: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const { run, cancel, error } = useRepository();
   const [url, setUrl] = useState('');
+  const [browsing, setBrowsing] = useState(false);
   const [branch, setBranch] = useState('');
   const [depth, setDepth] = useState('');
   const [filter, setFilter] = useState(false);
@@ -16,6 +18,7 @@ function CloneDialog({ close }: { close: () => void }) {
   }, []);
   const submit = async () => {
     setPending(true);
+    setBrowsing(false);
     const previous = useRepository.getState().snapshot;
     try {
       await run({
@@ -54,6 +57,17 @@ function CloneDialog({ close }: { close: () => void }) {
         }}
       >
         <h2>Clone repository</h2>
+        <button type="button" disabled={pending} onClick={() => setBrowsing((value) => !value)}>
+          {browsing ? 'Hide provider repositories' : 'Browse provider repositories'}
+        </button>
+        {browsing && (
+          <ProviderRepositoryPicker
+            onSelect={(url) => {
+              setUrl(url);
+              setBrowsing(false);
+            }}
+          />
+        )}
         <label>
           Repository URL or absolute path
           <input

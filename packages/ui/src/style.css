@@ -1212,3 +1212,58 @@ footer {
 .editor-close-review button {
   margin: 8px 12px 0 0;
 }
+
+.clone-dialog {
+  max-height: 90vh;
+  overflow: auto;
+}
+.provider-picker {
+  border-block: 1px solid var(--border);
+  margin-block: 12px;
+  padding-block: 8px;
+}
+.provider-repositories {
+  height: 224px;
+  overflow: auto;
+  border: 1px solid var(--border);
+}
+.provider-repository {
+  box-sizing: border-box;
+  cursor: pointer;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+}
+.provider-repository strong,
+.provider-repository span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.provider-repository[aria-selected='true'] {
+  background: #243b4b;
+}
+.provider-repository span {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.provider-repositories:focus-visible {
+  outline: 2px solid #6bdfc2;
+  outline-offset: 2px;
+}
+.provider-picker label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-block: 8px;
+}
+.provider-picker select {
+  width: 100%;
+  font: inherit;
+  padding: 8px;
+  color: inherit;
+  background: #10151e;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}

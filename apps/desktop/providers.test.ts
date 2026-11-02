@@ -244,6 +244,17 @@ test('device sign-in protects refresh tokens and revalidates the same identity a
   }
   const restarted = new ProviderService(directory, vault, undefined, oauth, () => now);
   now += 121000;
+  server.use(
+    http.get('https://api.github.com/user/repos', ({ request }) => {
+      expect(request.headers.get('authorization')).toBe('token second-access');
+      return HttpResponse.json([]);
+    }),
+  );
+  expect(await restarted.repositories(account.id, 1)).toEqual({
+    repositories: [],
+    nextPage: null,
+    limited: false,
+  });
   const checked = await restarted.verify(account.id);
   expect(refreshes).toBe(1);
   expect(checked.accounts[0]).toMatchObject({

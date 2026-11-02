@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import {
   providerAccountsSchema,
+  providerRepositoryPageNumberSchema,
+  providerRepositoryPageSchema,
   providerConnectSchema,
   deviceStartSchema,
   deviceChallengeSchema,
@@ -1054,6 +1056,14 @@ const workingRequests = [
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
   z
+    .object({
+      id: requestId,
+      method: z.literal('providerRepositories'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      page: providerRepositoryPageNumberSchema,
+    })
+    .strict(),
+  z
     .object({ id: requestId, method: z.literal('providerDeviceStart'), options: deviceStartSchema })
     .strict(),
   z
@@ -1166,6 +1176,9 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('providerDevice'), challenge: deviceChallengeSchema }),
   z.object({ kind: z.literal('providerDeviceOpened') }).strict(),
   z.object({ kind: z.literal('providerAccounts'), state: providerAccountsSchema }),
+  z
+    .object({ kind: z.literal('providerRepositories'), page: providerRepositoryPageSchema })
+    .strict(),
   z.object({ kind: z.literal('deleteRemotePreview'), plan: deleteRemotePlanSchema }),
   z.object({ kind: z.literal('authenticationAnswered'), accepted: z.boolean() }),
   z.object({ kind: z.literal('editorAnswered'), accepted: z.boolean() }),

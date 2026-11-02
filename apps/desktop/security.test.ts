@@ -86,3 +86,22 @@ test('device IPC accepts only session IDs for browser opening and rejects privat
     }).success,
   ).toBe(false);
 });
+
+test('repository browsing accepts bounded page numbers without renderer-supplied hosts or tokens', () => {
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    method: 'providerRepositories',
+    accountId: 'a'.repeat(64),
+    page: 1,
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  for (const fields of [
+    { page: 0 },
+    { page: 101 },
+    { page: 1.5 },
+    { url: 'https://attacker.test' },
+    { token: 'secret' },
+  ])
+    expect(requestSchema.safeParse({ ...request, ...fields }).success).toBe(false);
+});

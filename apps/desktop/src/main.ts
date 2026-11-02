@@ -190,6 +190,7 @@ else {
       inFlight.add(request.id);
       try {
         if (
+          request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerConnect' ||
           request.method === 'providerDisconnect' ||
@@ -211,6 +212,15 @@ else {
           );
           const controller = new AbortController();
           providerRequests.set(request.id, controller);
+          if (request.method === 'providerRepositories')
+            return resultSchema.parse({
+              kind: 'providerRepositories',
+              page: await providers.repositories(
+                request.accountId,
+                request.page,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerDeviceStart')
             return {
               kind: 'providerDevice',
@@ -283,6 +293,7 @@ else {
         );
       } catch (error) {
         if (
+          request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerConnect' ||
           request.method === 'providerDisconnect' ||
