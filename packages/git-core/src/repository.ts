@@ -736,19 +736,48 @@ export class RepositoryService {
     const work = this.working(id);
     return this.queue(work.repo.commonDir).run(false, () => work.operationState(signal), signal);
   }
+  providerPullPreview(id: string, options: PullOptions, signal?: AbortSignal) {
+    const work = this.working(id);
+    const { repo, manager } = this.remoteManager(id);
+    return this.queue(repo.commonDir).run(
+      false,
+      async () => {
+        const context = await work.pullContext(options, signal);
+        if (context.remote === '.')
+          throw new GitError(
+            'PROVIDER_PULL_LOCAL',
+            'This upstream is local. Use Git credential helpers for this pull.',
+          );
+        const target = await manager.providerTarget(context.remote, 'fetch', signal);
+        if (JSON.stringify(await work.pullContext(options, signal)) !== JSON.stringify(context))
+          throw new GitError(
+            'STALE_PULL',
+            'The branch or upstream changed during review. Review the pull again.',
+          );
+        return { target, upstream: context.upstream };
+      },
+      signal,
+    );
+  }
   pull(
     id: string,
     options: PullOptions,
     signal?: AbortSignal,
     onProgress?: (text: string) => void,
     authentication?: NodeJS.ProcessEnv,
+    provider?: ProviderRemoteAuthorization,
   ) {
     const work = this.working(id);
-    const { repo, manager } = this.remoteManager(id, onProgress, authentication);
+    const { repo, manager } = this.remoteManager(id, onProgress, authentication, provider);
     return this.queue(repo.commonDir).run(
       true,
       async () => {
         const context = await work.pullContext(options, signal);
+        if (provider && context.remote === '.')
+          throw new GitError(
+            'PROVIDER_PULL_LOCAL',
+            'This upstream is local. Use Git credential helpers for this pull.',
+          );
         if (context.remote !== '.') await manager.fetch(context.remote, signal);
         return work.integratePull(options, context, signal, onProgress);
       },

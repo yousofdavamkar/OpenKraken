@@ -90,7 +90,9 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
     request.method === 'providerGit'
       ? request.operation.method === 'fetch'
         ? `Fetch ${request.operation.name}`
-        : 'Push repository'
+        : request.operation.method === 'pull'
+          ? 'Pull upstream'
+          : 'Push repository'
       : request.method === 'clone'
         ? `Clone ${request.options.url}`
         : request.method === 'fetch'
@@ -141,12 +143,23 @@ async function executeGit(
             ? 'Pushing provider repository…'
             : request.operation.method === 'pushPreview'
               ? 'Reviewing provider push…'
-              : 'Fetching provider repository…';
+              : request.operation.method === 'pull'
+                ? 'Pulling provider repository…'
+                : 'Fetching provider repository…';
     }
     parent!.postMessage({ type: 'gitProgress', id: request.id, text });
   };
+  if (request.method === 'providerPullPreview')
+    return {
+      kind: 'providerPullPreview',
+      ...(await git.providerPullPreview(request.repoId, request.options, signal)),
+    };
   if (request.method === 'providerGitTarget') {
     const operation = request.operation;
+    if (operation.method === 'pull') {
+      const preview = await git.providerPullPreview(operation.repoId, operation.options, signal);
+      return { kind: 'providerGitTarget', target: preview.target };
+    }
     const name =
       operation.method === 'fetch'
         ? operation.name
@@ -170,6 +183,18 @@ async function executeGit(
       username: request.credential.username,
       token: request.token,
     };
+    if (operation.method === 'pull')
+      return {
+        kind: 'workingState',
+        state: await git.pull(
+          operation.repoId,
+          operation.options,
+          signal,
+          progress,
+          auth,
+          provider,
+        ),
+      };
     if (operation.method === 'pushPreview')
       return {
         kind: 'pushPreview',
@@ -520,23 +545,10 @@ parent.on('message', (event) => {
               message:
                 (request.method === 'clone' && request.credential) ||
                 request.method === 'providerGit'
-                  ? error instanceof GitError && error.code === 'PROVIDER_TRANSPORT_REWRITE'
-                    ? 'Git rewrites this URL. Disable the rewrite or use Git credential helpers.'
-                    : error instanceof GitError && error.code === 'PUSH_REJECTED'
-                      ? 'Push rejected by the server. Fetch and review the destination before retrying.'
-                      : error instanceof GitError && error.code === 'PUSH_LEASE_REJECTED'
-                        ? 'The destination changed since review. Review the push again before retrying.'
-                        : error instanceof GitError && error.code === 'STALE_PUSH'
-                          ? 'The local tip or remote settings changed. Review the push again.'
-                          : error instanceof GitError && error.code === 'STALE_PROVIDER_REMOTE'
-                            ? 'The remote configuration or tracking refs changed. Review the remote and retry.'
-                            : error instanceof GitError &&
-                                error.code === 'CLONE_DESTINATION_NOT_EMPTY'
-                              ? 'Choose an empty folder for this clone.'
-                              : error instanceof GitError &&
-                                  error.code === 'TLS_CERTIFICATE_INVALID'
-                                ? 'The HTTPS certificate could not be verified.'
-                                : 'Provider Git operation failed. Check repository access and HTTPS settings, or use Git credential helpers.'
+                  ? providerGitFailure(
+                      error,
+                      request.method === 'providerGit' && request.operation.method === 'pull',
+                    )
                   : error instanceof Error
                     ? error.message
                     : String(error),
@@ -560,4 +572,30 @@ async function shutdown() {
   } finally {
     process.exit(0);
   }
+}
+
+function providerGitFailure(error: unknown, pull: boolean) {
+  const messages: Record<string, string> = {
+    PROVIDER_TRANSPORT_REWRITE:
+      'Git rewrites this URL. Disable the rewrite or use Git credential helpers.',
+    PUSH_REJECTED: 'Push rejected by the server. Fetch and review the destination before retrying.',
+    PUSH_LEASE_REJECTED:
+      'The destination changed since review. Review the push again before retrying.',
+    STALE_PUSH: 'The local tip or remote settings changed. Review the push again.',
+    STALE_PROVIDER_REMOTE:
+      'The remote configuration or tracking refs changed. Review the remote and retry.',
+    CLONE_DESTINATION_NOT_EMPTY: 'Choose an empty folder for this clone.',
+    TLS_CERTIFICATE_INVALID: 'The HTTPS certificate could not be verified.',
+    STALE_PULL: 'The branch, staged files or upstream changed. Review the pull again.',
+    PULL_DIRTY: 'Commit or stash tracked changes before pulling.',
+    PULL_BRANCH_REQUIRED: 'Switch to an existing branch before pulling.',
+    PULL_UPSTREAM_REQUIRED: 'Set an upstream for this branch before pulling.',
+    PROVIDER_PULL_LOCAL: 'This upstream is local. Use Git credential helpers for this pull.',
+  };
+  return (
+    (error instanceof GitError && messages[error.code]) ||
+    (pull
+      ? 'Pull did not complete. Check repository access and review the refreshed branch and any conflicts. Fast-forward-only refuses divergent history.'
+      : 'Provider Git operation failed. Check repository access and HTTPS settings, or use Git credential helpers.')
+  );
 }

@@ -390,3 +390,99 @@ test('saved-account push review uses the push URL and refuses a changed destinat
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('saved-account pull reviews its upstream, guards configuration and integrates verified HTTPS history', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-provider-pull-'));
+  const source = createFixture(join(root, 'source'));
+  fixtureGit(source, ['commit', '--allow-empty', '-m', 'Incoming provider commit']);
+  const bare = join(root, 'remote.git');
+  fixtureGit(source, ['clone', '--bare', '.', bare]);
+  const remote = await authenticatedRemote(bare, {
+    basePath: '/team/project.git',
+    password: 'fixture-provider-token',
+  });
+  const local = createFixture(join(root, 'local'));
+  fixtureGit(local, ['remote', 'set-url', 'origin', remote.url]);
+  // Fetch uses its own direction even when push has a different destination.
+  fixtureGit(local, [
+    'remote',
+    'set-url',
+    '--push',
+    'origin',
+    'https://other.test/team/project.git',
+  ]);
+  const broker = new AskpassBroker(
+    resolve(
+      'apps/desktop/dist/helpers',
+      process.platform === 'win32' ? 'openkraken-askpass.exe' : 'openkraken-askpass',
+    ),
+    () => {
+      throw new Error('Saved pull must not prompt');
+    },
+  );
+  const service = new RepositoryService('git', { dataDir: join(root, 'profile') });
+  try {
+    const repo = await service.open(local);
+    const initial = await service.workingState(repo.id);
+    const options = { mode: 'ff-only' as const, revision: initial.revision };
+    const preview = await service.providerPullPreview(repo.id, options);
+    expect(preview).toMatchObject({
+      target: { url: remote.url },
+      upstream: 'refs/remotes/origin/main',
+    });
+    expect(remote.requests()).toBe(0);
+    const scope = await broker.open(randomUUID(), 'Pull upstream', undefined, {
+      url: remote.url,
+      ...remote.credentials,
+    });
+    const environment = {
+      ...scope.environment,
+      GIT_SSL_CAINFO: remote.certificate,
+      GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1',
+    };
+    const provider = { ...preview.target, username: remote.credentials.username };
+    fixtureGit(local, ['config', 'branch.main.merge', 'refs/heads/feature']);
+    await expect(
+      service.pull(repo.id, options, undefined, undefined, environment, provider),
+    ).rejects.toMatchObject({ code: 'STALE_PROVIDER_REMOTE' });
+    expect(remote.requests()).toBe(0);
+    expect(fixtureGit(local, ['rev-parse', 'HEAD'])).toBe(initial.head.oid);
+    fixtureGit(local, ['config', 'branch.main.merge', 'refs/heads/main']);
+    const reviewed = await service.providerPullPreview(repo.id, options);
+    const result = await service.pull(repo.id, options, undefined, undefined, environment, {
+      ...reviewed.target,
+      username: provider.username,
+    });
+    expect(result.head.oid).toBe(fixtureGit(source, ['rev-parse', 'HEAD']));
+    expect(result.undo?.label).toBe('Pull (ff-only)');
+    expect(remote.authenticated()).toBeGreaterThan(1);
+    await service.undo(repo.id);
+    expect(fixtureGit(local, ['rev-parse', 'HEAD'])).toBe(initial.head.oid);
+    fixtureGit(local, ['config', 'branch.main.remote', '.']);
+    const requests = remote.requests();
+    await expect(
+      service.pull(
+        repo.id,
+        { ...options, revision: (await service.workingState(repo.id)).revision },
+        undefined,
+        undefined,
+        environment,
+        provider,
+      ),
+    ).rejects.toMatchObject({ code: 'PROVIDER_PULL_LOCAL' });
+    expect(remote.requests()).toBe(requests);
+    await expect(
+      service.providerPullPreview(repo.id, {
+        ...options,
+        revision: (await service.workingState(repo.id)).revision,
+      }),
+    ).rejects.toMatchObject({ code: 'PROVIDER_PULL_LOCAL' });
+    scope.close();
+  } finally {
+    await broker.close();
+    await service.dispose();
+    await remote.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

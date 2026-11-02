@@ -221,3 +221,25 @@ test('saved-account push accepts a reviewed plan but no caller-supplied destinat
     }).success,
   ).toBe(false);
 });
+
+test('saved pull requires working and remote revisions and resolves its upstream internally', () => {
+  const id = '00000000-0000-4000-8000-000000000000',
+    repoId = 'a'.repeat(64);
+  const options = { mode: 'ff-only', revision: 'b'.repeat(64) };
+  const preview = { id, method: 'providerPullPreview', repoId, options };
+  expect(requestSchema.safeParse(preview).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(preview).success).toBe(true);
+  const operation = { method: 'pull', repoId, options, revision: 'c'.repeat(64) };
+  const request = { id, method: 'providerGit', accountId: 'd'.repeat(64), operation };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  for (const extra of [
+    { revision: undefined },
+    { name: 'another' },
+    { upstream: 'refs/heads/other' },
+    { url: 'https://other.test/team/repo.git' },
+    { credential: { password: 'secret' } },
+  ])
+    expect(
+      requestSchema.safeParse({ ...request, operation: { ...operation, ...extra } }).success,
+    ).toBe(false);
+});
