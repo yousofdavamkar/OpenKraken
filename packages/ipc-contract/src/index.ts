@@ -92,6 +92,14 @@ export const operationStateSchema = z
   })
   .strict();
 export type OperationState = z.infer<typeof operationStateSchema>;
+export const operationActionSchema = z
+  .object({
+    action: z.enum(['continue', 'skip', 'abort']),
+    token: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .strict();
+export type OperationAction = z.infer<typeof operationActionSchema>;
+
 export const graphViewSchema = z
   .object({
     hiddenRefs: z.array(z.string().min(1).max(1024)).max(10000),
@@ -144,6 +152,7 @@ export const commitOptionsSchema = z
   .strict();
 export type CommitOptions = z.infer<typeof commitOptionsSchema>;
 export const workingStateSchema = z.object({
+  operation: operationStateSchema.optional(),
   revision: z.string().regex(/^[0-9a-f]{64}$/),
   messageTemplate: z.string().optional(),
   amendMessage: z.string().optional(),
@@ -568,6 +577,14 @@ const workingRequests = [
     })
     .strict(),
   z.object({ id: requestId, method: z.literal('workingState'), repoId: repoIdSchema }).strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('operationAction'),
+      repoId: repoIdSchema,
+      options: operationActionSchema,
+    })
+    .strict(),
   z
     .object({
       id: requestId,

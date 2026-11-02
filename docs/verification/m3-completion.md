@@ -14,17 +14,17 @@ M3's feature scope and Linux acceptance suite are complete as of 2026-11-01, at 
 
 ## Verification
 
-| Check | Result |
-| --- | --- |
-| TypeScript build, ESLint and Prettier | Passed |
-| Full Vitest suite | 132 tests passed |
-| Combined Electron suite with Gitea enabled | 28 passed; one dedicated large-repository benchmark skipped |
-| 2,000-commit first paint | 237.3 ms |
-| Next 5,000 commits, including worker/layout/UI | 158.4 ms |
-| 12,000-row scroll frame p95 | 16.8 ms |
-| Linux platform bundle and hardened fuse verification | Passed |
-| Packaged renderer isolation and unpacked native-helper execution | Passed |
-| Windows native helper cross-compilation | Passed; runtime not executed here |
+| Check                                                            | Result                                                      |
+| ---------------------------------------------------------------- | ----------------------------------------------------------- |
+| TypeScript build, ESLint and Prettier                            | Passed                                                      |
+| Full Vitest suite                                                | 132 tests passed                                            |
+| Combined Electron suite with Gitea enabled                       | 28 passed; one dedicated large-repository benchmark skipped |
+| 2,000-commit first paint                                         | 237.3 ms                                                    |
+| Next 5,000 commits, including worker/layout/UI                   | 158.4 ms                                                    |
+| 12,000-row scroll frame p95                                      | 16.8 ms                                                     |
+| Linux platform bundle and hardened fuse verification             | Passed                                                      |
+| Packaged renderer isolation and unpacked native-helper execution | Passed                                                      |
+| Windows native helper cross-compilation                          | Passed; runtime not executed here                           |
 
 The [Gitea fixture](m3-gitea.md) runs Gitea 1.26.4 in a rootless container, with HTTPS verified against a test CA and SSH using an encrypted Ed25519 key. It drives desktop clone, push review/rejection, pull, host-key refusal/acceptance and changed-key diagnostics. Bare-remote tests additionally exercise exact leases, stale reviews, separate push URLs, tags, clone options and transport cancellation. Pull fixtures cover ff-only/merge/rebase, conflicts and native abort, dirty/stale/detached/missing-upstream guards, and an upstream change during fetch. Automatic-fetch tests cover backoff and successful recovery with real HTTP/Git transports.
 

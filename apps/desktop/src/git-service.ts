@@ -174,6 +174,11 @@ async function executeGit(
       kind: 'workingState',
       state: await git.commit(request.repoId, request.options, signal),
     };
+  if (request.method === 'operationAction')
+    return {
+      kind: 'workingState',
+      state: await git.operationAction(request.repoId, request.options, signal, progress),
+    };
   if (request.method === 'workingState')
     return { kind: 'workingState', state: await git.workingState(request.repoId, signal) };
   if (request.method === 'files')
@@ -245,6 +250,7 @@ parent.on('message', (event) => {
     'push',
     'deleteRemote',
     'pull',
+    'operationAction',
     'stashPush',
     'stashAction',
   ].includes(request.method);

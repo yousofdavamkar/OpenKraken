@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Request, WorkingState, WorkingDiff, DiscardPreview } from '@openkraken/ipc-contract';
+import { OperationPanel } from './operation.js';
 import { DiscardDialog } from './discard-dialog.js';
 import { WorkingDiffDialog } from './working-diff.js';
 import { useRepository, waitForBackground } from './store.js';
@@ -119,6 +120,7 @@ export function WorkingTreePanel() {
     void mutate({ id: crypto.randomUUID(), method: 'files', repoId, action, paths });
   return (
     <section aria-label="Working tree">
+      <OperationPanel key={repoId} />
       {discard && (
         <DiscardDialog
           preview={discard.preview}

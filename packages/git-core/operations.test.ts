@@ -48,3 +48,73 @@ test('operation inspection reads native rebase progress and detects edited confl
     await service.dispose();
   }
 });
+test('resolved rebase continues through native Git and stale reviews leave edits untouched', async () => {
+  const { path, service, repo } = await divergent('continue-rebase');
+  try {
+    expect(() => fixtureGit(path, ['rebase', '--merge', 'incoming'])).toThrow();
+    const paused = await service.operationState(repo.id);
+    await expect(
+      service.operationAction(repo.id, { action: 'continue', token: paused.token }),
+    ).rejects.toMatchObject({ code: 'UNRESOLVED_CONFLICTS' });
+    await writeFile(join(path, 'tracked.txt'), 'resolved version\n');
+    await expect(
+      service.operationAction(repo.id, { action: 'abort', token: paused.token }),
+    ).rejects.toMatchObject({ code: 'STALE_OPERATION' });
+    expect(fixtureGit(path, ['status', '--porcelain'])).toContain('UU tracked.txt');
+    fixtureGit(path, ['add', 'tracked.txt']);
+    const reviewed = await service.operationState(repo.id);
+    await service.operationAction(repo.id, { action: 'continue', token: reviewed.token });
+    expect((await service.operationState(repo.id)).kind).toBe('none');
+    expect(fixtureGit(path, ['show', 'HEAD:tracked.txt'])).toBe('resolved version');
+    expect(fixtureGit(path, ['log', '-2', '--format=%s'])).toBe(
+      'Second local commit\nLocal conflict',
+    );
+    expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
+  } finally {
+    await service.dispose();
+  }
+});
+for (const action of ['skip', 'abort'] as const)
+  test(`native rebase ${action} preserves the intended branch and publishes the resulting index`, async () => {
+    const { path, service, repo, original } = await divergent(`rebase-${action}`);
+    try {
+      expect(() => fixtureGit(path, ['rebase', '--merge', 'incoming'])).toThrow();
+      const state = await service.operationState(repo.id);
+      await service.operationAction(repo.id, { action, token: state.token });
+      expect((await service.operationState(repo.id)).kind).toBe('none');
+      expect(fixtureGit(path, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/main');
+      expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
+      if (action === 'abort') expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(original);
+      else {
+        expect(fixtureGit(path, ['show', 'HEAD:tracked.txt'])).toBe('incoming version');
+        expect(fixtureGit(path, ['log', '-2', '--format=%s'])).toBe(
+          'Second local commit\nIncoming conflict',
+        );
+      }
+    } finally {
+      await service.dispose();
+    }
+  });
+for (const action of ['continue', 'abort'] as const)
+  test(`native merge ${action} uses the reviewed operation`, async () => {
+    const { path, service, repo, original } = await divergent(`merge-${action}`);
+    try {
+      expect(() => fixtureGit(path, ['merge', 'incoming'])).toThrow();
+      expect((await service.operationState(repo.id)).kind).toBe('merge');
+      if (action === 'continue') {
+        await writeFile(join(path, 'tracked.txt'), 'merge resolution\n');
+        fixtureGit(path, ['add', 'tracked.txt']);
+      }
+      const state = await service.operationState(repo.id);
+      await service.operationAction(repo.id, { action, token: state.token });
+      expect((await service.operationState(repo.id)).kind).toBe('none');
+      expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
+      if (action === 'abort') expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(original);
+      else
+        expect(fixtureGit(path, ['rev-list', '--parents', '-1', 'HEAD']).split(' ')).toHaveLength(
+          3,
+        );
+    } finally {
+      await service.dispose();
+    }
+  });

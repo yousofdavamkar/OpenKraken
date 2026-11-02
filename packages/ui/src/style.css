@@ -815,3 +815,18 @@ footer {
   max-height: 35vh;
   overflow-y: auto;
 }
+.operation-panel {
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.operation-panel h3 {
+  margin: 0;
+}
+.operation-panel pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow: auto;
+}

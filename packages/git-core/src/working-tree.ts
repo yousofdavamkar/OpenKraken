@@ -23,6 +23,8 @@ import {
   pullOptionsSchema,
   type PullOptions,
   type OperationState,
+  type OperationAction,
+  operationActionSchema,
   type StashPushOptions,
   type ReferenceOptions,
   type WorkingState,
@@ -171,6 +173,7 @@ export class WorkingTree {
           commitWarning: error instanceof Error ? error.message : String(error),
         }));
     return {
+      operation: await this.operationState(signal),
       status: parser.finish(),
       head: fingerprint.head,
       revision: this.revision(fingerprint),
@@ -401,6 +404,64 @@ export class WorkingTree {
       conflicts,
       token: hash(metadata.fingerprint + JSON.stringify(fingerprint) + JSON.stringify(images)),
     };
+  }
+  async operationAction(
+    input: OperationAction,
+    signal?: AbortSignal,
+    onProgress?: (text: string) => void,
+  ) {
+    const options = operationActionSchema.parse(input);
+    await this.locked(async (indexFile, publish) => {
+      const state = await this.operationState(signal, indexFile);
+      if (state.token !== options.token)
+        throw new GitError(
+          'STALE_OPERATION',
+          'The operation or working files changed. Review the current state before continuing.',
+        );
+      if (!state.actions.includes(options.action))
+        throw new GitError(
+          'INVALID_OPERATION_ACTION',
+          'This action is not available for the current Git operation.',
+        );
+      if (options.action === 'continue' && state.conflicts)
+        throw new GitError(
+          'UNRESOLVED_CONFLICTS',
+          'Resolve and stage all conflicted files before continuing.',
+        );
+      const before = await this.saved(indexFile);
+      const pending = join(this.directory, `pending-${randomUUID()}.json`);
+      const record = { label: `${state.kind} ${options.action}`, before };
+      await atomic(pending, JSON.stringify(record));
+      const progress = onProgress ? new GitProgressLines(onProgress) : undefined;
+      let failure: unknown;
+      try {
+        const result = await this.run([state.kind, `--${options.action}`], {
+          indexFile,
+          signal,
+          readOnly: false,
+          allowedExitCodes: [0, 1],
+          timeoutMs: 180000,
+          env: { GIT_EDITOR: 'true' },
+          onStderr: progress ? (chunk) => progress.push(chunk) : undefined,
+        });
+        if (result.exitCode)
+          throw new GitError(
+            'GIT_FAILED',
+            redactGitMessage(`${result.stdout.toString()}\n${result.stderr}`.trim()),
+          );
+      } catch (error) {
+        failure = error;
+      } finally {
+        progress?.end();
+      }
+      const after = await this.saved(indexFile);
+      await atomic(pending, JSON.stringify({ ...record, after }));
+      if (!sameHead(before.head, after.head) || before.signature !== after.signature)
+        await publish();
+      await rm(pending, { force: true });
+      if (failure) throw failure;
+    }, signal);
+    return this.state();
   }
   async pullContext(input: PullOptions, signal?: AbortSignal) {
     const options = pullOptionsSchema.parse(input);

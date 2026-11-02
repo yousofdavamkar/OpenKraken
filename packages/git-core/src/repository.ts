@@ -13,6 +13,7 @@ import type {
   DeleteRemoteSelection,
   DeleteRemotePlan,
   PullOptions,
+  OperationAction,
   StashPushOptions,
   StashActionOptions,
   GraphView,
@@ -533,6 +534,19 @@ export class RepositoryService {
   ) {
     const { repo, manager } = this.remoteManager(id, onProgress, authentication);
     return this.queue(repo.commonDir).run(true, () => manager.push(options, signal), signal);
+  }
+  operationAction(
+    id: string,
+    options: OperationAction,
+    signal?: AbortSignal,
+    onProgress?: (text: string) => void,
+  ) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(
+      true,
+      () => work.operationAction(options, signal, onProgress),
+      signal,
+    );
   }
   operationState(id: string, signal?: AbortSignal) {
     const work = this.working(id);
