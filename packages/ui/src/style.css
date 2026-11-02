@@ -1553,3 +1553,42 @@ footer {
   outline: 1px solid #6bdfc2;
   outline-offset: -2px;
 }
+
+.command-dialog {
+  width: min(650px, 90vw);
+  max-height: 85vh;
+}
+.command-dialog label {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+.command-dialog input {
+  flex: 1;
+  min-width: 0;
+}
+.command-results {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #35455d;
+}
+.command-results [role='option'] {
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.command-results [aria-selected='true'] {
+  background: #243d58;
+  outline: 1px solid #65a6d6;
+  outline-offset: -1px;
+}
+.command-results [aria-disabled='true'] {
+  color: #a4afbf;
+  cursor: default;
+}
+.command-results span {
+  font-size: 12px;
+}

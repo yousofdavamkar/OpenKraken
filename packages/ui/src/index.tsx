@@ -1,3 +1,4 @@
+import { CommandButton, CommandControls, CommandProvider } from './commands.js';
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AvatarSettings } from './avatars.js';
@@ -53,6 +54,7 @@ function App() {
           OpenKraken <span className="edition">LOCAL GIT CLIENT</span>
         </div>
         <div className="toolbar">
+          <CommandControls />
           <AvatarSettings />
           <Clone />
           <ProviderAccountsControl />
@@ -66,14 +68,15 @@ function App() {
           <Reset />
           <Push />
           <Stashes />
-          <button onClick={open} disabled={!!busy}>
+          <CommandButton command="repository.open" onClick={open} disabled={!!busy}>
             Open repository
-          </button>
-          <button onClick={() => setInit(!init)} disabled={!!busy}>
+          </CommandButton>
+          <CommandButton command="repository.init" onClick={() => setInit(!init)} disabled={!!busy}>
             Initialize
-          </button>
+          </CommandButton>
           {snapshot && (
-            <button
+            <CommandButton
+              command="repository.refresh"
               onClick={() =>
                 void run({
                   id: crypto.randomUUID(),
@@ -84,7 +87,7 @@ function App() {
               disabled={!!busy}
             >
               Refresh
-            </button>
+            </CommandButton>
           )}
           {(busy || paging || searching) && <button onClick={() => void cancel()}>Cancel</button>}
         </div>
@@ -288,6 +291,8 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
 }
 createRoot(document.getElementById('root')!).render(
   <ErrorBoundary>
-    <App />
+    <CommandProvider>
+      <App />
+    </CommandProvider>
   </ErrorBoundary>,
 );

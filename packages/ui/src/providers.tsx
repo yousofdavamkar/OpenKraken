@@ -1,3 +1,4 @@
+import { CommandButton } from './commands.js';
 import { useEffect, useRef, useState } from 'react';
 import type { ProviderAccounts, Request } from '@openkraken/ipc-contract';
 import { GitLabSignIn } from './gitlab-sign-in.js';
@@ -221,7 +222,9 @@ export function ProviderAccountsControl() {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button onClick={() => setOpen(true)}>Provider accounts</button>
+      <CommandButton command="providers.accounts" onClick={() => setOpen(true)}>
+        Provider accounts
+      </CommandButton>
       {open && <AccountsDialog close={() => setOpen(false)} />}
     </>
   );

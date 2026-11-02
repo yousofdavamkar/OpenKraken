@@ -1,3 +1,4 @@
+import { CommandButton } from './commands.js';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import type {
@@ -721,7 +722,9 @@ export function Issues() {
   const [opened, setOpened] = useState(false);
   return (
     <>
-      <button onClick={() => setOpened(true)}>Issues</button>
+      <CommandButton command="providers.issues" onClick={() => setOpened(true)}>
+        Issues
+      </CommandButton>
       {opened && <IssueDialog close={() => setOpened(false)} />}
     </>
   );

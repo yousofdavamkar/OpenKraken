@@ -160,6 +160,9 @@ importers:
       '@tanstack/react-virtual':
         specifier: latest
         version: 3.14.24(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      fuzzysort:
+        specifier: 4.0.2
+        version: 4.0.2
       immer:
         specifier: latest
         version: 11.2.9
@@ -1473,6 +1476,9 @@ packages:
 
   function-bind@1.1.2:
     resolution: {integrity: sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA==}
+
+  fuzzysort@4.0.2:
+    resolution: {integrity: sha512-3c7yD6rK1EXIsqpcu1ZVzXJugODWNMzvUij6yTiziaAHrpNS8kzFOI9mJLE8pmG4K9JOaVgzQRgklfOEk8f4Tg==}
 
   galactus@2.0.2:
     resolution: {integrity: sha512-HmKyTFGomdAchz4umx8MwBnrnfFmdpwiTyGA4ZOF7rya2Lmgbc9qate4yweInL+0gUBVImhaz12SBGpW3SY4Yg==}
@@ -3523,6 +3529,8 @@ snapshots:
     optional: true
 
   function-bind@1.1.2: {}
+
+  fuzzysort@4.0.2: {}
 
   galactus@2.0.2:
     dependencies:

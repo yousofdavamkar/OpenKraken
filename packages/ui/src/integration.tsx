@@ -1,3 +1,4 @@
+import { CommandButton } from './commands.js';
 import { useEffect, useRef, useState } from 'react';
 import type {
   Snapshot,
@@ -282,7 +283,8 @@ export function Integration() {
   const selected = detail?.oid ?? selection.focus;
   return (
     <>
-      <button
+      <CommandButton
+        command="history.integrate"
         disabled={
           (!!busy && !syncing) ||
           !workingState?.head.oid ||
@@ -299,7 +301,7 @@ export function Integration() {
         }}
       >
         Integrate commits
-      </button>
+      </CommandButton>
       {review && <IntegrationDialog {...review} close={() => setReview(undefined)} />}
     </>
   );

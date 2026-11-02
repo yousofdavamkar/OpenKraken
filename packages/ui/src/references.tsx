@@ -1,3 +1,4 @@
+import { CommandButton } from './commands.js';
 import { useEffect, useRef, useState } from 'react';
 import type { Ref, ReferenceOptions } from '@openkraken/ipc-contract';
 import { useRepository, waitForBackground } from './store.js';
@@ -220,12 +221,20 @@ export function NewReferences() {
   };
   return (
     <>
-      <button disabled={!!busy || !oid} onClick={() => show('createBranch')}>
+      <CommandButton
+        command="references.branch"
+        disabled={!!busy || !oid}
+        onClick={() => show('createBranch')}
+      >
         New branch
-      </button>
-      <button disabled={!!busy || !oid} onClick={() => show('createTag')}>
+      </CommandButton>
+      <CommandButton
+        command="references.tag"
+        disabled={!!busy || !oid}
+        onClick={() => show('createTag')}
+      >
         New tag
-      </button>
+      </CommandButton>
       {action && (
         <ReferenceDialog action={action} target={target} close={() => setAction(undefined)} />
       )}

@@ -1,3 +1,4 @@
+import { CommandButton } from './commands.js';
 import { useEffect, useRef, useState } from 'react';
 import type {
   InteractiveRebase,
@@ -270,7 +271,8 @@ export function InteractiveRebaseControl() {
   if (!snapshot || snapshot.repository.isBare) return null;
   return (
     <>
-      <button
+      <CommandButton
+        command="history.rebase"
         disabled={
           (!!busy && !syncing) ||
           !workingState?.head.oid ||
@@ -286,7 +288,7 @@ export function InteractiveRebaseControl() {
         }}
       >
         Interactive rebase
-      </button>
+      </CommandButton>
       {review && <RebaseDialog {...review} close={() => setReview(undefined)} />}
     </>
   );

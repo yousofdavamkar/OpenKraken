@@ -1,3 +1,4 @@
+import { CommandButton } from './commands.js';
 import { useEffect, useRef, useState } from 'react';
 import type { PullOptions, Result } from '@openkraken/ipc-contract';
 import { ProviderGitAccount } from './provider-git-account.js';
@@ -213,9 +214,13 @@ export function Pull() {
   if (!snapshot) return null;
   return (
     <>
-      <button disabled={!!busy && !syncing} onClick={() => setOpened(true)}>
+      <CommandButton
+        command="repository.pull"
+        disabled={!!busy && !syncing}
+        onClick={() => setOpened(true)}
+      >
         Pull
-      </button>
+      </CommandButton>
       {opened && (
         <PullDialog
           key={snapshot.repository.id}

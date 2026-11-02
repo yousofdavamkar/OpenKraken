@@ -1,3 +1,4 @@
+import { CommandButton } from './commands.js';
 import { useEffect, useRef, useState } from 'react';
 import type { ResetPreview, ResetSelection, Snapshot } from '@openkraken/ipc-contract';
 import { useRepository, waitForBackground } from './store.js';
@@ -154,7 +155,8 @@ export function Reset() {
   const selected = detail?.oid ?? selection.focus;
   return (
     <>
-      <button
+      <CommandButton
+        command="history.reset"
         disabled={
           (!!busy && !syncing) ||
           !workingState?.head.oid ||
@@ -169,7 +171,7 @@ export function Reset() {
         }
       >
         Reset
-      </button>
+      </CommandButton>
       {review && <ResetDialog {...review} close={() => setReview(undefined)} />}
     </>
   );

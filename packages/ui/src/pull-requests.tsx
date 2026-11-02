@@ -1,3 +1,4 @@
+import { CommandButton } from './commands.js';
 import { BitbucketPullDetails } from './bitbucket-pull-details.js';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
@@ -609,7 +610,9 @@ export function PullRequests() {
   const [opened, setOpened] = useState(false);
   return (
     <>
-      <button onClick={() => setOpened(true)}>Pull requests</button>
+      <CommandButton command="providers.pulls" onClick={() => setOpened(true)}>
+        Pull requests
+      </CommandButton>
       {opened && <PullRequestDialog close={() => setOpened(false)} />}
     </>
   );

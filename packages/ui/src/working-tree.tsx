@@ -1,3 +1,4 @@
+import { CommandButton } from './commands.js';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type {
   Request,
@@ -263,14 +264,16 @@ export function WorkingTreePanel() {
       ) : (
         <>
           <div className="working-actions">
-            <button
+            <CommandButton
+              command="worktree.undo"
               disabled={!!busy || !state?.undo}
               title={state?.undo?.label}
               onClick={() => void mutate({ id: crypto.randomUUID(), method: 'undo', repoId })}
             >
               Undo
-            </button>
-            <button
+            </CommandButton>
+            <CommandButton
+              command="worktree.redo"
               disabled={!!busy || !state?.redo}
               title={state?.redo?.label}
               onClick={() =>
@@ -278,7 +281,7 @@ export function WorkingTreePanel() {
               }
             >
               Redo
-            </button>
+            </CommandButton>
           </div>
           {error && (
             <p className="error" role="alert">

@@ -1,3 +1,4 @@
+import { CommandButton } from './commands.js';
 import { ProviderGitAccount } from './provider-git-account.js';
 import { GitProgress } from './git-progress.js';
 import { useEffect, useRef, useState } from 'react';
@@ -283,9 +284,13 @@ export function Push() {
   if (!snapshot) return null;
   return (
     <>
-      <button disabled={!!busy && !syncing} onClick={() => setOpened(true)}>
+      <CommandButton
+        command="repository.push"
+        disabled={!!busy && !syncing}
+        onClick={() => setOpened(true)}
+      >
         Push
-      </button>
+      </CommandButton>
       {opened && (
         <PushDialog
           key={snapshot.repository.id}

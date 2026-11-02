@@ -18,6 +18,7 @@
     "@openkraken/graph": "workspace:*",
     "@openkraken/ipc-contract": "workspace:*",
     "@tanstack/react-virtual": "latest",
+    "fuzzysort": "4.0.2",
     "immer": "latest",
     "node-diff3": "3.2.1",
     "react": "19.3.1",

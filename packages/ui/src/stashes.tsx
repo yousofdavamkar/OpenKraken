@@ -1,3 +1,4 @@
+import { CommandButton } from './commands.js';
 import { useEffect, useRef, useState } from 'react';
 import type { StashState, WorkingState, StashActionOptions } from '@openkraken/ipc-contract';
 import { useRepository, waitForBackground } from './store.js';
@@ -324,12 +325,13 @@ export function Stashes() {
   if (!snapshot || snapshot.repository.isBare) return null;
   return (
     <>
-      <button
+      <CommandButton
+        command="worktree.stashes"
         disabled={!workingState || (!!busy && !syncing)}
         onClick={() => setOpened(workingState)}
       >
         Stashes
-      </button>
+      </CommandButton>
       {opened && (
         <StashDialog
           key={snapshot.repository.id}

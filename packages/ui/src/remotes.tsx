@@ -1,3 +1,4 @@
+import { CommandButton } from './commands.js';
 import { ProviderGitAccount } from './provider-git-account.js';
 import { GitProgress } from './git-progress.js';
 import { DeleteRemoteRef } from './delete-remote.js';
@@ -267,9 +268,13 @@ export function ManageRemotes() {
   if (!snapshot) return null;
   return (
     <>
-      <button disabled={!!busy && !syncing} onClick={() => setOpened(true)}>
+      <CommandButton
+        command="repository.remotes"
+        disabled={!!busy && !syncing}
+        onClick={() => setOpened(true)}
+      >
         Manage remotes
-      </button>
+      </CommandButton>
       {opened && (
         <RemoteDialog
           key={snapshot.repository.id}

@@ -1,3 +1,4 @@
+import { CommandButton } from './commands.js';
 import { useEffect, useRef, useState } from 'react';
 import { ProviderRepositoryPicker } from './provider-repositories.js';
 import { GitProgress } from './git-progress.js';
@@ -189,7 +190,8 @@ export function Clone() {
   const [opened, setOpened] = useState(false);
   return (
     <>
-      <button
+      <CommandButton
+        command="repository.clone"
         disabled={!!busy && !syncing}
         onClick={() => {
           useRepository.setState({ error: undefined });
@@ -197,7 +199,7 @@ export function Clone() {
         }}
       >
         Clone
-      </button>
+      </CommandButton>
       {opened && <CloneDialog close={() => setOpened(false)} />}
     </>
   );
