@@ -1,3 +1,4 @@
+import { BitbucketComments } from './bitbucket-comments.js';
 import { BitbucketFiles } from './bitbucket-files.js';
 import { providerBitbucketRevisionSchema } from '@openkraken/ipc-contract';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -120,6 +121,7 @@ export function BitbucketPullDetails({
   const [pending, setPending] = useState(true);
   const [attempt, setAttempt] = useState(0);
   const [showFiles, setShowFiles] = useState(false);
+  const [showComments, setShowComments] = useState(false);
   const comparisonKey = JSON.stringify([detail?.repositoryId, detail?.source, detail?.destination]);
   const repositoryId = detail?.repositoryId;
   const sourceRepositoryId = detail?.source.repository?.id;
@@ -181,12 +183,14 @@ export function BitbucketPullDetails({
         throw new Error('Bitbucket pull-request details could not be refreshed.');
       return {
         resetChildren:
-          comparisonKey !==
-          JSON.stringify([
-            result.pullRequest.repositoryId,
-            result.pullRequest.source,
-            result.pullRequest.destination,
-          ]),
+          detail?.repositoryId !== result.pullRequest.repositoryId ||
+          (showFiles &&
+            comparisonKey !==
+              JSON.stringify([
+                result.pullRequest.repositoryId,
+                result.pullRequest.source,
+                result.pullRequest.destination,
+              ])),
         commit: () => {
           setDetail(result.pullRequest);
           setError('');
@@ -239,7 +243,12 @@ export function BitbucketPullDetails({
           {detail.reason && <p className="pull-body">Reason: {detail.reason}</p>}
           <p className="pull-body">{detail.body || 'No description.'}</p>
           <p className="provider-url">{detail.url}</p>
-          <button onClick={() => setShowFiles(!showFiles)}>
+          <button
+            onClick={() => {
+              setShowFiles(!showFiles);
+              setShowComments(false);
+            }}
+          >
             {showFiles ? 'Hide files' : 'Show files'}
           </button>
           {showFiles &&
@@ -248,6 +257,22 @@ export function BitbucketPullDetails({
             ) : (
               <p>Files require an available source repository and full commit identifiers.</p>
             ))}
+          <button
+            onClick={() => {
+              setShowComments(!showComments);
+              setShowFiles(false);
+            }}
+          >
+            {showComments ? 'Hide comments' : 'Show comments'}
+          </button>
+          {showComments && (
+            <BitbucketComments
+              key={`${target.accountId}/${detail.repositoryId}/${number}`}
+              target={target}
+              number={number}
+              repositoryId={detail.repositoryId}
+            />
+          )}
           <People
             label="Reviewers"
             rows={
