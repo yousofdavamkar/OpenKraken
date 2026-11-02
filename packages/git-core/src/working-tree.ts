@@ -25,6 +25,8 @@ import {
   type OperationState,
   type OperationAction,
   operationActionSchema,
+  startOperationSchema,
+  type StartOperation,
   type StashPushOptions,
   type ReferenceOptions,
   type WorkingState,
@@ -405,6 +407,91 @@ export class WorkingTree {
       token: hash(metadata.fingerprint + JSON.stringify(fingerprint) + JSON.stringify(images)),
     };
   }
+  async startOperation(
+    input: StartOperation,
+    signal?: AbortSignal,
+    onProgress?: (text: string) => void,
+  ) {
+    const options = startOperationSchema.parse(input);
+    await this.locked(async (indexFile, publish) => {
+      await this.noOperation();
+      const state = await this.state(signal);
+      if (state.revision !== options.revision)
+        throw new GitError(
+          'STALE_OPERATION',
+          'HEAD or staged files changed. Review the current branch before starting.',
+        );
+      if (!state.head.oid)
+        throw new GitError(
+          'UNBORN_HEAD',
+          'Create an initial commit before starting this operation.',
+        );
+      if (state.status.entries.some((entry) => !['untracked', 'ignored'].includes(entry.kind)))
+        throw new GitError(
+          'OPERATION_DIRTY',
+          'Commit or stash tracked changes before starting this operation.',
+        );
+      await this.run(['cat-file', '-e', `${options.target}^{commit}`], { signal });
+      await this.runOperation(
+        options.kind === 'rebase'
+          ? [
+              'rebase',
+              '--merge',
+              '--no-autostash',
+              '--no-update-refs',
+              '--no-rebase-merges',
+              options.target,
+            ]
+          : ['merge', `--${options.mode}`, '--no-autostash', '--no-edit', options.target],
+        options.kind === 'rebase' ? 'Rebase' : `Merge (${options.mode})`,
+        indexFile,
+        publish,
+        signal,
+        onProgress,
+      );
+    }, signal);
+    return this.state();
+  }
+  private async runOperation(
+    args: string[],
+    label: string,
+    indexFile: string,
+    publish: () => Promise<void>,
+    signal?: AbortSignal,
+    onProgress?: (text: string) => void,
+  ) {
+    const before = await this.saved(indexFile);
+    const pending = join(this.directory, `pending-${randomUUID()}.json`);
+    const record = { label, before };
+    await atomic(pending, JSON.stringify(record));
+    const progress = onProgress ? new GitProgressLines(onProgress) : undefined;
+    let failure: unknown;
+    try {
+      const result = await this.run(args, {
+        indexFile,
+        signal,
+        readOnly: false,
+        allowedExitCodes: [0, 1],
+        timeoutMs: 180000,
+        env: { GIT_EDITOR: 'true' },
+        onStderr: progress ? (chunk) => progress.push(chunk) : undefined,
+      });
+      if (result.exitCode)
+        throw new GitError(
+          'GIT_FAILED',
+          redactGitMessage(`${result.stdout.toString()}\n${result.stderr}`.trim()),
+        );
+    } catch (error) {
+      failure = error;
+    } finally {
+      progress?.end();
+    }
+    const after = await this.saved(indexFile);
+    await atomic(pending, JSON.stringify({ ...record, after }));
+    if (!sameHead(before.head, after.head) || before.signature !== after.signature) await publish();
+    await rm(pending, { force: true });
+    if (failure) throw failure;
+  }
   async operationAction(
     input: OperationAction,
     signal?: AbortSignal,
@@ -428,38 +515,14 @@ export class WorkingTree {
           'UNRESOLVED_CONFLICTS',
           'Resolve and stage all conflicted files before continuing.',
         );
-      const before = await this.saved(indexFile);
-      const pending = join(this.directory, `pending-${randomUUID()}.json`);
-      const record = { label: `${state.kind} ${options.action}`, before };
-      await atomic(pending, JSON.stringify(record));
-      const progress = onProgress ? new GitProgressLines(onProgress) : undefined;
-      let failure: unknown;
-      try {
-        const result = await this.run([state.kind, `--${options.action}`], {
-          indexFile,
-          signal,
-          readOnly: false,
-          allowedExitCodes: [0, 1],
-          timeoutMs: 180000,
-          env: { GIT_EDITOR: 'true' },
-          onStderr: progress ? (chunk) => progress.push(chunk) : undefined,
-        });
-        if (result.exitCode)
-          throw new GitError(
-            'GIT_FAILED',
-            redactGitMessage(`${result.stdout.toString()}\n${result.stderr}`.trim()),
-          );
-      } catch (error) {
-        failure = error;
-      } finally {
-        progress?.end();
-      }
-      const after = await this.saved(indexFile);
-      await atomic(pending, JSON.stringify({ ...record, after }));
-      if (!sameHead(before.head, after.head) || before.signature !== after.signature)
-        await publish();
-      await rm(pending, { force: true });
-      if (failure) throw failure;
+      await this.runOperation(
+        [state.kind, `--${options.action}`],
+        `${state.kind} ${options.action}`,
+        indexFile,
+        publish,
+        signal,
+        onProgress,
+      );
     }, signal);
     return this.state();
   }
@@ -1247,6 +1310,7 @@ export class WorkingTree {
           'rebase-merge',
           'rebase-apply',
           'sequencer',
+          'BISECT_LOG',
         ].includes(p),
       )
     )

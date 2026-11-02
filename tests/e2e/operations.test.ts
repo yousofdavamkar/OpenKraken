@@ -42,3 +42,44 @@ test('reopened native rebase shows progress and requires confirmation before abo
     rmSync(root, { recursive: true, force: true });
   }
 });
+test('reviewed no-ff merge creates a merge commit and refreshes history', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-merge-e2e-'));
+  const path = createFixture(join(root, 'repository'));
+  fixtureGit(path, ['switch', '-c', 'incoming']);
+  writeFileSync(join(path, 'incoming.txt'), 'incoming\n');
+  fixtureGit(path, ['add', '.']);
+  fixtureGit(path, ['commit', '-m', 'Incoming file']);
+  const target = fixtureGit(path, ['rev-parse', 'HEAD']);
+  fixtureGit(path, ['switch', 'main']);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('button', { name: 'Merge or rebase', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Merge or rebase', exact: true });
+    await dialog
+      .getByRole('combobox', { name: 'Target commit', exact: true })
+      .selectOption({ label: 'incoming' });
+    await dialog.getByRole('combobox', { name: 'Merge mode', exact: true }).selectOption('no-ff');
+    await expect(dialog.getByText(target, { exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Start merge', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    const parents = fixtureGit(path, ['rev-list', '--parents', '-1', 'HEAD']).split(' ');
+    expect(parents).toHaveLength(3);
+    expect(parents[2]).toBe(target);
+    await expect(page.getByTestId('head')).toHaveText('main');
+    await expect(
+      page
+        .getByRole('grid', { name: 'Commit history' })
+        .getByRole('gridcell', { name: /Incoming file/ }),
+    ).toBeVisible();
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

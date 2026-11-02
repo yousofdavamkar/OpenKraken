@@ -174,6 +174,11 @@ async function executeGit(
       kind: 'workingState',
       state: await git.commit(request.repoId, request.options, signal),
     };
+  if (request.method === 'startOperation')
+    return {
+      kind: 'workingState',
+      state: await git.startOperation(request.repoId, request.options, signal, progress),
+    };
   if (request.method === 'operationAction')
     return {
       kind: 'workingState',
@@ -251,6 +256,7 @@ parent.on('message', (event) => {
     'deleteRemote',
     'pull',
     'operationAction',
+    'startOperation',
     'stashPush',
     'stashAction',
   ].includes(request.method);

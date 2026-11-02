@@ -118,3 +118,78 @@ for (const action of ['continue', 'abort'] as const)
       await service.dispose();
     }
   });
+for (const mode of ['ff', 'no-ff', 'squash'] as const)
+  test(`start merge ${mode} integrates a reviewed commit with native Git semantics`, async () => {
+    const path = createFixture(join(root, `start-merge-${mode}`));
+    fixtureGit(path, ['switch', '-c', 'incoming']);
+    await writeFile(join(path, 'incoming.txt'), 'new file\n');
+    fixtureGit(path, ['add', '.']);
+    fixtureGit(path, ['commit', '-m', 'Incoming change']);
+    const target = fixtureGit(path, ['rev-parse', 'HEAD']);
+    fixtureGit(path, ['switch', 'main']);
+    const original = fixtureGit(path, ['rev-parse', 'HEAD']);
+    const service = new RepositoryService('git', { dataDir: join(root, `merge-${mode}-profile`) });
+    try {
+      const repo = await service.open(path);
+      const state = await service.workingState(repo.id);
+      await service.startOperation(repo.id, {
+        kind: 'merge',
+        mode,
+        target,
+        revision: state.revision,
+      });
+      expect(fixtureGit(path, ['show', ':incoming.txt'])).toBe('new file');
+      if (mode === 'ff') expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(target);
+      if (mode === 'no-ff')
+        expect(fixtureGit(path, ['rev-list', '--parents', '-1', 'HEAD']).split(' ')).toHaveLength(
+          3,
+        );
+      if (mode === 'squash') {
+        expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(original);
+        expect(fixtureGit(path, ['diff', '--cached', '--name-only'])).toBe('incoming.txt');
+      }
+    } finally {
+      await service.dispose();
+    }
+  });
+test('starting rebase publishes conflict stages and can be aborted through the service', async () => {
+  const { path, service, repo, original } = await divergent('start-rebase-conflict');
+  try {
+    const target = fixtureGit(path, ['rev-parse', 'incoming']);
+    const state = await service.workingState(repo.id);
+    await expect(
+      service.startOperation(repo.id, { kind: 'rebase', target, revision: state.revision }),
+    ).rejects.toMatchObject({ code: 'GIT_FAILED' });
+    const paused = await service.operationState(repo.id);
+    expect(paused).toMatchObject({ kind: 'rebase', conflicts: 1 });
+    expect(fixtureGit(path, ['ls-files', '--unmerged'])).toContain('tracked.txt');
+    await service.operationAction(repo.id, { action: 'abort', token: paused.token });
+    expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(original);
+  } finally {
+    await service.dispose();
+  }
+});
+test('starting integration refuses changed HEAD, dirty tracked files and an existing operation', async () => {
+  const { path, service, repo, original } = await divergent('start-guards');
+  try {
+    const target = fixtureGit(path, ['rev-parse', 'incoming']);
+    const state = await service.workingState(repo.id);
+    const options = { kind: 'merge', mode: 'ff', target, revision: state.revision } as const;
+    await writeFile(join(path, 'tracked.txt'), 'keep these edits\n');
+    await expect(service.startOperation(repo.id, options)).rejects.toMatchObject({
+      code: 'OPERATION_DIRTY',
+    });
+    fixtureGit(path, ['commit', '-am', 'Another writer']);
+    await expect(service.startOperation(repo.id, options)).rejects.toMatchObject({
+      code: 'STALE_OPERATION',
+    });
+    fixtureGit(path, ['reset', '--hard', original]);
+    expect(() => fixtureGit(path, ['merge', 'incoming'])).toThrow();
+    await expect(service.startOperation(repo.id, options)).rejects.toMatchObject({
+      code: 'OPERATION_IN_PROGRESS',
+    });
+    expect((await service.operationState(repo.id)).kind).toBe('merge');
+  } finally {
+    await service.dispose();
+  }
+});

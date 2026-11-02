@@ -99,6 +99,24 @@ export const operationActionSchema = z
   })
   .strict();
 export type OperationAction = z.infer<typeof operationActionSchema>;
+export const startOperationSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('merge'),
+      mode: z.enum(['ff', 'no-ff', 'squash']),
+      target: oidSchema,
+      revision: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('rebase'),
+      target: oidSchema,
+      revision: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict(),
+]);
+export type StartOperation = z.infer<typeof startOperationSchema>;
 
 export const graphViewSchema = z
   .object({
@@ -577,6 +595,14 @@ const workingRequests = [
     })
     .strict(),
   z.object({ id: requestId, method: z.literal('workingState'), repoId: repoIdSchema }).strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('startOperation'),
+      repoId: repoIdSchema,
+      options: startOperationSchema,
+    })
+    .strict(),
   z
     .object({
       id: requestId,
