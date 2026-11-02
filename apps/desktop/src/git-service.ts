@@ -115,6 +115,11 @@ async function executeGit(
     lastProgress = now;
     parent!.postMessage({ type: 'gitProgress', id: request.id, text });
   };
+  if (request.method === 'commitFiles')
+    return {
+      kind: 'commitFiles',
+      files: await git.commitFiles(request.repoId, request.oid, request.parent, signal),
+    };
   if (request.method === 'deleteRemotePreview')
     return {
       kind: 'deleteRemotePreview',

@@ -955,3 +955,24 @@ footer {
 .git-editor-dialog .dialog-actions .primary {
   margin: 0;
 }
+.commit-files-scroll {
+  max-height: 260px;
+  overflow: auto;
+  margin: 10px 0;
+}
+.commit-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.commit-file-row code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-change-kind {
+  color: #91a0b5;
+  font-size: 11px;
+}

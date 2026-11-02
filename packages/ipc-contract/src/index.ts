@@ -632,6 +632,15 @@ const workingRequests = [
   z
     .object({
       id: requestId,
+      method: z.literal('commitFiles'),
+      repoId: repoIdSchema,
+      oid: oidSchema,
+      parent: oidSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('deleteRemotePreview'),
       repoId: repoIdSchema,
       selection: deleteRemoteSelectionSchema,
@@ -931,6 +940,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('remotes'), state: remoteStateSchema }),
   z.object({ kind: z.literal('discardPreview'), preview: discardPreviewSchema }),
   z.object({ kind: z.literal('diff'), diff: workingDiffSchema }),
+  z.object({ kind: z.literal('commitFiles'), files: commitFilesSchema }),
   z.object({ kind: z.literal('workingState'), state: workingStateSchema }),
   z.object({ kind: z.literal('conflictPreview'), preview: conflictPreviewSchema }),
   z.object({ kind: z.literal('mergePrediction'), prediction: mergePredictionSchema }),

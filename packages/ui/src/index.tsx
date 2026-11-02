@@ -14,6 +14,7 @@ import { Push } from './push.js';
 import { Reset } from './reset.js';
 import { Integration } from './integration.js';
 import { InteractiveRebaseControl } from './interactive-rebase.js';
+import { CommitFilesPanel } from './commit-files.js';
 import { Pull } from './pull.js';
 import { ManageRemotes } from './remotes.js';
 import { ReferenceDropActions, referenceDragProps } from './reference-drop.js';
@@ -209,10 +210,13 @@ function App() {
                     {detail.author.name} {detail.author.email}
                   </p>
                   <pre>{detail.body}</pre>
-                  <h3>Parents</h3>
-                  {detail.parents.map((parent) => (
-                    <code key={parent}>{parent}</code>
-                  ))}
+                  {/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(detail.oid) && (
+                    <CommitFilesPanel
+                      key={`${snapshot.repository.id}:${detail.oid}`}
+                      repoId={snapshot.repository.id}
+                      oid={detail.oid}
+                    />
+                  )}
                 </section>
               )}
 
