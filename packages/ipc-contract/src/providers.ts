@@ -1115,7 +1115,7 @@ export const providerIssueOptionsSchema = z
     number: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   })
   .strict();
-export const providerIssueSummarySchema = z
+const providerGitHubIssueSummarySchema = z
   .object({
     number: providerIssueOptionsSchema.shape.number,
     title: z.string().min(1).max(4096),
@@ -1153,6 +1153,44 @@ export const providerIssueSummarySchema = z
       }),
   })
   .strict();
+export const providerGitLabIssueSummarySchema = providerGitHubIssueSummarySchema
+  .extend({
+    provider: z.literal('gitlab'),
+    id: providerCiIdSchema,
+    projectId: providerCiIdSchema,
+    confidential: z.boolean(),
+    locked: z.boolean().nullable(),
+    issueType: z.string().min(1).max(64),
+    dueDate: z.string().date().nullable(),
+    weight: providerCountSchema.nullable(),
+    url: z
+      .string()
+      .url()
+      .max(4096)
+      .refine((value) => {
+        try {
+          const url = new URL(value),
+            parts = url.pathname.split('/');
+          return (
+            value === `${url.origin}${url.pathname}` &&
+            providerOriginSchema.safeParse(url.origin).success &&
+            parts.length >= 6 &&
+            parts.at(-3) === '-' &&
+            parts.at(-2) === 'issues' &&
+            providerNamespaceSchema.safeParse(parts.slice(1, -4).join('/')).success &&
+            providerRepositoryPathComponentSchema.safeParse(parts.at(-4)).success &&
+            /^[1-9][0-9]*$/.test(parts.at(-1)!)
+          );
+        } catch {
+          return false;
+        }
+      }),
+  })
+  .strict();
+export const providerIssueSummarySchema = z.union([
+  providerGitHubIssueSummarySchema,
+  providerGitLabIssueSummarySchema,
+]);
 export const providerIssuePageSchema = z
   .object({
     issues: z.array(providerIssueSummarySchema).max(100),
@@ -1164,13 +1202,17 @@ export type ProviderIssueListOptions = z.infer<typeof providerIssueListOptionsSc
 export type ProviderIssueOptions = z.infer<typeof providerIssueOptionsSchema>;
 export type ProviderIssueSummary = z.infer<typeof providerIssueSummarySchema>;
 export type ProviderIssuePage = z.infer<typeof providerIssuePageSchema>;
-export const providerIssueDetailsSchema = providerIssueSummarySchema
+export const providerGitLabIssueDetailsSchema = providerGitLabIssueSummarySchema
   .extend({ body: z.string().max(262144) })
   .strict();
+export const providerIssueDetailsSchema = z.union([
+  providerGitHubIssueSummarySchema.extend({ body: z.string().max(262144) }).strict(),
+  providerGitLabIssueDetailsSchema,
+]);
 export const providerIssueCommentsOptionsSchema = providerIssueOptionsSchema
   .extend({ page: providerRepositoryPageNumberSchema })
   .strict();
-export const providerIssueCommentSchema = z
+const providerGitHubIssueCommentSchema = z
   .object({
     id: z.string().regex(/^[1-9][0-9]{0,19}$/),
     author: z.string().min(1).max(255).nullable(),
@@ -1179,6 +1221,19 @@ export const providerIssueCommentSchema = z
     updatedAt: providerDateSchema,
   })
   .strict();
+export const providerGitLabIssueCommentSchema = providerGitHubIssueCommentSchema
+  .extend({
+    provider: z.literal('gitlab'),
+    system: z.boolean(),
+    internal: z.boolean().nullable(),
+    confidential: z.boolean().nullable(),
+    noteType: z.string().min(1).max(64).nullable(),
+  })
+  .strict();
+export const providerIssueCommentSchema = z.union([
+  providerGitHubIssueCommentSchema,
+  providerGitLabIssueCommentSchema,
+]);
 export const providerIssueCommentsPageSchema = z
   .object({
     comments: z.array(providerIssueCommentSchema).max(100),

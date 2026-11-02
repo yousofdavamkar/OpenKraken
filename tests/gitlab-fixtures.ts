@@ -76,3 +76,45 @@ export function gitlabDiscussionFixture(id = 1) {
     ],
   };
 }
+
+export function gitlabIssueFixture(iid = 1) {
+  return {
+    id: 2000 + iid,
+    iid,
+    project_id: 77,
+    title: `Issue ${iid}`,
+    description: 'Literal <script>issue</script>',
+    state: 'opened',
+    author: { id: 12, username: 'contributor' },
+    labels: ['bug', 'triage'],
+    assignees: [{ id: 13, username: 'maintainer' }],
+    milestone: { id: 4, title: 'Next release' },
+    created_at: '2026-10-01T12:00:00Z',
+    updated_at: '2026-10-02T12:00:00Z',
+    closed_at: null,
+    user_notes_count: 5,
+    confidential: true,
+    discussion_locked: null,
+    issue_type: 'incident',
+    due_date: '2026-11-10',
+    weight: 3,
+    web_url: 'https://attacker.test/ignored',
+  };
+}
+export function gitlabIssueNoteFixture(id = 1, iid = 7) {
+  return {
+    id,
+    body: 'Literal <script>note</script>',
+    author: { username: 'reviewer' },
+    created_at: '2026-10-01T12:00:00Z',
+    updated_at: '2026-10-02T12:00:00Z',
+    system: false,
+    noteable_id: 2000 + iid,
+    noteable_iid: iid,
+    noteable_type: 'Issue',
+    project_id: 77,
+    internal: true,
+    confidential: true,
+    type: 'DiscussionNote',
+  };
+}

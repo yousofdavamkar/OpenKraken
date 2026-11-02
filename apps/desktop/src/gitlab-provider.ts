@@ -1,3 +1,4 @@
+import { loadIssues, loadIssue, loadIssueComments } from './gitlab-issues.js';
 import { loadMergeRequestPipelines, loadMergeRequestPipelineJobs } from './gitlab-pipelines.js';
 import {
   loadMergeRequestMergeState,
@@ -28,6 +29,9 @@ import { loadMergeRequestDiscussions } from './gitlab-discussions.js';
 import { loadMergeRequestFiles } from './gitlab-files.js';
 import { loadMergeRequest, loadMergeRequests } from './gitlab-merges.js';
 import type {
+  ProviderIssueOptions,
+  ProviderIssueCommentsOptions,
+  ProviderIssueListOptions,
   ProviderPullTemplatesOptions,
   ProviderMergeTemplateOptions,
   ProviderMergePipelinesOptions,
@@ -139,6 +143,32 @@ export class GitLabProvider {
     signal?: AbortSignal,
   ) {
     return loadMergeRequests(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      providerOriginSchema.parse(origin),
+      input,
+    );
+  }
+  issue(origin: string, token: string, input: ProviderIssueOptions, signal?: AbortSignal) {
+    return loadIssue(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      providerOriginSchema.parse(origin),
+      input,
+    );
+  }
+  issueComments(
+    origin: string,
+    token: string,
+    input: ProviderIssueCommentsOptions,
+    signal?: AbortSignal,
+  ) {
+    return loadIssueComments(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      providerOriginSchema.parse(origin),
+      input,
+    );
+  }
+  issues(origin: string, token: string, input: ProviderIssueListOptions, signal?: AbortSignal) {
+    return loadIssues(
       (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
       providerOriginSchema.parse(origin),
       input,

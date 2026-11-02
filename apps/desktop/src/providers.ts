@@ -145,7 +145,10 @@ export class ProviderService {
   }
   private collaborationDriver(account: ProviderAccount) {
     if (account.provider !== 'github')
-      throw new ProviderError('PROVIDER_UNSUPPORTED', 'GitLab collaboration is not available yet.');
+      throw new ProviderError(
+        'PROVIDER_UNSUPPORTED',
+        'This collaboration action is not available for this provider yet.',
+      );
     return this.github;
   }
   private run<T>(work: () => Promise<T>) {
@@ -653,21 +656,21 @@ export class ProviderService {
     return this.run(async () => {
       const options = providerIssueListOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.collaborationDriver(account).issues(account.origin, token, options, signal);
+      return this.accountDriver(account.provider).issues(account.origin, token, options, signal);
     });
   }
   issue(id: string, input: ProviderIssueOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerIssueOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.collaborationDriver(account).issue(account.origin, token, options, signal);
+      return this.accountDriver(account.provider).issue(account.origin, token, options, signal);
     });
   }
   issueComments(id: string, input: ProviderIssueCommentsOptions, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerIssueCommentsOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.collaborationDriver(account).issueComments(
+      return this.accountDriver(account.provider).issueComments(
         account.origin,
         token,
         options,
