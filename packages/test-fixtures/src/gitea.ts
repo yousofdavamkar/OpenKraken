@@ -160,7 +160,7 @@ export async function startGitea(root: string) {
       GIT_CONFIG_GLOBAL: '/dev/null',
       GIT_SSH_COMMAND: `ssh -F /dev/null -o IdentityAgent=none -o IdentitiesOnly=yes -o StrictHostKeyChecking=ask -o UserKnownHostsFile=${quote(join(root, 'known_hosts'))} -i ${quote(key)}`,
     };
-    const push = async (source: string) => {
+    const push = async (source: string, destination = 'refs/heads/main', sourceRef = 'HEAD') => {
       await exec(
         'git',
         [
@@ -169,12 +169,12 @@ export async function startGitea(root: string) {
           'push',
           '--',
           httpsUrl,
-          'HEAD:refs/heads/main',
+          `${sourceRef}:${destination}`,
         ],
         { cwd: source, env: environment, timeout: 30000 },
       );
     };
-    const tip = async () => {
+    const tip = async (ref = 'refs/heads/main') => {
       const result = await exec(
         'git',
         [
@@ -184,7 +184,7 @@ export async function startGitea(root: string) {
           '--refs',
           '--',
           httpsUrl,
-          'refs/heads/main',
+          ref,
         ],
         { env: environment, timeout: 30000 },
       );

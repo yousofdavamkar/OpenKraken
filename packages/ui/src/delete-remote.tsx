@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DeleteRemotePlan } from '@openkraken/ipc-contract';
 import { useRepository, waitForBackground } from './store.js';
+import { ProviderGitAccount } from './provider-git-account.js';
 import { GitProgress } from './git-progress.js';
 function DeleteDialog({
   repoId,
@@ -12,16 +13,40 @@ function DeleteDialog({
   close: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const [accountId, setAccountId] = useState('');
+  const [revision, setRevision] = useState('');
+  const [reload, setReload] = useState(0);
   const [kind, setKind] = useState('heads');
   const [destination, setDestination] = useState('');
   const [plan, setPlan] = useState<DeleteRemotePlan>();
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState(true);
   const [complete, setComplete] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   useEffect(() => {
     dialog.current?.showModal();
-  }, []);
+    let alive = true;
+    const id = crypto.randomUUID();
+    setPending(true);
+    setRevision('');
+    void window.openkraken
+      .request({ id, method: 'remotes', repoId })
+      .then((result) => {
+        if (!alive) return;
+        if (result.kind === 'remotes') setRevision(result.state.token);
+        if (result.kind === 'error') setError(result.message);
+      })
+      .catch((error: unknown) => {
+        if (alive) setError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (alive) setPending(false);
+      });
+    return () => {
+      alive = false;
+      void window.openkraken.cancel(id);
+    };
+  }, [repoId, reload]);
   const submit = async () => {
     setPending(true);
     setError('');
@@ -34,15 +59,20 @@ function DeleteDialog({
         throw new Error('Wait for the current operation to finish');
       id = crypto.randomUUID();
       useRepository.setState({ busy: id });
+      const selection = { name, destination: `refs/${kind}/${destination}` };
       const result = await window.openkraken.request(
-        plan
-          ? { id, method: 'deleteRemote', repoId, plan }
-          : {
+        accountId
+          ? {
               id,
-              method: 'deleteRemotePreview',
-              repoId,
-              selection: { name, destination: `refs/${kind}/${destination}` },
-            },
+              method: 'providerGit',
+              accountId,
+              operation: plan
+                ? { method: 'deleteRemote', repoId, plan }
+                : { method: 'deleteRemotePreview', repoId, selection, revision },
+            }
+          : plan
+            ? { id, method: 'deleteRemote', repoId, plan }
+            : { id, method: 'deleteRemotePreview', repoId, selection },
       );
       if (result.kind === 'error') throw new Error(result.message);
       if (result.kind === 'deleteRemotePreview') setPlan(result.plan);
@@ -81,6 +111,12 @@ function DeleteDialog({
       >
         <h2>Delete from remote</h2>
         <p>Remote: {name}</p>
+        <ProviderGitAccount
+          label="Deletion authentication"
+          value={accountId}
+          onChange={setAccountId}
+          disabled={pending || !!plan}
+        />
         <label>
           Ref type
           <select
@@ -142,14 +178,27 @@ function DeleteDialog({
                 setComplete(false);
                 setNotice('');
                 setError('');
+                setReload((value) => value + 1);
               }}
             >
               Review again
             </button>
           )}
+          {!plan && (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                setError('');
+                setReload((value) => value + 1);
+              }}
+            >
+              Reload remotes
+            </button>
+          )}
           {!complete && (
             <button
-              disabled={pending || !destination.trim()}
+              disabled={pending || !destination.trim() || (!!accountId && !revision)}
               className={plan ? 'danger' : undefined}
             >
               {plan ? 'Delete reviewed remote ref' : 'Review deletion'}
