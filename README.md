@@ -131,4 +131,6 @@ In **Manage remotes**, **Fetch authentication** lets you choose a saved account 
 
 **Delete branch or tag** in Manage remotes also offers saved-account authentication. Review resolves the push URL and exact server tip; deletion needs a separate confirmation and refuses a tip changed since review. Closing the review leaves the server ref intact.
 
-PR workflows, repository creation/forking and other providers remain in development. A real OAuth application registration and live sign-in still require environment-specific verification. Existing Git credential helpers and SSH agents remain available for manual clone/fetch/push. See [M6 progress](docs/verification/m6-progress.md).
+**Pull requests** opens a repository picker and paged PR list. Filter by state, search loaded PRs, use the keyboard to open details, and refresh or retry results. Descriptions display as text; changing repositories or closing the panel cancels pending requests.
+
+PR creation/review/merge, repository creation/forking and other providers remain in development. A real OAuth application registration and live sign-in still require environment-specific verification. Existing Git credential helpers and SSH agents remain available for manual clone/fetch/push. See [M6 progress](docs/verification/m6-progress.md).
