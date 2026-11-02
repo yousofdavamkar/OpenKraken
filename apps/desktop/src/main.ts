@@ -278,6 +278,7 @@ else {
           request.method === 'providerSubmitReview' ||
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
+          request.method === 'providerMergeRequest' ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerPollingPolicy' ||
@@ -466,6 +467,15 @@ else {
                 controller.signal,
               ),
             });
+          if (request.method === 'providerMergeRequest')
+            return resultSchema.parse({
+              kind: 'providerMergeRequest',
+              mergeRequest: await providers.mergeRequest(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerRepositories')
             return resultSchema.parse({
               kind: 'providerRepositories',
@@ -601,6 +611,7 @@ else {
           request.method === 'providerSubmitReview' ||
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
+          request.method === 'providerMergeRequest' ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerPollingPolicy' ||

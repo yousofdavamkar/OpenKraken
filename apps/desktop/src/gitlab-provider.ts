@@ -10,6 +10,8 @@ import {
 } from '@openkraken/ipc-contract';
 import { ProviderError } from './provider-error.js';
 import { ProviderPollingPolicy } from './provider-polling-policy.js';
+import { loadMergeRequest, loadMergeRequests } from './gitlab-merges.js';
+import type { ProviderPullListOptions, ProviderPullOptions } from '@openkraken/ipc-contract';
 import { ProviderReadCache } from './provider-read-cache.js';
 
 const projectSchema = z.object({
@@ -32,64 +34,96 @@ export class GitLabProvider {
     return this.policy.get(origin, token);
   }
   async identity(origin: string, token: string, signal?: AbortSignal) {
-    return this.request(origin, token, signal, async (options) => {
-      const result = z
-        .object({
-          id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-          username: z.string().min(1).max(255),
-        })
-        .parse(await new Users(options).showCurrentUser());
-      return { id: String(result.id), login: result.username };
-    });
+    return this.request(
+      origin,
+      token,
+      signal,
+      async (options) => {
+        const result = z
+          .object({
+            id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+            username: z.string().min(1).max(255),
+          })
+          .parse(await new Users(options).showCurrentUser());
+        return { id: String(result.id), login: result.username };
+      },
+      'user',
+    );
   }
   async repositories(origin: string, token: string, page: number, signal?: AbortSignal) {
     providerRepositoryPageNumberSchema.parse(page);
     const host = providerOriginSchema.parse(origin);
-    return this.request(host, token, signal, async (options) => {
-      const data = z
-        .array(projectSchema)
-        .max(100)
-        .parse(
-          await new Projects(options).all({
-            membership: true,
-            pagination: 'offset',
-            page,
-            perPage: 100,
-            orderBy: 'id',
-            sort: 'asc',
-            maxPages: 1,
+    return this.request(
+      host,
+      token,
+      signal,
+      async (options) => {
+        const data = z
+          .array(projectSchema)
+          .max(100)
+          .parse(
+            await new Projects(options).all({
+              membership: true,
+              pagination: 'offset',
+              page,
+              perPage: 100,
+              orderBy: 'id',
+              sort: 'asc',
+              maxPages: 1,
+            }),
+          );
+        return providerRepositoryPageSchema.parse({
+          repositories: data.map((project) => {
+            const parts = project.path_with_namespace.split('/');
+            const owner = providerNamespaceSchema.parse(parts.slice(0, -1).join('/'));
+            if (parts.at(-1) !== project.path)
+              throw new ProviderError(
+                'PROVIDER_RESPONSE',
+                'GitLab returned an invalid repository path.',
+              );
+            return {
+              id: String(project.id),
+              owner,
+              name: project.path,
+              description: project.description ?? '',
+              private: project.visibility !== 'public',
+              visibility: project.visibility,
+              archived: project.archived,
+              cloneUrl: `${host}/${owner}/${project.path}.git`,
+            };
           }),
-        );
-      return providerRepositoryPageSchema.parse({
-        repositories: data.map((project) => {
-          const parts = project.path_with_namespace.split('/');
-          const owner = providerNamespaceSchema.parse(parts.slice(0, -1).join('/'));
-          if (parts.at(-1) !== project.path)
-            throw new ProviderError(
-              'PROVIDER_RESPONSE',
-              'GitLab returned an invalid repository path.',
-            );
-          return {
-            id: String(project.id),
-            owner,
-            name: project.path,
-            description: project.description ?? '',
-            private: project.visibility !== 'public',
-            visibility: project.visibility,
-            archived: project.archived,
-            cloneUrl: `${host}/${owner}/${project.path}.git`,
-          };
-        }),
-        nextPage: data.length === 100 && page < 100 ? page + 1 : null,
-        limited: data.length === 100 && page === 100,
-      });
-    });
+          nextPage: data.length === 100 && page < 100 ? page + 1 : null,
+          limited: data.length === 100 && page === 100,
+        });
+      },
+      'projects',
+    );
+  }
+  pullRequests(
+    origin: string,
+    token: string,
+    input: ProviderPullListOptions,
+    signal?: AbortSignal,
+  ) {
+    return loadMergeRequests(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      providerOriginSchema.parse(origin),
+      input,
+    );
+  }
+  mergeRequest(origin: string, token: string, input: ProviderPullOptions, signal?: AbortSignal) {
+    return loadMergeRequest(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      providerOriginSchema.parse(origin),
+      input,
+    );
   }
   private async request<T>(
     origin: string,
     token: string,
     signal: AbortSignal | undefined,
     perform: (options: BaseResourceOptions<false>) => Promise<T>,
+    expectedEndpoint: string,
   ) {
     const host = providerOriginSchema.parse(origin);
     this.policy.assertAllowed(host, token);
@@ -106,7 +140,7 @@ export class GitLabProvider {
           (_, options) => Promise.resolve(options),
           async (endpoint, options) => {
             // Each public call owns one page. SDK pagination/retries cannot add hidden requests.
-            if (dispatched || !['user', 'projects'].includes(endpoint) || options?.method !== 'GET')
+            if (dispatched || endpoint !== expectedEndpoint || options?.method !== 'GET')
               throw new Error('endpoint');
             dispatched = true;
             const url = new URL(`${host}/api/v4/${endpoint}`);
@@ -182,10 +216,7 @@ export class GitLabProvider {
       if (signal?.aborted) throw new ProviderError('CANCELLED', 'GitLab request cancelled.');
       if (error instanceof ProviderError) throw error;
       if (error instanceof z.ZodError)
-        throw new ProviderError(
-          'PROVIDER_RESPONSE',
-          'GitLab returned invalid repository or account metadata.',
-        );
+        throw new ProviderError('PROVIDER_RESPONSE', 'GitLab returned invalid response metadata.');
       throw new ProviderError(
         'PROVIDER_REQUEST',
         'The GitLab request failed. Check the connection and try again.',

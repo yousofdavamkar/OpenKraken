@@ -401,7 +401,7 @@ test('pull-request browsing accepts only bounded repository selectors and accoun
   for (const extra of [
     { page: 0 },
     { page: 101 },
-    { state: 'merged' },
+    { state: 'unknown' },
     { origin: 'https://other.test' },
     { token: 'secret' },
     { repository: { owner: '../other', name: 'project' } },
@@ -716,4 +716,23 @@ test('issue action IPC requires bounded text and reviewed state without unrelate
     expect(
       requestSchema.safeParse({ ...common, method: 'providerWriteIssue', options }).success,
     ).toBe(false);
+});
+
+test('GitLab detail IPC accepts nested selectors but never passes provider reads to the Git service', () => {
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    method: 'providerMergeRequest',
+    accountId: 'a'.repeat(64),
+    options: { repository: { owner: 'group/subgroup', name: 'project' }, number: 7 },
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  for (const owner of ['../group', 'group/%2Fsecret', 'group//secret'])
+    expect(
+      requestSchema.safeParse({
+        ...request,
+        options: { ...request.options, repository: { owner, name: 'project' } },
+      }).success,
+    ).toBe(false);
+  expect(requestSchema.safeParse({ ...request, token: 'secret' }).success).toBe(false);
 });

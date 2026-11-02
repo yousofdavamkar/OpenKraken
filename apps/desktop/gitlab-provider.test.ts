@@ -60,11 +60,7 @@ test('GitLab validates and protects a PAT independently of GitHub on the same ho
     password: 'gitlab-secret',
   });
   await expect(
-    reopened.pullRequests(account.id, {
-      repository: { owner: 'team', name: 'project' },
-      state: 'open',
-      page: 1,
-    }),
+    reopened.pullRequest(account.id, { repository: { owner: 'team', name: 'project' }, number: 1 }),
   ).rejects.toMatchObject({ code: 'PROVIDER_UNSUPPORTED' });
   expect(await readFile(join(directory, 'provider-accounts.json'), 'utf8')).not.toContain('secret');
   const secrets = await readdir(join(directory, 'provider-secrets'));

@@ -489,13 +489,19 @@ export class GitHubProvider implements ProviderDriver {
     signal?: AbortSignal,
   ) {
     const options = providerPullListOptionsSchema.parse(input);
+    const state = options.state;
+    if (state === 'merged' || state === 'locked')
+      throw new ProviderError(
+        'PROVIDER_UNSUPPORTED',
+        'Choose an open, closed or all pull-request filter for GitHub.',
+      );
     const host = providerOriginSchema.parse(origin);
     return this.request(host, token, signal, async (client, headers) => {
       const { data } = await client.pulls.list({
         headers,
         owner: options.repository.owner,
         repo: options.repository.name,
-        state: options.state,
+        state,
         page: options.page,
         per_page: 100,
         sort: 'created',

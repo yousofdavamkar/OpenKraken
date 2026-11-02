@@ -1,0 +1,26 @@
+export function gitlabMergeFixture(iid = 1) {
+  return {
+    id: 1000 + iid,
+    iid,
+    project_id: 77,
+    target_project_id: 77,
+    source_project_id: 88,
+    title: `Merge ${iid}`,
+    description: 'Literal <script>description</script>',
+    state: 'opened',
+    draft: false,
+    author: { id: 12, username: 'contributor' },
+    created_at: '2026-10-01T12:00:00Z',
+    updated_at: '2026-10-02T12:00:00Z',
+    merged_at: null,
+    source_branch: 'feature',
+    target_branch: 'main',
+    sha: '1'.repeat(40),
+    diff_refs: { base_sha: '2'.repeat(40), head_sha: '1'.repeat(40), start_sha: '3'.repeat(40) },
+    detailed_merge_status: 'checking',
+    has_conflicts: false,
+    changes_count: '1000+',
+    user_notes_count: 5,
+    web_url: 'https://attacker.test/ignored',
+  };
+}

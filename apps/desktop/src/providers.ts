@@ -338,7 +338,12 @@ export class ProviderService {
     return this.run(async () => {
       const options = providerPullListOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.collaborationDriver(account).pullRequests(account.origin, token, options, signal);
+      return this.accountDriver(account.provider).pullRequests(
+        account.origin,
+        token,
+        options,
+        signal,
+      );
     });
   }
   pullRequest(id: string, input: ProviderPullOptions, signal?: AbortSignal) {
@@ -346,6 +351,18 @@ export class ProviderService {
       const options = providerPullOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
       return this.collaborationDriver(account).pullRequest(account.origin, token, options, signal);
+    });
+  }
+  mergeRequest(id: string, input: ProviderPullOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerPullOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to read merge requests.',
+        );
+      return this.gitlab.mergeRequest(account.origin, token, options, signal);
     });
   }
   issues(id: string, input: ProviderIssueListOptions, signal?: AbortSignal) {

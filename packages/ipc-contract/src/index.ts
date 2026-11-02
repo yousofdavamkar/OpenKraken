@@ -37,6 +37,7 @@ import {
   providerPullOptionsSchema,
   providerPullPageSchema,
   providerPullDetailsSchema,
+  providerMergeRequestDetailsSchema,
   providerAccountsSchema,
   providerGitCredentialSchema,
   providerRemoteTargetSchema,
@@ -1303,6 +1304,14 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerMergeRequest'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerPullOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerGit'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       operation: providerGitOperationSchema,
@@ -1533,6 +1542,12 @@ export const resultSchema = z.discriminatedUnion('kind', [
     .object({ kind: z.literal('providerReviewSubmitted'), review: providerPullReviewSchema })
     .strict(),
   z.object({ kind: z.literal('providerPullRequests'), page: providerPullPageSchema }).strict(),
+  z
+    .object({
+      kind: z.literal('providerMergeRequest'),
+      mergeRequest: providerMergeRequestDetailsSchema,
+    })
+    .strict(),
   z
     .object({ kind: z.literal('providerPullRequest'), pullRequest: providerPullDetailsSchema })
     .strict(),

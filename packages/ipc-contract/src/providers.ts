@@ -214,7 +214,7 @@ export const providerPullNumberSchema = z.number().int().positive().max(Number.M
 export const providerPullListOptionsSchema = z
   .object({
     repository: providerRepositoryTargetSchema,
-    state: z.enum(['open', 'closed', 'all']),
+    state: z.enum(['open', 'closed', 'merged', 'locked', 'all']),
     page: providerRepositoryPageNumberSchema,
   })
   .strict();
@@ -227,7 +227,7 @@ export const providerPullSummarySchema = z
     number: providerPullNumberSchema,
     title: z.string().min(1).max(4096),
     author: z.string().min(1).max(255).nullable(),
-    state: z.enum(['open', 'closed']),
+    state: z.enum(['open', 'closed', 'merged', 'locked']),
     draft: z.boolean(),
     createdAt: providerDateSchema,
     updatedAt: providerDateSchema,
@@ -240,14 +240,23 @@ export const providerPullSummarySchema = z
         try {
           const url = new URL(value);
           const parts = url.pathname.split('/');
-          return (
-            value === `${url.origin}${url.pathname}` &&
-            providerOriginSchema.safeParse(url.origin).success &&
+          const github =
             parts.length === 5 &&
             providerRepositoryNameSchema.safeParse(parts[1]).success &&
             providerRepositoryNameSchema.safeParse(parts[2]).success &&
             parts[3] === 'pull' &&
-            /^[1-9][0-9]*$/.test(parts[4]!)
+            /^[1-9][0-9]*$/.test(parts[4]!);
+          const gitlab =
+            parts.length >= 6 &&
+            parts.at(-3) === '-' &&
+            parts.at(-2) === 'merge_requests' &&
+            providerNamespaceSchema.safeParse(parts.slice(1, -4).join('/')).success &&
+            providerRepositoryPathComponentSchema.safeParse(parts.at(-4)).success &&
+            /^[1-9][0-9]*$/.test(parts.at(-1)!);
+          return (
+            value === `${url.origin}${url.pathname}` &&
+            providerOriginSchema.safeParse(url.origin).success &&
+            (github || gitlab)
           );
         } catch {
           return false;
@@ -293,6 +302,42 @@ export type ProviderPullPage = z.infer<typeof providerPullPageSchema>;
 export type ProviderPullDetails = z.infer<typeof providerPullDetailsSchema>;
 
 const providerCommitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
+const providerProjectIdSchema = z.string().regex(/^[1-9][0-9]{0,19}$/);
+export const providerMergeRequestDetailsSchema = providerPullSummarySchema
+  .extend({
+    provider: z.literal('gitlab'),
+    body: z.string().max(262144),
+    source: z
+      .object({
+        projectId: providerProjectIdSchema.nullable(),
+        branch: z.string().min(1).max(1024),
+        sha: providerCommitSchema.nullable(),
+      })
+      .strict(),
+    target: z
+      .object({
+        projectId: providerProjectIdSchema,
+        branch: z.string().min(1).max(1024),
+      })
+      .strict(),
+    diffRefs: z
+      .object({
+        base: providerCommitSchema,
+        head: providerCommitSchema,
+        start: providerCommitSchema,
+      })
+      .strict()
+      .nullable(),
+    changesCount: z
+      .object({ count: providerCountSchema, limited: z.boolean() })
+      .strict()
+      .nullable(),
+    notesCount: providerCountSchema,
+    mergeStatus: z.string().min(1).max(128),
+    conflicts: z.boolean(),
+  })
+  .strict();
+export type ProviderMergeRequestDetails = z.infer<typeof providerMergeRequestDetailsSchema>;
 export const providerPullRevisionSchema = z
   .object({ head: providerCommitSchema, base: providerCommitSchema })
   .strict();
