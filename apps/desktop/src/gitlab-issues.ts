@@ -128,15 +128,13 @@ export async function loadIssue(read: GitLabRead, origin: string, input: Provide
   const options = providerIssueOptionsSchema.parse(input);
   const projectId = await project(read, options.repository);
   return read(`projects/${projectId}/issues/${options.number}`, async (client) => {
-    const data = issueSchema
-      .extend({ description: z.string().max(262144).nullable() })
-      .parse(await new Issues(client).show(options.number, { projectId }));
-    if (data.iid !== options.number)
-      throw new ProviderError('PROVIDER_RESPONSE', 'GitLab returned another issue.');
-    return providerGitLabIssueDetailsSchema.parse({
-      ...summary(data, projectId, origin, options.repository),
-      body: data.description ?? '',
-    });
+    return parseIssue(
+      await new Issues(client).show(options.number, { projectId }),
+      projectId,
+      origin,
+      options.repository,
+      options.number,
+    );
   });
 }
 export async function loadIssueComments(
@@ -153,23 +151,7 @@ export async function loadIssueComments(
     `projects/${issue.projectId}/issues/${options.number}/notes`,
     async (client) => {
       const data = z
-        .array(
-          z.object({
-            id: integer,
-            author: user.nullable(),
-            body: z.string().max(262144),
-            created_at: date,
-            updated_at: date,
-            noteable_id: integer,
-            noteable_iid: integer.nullish(),
-            noteable_type: z.literal('Issue'),
-            project_id: integer,
-            system: z.boolean(),
-            internal: z.boolean().nullish(),
-            confidential: z.boolean().nullish(),
-            type: z.string().min(1).max(64).nullish(),
-          }),
-        )
+        .array(z.unknown())
         .max(100)
         .parse(
           await new IssueNotes(client).all(Number(issue.projectId), options.number, {
@@ -181,35 +163,10 @@ export async function loadIssueComments(
             orderBy: 'created_at',
           }),
         );
-      if (
-        new Set(data.map((entry) => entry.id)).size !== data.length ||
-        data.some(
-          (entry) =>
-            String(entry.noteable_id) !== issue.id ||
-            String(entry.project_id) !== issue.projectId ||
-            (entry.noteable_iid !== null &&
-              entry.noteable_iid !== undefined &&
-              entry.noteable_iid !== options.number),
-        )
-      )
-        throw new ProviderError(
-          'PROVIDER_RESPONSE',
-          'GitLab returned duplicate notes or notes from another issue.',
-        );
-      return data.map((entry) =>
-        providerGitLabIssueCommentSchema.parse({
-          provider: 'gitlab',
-          id: String(entry.id),
-          author: entry.author?.username ?? null,
-          body: entry.body,
-          createdAt: entry.created_at,
-          updatedAt: entry.updated_at,
-          system: entry.system,
-          internal: entry.internal ?? null,
-          confidential: entry.confidential ?? null,
-          noteType: entry.type ?? null,
-        }),
-      );
+      const notes = data.map((entry) => parseIssueNote(entry, issue));
+      if (new Set(notes.map((entry) => entry.id)).size !== notes.length)
+        throw new ProviderError('PROVIDER_RESPONSE', 'GitLab returned duplicate issue notes.');
+      return notes;
     },
   );
   const after = await loadIssue(read, origin, {
@@ -229,5 +186,64 @@ export async function loadIssueComments(
     comments,
     nextPage: comments.length === 100 && options.page < 100 ? options.page + 1 : null,
     limited: comments.length === 100 && options.page === 100,
+  });
+}
+
+export function parseIssue(
+  value: unknown,
+  projectId: number,
+  origin: string,
+  repository: ProviderIssueOptions['repository'],
+  number?: number,
+) {
+  const data = issueSchema.extend({ description: z.string().max(262144).nullable() }).parse(value);
+  if (number !== undefined && data.iid !== number)
+    throw new ProviderError('PROVIDER_RESPONSE', 'GitLab returned another issue.');
+  return providerGitLabIssueDetailsSchema.parse({
+    ...summary(data, projectId, origin, repository),
+    body: data.description ?? '',
+  });
+}
+
+export function parseIssueNote(
+  value: unknown,
+  issue: { id: string; projectId: string; number: number },
+) {
+  const entry = z
+    .object({
+      id: integer,
+      author: user.nullable(),
+      body: z.string().max(262144),
+      created_at: date,
+      updated_at: date,
+      noteable_id: integer,
+      noteable_iid: integer.nullish(),
+      noteable_type: z.literal('Issue'),
+      project_id: integer,
+      system: z.boolean(),
+      internal: z.boolean().nullish(),
+      confidential: z.boolean().nullish(),
+      type: z.string().min(1).max(64).nullish(),
+    })
+    .parse(value);
+  if (
+    String(entry.noteable_id) !== issue.id ||
+    String(entry.project_id) !== issue.projectId ||
+    (entry.noteable_iid !== null &&
+      entry.noteable_iid !== undefined &&
+      entry.noteable_iid !== issue.number)
+  )
+    throw new ProviderError('PROVIDER_RESPONSE', 'GitLab returned a note from another issue.');
+  return providerGitLabIssueCommentSchema.parse({
+    provider: 'gitlab',
+    id: String(entry.id),
+    author: entry.author?.username ?? null,
+    body: entry.body,
+    createdAt: entry.created_at,
+    updatedAt: entry.updated_at,
+    system: entry.system,
+    internal: entry.internal ?? null,
+    confidential: entry.confidential ?? null,
+    noteType: entry.type ?? null,
   });
 }

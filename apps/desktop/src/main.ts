@@ -269,6 +269,8 @@ else {
           request.method === 'providerCreateComment' ||
           request.method === 'providerPullChecks' ||
           request.method === 'providerWriteIssue' ||
+          request.method === 'providerGitLabIssueActionPreview' ||
+          request.method === 'providerWriteGitLabIssue' ||
           request.method === 'providerIssueActionPreview' ||
           request.method === 'providerIssues' ||
           request.method === 'providerIssue' ||
@@ -396,6 +398,24 @@ else {
             return resultSchema.parse({
               kind: 'providerPullChecks',
               page: await providers.pullChecks(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerWriteGitLabIssue')
+            return resultSchema.parse({
+              kind: 'providerIssueWritten',
+              result: await providers.writeGitLabIssue(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerGitLabIssueActionPreview')
+            return resultSchema.parse({
+              kind: 'providerGitLabIssueActionPreview',
+              preview: await providers.previewGitLabIssueAction(
                 request.accountId,
                 request.options,
                 controller.signal,
@@ -762,6 +782,8 @@ else {
           request.method === 'providerCreateComment' ||
           request.method === 'providerPullChecks' ||
           request.method === 'providerWriteIssue' ||
+          request.method === 'providerGitLabIssueActionPreview' ||
+          request.method === 'providerWriteGitLabIssue' ||
           request.method === 'providerIssueActionPreview' ||
           request.method === 'providerIssues' ||
           request.method === 'providerIssue' ||

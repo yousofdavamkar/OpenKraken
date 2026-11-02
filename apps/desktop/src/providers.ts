@@ -1,4 +1,10 @@
 import {
+  providerGitLabIssueIntentSchema,
+  providerWriteGitLabIssueSchema,
+  type ProviderGitLabIssueIntent,
+  type ProviderWriteGitLabIssue,
+} from '@openkraken/ipc-contract';
+import {
   providerMergePipelinesOptionsSchema,
   providerMergePipelineJobsOptionsSchema,
   type ProviderMergePipelinesOptions,
@@ -650,6 +656,36 @@ export class ProviderService {
           'Choose a GitLab account to manage discussions.',
         );
       return this.gitlab.writeMergeDiscussion(account.origin, token, options, signal);
+    });
+  }
+  previewGitLabIssueAction(id: string, input: ProviderGitLabIssueIntent, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerGitLabIssueIntentSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account for this issue action.',
+        );
+      return this.gitlab.previewIssueAction(
+        account.origin,
+        token,
+        account.providerUserId,
+        options,
+        signal,
+      );
+    });
+  }
+  writeGitLabIssue(id: string, input: ProviderWriteGitLabIssue, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerWriteGitLabIssueSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account for this issue action.',
+        );
+      return this.gitlab.writeIssue(account.origin, token, account.providerUserId, options, signal);
     });
   }
   issues(id: string, input: ProviderIssueListOptions, signal?: AbortSignal) {

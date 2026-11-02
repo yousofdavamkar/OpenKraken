@@ -1296,3 +1296,48 @@ export const providerIssueWriteResultSchema = z.discriminatedUnion('kind', [
 ]);
 export type ProviderWriteIssue = z.infer<typeof providerWriteIssueSchema>;
 export type ProviderIssueWriteResult = z.infer<typeof providerIssueWriteResultSchema>;
+
+export const providerGitLabIssueIntentSchema = z.discriminatedUnion('action', [
+  providerCreateIssueSchema
+    .extend({ title: providerCreateIssueSchema.shape.title.max(255), confidential: z.boolean() })
+    .strict(),
+  providerIssueOptionsSchema
+    .extend({
+      action: z.literal('comment'),
+      body: z
+        .string()
+        .min(1)
+        .max(65536)
+        .refine((value) => !!value.trim(), 'Enter a comment'),
+      internal: z.boolean(),
+    })
+    .strict(),
+  providerIssueOptionsSchema
+    .extend({ action: z.literal('state'), state: z.enum(['open', 'closed']) })
+    .strict(),
+]);
+export const providerGitLabIssueActionPreviewSchema = z
+  .object({
+    project: z
+      .object({
+        id: providerCiIdSchema,
+        archived: z.boolean(),
+        issuesEnabled: z.boolean().nullable(),
+        issuesAccessLevel: z.enum(['disabled', 'private', 'enabled']).nullable(),
+      })
+      .strict(),
+    issue: providerGitLabIssueDetailsSchema.nullable(),
+    revision: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .strict();
+export const providerWriteGitLabIssueSchema = z
+  .object({
+    intent: providerGitLabIssueIntentSchema,
+    revision: providerGitLabIssueActionPreviewSchema.shape.revision,
+  })
+  .strict();
+export type ProviderGitLabIssueIntent = z.infer<typeof providerGitLabIssueIntentSchema>;
+export type ProviderGitLabIssueActionPreview = z.infer<
+  typeof providerGitLabIssueActionPreviewSchema
+>;
+export type ProviderWriteGitLabIssue = z.infer<typeof providerWriteGitLabIssueSchema>;

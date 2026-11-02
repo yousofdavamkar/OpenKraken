@@ -1027,3 +1027,45 @@ test('GitLab pipelines and jobs require bounded pages and pinned commits outside
       requestSchema.safeParse({ ...jobs, options: { ...jobs.options, ...extra } }).success,
     ).toBe(false);
 });
+
+test('GitLab issue action IPC binds explicit visibility and revision without GitHub state reasons or secret fields', () => {
+  const base = { id: '00000000-0000-4000-8000-000000000000', accountId: 'a'.repeat(64) };
+  const intent = {
+    action: 'create',
+    repository: { owner: 'group/subgroup', name: 'project' },
+    title: 'Test',
+    body: 'Body',
+    confidential: true,
+  };
+  const preview = { ...base, method: 'providerGitLabIssueActionPreview', options: intent };
+  const write = {
+    ...base,
+    method: 'providerWriteGitLabIssue',
+    options: { intent, revision: 'b'.repeat(64) },
+  };
+  for (const request of [preview, write]) {
+    expect(requestSchema.safeParse(request).success).toBe(true);
+    expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+    expect(requestSchema.safeParse({ ...request, token: 'secret' }).success).toBe(false);
+  }
+  expect(requestSchema.safeParse({ ...write, options: { intent } }).success).toBe(false);
+  for (const extra of [
+    { confidential: undefined },
+    { title: 'x'.repeat(256) },
+    { endpoint: 'https://attacker.test' },
+  ])
+    expect(requestSchema.safeParse({ ...preview, options: { ...intent, ...extra } }).success).toBe(
+      false,
+    );
+  const state = { action: 'state', repository: intent.repository, number: 7, state: 'closed' };
+  expect(requestSchema.safeParse({ ...preview, options: state }).success).toBe(true);
+  expect(
+    requestSchema.safeParse({ ...preview, options: { ...state, reason: 'completed' } }).success,
+  ).toBe(false);
+  expect(
+    requestSchema.safeParse({
+      ...preview,
+      options: { action: 'comment', repository: intent.repository, number: 7, body: 'Body' },
+    }).success,
+  ).toBe(false);
+});

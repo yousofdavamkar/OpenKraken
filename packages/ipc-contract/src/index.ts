@@ -16,6 +16,9 @@ import {
   providerPullChecksPageSchema,
   providerWriteIssueSchema,
   providerIssueWriteResultSchema,
+  providerGitLabIssueIntentSchema,
+  providerGitLabIssueActionPreviewSchema,
+  providerWriteGitLabIssueSchema,
   providerIssueActionPreviewSchema,
   providerIssueListOptionsSchema,
   providerIssueOptionsSchema,
@@ -1260,6 +1263,22 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerGitLabIssueActionPreview'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerGitLabIssueIntentSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerWriteGitLabIssue'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerWriteGitLabIssueSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerIssueActionPreview'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerIssueOptionsSchema,
@@ -1678,6 +1697,12 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('providerPullChecks'), page: providerPullChecksPageSchema }).strict(),
   z
     .object({ kind: z.literal('providerIssueWritten'), result: providerIssueWriteResultSchema })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerGitLabIssueActionPreview'),
+      preview: providerGitLabIssueActionPreviewSchema,
+    })
     .strict(),
   z
     .object({
