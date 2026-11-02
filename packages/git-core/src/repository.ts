@@ -534,6 +534,10 @@ export class RepositoryService {
     const { repo, manager } = this.remoteManager(id, onProgress, authentication);
     return this.queue(repo.commonDir).run(true, () => manager.push(options, signal), signal);
   }
+  operationState(id: string, signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(false, () => work.operationState(signal), signal);
+  }
   pull(
     id: string,
     options: PullOptions,

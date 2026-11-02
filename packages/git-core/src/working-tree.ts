@@ -22,6 +22,7 @@ import {
   type StashActionOptions,
   pullOptionsSchema,
   type PullOptions,
+  type OperationState,
   type StashPushOptions,
   type ReferenceOptions,
   type WorkingState,
@@ -31,6 +32,7 @@ import {
 } from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { StashStore } from './stash.js';
+import { inspectOperation } from './operation-state.js';
 import { GitProgressLines, redactGitMessage } from './progress.js';
 import { RepositoryQueue } from './queue.js';
 import { FileBackups, fileImageSchema, sameImages, type FileImage } from './file-backups.js';
@@ -367,6 +369,38 @@ export class WorkingTree {
         paths.set(entry.origPathBytes, Buffer.from(entry.origPathBytes, 'base64'));
     }
     return Buffer.concat([...paths.values()].flatMap((p) => [p, Buffer.from([0])]));
+  }
+  async operationState(signal?: AbortSignal, indexFile?: string): Promise<OperationState> {
+    const metadata = await inspectOperation(this.repo.gitDir);
+    const fingerprint = await this.fingerprint(indexFile);
+    let images: FileImage[] = [];
+    let conflicts = 0;
+    if (metadata.details.kind !== 'none' && !this.repo.isBare) {
+      const parser = new StatusParser();
+      await this.run(['status', '--porcelain=v2', '-z', '--untracked-files=no'], {
+        indexFile,
+        signal,
+        onStdout: (chunk) => parser.push(chunk),
+      });
+      const entries = parser.finish().entries;
+      conflicts = entries.filter((entry) => entry.kind === 'conflict').length;
+      const paths = [
+        ...new Set(
+          entries
+            .filter((entry) => !entry.submodule.startsWith('S'))
+            .flatMap((entry) => [
+              entry.pathBytes,
+              ...(entry.origPathBytes ? [entry.origPathBytes] : []),
+            ]),
+        ),
+      ];
+      images = await this.backups.capture(paths, false, signal);
+    }
+    return {
+      ...metadata.details,
+      conflicts,
+      token: hash(metadata.fingerprint + JSON.stringify(fingerprint) + JSON.stringify(images)),
+    };
   }
   async pullContext(input: PullOptions, signal?: AbortSignal) {
     const options = pullOptionsSchema.parse(input);

@@ -76,6 +76,22 @@ export const repositorySchema = z.object({
     'applying-mailbox',
   ]),
 });
+export const operationStateSchema = z
+  .object({
+    kind: z.enum(['none', 'merge', 'rebase', 'cherry-pick', 'revert', 'am', 'bisect']),
+    token: z.string().regex(/^[0-9a-f]{64}$/),
+    actions: z.array(z.enum(['continue', 'skip', 'abort'])),
+    conflicts: z.number().int().nonnegative(),
+    message: z.string().max(65536),
+    originalHead: oidSchema.optional(),
+    currentCommit: oidSchema.optional(),
+    branchRef: z.string().optional(),
+    progress: z
+      .object({ current: z.number().int().nonnegative(), total: z.number().int().positive() })
+      .optional(),
+  })
+  .strict();
+export type OperationState = z.infer<typeof operationStateSchema>;
 export const graphViewSchema = z
   .object({
     hiddenRefs: z.array(z.string().min(1).max(1024)).max(10000),
