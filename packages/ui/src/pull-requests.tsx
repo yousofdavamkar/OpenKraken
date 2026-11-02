@@ -500,15 +500,13 @@ function PullRequestDialog({ close }: { close: () => void }) {
             {target.origin}/{target.repository.owner}/{target.repository.name}
           </p>
           <div className="dialog-actions">
-            {target.provider === 'github' && (
-              <CreatePullRequest
-                target={target}
-                created={() => {
-                  setState('open');
-                  setVersion((value) => value + 1);
-                }}
-              />
-            )}
+            <CreatePullRequest
+              target={target}
+              created={() => {
+                setState('open');
+                setVersion((value) => value + 1);
+              }}
+            />
             <button type="button" onClick={() => setTarget(undefined)}>
               Choose repository
             </button>

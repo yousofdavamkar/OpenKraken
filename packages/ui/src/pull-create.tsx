@@ -4,10 +4,22 @@ import {
   type ProviderPullSource,
   type ProviderPullRevision,
   type ProviderPullSummary,
-  type ProviderPullTemplates,
+  type ProviderMergeCreationPreview,
+  type ProviderAccount,
   type Request as BridgeRequest,
 } from '@openkraken/ipc-contract';
-type Target = { origin: string; accountId: string; repository: ProviderPullSource['repository'] };
+type Target = {
+  provider: ProviderAccount['provider'];
+  origin: string;
+  accountId: string;
+  repository: ProviderPullSource['repository'];
+};
+type Templates = {
+  defaultBranch: string | null;
+  revision: string;
+  templates: { path: string; label: string; size?: number }[];
+  limited: boolean;
+};
 function Composer({
   target,
   close,
@@ -17,6 +29,10 @@ function Composer({
   close: () => void;
   created: () => void;
 }) {
+  const gitlab = target.provider === 'gitlab';
+  const noun = gitlab ? 'merge' : 'pull';
+  const abbreviation = gitlab ? 'MR' : 'PR';
+  const prefix = gitlab ? '!' : '#';
   const dialog = useRef<HTMLDialogElement>(null);
   const requests = useRef(new Set<string>());
   const [owner, setOwner] = useState(target.repository.owner),
@@ -29,7 +45,7 @@ function Composer({
     [maintainerCanModify, setMaintainerCanModify] = useState(false);
   const [dirty, setDirty] = useState(false),
     [discard, setDiscard] = useState(false);
-  const [revision, setRevision] = useState<ProviderPullRevision>();
+  const [revision, setRevision] = useState<ProviderPullRevision | ProviderMergeCreationPreview>();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const [result, setResult] = useState<ProviderPullSummary>();
@@ -37,7 +53,7 @@ function Composer({
     [checked, setChecked] = useState(false);
   const [existing, setExisting] = useState<ProviderPullSummary[]>([]),
     [next, setNext] = useState<number | null>(null);
-  const [templates, setTemplates] = useState<ProviderPullTemplates>();
+  const [templates, setTemplates] = useState<Templates>();
   const [templateError, setTemplateError] = useState(''),
     [loadingTemplates, setLoadingTemplates] = useState(true);
   const [templateAttempt, setTemplateAttempt] = useState(0),
@@ -68,15 +84,26 @@ function Composer({
     void window.openkraken
       .request({
         id,
-        method: 'providerPullTemplates',
+        method: gitlab ? 'providerMergeTemplates' : 'providerPullTemplates',
         accountId: target.accountId,
         options: { repository: target.repository },
       })
       .then((response) => {
         if (!alive) return;
-        if (response.kind === 'providerPullTemplates') {
-          setTemplates(response.templates);
-          setBase((current) => current || response.templates.defaultBranch);
+        if (
+          response.kind === 'providerPullTemplates' ||
+          response.kind === 'providerMergeTemplates'
+        ) {
+          const entries =
+            response.kind === 'providerMergeTemplates'
+              ? response.templates.templates.map((item) => ({ path: item.key, label: item.name }))
+              : response.templates.templates.map((item) => ({
+                  path: item.path,
+                  label: item.path,
+                  size: item.size,
+                }));
+          setTemplates({ ...response.templates, templates: entries });
+          setBase((current) => current || response.templates.defaultBranch || '');
         } else if (response.kind === 'error') setTemplateError(response.message);
       })
       .catch(() => {
@@ -91,7 +118,7 @@ function Composer({
       alive = false;
       void window.openkraken.cancel(id);
     };
-  }, [target.accountId, target.repository, templateAttempt]);
+  }, [target.accountId, target.repository, templateAttempt, gitlab]);
   const source = { repository: target.repository, source: { owner, name: repo }, head, base };
   const valid = providerCreatePullSchema
     .omit({ revision: true })
@@ -108,11 +135,16 @@ function Composer({
     try {
       const response = await perform({
         id: crypto.randomUUID(),
-        method: 'providerPreviewPull',
         accountId: target.accountId,
-        options: source,
+        ...(gitlab
+          ? {
+              method: 'providerPreviewMergeCreation',
+              options: { ...source, title, body, draft, maintainerCanModify },
+            }
+          : { method: 'providerPreviewPull', options: source }),
       });
       if (response.kind === 'providerPullCreationPreview') setRevision(response.revision);
+      else if (response.kind === 'providerMergeCreationPreview') setRevision(response.preview);
       else if (response.kind === 'error') setError(response.message);
       else if (response.kind === 'cancelled') setError('Preview cancelled.');
     } catch {
@@ -128,12 +160,24 @@ function Composer({
     try {
       const response = await perform({
         id: crypto.randomUUID(),
-        method: 'providerCreatePull',
         accountId: target.accountId,
-        options: { ...source, revision, title, body, draft, maintainerCanModify },
+        ...('revision' in revision
+          ? {
+              method: 'providerCreateMergeRequest',
+              options: {
+                intent: { ...source, title, body, draft, maintainerCanModify },
+                revision: revision.revision,
+              },
+            }
+          : {
+              method: 'providerCreatePull',
+              options: { ...source, revision, title, body, draft, maintainerCanModify },
+            }),
       });
-      if (response.kind === 'providerPullCreated') {
-        setResult(response.pullRequest);
+      if (response.kind === 'providerPullCreated' || response.kind === 'providerMergeCreated') {
+        setResult(
+          response.kind === 'providerMergeCreated' ? response.mergeRequest : response.pullRequest,
+        );
         created();
       } else if (response.kind === 'error') {
         setError(response.message);
@@ -142,9 +186,11 @@ function Composer({
       } else if (response.kind === 'cancelled') {
         setError('Creation cancelled before submission.');
         setRevision(undefined);
-      }
+      } else throw new Error('Unknown creation result');
     } catch {
-      setError('The creation result is unknown. Check existing pull requests before trying again.');
+      setError(
+        `The creation result is unknown. Check existing ${noun} requests before trying again.`,
+      );
       setUncertain(true);
       setRevision(undefined);
     } finally {
@@ -159,15 +205,27 @@ function Composer({
     try {
       const response = await perform({
         id: crypto.randomUUID(),
-        method: 'providerPullTemplate',
         accountId: target.accountId,
-        options: {
-          repository: target.repository,
-          revision: templates.revision,
-          path: templatePath,
-        },
+        ...(gitlab
+          ? {
+              method: 'providerMergeTemplate',
+              options: {
+                repository: target.repository,
+                revision: templates.revision,
+                key: templatePath,
+              },
+            }
+          : {
+              method: 'providerPullTemplate',
+              options: {
+                repository: target.repository,
+                revision: templates.revision,
+                path: templatePath,
+              },
+            }),
       });
-      if (response.kind === 'providerPullTemplate') setTemplateBody(response.template.body);
+      if (response.kind === 'providerPullTemplate' || response.kind === 'providerMergeTemplate')
+        setTemplateBody(response.template.body);
       else if (response.kind === 'error') setError(response.message);
     } catch {
       setError('The selected template could not be loaded.');
@@ -190,7 +248,7 @@ function Composer({
         setChecked(true);
       } else if (response.kind === 'error') setError(response.message);
     } catch {
-      setError('Existing pull requests could not be loaded.');
+      setError(`Existing ${noun} requests could not be loaded.`);
     } finally {
       setBusy(false);
     }
@@ -199,14 +257,14 @@ function Composer({
     <dialog
       ref={dialog}
       className="reference-dialog pr-create-dialog"
-      aria-label="Create pull request"
+      aria-label={`Create ${noun} request`}
       onCancel={(event) => {
         event.preventDefault();
         event.stopPropagation();
         leave();
       }}
     >
-      <h2>Create pull request</h2>
+      <h2>Create {noun} request</h2>
       <p>
         Target repository: {target.origin}/{target.repository.owner}/{target.repository.name}
       </p>
@@ -218,7 +276,7 @@ function Composer({
             Source owner
             <input
               value={owner}
-              maxLength={100}
+              maxLength={gitlab ? 2200 : 100}
               onChange={(event) => {
                 setOwner(event.target.value);
                 setDirty(true);
@@ -260,7 +318,7 @@ function Composer({
           </label>
         </div>
         <label>
-          PR title
+          {abbreviation} title
           <input
             value={title}
             maxLength={256}
@@ -306,7 +364,7 @@ function Composer({
         </label>
       </fieldset>
       {!result && !uncertain && !revision && (
-        <section aria-label="Pull-request templates">
+        <section aria-label={gitlab ? 'Merge-request templates' : 'Pull-request templates'}>
           {loadingTemplates && <p role="status">Loading templates…</p>}
           {templateError && (
             <p role="alert">
@@ -322,7 +380,13 @@ function Composer({
           {templates && (
             <>
               <p>
-                Templates from {templates.defaultBranch} at <code>{templates.revision}</code>.
+                {gitlab ? (
+                  'Project and inherited templates. Preview loads the current template content.'
+                ) : (
+                  <>
+                    Templates from {templates.defaultBranch} at <code>{templates.revision}</code>.
+                  </>
+                )}
               </p>
               {templates.templates.length ? (
                 <>
@@ -341,10 +405,10 @@ function Composer({
                         <option
                           key={template.path}
                           value={template.path}
-                          disabled={template.size > 65536}
+                          disabled={(template.size ?? 0) > 65536}
                         >
-                          {template.path}
-                          {template.size > 65536 ? ' (too large)' : ''}
+                          {template.label}
+                          {(template.size ?? 0) > 65536 ? ' (too large)' : ''}
                         </option>
                       ))}
                     </select>
@@ -379,8 +443,8 @@ function Composer({
         </section>
       )}
       {revision && !result && (
-        <section aria-label="Confirm PR creation">
-          <h3>{title}</h3>
+        <section aria-label={`Confirm ${abbreviation} creation`}>
+          <h3>{'title' in revision ? revision.title : title}</h3>
           <p>
             {owner}/{repo}:{head} → {target.repository.owner}/{target.repository.name}:{base}
           </p>
@@ -391,38 +455,41 @@ function Composer({
             Target commit: <code>{revision.base}</code>
           </p>
           <p>
-            {draft ? 'Draft pull request' : 'Ready for review'} · Maintainer edits{' '}
+            {draft ? `Draft ${noun} request` : 'Ready for review'} · Maintainer edits{' '}
             {maintainerCanModify ? 'allowed' : 'not allowed'}
           </p>
           <pre>{body || 'No description.'}</pre>
           <p>
-            Creation sends this pull request to the provider and can notify repository participants.
+            Creation sends this {noun} request to the provider and can notify repository
+            participants.
           </p>
         </section>
       )}
       {error && <p role="alert">{error}</p>}
       {result && (
         <p role="status">
-          Created #{result.number}: {result.title}
+          Created {prefix}
+          {result.number}: {result.title}
           <br />
           {result.url}
         </p>
       )}
       {uncertain && (
-        <section aria-label="Check PR creation result">
+        <section aria-label={`Check ${abbreviation} creation result`}>
           <button disabled={busy} onClick={() => void checkExisting()}>
-            Check existing pull requests
+            Check existing {noun} requests
           </button>
           {checked && (
             <>
               <p>
-                Check the returned PRs before creating another. This does not automatically detect
-                duplicates.
+                Check the returned {abbreviation}s before creating another. This does not
+                automatically detect duplicates.
               </p>
               <ul className="pr-existing">
                 {existing.map((pull) => (
                   <li key={pull.number}>
-                    #{pull.number} {pull.title} · {pull.state}
+                    {prefix}
+                    {pull.number} {pull.title} · {pull.state}
                     <br />
                     {pull.url}
                   </li>
@@ -448,8 +515,8 @@ function Composer({
         </section>
       )}
       {discard ? (
-        <section aria-label="Discard PR draft">
-          <p>Discard this unsent pull-request draft?</p>
+        <section aria-label={`Discard ${abbreviation} draft`}>
+          <p>Discard this unsent {noun}-request draft?</p>
           <button onClick={() => setDiscard(false)}>Keep editing</button>
           <button className="danger" onClick={close}>
             Discard draft
@@ -477,12 +544,12 @@ function Composer({
                   Edit draft
                 </button>
                 <button disabled={busy} onClick={() => void submit()}>
-                  Create confirmed PR
+                  Create confirmed {abbreviation}
                 </button>
               </>
             ) : (
               <button disabled={busy || !valid} onClick={() => void prepare()}>
-                Preview PR
+                Preview {abbreviation}
               </button>
             ))}
         </div>
@@ -494,7 +561,9 @@ export function CreatePullRequest({ target, created }: { target: Target; created
   const [opened, setOpened] = useState(false);
   return (
     <>
-      <button onClick={() => setOpened(true)}>New pull request</button>
+      <button onClick={() => setOpened(true)}>
+        New {target.provider === 'gitlab' ? 'merge' : 'pull'} request
+      </button>
       {opened && <Composer target={target} created={created} close={() => setOpened(false)} />}
     </>
   );
