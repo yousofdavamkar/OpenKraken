@@ -156,3 +156,22 @@ For an open GitLab merge request, **Review MR merge** shows the project’s merg
 For GitLab merge requests, **Approvals** shows the provider’s approval status, your eligibility, approving users and available rule summaries. **Approve merge request** and **Remove my approval** require review and confirmation against the current commit and approval state. Enter an approval password only when the project requires it; the field clears after each attempt. SAML re-authentication must be completed on GitLab. If a result is uncertain, **Check existing approval** reads the current state without repeating the write.
 
 Merge queues/stacks, thread resolution, multi-line comment creation, repository creation/forking and other providers remain in development. A real OAuth application registration and live sign-in still require environment-specific verification. Existing Git credential helpers and SSH agents remain available for manual clone/fetch/push. See [M6 progress](docs/verification/m6-progress.md).
+
+## Commands and keyboard shortcuts (M7 in progress)
+
+Use **Commands** or **Ctrl/Cmd+P** to open the command palette. Search by action or alias, filter by category, move with arrow keys, and press Enter. Recently and frequently used commands rise in empty-search results. Unavailable commands remain visible. Commands open the same review dialogs and use the same availability checks as their toolbar controls.
+
+Use **Keybindings** to edit the JSON map. Missing entries inherit defaults; `null` disables a binding. `Mod` means Command on macOS and Control elsewhere. For example:
+
+```json
+{
+  "version": 1,
+  "bindings": {
+    "app.commands": "Mod+Shift+P",
+    "history.search": "Mod+Shift+F",
+    "repository.open": null
+  }
+}
+```
+
+Apply validates conflicts, including inherited bindings on both platforms, before saving. The editor lists command IDs and active shortcuts. Restore defaults changes the draft; Apply saves it. Shortcuts pause in dialogs; action shortcuts also pause in text fields, except opening the palette or focusing commit search. These shortcuts currently run in the renderer; native accelerators and the rest of M7 remain open. See [M7 progress](docs/verification/m7-progress.md).
