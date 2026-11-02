@@ -1,4 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { BitbucketFiles } from './bitbucket-files.js';
+import { providerBitbucketRevisionSchema } from '@openkraken/ipc-contract';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import type { ProviderBitbucketPullDetails, ProviderPullOptions } from '@openkraken/ipc-contract';
 import { useProviderPoll } from './provider-polling.js';
@@ -117,6 +119,26 @@ export function BitbucketPullDetails({
   const [error, setError] = useState('');
   const [pending, setPending] = useState(true);
   const [attempt, setAttempt] = useState(0);
+  const [showFiles, setShowFiles] = useState(false);
+  const comparisonKey = JSON.stringify([detail?.repositoryId, detail?.source, detail?.destination]);
+  const repositoryId = detail?.repositoryId;
+  const sourceRepositoryId = detail?.source.repository?.id;
+  const sourceCommit = detail?.source.commit;
+  const destinationCommit = detail?.destination.commit;
+  const context = useMemo(() => {
+    const revision = providerBitbucketRevisionSchema.safeParse({
+      repositoryId,
+      sourceRepositoryId,
+      sourceCommit,
+      destinationCommit,
+    });
+    return revision.success
+      ? {
+          accountId: target.accountId,
+          options: { repository: target.repository, number, revision: revision.data },
+        }
+      : null;
+  }, [repositoryId, sourceRepositoryId, sourceCommit, destinationCommit, target, number]);
   useEffect(() => {
     const id = crypto.randomUUID();
     let alive = true;
@@ -158,6 +180,13 @@ export function BitbucketPullDetails({
       if (result.kind !== 'providerBitbucketPullRequest')
         throw new Error('Bitbucket pull-request details could not be refreshed.');
       return {
+        resetChildren:
+          comparisonKey !==
+          JSON.stringify([
+            result.pullRequest.repositoryId,
+            result.pullRequest.source,
+            result.pullRequest.destination,
+          ]),
         commit: () => {
           setDetail(result.pullRequest);
           setError('');
@@ -210,6 +239,15 @@ export function BitbucketPullDetails({
           {detail.reason && <p className="pull-body">Reason: {detail.reason}</p>}
           <p className="pull-body">{detail.body || 'No description.'}</p>
           <p className="provider-url">{detail.url}</p>
+          <button onClick={() => setShowFiles(!showFiles)}>
+            {showFiles ? 'Hide files' : 'Show files'}
+          </button>
+          {showFiles &&
+            (context ? (
+              <BitbucketFiles key={comparisonKey} context={context} />
+            ) : (
+              <p>Files require an available source repository and full commit identifiers.</p>
+            ))}
           <People
             label="Reviewers"
             rows={

@@ -18,6 +18,8 @@ type ReadMethod =
   | 'providerPullRequests'
   | 'providerPullRequest'
   | 'providerBitbucketPullRequest'
+  | 'providerBitbucketPullFiles'
+  | 'providerBitbucketPullDiff'
   | 'providerMergeApprovals'
   | 'providerMergeRequest'
   | 'providerMergeRequestPipelines'
