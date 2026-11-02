@@ -16,3 +16,5 @@ References:
 - https://developer.atlassian.com/cloud/bitbucket/rest/api-group-users/
 - https://developer.atlassian.com/cloud/bitbucket/rest/api-group-workspaces/
 - https://developer.atlassian.com/cloud/bitbucket/rest/api-group-repositories/
+
+Native Bitbucket pull-request list/details browsing is subsequently enabled by [ADR 0056](0056-bitbucket-pull-request-browsing.md); issue browsing and collaboration writes remain outside this account/repository slice.
