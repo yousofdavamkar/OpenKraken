@@ -1267,3 +1267,18 @@ footer {
   border: 1px solid var(--border);
   border-radius: 4px;
 }
+.provider-git-account label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-block: 8px;
+}
+.provider-git-account select {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: #10151e;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+}

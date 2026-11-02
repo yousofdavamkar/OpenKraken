@@ -714,3 +714,158 @@ test('a saved provider account authenticates native HTTPS clone without exposing
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('saved-account fetch updates tracking refs and refuses a remote changed during account validation', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-provider-fetch-ui-'));
+  const source = createFixture(join(root, 'source'));
+  fixtureGit(source, ['commit', '--allow-empty', '-m', 'Provider fetched tip']);
+  const bare = join(root, 'remote.git');
+  fixtureGit(source, ['clone', '--bare', '.', bare]);
+  const remote = await authenticatedRemote(bare, {
+    basePath: '/team/project.git',
+    password: 'fixture-provider-secret',
+  });
+  const local = createFixture(join(root, 'local'));
+  fixtureGit(local, ['remote', 'set-url', 'origin', remote.url]);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+    env: {
+      ...process.env,
+      GIT_SSL_CAINFO: remote.certificate,
+      GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1',
+    },
+  });
+  try {
+    await fixtureProtection(app);
+    const origin = new URL(remote.url).origin;
+    await app.evaluate(
+      ({ session, dialog }, { origin, local }) => {
+        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [local] });
+        session.fromPartition('openkraken-providers').fetch = async (input, init) => {
+          if (
+            String(input) !== `${origin}/api/v3/user` ||
+            new Headers(init?.headers).get('authorization') !== 'token fixture-provider-secret'
+          )
+            throw new Error('Unexpected provider request');
+          return new Response(JSON.stringify({ id: 321, login: 'fixture-user' }), {
+            headers: { 'content-type': 'application/json' },
+          });
+        };
+      },
+      { origin, local },
+    );
+    const page = await app.firstWindow();
+    const connected = await page.evaluate(
+      ({ origin, token }) =>
+        window.openkraken.request({
+          id: crypto.randomUUID(),
+          method: 'providerConnect',
+          options: { provider: 'github', origin, token },
+        }),
+      { origin, token: remote.credentials.password },
+    );
+    expect(connected.kind).toBe('providerAccounts');
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('button', { name: 'Manage remotes', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Manage remotes' });
+    await dialog
+      .getByLabel('Fetch authentication', { exact: true })
+      .selectOption({ label: `fixture-user · ${origin}` });
+    await dialog.getByRole('button', { name: 'Fetch origin', exact: true }).click();
+    await expect(dialog.getByRole('status')).toHaveText('Fetched origin');
+    expect(fixtureGit(local, ['rev-parse', 'refs/remotes/origin/main'])).toBe(
+      fixtureGit(source, ['rev-parse', 'HEAD']),
+    );
+    expect(remote.authenticated()).toBeGreaterThan(1);
+    await expect(page.getByRole('dialog', { name: 'Git authentication', exact: true })).toHaveCount(
+      0,
+    );
+    await app.evaluate(({ session }) => {
+      const partition = session.fromPartition('openkraken-providers');
+      const original = partition.fetch;
+      Object.assign(globalThis, { providerFetchStarted: false });
+      partition.fetch = async (input, init) => {
+        Object.assign(globalThis, { providerFetchStarted: true });
+        await new Promise<void>((resolve) =>
+          Object.assign(globalThis, { releaseProviderFetch: resolve }),
+        );
+        return original(input, init);
+      };
+    });
+    const requests = remote.requests();
+    await dialog.getByRole('button', { name: 'Fetch origin', exact: true }).click();
+    await expect
+      .poll(() =>
+        app.evaluate(
+          () =>
+            (globalThis as typeof globalThis & { providerFetchStarted: boolean })
+              .providerFetchStarted,
+        ),
+      )
+      .toBe(true);
+    fixtureGit(local, ['remote', 'set-url', 'origin', remote.url.replace('/team/', '/changed/')]);
+    await app.evaluate(() =>
+      (
+        globalThis as typeof globalThis & { releaseProviderFetch: () => void }
+      ).releaseProviderFetch(),
+    );
+    await expect(dialog.getByRole('alert')).toContainText(
+      'remote configuration or tracking refs changed',
+    );
+    expect(remote.requests()).toBe(requests);
+    await expect(dialog).not.toContainText(remote.credentials.password);
+    await app.evaluate(() => Object.assign(globalThis, { providerFetchStarted: false }));
+    await dialog.getByRole('button', { name: 'Fetch origin', exact: true }).click();
+    await expect(dialog.getByRole('alert')).toContainText('Reload remotes before retrying');
+    expect(
+      await app.evaluate(
+        () =>
+          (globalThis as typeof globalThis & { providerFetchStarted: boolean })
+            .providerFetchStarted,
+      ),
+    ).toBe(false);
+    fixtureGit(local, ['remote', 'set-url', 'origin', remote.url]);
+    await dialog.getByRole('button', { name: 'Reload remotes' }).click();
+    await expect(dialog.getByRole('alert')).toHaveCount(0);
+    await app.evaluate(({ session }) => {
+      Object.assign(globalThis, { providerFetchStarted: false, providerFetchCancelled: false });
+      session.fromPartition('openkraken-providers').fetch = async (_input, init) => {
+        Object.assign(globalThis, { providerFetchStarted: true });
+        await new Promise<void>((resolve) => {
+          if (init?.signal?.aborted) resolve();
+          else init?.signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+        Object.assign(globalThis, { providerFetchCancelled: true });
+        return new Response(JSON.stringify({ id: 321, login: 'fixture-user' }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      };
+    });
+    await page.screenshot({ path: 'test-results/provider-fetch-account.png' });
+    await dialog.getByRole('button', { name: 'Fetch origin', exact: true }).click();
+    await expect
+      .poll(() =>
+        app.evaluate(
+          () =>
+            (globalThis as typeof globalThis & { providerFetchStarted: boolean })
+              .providerFetchStarted,
+        ),
+      )
+      .toBe(true);
+    await dialog.getByRole('button', { name: 'Cancel fetch', exact: true }).click();
+    await expect(dialog.getByRole('button', { name: 'Fetch origin', exact: true })).toBeEnabled();
+    expect(
+      await app.evaluate(
+        () =>
+          (globalThis as typeof globalThis & { providerFetchCancelled: boolean })
+            .providerFetchCancelled,
+      ),
+    ).toBe(true);
+    expect(remote.requests()).toBe(requests);
+  } finally {
+    await app.close();
+    await remote.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

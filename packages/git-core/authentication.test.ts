@@ -282,6 +282,28 @@ test('saved-account fetch validates the current remote before updating tracking 
       }),
     ).rejects.toMatchObject({ code: 'STALE_PROVIDER_REMOTE' });
     expect(remote.requests()).toBe(requests);
+    fixtureGit(local, ['remote', 'set-url', '--add', 'origin', remote.url]);
+    await expect(service.providerRemoteTarget(repo.id, 'origin', 'fetch')).rejects.toMatchObject({
+      code: 'PROVIDER_REMOTE_URL',
+    });
+    fixtureGit(local, ['config', '--unset-all', 'remote.origin.url']);
+    for (const url of [
+      'git@example.test:team/project.git',
+      'http://example.test/team/project.git',
+      'https://user:secret@example.test/team/project.git',
+      remote.url + '?token=secret',
+    ]) {
+      fixtureGit(local, ['config', 'remote.origin.url', url]);
+      await expect(service.providerRemoteTarget(repo.id, 'origin', 'fetch')).rejects.toMatchObject({
+        code: 'PROVIDER_REMOTE_URL',
+      });
+    }
+    fixtureGit(local, ['config', 'remote.origin.url', remote.url]);
+    fixtureGit(local, ['config', `url.https://other.test/team/project.git.insteadOf`, remote.url]);
+    await expect(service.providerRemoteTarget(repo.id, 'origin', 'fetch')).rejects.toMatchObject({
+      code: 'PROVIDER_TRANSPORT_REWRITE',
+    });
+    expect(remote.requests()).toBe(requests);
     scope.close();
   } finally {
     await broker.close();

@@ -1,3 +1,4 @@
+import { ProviderGitAccount } from './provider-git-account.js';
 import { GitProgress } from './git-progress.js';
 import { DeleteRemoteRef } from './delete-remote.js';
 import { useEffect, useRef, useState } from 'react';
@@ -14,6 +15,7 @@ function RemoteDialog({ repoId, close }: { repoId: string; close: () => void }) 
   const [removing, setRemoving] = useState<string>();
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
+  const [accountId, setAccountId] = useState('');
   const load = async () => {
     setPending(true);
     try {
@@ -53,7 +55,14 @@ function RemoteDialog({ repoId, close }: { repoId: string; close: () => void }) 
       useRepository.setState({ busy: id });
       const result = await window.openkraken.request(
         options.action === 'fetch'
-          ? { id, method: 'fetch', repoId, name: options.name }
+          ? accountId && state
+            ? {
+                id,
+                method: 'providerGit',
+                accountId,
+                operation: { method: 'fetch', repoId, name: options.name, revision: state.token },
+              }
+            : { id, method: 'fetch', repoId, name: options.name }
           : { id, method: 'remote', repoId, options },
       );
       if (result.kind === 'error') throw new Error(result.message);
@@ -92,6 +101,12 @@ function RemoteDialog({ repoId, close }: { repoId: string; close: () => void }) 
       }}
     >
       <h2>Manage remotes</h2>
+      <ProviderGitAccount
+        label="Fetch authentication"
+        value={accountId}
+        onChange={setAccountId}
+        disabled={pending}
+      />
       <GitProgress />
       {state?.remotes.map((remote) => (
         <section key={remote.name} className="remote-entry">
@@ -184,7 +199,7 @@ function RemoteDialog({ repoId, close }: { repoId: string; close: () => void }) 
             placeholder="https://host/owner/repository.git"
           />
         </label>
-        <p>Use your credential helper or SSH agent for authentication.</p>
+        <p>Enter a repository URL without passwords or tokens.</p>
         {editing ? (
           <div className="dialog-actions">
             <button
