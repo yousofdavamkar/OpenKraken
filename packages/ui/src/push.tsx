@@ -1,3 +1,4 @@
+import { ProviderGitAccount } from './provider-git-account.js';
 import { GitProgress } from './git-progress.js';
 import { useEffect, useRef, useState } from 'react';
 import type { PushPlan, RemoteState } from '@openkraken/ipc-contract';
@@ -8,6 +9,9 @@ function PushDialog({ repoId, close }: { repoId: string; close: () => void }) {
   const initial = refs.find((ref) => ref.isHead) ?? refs[0];
   const dialog = useRef<HTMLDialogElement>(null);
   const [remotes, setRemotes] = useState<RemoteState['remotes']>([]);
+  const [accountId, setAccountId] = useState('');
+  const [remoteRevision, setRemoteRevision] = useState('');
+  const [reload, setReload] = useState(0);
   const [remote, setRemote] = useState('');
   const [source, setSource] = useState(initial?.name ?? '');
   const [destination, setDestination] = useState(initial?.shortName ?? '');
@@ -21,6 +25,8 @@ function PushDialog({ repoId, close }: { repoId: string; close: () => void }) {
   useEffect(() => {
     dialog.current?.showModal();
     let stopped = false;
+    setPending(true);
+    setRemoteRevision('');
     void window.openkraken
       .request({ id: crypto.randomUUID(), method: 'remotes', repoId })
       .then((result) => {
@@ -28,8 +34,11 @@ function PushDialog({ repoId, close }: { repoId: string; close: () => void }) {
         if (result.kind === 'error') setError(result.message);
         if (result.kind === 'remotes') {
           setRemotes(result.state.remotes);
+          setRemoteRevision(result.state.token);
           setRemote(
-            result.state.remotes.find((r) => r.name === 'origin')?.name ??
+            (current) =>
+              result.state.remotes.find((r) => r.name === current)?.name ??
+              result.state.remotes.find((r) => r.name === 'origin')?.name ??
               result.state.remotes[0]?.name ??
               '',
           );
@@ -44,7 +53,7 @@ function PushDialog({ repoId, close }: { repoId: string; close: () => void }) {
     return () => {
       stopped = true;
     };
-  }, [repoId]);
+  }, [repoId, reload]);
   const submit = async () => {
     setPending(true);
     setError(undefined);
@@ -57,19 +66,25 @@ function PushDialog({ repoId, close }: { repoId: string; close: () => void }) {
         throw new Error('Wait for the current operation to finish');
       id = crypto.randomUUID();
       useRepository.setState({ busy: id });
+      const selection = {
+        name: remote,
+        source,
+        destination: `${source.startsWith('refs/tags/') ? 'refs/tags/' : 'refs/heads/'}${destination}`,
+      };
+      const options = plan ? { plan, force, upstream } : undefined;
       const result = await window.openkraken.request(
-        plan
-          ? { id, method: 'push', repoId, options: { plan, force, upstream } }
-          : {
+        accountId
+          ? {
               id,
-              method: 'pushPreview',
-              repoId,
-              selection: {
-                name: remote,
-                source,
-                destination: `${source.startsWith('refs/tags/') ? 'refs/tags/' : 'refs/heads/'}${destination}`,
-              },
-            },
+              method: 'providerGit',
+              accountId,
+              operation: options
+                ? { method: 'push', repoId, options }
+                : { method: 'pushPreview', repoId, selection, revision: remoteRevision },
+            }
+          : options
+            ? { id, method: 'push', repoId, options }
+            : { id, method: 'pushPreview', repoId, selection },
       );
       if (result.kind === 'error') throw new Error(result.message);
       if (result.kind === 'cancelled')
@@ -113,6 +128,12 @@ function PushDialog({ repoId, close }: { repoId: string; close: () => void }) {
       >
         <h2>Push to remote</h2>
         <GitProgress />
+        <ProviderGitAccount
+          label="Push authentication"
+          value={accountId}
+          onChange={setAccountId}
+          disabled={pending || !!plan}
+        />
         <label>
           Remote
           <select
@@ -219,14 +240,33 @@ function PushDialog({ repoId, close }: { repoId: string; close: () => void }) {
                 setComplete(false);
                 setError(undefined);
                 setNotice('');
+                setReload((value) => value + 1);
               }}
             >
               Review again
             </button>
           )}
+          {!plan && (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                setError(undefined);
+                setReload((value) => value + 1);
+              }}
+            >
+              Reload remotes
+            </button>
+          )}
           {!complete && (
             <button
-              disabled={pending || !remote || !source || !destination.trim()}
+              disabled={
+                pending ||
+                !remote ||
+                !source ||
+                !destination.trim() ||
+                (!!accountId && !remoteRevision)
+              }
               className={force ? 'danger' : undefined}
             >
               {plan ? 'Push reviewed tip' : 'Review push'}

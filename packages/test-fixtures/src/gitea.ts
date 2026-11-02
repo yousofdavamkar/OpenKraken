@@ -174,7 +174,23 @@ export async function startGitea(root: string) {
         { cwd: source, env: environment, timeout: 30000 },
       );
     };
-    return { httpsUrl, sshUrl, credentials, passphrase, environment, push, stop };
+    const tip = async () => {
+      const result = await exec(
+        'git',
+        [
+          '-c',
+          `http.extraHeader=Authorization: ${authorization}`,
+          'ls-remote',
+          '--refs',
+          '--',
+          httpsUrl,
+          'refs/heads/main',
+        ],
+        { env: environment, timeout: 30000 },
+      );
+      return result.stdout.trim().split('\t')[0]!;
+    };
+    return { httpsUrl, sshUrl, credentials, passphrase, environment, push, tip, stop };
   } catch (error) {
     await stop().catch(() => {});
     throw error;
