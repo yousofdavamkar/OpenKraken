@@ -240,3 +240,66 @@ export type ProviderPullOptions = z.infer<typeof providerPullOptionsSchema>;
 export type ProviderPullSummary = z.infer<typeof providerPullSummarySchema>;
 export type ProviderPullPage = z.infer<typeof providerPullPageSchema>;
 export type ProviderPullDetails = z.infer<typeof providerPullDetailsSchema>;
+
+const providerCommitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
+export const providerPullRevisionSchema = z
+  .object({ head: providerCommitSchema, base: providerCommitSchema })
+  .strict();
+export const providerPullFilesOptionsSchema = providerPullOptionsSchema
+  .extend({ revision: providerPullRevisionSchema, page: z.number().int().min(1).max(30) })
+  .strict();
+export const providerPullFileSchema = z
+  .object({
+    path: z.string().min(1).max(4096),
+    previousPath: z.string().min(1).max(4096).nullable(),
+    status: z.enum(['added', 'removed', 'modified', 'renamed', 'copied', 'changed', 'unchanged']),
+    additions: providerCountSchema,
+    deletions: providerCountSchema,
+    changes: providerCountSchema,
+    sha: providerCommitSchema,
+    patch: z.string().max(262144).nullable(),
+    patchTruncated: z.boolean(),
+  })
+  .strict();
+export const providerPullFilesPageSchema = z
+  .object({
+    files: z.array(providerPullFileSchema).max(100),
+    nextPage: z.number().int().min(1).max(30).nullable(),
+    limited: z.boolean(),
+  })
+  .strict();
+export const providerPullReviewsOptionsSchema = providerPullOptionsSchema
+  .extend({ page: providerRepositoryPageNumberSchema })
+  .strict();
+export const providerPullReviewSchema = z
+  .object({
+    id: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    author: z.string().min(1).max(255).nullable(),
+    state: z.enum(['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED', 'DISMISSED', 'PENDING']),
+    body: z.string().max(262144),
+    submittedAt: providerDateSchema.nullable(),
+    commitId: providerCommitSchema.nullable(),
+  })
+  .strict();
+export const providerPullReviewsPageSchema = z
+  .object({
+    reviews: z.array(providerPullReviewSchema).max(100),
+    nextPage: providerRepositoryPageNumberSchema.nullable(),
+    limited: z.boolean(),
+  })
+  .strict();
+export const providerSubmitReviewSchema = providerPullOptionsSchema
+  .extend({
+    revision: providerPullRevisionSchema,
+    event: z.enum(['COMMENT', 'APPROVE', 'REQUEST_CHANGES']),
+    body: z.string().max(65536),
+  })
+  .strict()
+  .refine((value) => value.event === 'APPROVE' || !!value.body.trim(), 'Enter review text');
+export type ProviderPullFilesOptions = z.infer<typeof providerPullFilesOptionsSchema>;
+export type ProviderPullFilesPage = z.infer<typeof providerPullFilesPageSchema>;
+export type ProviderPullFile = z.infer<typeof providerPullFileSchema>;
+export type ProviderPullReviewsOptions = z.infer<typeof providerPullReviewsOptionsSchema>;
+export type ProviderPullReviewsPage = z.infer<typeof providerPullReviewsPageSchema>;
+export type ProviderPullReview = z.infer<typeof providerPullReviewSchema>;
+export type ProviderSubmitReview = z.infer<typeof providerSubmitReviewSchema>;

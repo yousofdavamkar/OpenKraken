@@ -1,5 +1,17 @@
 import { Octokit } from '@octokit/rest';
 import {
+  providerPullReviewsOptionsSchema,
+  providerPullReviewsPageSchema,
+  providerPullReviewSchema,
+  providerSubmitReviewSchema,
+  type ProviderPullReviewsOptions,
+  type ProviderPullReviewsPage,
+  type ProviderPullReview,
+  type ProviderSubmitReview,
+  providerPullFilesOptionsSchema,
+  providerPullFilesPageSchema,
+  type ProviderPullFilesOptions,
+  type ProviderPullFilesPage,
   providerPullListOptionsSchema,
   providerPullOptionsSchema,
   providerPullSummarySchema,
@@ -24,6 +36,24 @@ export class ProviderError extends Error {
   }
 }
 export interface ProviderDriver {
+  pullReviews(
+    origin: string,
+    token: string,
+    options: ProviderPullReviewsOptions,
+    signal?: AbortSignal,
+  ): Promise<ProviderPullReviewsPage>;
+  submitReview(
+    origin: string,
+    token: string,
+    options: ProviderSubmitReview,
+    signal?: AbortSignal,
+  ): Promise<ProviderPullReview>;
+  pullFiles(
+    origin: string,
+    token: string,
+    options: ProviderPullFilesOptions,
+    signal?: AbortSignal,
+  ): Promise<ProviderPullFilesPage>;
   pullRequests(
     origin: string,
     token: string,
@@ -182,6 +212,162 @@ export class GitHubProvider implements ProviderDriver {
       return result.data;
     });
   }
+  async pullFiles(
+    origin: string,
+    token: string,
+    input: ProviderPullFilesOptions,
+    signal?: AbortSignal,
+  ) {
+    const options = providerPullFilesOptionsSchema.parse(input);
+    await this.checkPullRevision(origin, token, options, signal);
+    const result = await this.request(origin, token, signal, async (client, headers) => {
+      const { data } = await client.pulls.listFiles({
+        headers,
+        owner: options.repository.owner,
+        repo: options.repository.name,
+        pull_number: options.number,
+        page: options.page,
+        per_page: 100,
+      });
+      if (
+        !Array.isArray(data) ||
+        data.length > 100 ||
+        data.some(
+          (file) =>
+            file?.patch !== null && file?.patch !== undefined && typeof file.patch !== 'string',
+        )
+      )
+        throw new ProviderError('PROVIDER_RESPONSE', 'The provider returned an invalid file page.');
+      const parsed = providerPullFilesPageSchema.safeParse({
+        files: data.map((file) => ({
+          path: file?.filename,
+          previousPath: file?.previous_filename ?? null,
+          status: file?.status,
+          additions: file?.additions,
+          deletions: file?.deletions,
+          changes: file?.changes,
+          sha: file?.sha,
+          patch: file?.patch?.slice(0, 262144) ?? null,
+          patchTruncated: (file?.patch?.length ?? 0) > 262144,
+        })),
+        nextPage: data.length === 100 && options.page < 30 ? options.page + 1 : null,
+        limited: data.length === 100 && options.page === 30,
+      });
+      if (!parsed.success)
+        throw new ProviderError('PROVIDER_RESPONSE', 'The provider returned an invalid file page.');
+      return parsed.data;
+    });
+    await this.checkPullRevision(origin, token, options, signal);
+    return result;
+  }
+  async pullReviews(
+    origin: string,
+    token: string,
+    input: ProviderPullReviewsOptions,
+    signal?: AbortSignal,
+  ) {
+    const options = providerPullReviewsOptionsSchema.parse(input);
+    return this.request(origin, token, signal, async (client, headers) => {
+      const { data } = await client.pulls.listReviews({
+        headers,
+        owner: options.repository.owner,
+        repo: options.repository.name,
+        pull_number: options.number,
+        page: options.page,
+        per_page: 100,
+      });
+      if (!Array.isArray(data) || data.length > 100)
+        throw new ProviderError(
+          'PROVIDER_RESPONSE',
+          'The provider returned an invalid review page.',
+        );
+      return providerPullReviewsPageSchema.parse({
+        reviews: data.map(pullReview),
+        nextPage: data.length === 100 && options.page < 100 ? options.page + 1 : null,
+        limited: data.length === 100 && options.page === 100,
+      });
+    });
+  }
+  async submitReview(
+    origin: string,
+    token: string,
+    input: ProviderSubmitReview,
+    signal?: AbortSignal,
+  ) {
+    const options = providerSubmitReviewSchema.parse(input);
+    const current = await this.checkPullRevision(origin, token, options, signal);
+    if (current.state !== 'open' || current.merged)
+      throw new ProviderError(
+        'PROVIDER_PULL_CLOSED',
+        'This pull request is closed. Refresh details before continuing.',
+      );
+    if (current.draft && options.event !== 'COMMENT')
+      throw new ProviderError(
+        'PROVIDER_PULL_DRAFT',
+        'Draft pull requests accept comments but cannot be approved or receive requests for changes.',
+      );
+    signal?.throwIfAborted();
+    return this.request(origin, token, signal, async (client, headers) => {
+      try {
+        const { data } = await client.pulls.createReview({
+          headers,
+          owner: options.repository.owner,
+          repo: options.repository.name,
+          pull_number: options.number,
+          commit_id: options.revision.head,
+          event: options.event,
+          body: options.body,
+        });
+        const review = pullReview(data);
+        const expected =
+          options.event === 'APPROVE'
+            ? 'APPROVED'
+            : options.event === 'COMMENT'
+              ? 'COMMENTED'
+              : 'CHANGES_REQUESTED';
+        if (
+          review.commitId !== options.revision.head ||
+          review.state !== expected ||
+          !review.submittedAt
+        )
+          throw new Error('Unexpected review acknowledgment');
+        return review;
+      } catch (error) {
+        const status =
+          typeof error === 'object' && error !== null && 'status' in error
+            ? Number(error.status)
+            : 0;
+        if ([400, 401, 403, 404, 422, 429].includes(status))
+          throw new ProviderError(
+            'PROVIDER_REVIEW_REJECTED',
+            'The provider rejected the review. Check access, review permissions and account limits before retrying.',
+          );
+        throw new ProviderError(
+          'PROVIDER_WRITE_UNCERTAIN',
+          'The provider may have received this review. Refresh the reviews and check before submitting again.',
+        );
+      }
+    });
+  }
+  private async checkPullRevision(
+    origin: string,
+    token: string,
+    options: ProviderPullOptions & { revision: { head: string; base: string } },
+    signal?: AbortSignal,
+  ) {
+    const current = await this.pullRequest(
+      origin,
+      token,
+      { repository: options.repository, number: options.number },
+      signal,
+    );
+    if (current.head.sha !== options.revision.head || current.base.sha !== options.revision.base)
+      throw new ProviderError(
+        'STALE_PROVIDER_PULL',
+        'The pull-request commits changed. Refresh details before continuing.',
+      );
+    return current;
+  }
   private async request<T>(
     origin: string,
     token: string,
@@ -244,6 +430,7 @@ export class GitHubProvider implements ProviderDriver {
         'X-GitHub-Api-Version': host === 'https://github.com' ? '2026-03-10' : '2022-11-28',
       });
     } catch (error) {
+      if (error instanceof ProviderError && error.code === 'PROVIDER_WRITE_UNCERTAIN') throw error;
       if (signal?.aborted) throw new ProviderError('CANCELLED', 'Provider request cancelled.');
       if (controller.signal.aborted)
         throw new ProviderError('PROVIDER_TIMEOUT', 'The provider did not respond in time.');
@@ -303,4 +490,27 @@ function pullSummary(
       'The provider returned invalid pull-request metadata.',
     );
   return result.data;
+}
+
+function pullReview(data: {
+  id: number;
+  user: { login?: string } | null;
+  state: string;
+  body: string;
+  submitted_at?: string | null;
+  commit_id: string | null;
+}) {
+  if (!Number.isSafeInteger(data?.id) || data.id <= 0)
+    throw new ProviderError('PROVIDER_RESPONSE', 'The provider returned an invalid review.');
+  const parsed = providerPullReviewSchema.safeParse({
+    id: String(data.id),
+    author: data.user?.login ?? null,
+    state: data.state,
+    body: data.body,
+    submittedAt: data.submitted_at ?? null,
+    commitId: data.commit_id,
+  });
+  if (!parsed.success)
+    throw new ProviderError('PROVIDER_RESPONSE', 'The provider returned an invalid review.');
+  return parsed.data;
 }

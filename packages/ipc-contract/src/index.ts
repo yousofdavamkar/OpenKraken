@@ -1,5 +1,11 @@
 import { z } from 'zod';
 import {
+  providerPullFilesOptionsSchema,
+  providerPullFilesPageSchema,
+  providerPullReviewsOptionsSchema,
+  providerPullReviewsPageSchema,
+  providerSubmitReviewSchema,
+  providerPullReviewSchema,
   providerPullListOptionsSchema,
   providerPullOptionsSchema,
   providerPullPageSchema,
@@ -1116,6 +1122,30 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerPullFiles'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerPullFilesOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerPullReviews'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerPullReviewsOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerSubmitReview'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerSubmitReviewSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerPullRequests'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerPullListOptionsSchema,
@@ -1283,6 +1313,13 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('providerPullFiles'), page: providerPullFilesPageSchema }).strict(),
+  z
+    .object({ kind: z.literal('providerPullReviews'), page: providerPullReviewsPageSchema })
+    .strict(),
+  z
+    .object({ kind: z.literal('providerReviewSubmitted'), review: providerPullReviewSchema })
+    .strict(),
   z.object({ kind: z.literal('providerPullRequests'), page: providerPullPageSchema }).strict(),
   z
     .object({ kind: z.literal('providerPullRequest'), pullRequest: providerPullDetailsSchema })

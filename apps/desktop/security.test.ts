@@ -329,3 +329,39 @@ test('pull-request browsing accepts only bounded repository selectors and accoun
       requestSchema.safeParse({ ...detail, options: { ...detail.options, number } }).success,
     ).toBe(false);
 });
+
+test('PR files and review IPC require bounded pages, revisions and explicit review events', () => {
+  const id = '00000000-0000-4000-8000-000000000000',
+    accountId = 'a'.repeat(64);
+  const options = {
+    repository: { owner: 'team', name: 'project' },
+    number: 1,
+    revision: { head: '1'.repeat(40), base: '2'.repeat(40) },
+  };
+  const files = { id, accountId, method: 'providerPullFiles', options: { ...options, page: 1 } };
+  const review = {
+    id,
+    accountId,
+    method: 'providerSubmitReview',
+    options: { ...options, event: 'COMMENT', body: 'Review text' },
+  };
+  expect(requestSchema.safeParse(files).success).toBe(true);
+  expect(requestSchema.safeParse(review).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(review).success).toBe(false);
+  expect(
+    requestSchema.safeParse({ ...files, options: { ...files.options, page: 31 } }).success,
+  ).toBe(false);
+  for (const extra of [
+    { revision: undefined },
+    { event: 'PENDING' },
+    { event: 'REQUEST_CHANGES', body: ' ' },
+    { event: 'COMMENT', body: '' },
+    { body: 'x'.repeat(65537) },
+    { token: 'secret' },
+    { comments: [] },
+    { url: 'https://other.test' },
+  ])
+    expect(
+      requestSchema.safeParse({ ...review, options: { ...review.options, ...extra } }).success,
+    ).toBe(false);
+});

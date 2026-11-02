@@ -1,12 +1,12 @@
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { protection } from '../../tests/provider-protection.js';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { ProviderService } from './src/providers.js';
-import { ProviderVault, type SecretProtection } from './src/provider-vault.js';
+import { ProviderVault } from './src/provider-vault.js';
 import { GitHubOAuth } from './src/github-device.js';
 const root = await mkdtemp(join(tmpdir(), 'openkraken-providers-'));
 const server = setupServer();
@@ -16,26 +16,6 @@ afterAll(async () => {
   server.close();
   await rm(root, { recursive: true, force: true });
 });
-function protection(): SecretProtection {
-  const key = randomBytes(32);
-  return {
-    available: async () => true,
-    encrypt: async (text) => {
-      const nonce = randomBytes(12);
-      const cipher = createCipheriv('aes-256-gcm', key, nonce);
-      const body = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
-      return Buffer.concat([nonce, cipher.getAuthTag(), body]);
-    },
-    decrypt: async (value) => {
-      const decipher = createDecipheriv('aes-256-gcm', key, value.subarray(0, 12));
-      decipher.setAuthTag(value.subarray(12, 28));
-      return {
-        result: Buffer.concat([decipher.update(value.subarray(28)), decipher.final()]).toString(),
-        shouldReEncrypt: false,
-      };
-    },
-  };
-}
 test('GitHub account validation stores a protected credential and returns metadata across restarts', async () => {
   const directory = join(root, 'connect');
   const vault = new ProviderVault(directory, protection());

@@ -244,6 +244,9 @@ else {
           );
         }
         if (
+          request.method === 'providerPullFiles' ||
+          request.method === 'providerPullReviews' ||
+          request.method === 'providerSubmitReview' ||
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
           request.method === 'providerRepositories' ||
@@ -259,6 +262,33 @@ else {
           providers = getProviders();
           const controller = new AbortController();
           providerRequests.set(request.id, controller);
+          if (request.method === 'providerPullFiles')
+            return resultSchema.parse({
+              kind: 'providerPullFiles',
+              page: await providers.pullFiles(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerPullReviews')
+            return resultSchema.parse({
+              kind: 'providerPullReviews',
+              page: await providers.pullReviews(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerSubmitReview')
+            return resultSchema.parse({
+              kind: 'providerReviewSubmitted',
+              review: await providers.submitReview(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerPullRequests')
             return resultSchema.parse({
               kind: 'providerPullRequests',
@@ -376,6 +406,9 @@ else {
         if (
           request.method === 'providerGit' ||
           (request.method === 'clone' && !!request.providerAccountId) ||
+          request.method === 'providerPullFiles' ||
+          request.method === 'providerPullReviews' ||
+          request.method === 'providerSubmitReview' ||
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
           request.method === 'providerRepositories' ||

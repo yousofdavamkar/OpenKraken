@@ -3,6 +3,12 @@ import { mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import {
+  providerPullReviewsOptionsSchema,
+  providerSubmitReviewSchema,
+  type ProviderPullReviewsOptions,
+  type ProviderSubmitReview,
+  providerPullFilesOptionsSchema,
+  type ProviderPullFilesOptions,
   providerPullListOptionsSchema,
   providerPullOptionsSchema,
   type ProviderPullListOptions,
@@ -207,6 +213,27 @@ export class ProviderService {
       const options = providerPullOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
       return this.github.pullRequest(account.origin, token, options, signal);
+    });
+  }
+  pullFiles(id: string, input: ProviderPullFilesOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerPullFilesOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.pullFiles(account.origin, token, options, signal);
+    });
+  }
+  pullReviews(id: string, input: ProviderPullReviewsOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerPullReviewsOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.pullReviews(account.origin, token, options, signal);
+    });
+  }
+  submitReview(id: string, input: ProviderSubmitReview, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerSubmitReviewSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.submitReview(account.origin, token, options, signal);
     });
   }
   /** Internal main-process API; the result must never be returned to the renderer. */
