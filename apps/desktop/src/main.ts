@@ -1,3 +1,4 @@
+import { CommandMenu } from './command-menu.js';
 import { CommandSettings } from './command-settings.js';
 import { BitbucketProvider } from './bitbucket-provider.js';
 import {
@@ -45,6 +46,7 @@ let window: BrowserWindow | undefined;
 let service: UtilityProcess | undefined;
 let avatars: AvatarCache | undefined;
 let commandSettings: CommandSettings | undefined;
+let commandMenu: CommandMenu | undefined;
 let providers: ProviderService | undefined;
 const providerRequests = new Map<string, AbortController>();
 const pending = new Map<
@@ -78,6 +80,8 @@ function startService() {
   child.on('message', (message) => {
     const event = desktopEventSchema.safeParse(message);
     if (event.success) {
+      // Native commands can originate only in main, never in the Git utility process.
+      if (event.data.type === 'commandExecute') return;
       if (event.data.type !== 'repositoryChanged' && !pending.has(event.data.id)) return;
       if (service === child && window && !window.isDestroyed())
         window.webContents.send(EVENT_CHANNEL, event.data);
@@ -163,6 +167,7 @@ function createWindow() {
     backgroundColor: '#10151e',
     webPreferences: { ...windowPreferences, preload: join(__dirname, 'preload.cjs') },
   });
+  commandMenu = new CommandMenu(window);
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-prevent-unload', (event) => {
     if (!window || window.isDestroyed()) return;
@@ -223,6 +228,10 @@ else {
         return { kind: 'error', code: 'BUSY', message: 'Too many pending operations' };
       inFlight.add(request.id);
       try {
+        if (request.method === 'commandContext') {
+          commandMenu?.context(request.revision, request.available);
+          return { kind: 'commandContext' };
+        }
         if (
           request.method === 'commandPreferences' ||
           request.method === 'commandKeymapSave' ||
@@ -239,6 +248,7 @@ else {
                   : request.method === 'commandInvoked'
                     ? await settings.record(request.command)
                     : await settings.read();
+            commandMenu?.configure(state.keymap, state.revision);
             return resultSchema.parse({ kind: 'commandPreferences', state });
           } catch {
             return {

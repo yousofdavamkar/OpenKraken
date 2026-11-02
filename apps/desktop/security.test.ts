@@ -1219,3 +1219,19 @@ test('command preferences accept only bounded known data on strict main-only rou
     }).success,
   ).toBe(true);
 });
+
+test('native command context is bounded, main-only and cannot carry arbitrary actions', () => {
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    method: 'commandContext',
+    revision: 0,
+    available: ['app.commands', 'repository.clone'],
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  expect(requestSchema.safeParse({ ...request, available: ['shell.run'] }).success).toBe(false);
+  expect(
+    requestSchema.safeParse({ ...request, available: Array(65).fill('app.commands') }).success,
+  ).toBe(false);
+  expect(requestSchema.safeParse({ ...request, javascript: 'arbitrary code' }).success).toBe(false);
+});

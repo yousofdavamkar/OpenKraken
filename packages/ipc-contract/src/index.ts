@@ -1195,6 +1195,14 @@ const workingRequests = [
     .strict(),
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('commandContext'),
+      revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      available: z.array(commandIdSchema).max(64),
+    })
+    .strict(),
   z.object({ id: requestId, method: z.literal('commandPreferences') }).strict(),
   z
     .object({
@@ -1752,6 +1760,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('commandContext') }).strict(),
   z.object({ kind: z.literal('commandPreferences'), state: commandPreferencesSchema }).strict(),
   z
     .object({ kind: z.literal('providerMergePreview'), preview: providerMergePreviewSchema })
@@ -2080,6 +2089,14 @@ export const gitProgressEventSchema = z
   .object({ type: z.literal('gitProgress'), id: requestId, text: z.string().max(4096) })
   .strict();
 export const desktopEventSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('commandExecute'),
+      command: commandIdSchema,
+      revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      source: z.enum(['menu', 'accelerator']),
+    })
+    .strict(),
   repositoryEventSchema,
   z
     .object({

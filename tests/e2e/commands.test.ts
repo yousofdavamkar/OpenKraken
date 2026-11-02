@@ -1,3 +1,4 @@
+import { pressShortcut } from '../electron-shortcut.js';
 import { _electron as electron, expect, test } from '@playwright/test';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -11,7 +12,7 @@ test('command palette searches by category, respects availability and dialogs, a
   try {
     let page = await app.firstWindow();
     await expect(page.getByRole('button', { name: 'Commands', exact: true })).toBeEnabled();
-    await page.keyboard.press('Control+P');
+    await pressShortcut(app, 'Control+P');
     let palette = page.getByRole('dialog', { name: 'Command palette' });
     await expect(palette).toBeVisible();
     await palette.getByLabel('Search commands').fill('Create branch');
@@ -30,7 +31,7 @@ test('command palette searches by category, respects availability and dialogs, a
     await expect(palette).toHaveCount(0);
     const clone = page.getByRole('dialog', { name: 'Clone repository', exact: true });
     await expect(clone).toBeVisible();
-    await page.keyboard.press('Control+P');
+    await pressShortcut(app, 'Control+P');
     await expect(palette).toHaveCount(0);
     await clone.getByRole('button', { name: 'Close', exact: true }).click();
     await app.close();
@@ -79,16 +80,16 @@ test('JSON keybindings reject conflicts atomically, dispatch existing actions, a
     );
     await editor.getByRole('button', { name: 'Apply', exact: true }).click();
     await expect(editor.getByRole('status')).toHaveText('Keyboard shortcuts saved.');
-    await page.keyboard.press('Control+P');
+    await pressShortcut(app, 'Control+P');
     await expect(page.getByRole('dialog', { name: 'Clone repository', exact: true })).toHaveCount(
       0,
     );
     await editor.getByRole('button', { name: 'Close', exact: true }).click();
-    await page.keyboard.press('Control+P');
+    await pressShortcut(app, 'Control+P');
     let clone = page.getByRole('dialog', { name: 'Clone repository', exact: true });
     await expect(clone).toBeVisible();
     await clone.getByRole('button', { name: 'Close', exact: true }).click();
-    await page.keyboard.press('Control+Shift+Y');
+    await pressShortcut(app, 'Control+Shift+Y');
     let palette = page.getByRole('dialog', { name: 'Command palette' });
     await expect(palette).toBeVisible();
     await palette.getByLabel('Search commands').press('Escape');
@@ -96,7 +97,7 @@ test('JSON keybindings reject conflicts atomically, dispatch existing actions, a
     app = await electron.launch({ args });
     page = await app.firstWindow();
     await expect(page.getByRole('button', { name: 'Commands', exact: true })).toBeEnabled();
-    await page.keyboard.press('Control+P');
+    await pressShortcut(app, 'Control+P');
     clone = page.getByRole('dialog', { name: 'Clone repository', exact: true });
     await expect(clone).toBeVisible();
     await clone.getByRole('button', { name: 'Close', exact: true }).click();
@@ -106,7 +107,7 @@ test('JSON keybindings reject conflicts atomically, dispatch existing actions, a
     await editor.getByRole('button', { name: 'Restore defaults', exact: true }).click();
     await editor.getByRole('button', { name: 'Apply', exact: true }).click();
     await editor.getByRole('button', { name: 'Close', exact: true }).click();
-    await page.keyboard.press('Control+P');
+    await pressShortcut(app, 'Control+P');
     palette = page.getByRole('dialog', { name: 'Command palette' });
     await expect(palette).toBeVisible();
   } finally {
@@ -160,11 +161,11 @@ test('palette follows repository availability and keeps writes behind their exis
     await editor.getByRole('button', { name: 'Apply', exact: true }).click();
     await editor.getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByLabel('Search commits', { exact: true }).focus();
-    await page.keyboard.press('Control+K');
+    await pressShortcut(app, 'Control+K');
     await expect(page.getByRole('dialog', { name: 'Clone repository', exact: true })).toHaveCount(
       0,
     );
-    await page.keyboard.press('Control+P');
+    await pressShortcut(app, 'Control+P');
     await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
   } finally {
     await app.close();
@@ -187,7 +188,7 @@ test('a damaged saved keymap falls back to defaults and can be repaired', async 
     app = await electron.launch({ args });
     page = await app.firstWindow();
     await expect(page.getByRole('button', { name: 'Commands', exact: true })).toBeEnabled();
-    await page.keyboard.press('Control+P');
+    await pressShortcut(app, 'Control+P');
     const palette = page.getByRole('dialog', { name: 'Command palette' });
     await expect(palette).toBeVisible();
     await palette.getByLabel('Search commands').fill('Keyboard shortcuts');
@@ -230,13 +231,13 @@ test('commit search participates in keymap conflicts and respects remapping and 
     await editor.getByRole('button', { name: 'Apply', exact: true }).click();
     await expect(editor.getByRole('status')).toHaveText('Keyboard shortcuts saved.');
     await editor.getByLabel('Keymap JSON').focus();
-    await page.keyboard.press('Control+Shift+F');
+    await pressShortcut(app, 'Control+Shift+F');
     await expect(editor.getByLabel('Keymap JSON')).toBeFocused();
     await editor.getByRole('button', { name: 'Close', exact: true }).click();
     const search = page.getByLabel('Search commits', { exact: true });
-    await page.keyboard.press('Control+F');
+    await pressShortcut(app, 'Control+F');
     await expect(search).not.toBeFocused();
-    await page.keyboard.press('Control+Shift+F');
+    await pressShortcut(app, 'Control+Shift+F');
     await expect(search).toBeFocused();
     await page.getByRole('button', { name: 'Commands', exact: true }).click();
     const palette = page.getByRole('dialog', { name: 'Command palette' });

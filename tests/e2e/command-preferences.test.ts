@@ -1,3 +1,4 @@
+import { pressShortcut } from '../electron-shortcut.js';
 import { _electron as electron, expect, test } from '@playwright/test';
 import {
   existsSync,
@@ -43,7 +44,7 @@ test('command preferences persist atomically in main settings and survive render
     app = await electron.launch({ args });
     page = await app.firstWindow();
     await expect(page.getByRole('button', { name: 'Commands', exact: true })).toBeEnabled();
-    await page.keyboard.press('Control+Shift+Y');
+    await pressShortcut(app, 'Control+Shift+Y');
     palette = page.getByRole('dialog', { name: 'Command palette' });
     await expect(palette).toBeVisible();
     await expect(palette.getByRole('listbox').getByRole('option').first()).toHaveAccessibleName(
@@ -127,7 +128,7 @@ test('legacy keymaps and frecency migrate once into native settings', async () =
     app = await electron.launch({ args });
     page = await app.firstWindow();
     await expect(page.getByRole('button', { name: 'Commands', exact: true })).toBeEnabled();
-    await page.keyboard.press('Control+Shift+Y');
+    await pressShortcut(app, 'Control+Shift+Y');
     const palette = page.getByRole('dialog', { name: 'Command palette' });
     await expect(palette.getByRole('listbox').getByRole('option').first()).toHaveAccessibleName(
       'Clone repository',
@@ -141,7 +142,7 @@ test('legacy keymaps and frecency migrate once into native settings', async () =
     app = await electron.launch({ args });
     page = await app.firstWindow();
     await expect(page.getByRole('button', { name: 'Commands', exact: true })).toBeEnabled();
-    await page.keyboard.press('Control+Shift+Y');
+    await pressShortcut(app, 'Control+Shift+Y');
     await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
   } finally {
     await app.close();
@@ -193,7 +194,7 @@ test('a failed native settings write keeps the old shortcuts active', async () =
     await editor.getByRole('button', { name: 'Apply', exact: true }).click();
     await expect(editor.getByRole('alert')).toContainText('could not be saved');
     await editor.getByRole('button', { name: 'Close', exact: true }).click();
-    await page.keyboard.press('Control+P');
+    await pressShortcut(app, 'Control+P');
     await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
     expect(readdirSync(join(root, 'settings.json'))).toEqual([]);
   } finally {

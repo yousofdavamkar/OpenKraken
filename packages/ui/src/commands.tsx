@@ -11,7 +11,7 @@ import {
 } from 'react';
 import fuzzysort from 'fuzzysort';
 import { commandCatalog, commandIds, isCommandId, type CommandId } from './command-catalog.js';
-import { bindingFor, emptyKeymap, matchesShortcut, parseKeymap } from './keymap.js';
+import { bindingFor, emptyKeymap, parseKeymap } from './keymap.js';
 import type { Bindings, CommandPreferences } from '@openkraken/ipc-contract';
 const usageKey = 'openkraken.commandUsage.v1';
 const halfLife = 14 * 24 * 60 * 60 * 1000;
@@ -23,6 +23,7 @@ class CommandRegistry {
     error: '',
   };
   ready = false;
+  nativeReady = false;
   revision = 0;
   private initialization?: Promise<void>;
   private writes: Promise<void> = Promise.resolve();
@@ -86,6 +87,90 @@ class CommandRegistry {
       this.ready = true;
       this.changed();
     }
+  }
+  connectNative() {
+    let alive = true;
+    let inFlight = false;
+    let sent = '';
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const context = () => ({
+      revision: this.revision,
+      available:
+        this.ready && !document.querySelector('dialog[open]')
+          ? commandIds.filter(
+              (id) =>
+                this.available(id) ||
+                ((id === 'app.commands' || id === 'app.keybindings') &&
+                  this.buttons.get(id)?.isConnected),
+            )
+          : [],
+    });
+    const sync = async () => {
+      if (!alive || !this.ready || inFlight) return;
+      const state = context();
+      const serialized = JSON.stringify(state);
+      if (serialized === sent) return;
+      inFlight = true;
+      try {
+        const result = await window.openkraken.request({
+          id: crypto.randomUUID(),
+          method: 'commandContext',
+          ...state,
+        });
+        if (result.kind !== 'commandContext') throw new Error('Menu context unavailable.');
+        sent = serialized;
+        if (alive && !this.nativeReady) {
+          this.nativeReady = true;
+          this.changed();
+        }
+      } catch {
+        if (alive)
+          retry = setTimeout(() => {
+            void sync();
+          }, 250);
+        return;
+      } finally {
+        inFlight = false;
+      }
+      if (alive && JSON.stringify(context()) !== sent) void sync();
+    };
+    const schedule = () =>
+      queueMicrotask(() => {
+        void sync();
+      });
+    const unsubscribe = this.subscribe(schedule);
+    const observer = new MutationObserver(schedule);
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['open', 'disabled'],
+    });
+    const unsubscribeEvents = window.openkraken.subscribe((event) => {
+      if (event.type !== 'commandExecute' || event.revision !== this.revision) return;
+      const target = document.activeElement;
+      const typing =
+        target instanceof Element &&
+        !!target.closest(
+          'input, textarea, select, [contenteditable]:not([contenteditable="false"]), .cm-editor, .xterm',
+        );
+      if (
+        event.source === 'accelerator' &&
+        typing &&
+        event.command !== 'app.commands' &&
+        event.command !== 'history.search'
+      )
+        return;
+      this.execute(event.command);
+    });
+    schedule();
+    return () => {
+      alive = false;
+      clearTimeout(retry);
+      observer.disconnect();
+      unsubscribe();
+      unsubscribeEvents();
+    };
   }
   buttons = new Map<CommandId, HTMLButtonElement>();
   listeners = new Set<() => void>();
@@ -214,7 +299,9 @@ function useCommands() {
 export function CommandProvider({ children }: { children: ReactNode }) {
   const [registry] = useState(() => new CommandRegistry());
   useEffect(() => {
+    const disconnect = registry.connectNative();
     void registry.initialize();
+    return disconnect;
   }, [registry]);
   return <Context.Provider value={registry}>{children}</Context.Provider>;
 }
@@ -236,7 +323,8 @@ export function CommandButton({
       ref={button}
       disabled={
         disabled ||
-        (!registry.ready && (command === 'app.commands' || command === 'app.keybindings'))
+        ((!registry.ready || !registry.nativeReady) &&
+          (command === 'app.commands' || command === 'app.keybindings'))
       }
       title={props.title ?? registry.shortcut(command) ?? undefined}
       onClick={(event) => {
@@ -436,8 +524,8 @@ function KeymapEditor({ close }: { close: () => void }) {
         entries inherit defaults; null disables a shortcut. Conflicts are checked on both platforms.
       </p>
       <p>
-        Use physical keys: letters A–Z, digits, F1–F24, or named punctuation (for example Comma).
-        Shortcuts pause in dialogs. Other action shortcuts also pause while editing text.
+        Use native shortcut keys: letters A–Z, digits, F1–F24, or named punctuation (for example
+        Comma). Shortcuts pause in dialogs. Other action shortcuts also pause while editing text.
       </p>
       <label>
         Keymap JSON
@@ -517,37 +605,6 @@ export function CommandControls() {
   const registry = useCommands();
   const [opened, setOpened] = useState(false);
   const [editing, setEditing] = useState(false);
-  useEffect(() => {
-    const keydown = (event: KeyboardEvent) => {
-      if (
-        event.defaultPrevented ||
-        event.repeat ||
-        event.isComposing ||
-        event.getModifierState('AltGraph') ||
-        document.querySelector('dialog[open]')
-      )
-        return;
-      const target = event.target;
-      const typing =
-        target instanceof Element &&
-        !!target.closest(
-          'input, textarea, select, [contenteditable]:not([contenteditable="false"]), .cm-editor, .xterm',
-        );
-      for (const id of commandIds) {
-        const shortcut = registry.shortcut(id);
-        if (
-          !shortcut ||
-          (typing && id !== 'app.commands' && id !== 'history.search') ||
-          !matchesShortcut(event, shortcut)
-        )
-          continue;
-        if (registry.execute(id)) event.preventDefault();
-        return;
-      }
-    };
-    window.addEventListener('keydown', keydown);
-    return () => window.removeEventListener('keydown', keydown);
-  }, [registry]);
   return (
     <>
       <CommandButton command="app.commands" onClick={() => setOpened(true)}>

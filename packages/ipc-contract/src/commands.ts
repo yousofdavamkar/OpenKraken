@@ -155,7 +155,7 @@ export function shortcutStroke(value: string, mac: boolean) {
     throw new Error('Typing keys require a Ctrl, Meta, Mod, or Alt modifier.');
   // Keep editing, window management, reload, and developer tools with their native handlers.
   if (
-    ((ctrl || meta) && !alt && /^Key[ACVXZQWR]$/.test(code)) ||
+    ((ctrl || meta) && !alt && /^Key[ACVXZQWRHM]$/.test(code)) ||
     ((ctrl || meta) && shift && /^Key[IJ]$/.test(code)) ||
     (alt && code === 'F4') ||
     code === 'F12'
