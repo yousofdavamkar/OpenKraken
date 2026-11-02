@@ -107,6 +107,12 @@ export function OperationPanel() {
   return (
     <section aria-label="Git operation" className="operation-panel">
       <h3>{names[state.kind]} in progress</h3>
+      {state.editStopped && (
+        <p>
+          Paused to edit this commit. Stage your changes, enable Amend last commit, and amend before
+          continuing.
+        </p>
+      )}
       {state.progress && (
         <p>
           Step {state.progress.current} of {state.progress.total}

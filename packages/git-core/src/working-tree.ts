@@ -906,7 +906,7 @@ export class WorkingTree {
     let failure: unknown;
     let editor: Awaited<ReturnType<typeof openGitEditor>> | undefined;
     try {
-      if (origin?.plan) {
+      if (origin?.plan && !discardUndo) {
         if (!this.editorHelper)
           throw new GitError('EDITOR_UNAVAILABLE', 'The native Git editor helper is unavailable');
         editor = await openGitEditor(

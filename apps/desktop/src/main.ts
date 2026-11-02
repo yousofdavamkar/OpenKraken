@@ -87,6 +87,7 @@ function callService(request: ServiceRequest): Promise<Result> {
                 'deleteRemotePreview',
                 'operationAction',
                 'startOperation',
+                'interactiveRebase',
                 'reset',
               ].includes(request.method)
             ? 210000

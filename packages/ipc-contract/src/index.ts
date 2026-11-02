@@ -769,6 +769,22 @@ const workingRequests = [
   z
     .object({
       id: requestId,
+      method: z.literal('interactiveRebasePreview'),
+      repoId: repoIdSchema,
+      base: oidSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('interactiveRebase'),
+      repoId: repoIdSchema,
+      options: interactiveRebaseSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('operationAction'),
       repoId: repoIdSchema,
       options: operationActionSchema,
@@ -876,6 +892,10 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('workingState'), state: workingStateSchema }),
   z.object({ kind: z.literal('conflictPreview'), preview: conflictPreviewSchema }),
   z.object({ kind: z.literal('mergePrediction'), prediction: mergePredictionSchema }),
+  z.object({
+    kind: z.literal('interactiveRebasePreview'),
+    preview: interactiveRebasePreviewSchema,
+  }),
   z.object({ kind: z.literal('resetPreview'), preview: resetPreviewSchema }),
   z.object({ kind: z.literal('appearance'), remoteAvatars: z.boolean() }),
   z.object({

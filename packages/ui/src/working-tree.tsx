@@ -364,7 +364,13 @@ export function WorkingTreePanel() {
               <input
                 type="checkbox"
                 checked={amend}
-                disabled={!!busy || !state?.head.oid}
+                disabled={
+                  !!busy ||
+                  !state?.head.oid ||
+                  (!!state.operation &&
+                    state.operation.kind !== 'none' &&
+                    !state.operation.editStopped)
+                }
                 onChange={(event) => {
                   draftVersion.current++;
                   setAmend(event.target.checked);
@@ -397,6 +403,9 @@ export function WorkingTreePanel() {
               disabled={
                 !!busy ||
                 !state ||
+                (!!state.operation &&
+                  state.operation.kind !== 'none' &&
+                  !(amend && state.operation.editStopped)) ||
                 !(amend ? amendText : message).trim() ||
                 (!amend && !staged.length) ||
                 (amend && amendHead !== state.head.oid)

@@ -12,6 +12,7 @@ import { Stashes } from './stashes.js';
 import { Push } from './push.js';
 import { Reset } from './reset.js';
 import { Integration } from './integration.js';
+import { InteractiveRebaseControl } from './interactive-rebase.js';
 import { Pull } from './pull.js';
 import { ManageRemotes } from './remotes.js';
 import { ReferenceDropActions, referenceDragProps } from './reference-drop.js';
@@ -53,6 +54,7 @@ function App() {
           <ManageRemotes />
           <Pull />
           <Integration />
+          <InteractiveRebaseControl />
           <Reset />
           <Push />
           <Stashes />

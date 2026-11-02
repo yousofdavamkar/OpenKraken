@@ -10,14 +10,12 @@ import {
 } from '@openkraken/git-core';
 const parent = process.parentPort;
 if (!parent) throw new Error('Git service requires a parent port');
-const authentication = new AskpassBroker(
-  join(
-    __dirname.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'),
-    'helpers',
-    process.platform === 'win32' ? 'openkraken-askpass.exe' : 'openkraken-askpass',
-  ),
-  (event) => parent.postMessage(event),
+const editorHelper = join(
+  __dirname.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'),
+  'helpers',
+  process.platform === 'win32' ? 'openkraken-askpass.exe' : 'openkraken-askpass',
 );
+const authentication = new AskpassBroker(editorHelper, (event) => parent.postMessage(event));
 let shuttingDown = false;
 const active = new Map<string, AbortController>();
 let service: Promise<RepositoryService> | undefined;
@@ -38,7 +36,7 @@ async function prepareWatcher(repo: Repository) {
 function getService() {
   return (service ??= locateGit(process.env.OPENKRAKEN_GIT).then((git) => {
     gitPath = git.path;
-    return new RepositoryService(git.path, { dataDir: process.argv[2] });
+    return new RepositoryService(git.path, { dataDir: process.argv[2], editorHelper });
   }));
 }
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
@@ -204,6 +202,16 @@ async function executeGit(
       kind: 'workingState',
       state: await git.startOperation(request.repoId, request.options, signal, progress),
     };
+  if (request.method === 'interactiveRebasePreview')
+    return {
+      kind: 'interactiveRebasePreview',
+      preview: await git.interactiveRebasePreview(request.repoId, request.base, signal),
+    };
+  if (request.method === 'interactiveRebase')
+    return {
+      kind: 'workingState',
+      state: await git.interactiveRebase(request.repoId, request.options, signal, progress),
+    };
   if (request.method === 'operationAction')
     return {
       kind: 'workingState',
@@ -282,6 +290,7 @@ parent.on('message', (event) => {
     'pull',
     'operationAction',
     'startOperation',
+    'interactiveRebase',
     'reset',
     'resolveConflict',
     'stashPush',
