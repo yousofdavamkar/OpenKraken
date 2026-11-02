@@ -789,3 +789,36 @@ test('GitLab discussions use bounded selectors and never enter the Git service',
     }).success,
   ).toBe(false);
 });
+
+test('GitLab reviewed discussion writes use strict public IPC and cannot enter the Git service', () => {
+  const intent = {
+    action: 'reply',
+    repository: { owner: 'group/subgroup', name: 'project' },
+    number: 7,
+    discussionId: 'b'.repeat(40),
+    body: 'Reply',
+  };
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    method: 'providerWriteMergeDiscussion',
+    accountId: 'a'.repeat(64),
+    options: { intent, revision: 'c'.repeat(64) },
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  for (const options of [
+    { intent },
+    { ...request.options, revision: 'invalid' },
+    { ...request.options, intent: { ...intent, discussionId: '../other' } },
+    { ...request.options, intent: { ...intent, body: ' ' } },
+    { ...request.options, intent: { ...intent, endpoint: 'https://attacker.test' } },
+  ])
+    expect(requestSchema.safeParse({ ...request, options }).success).toBe(false);
+  expect(
+    requestSchema.safeParse({
+      ...request,
+      method: 'providerMergeDiscussionPreview',
+      options: intent,
+    }).success,
+  ).toBe(true);
+});

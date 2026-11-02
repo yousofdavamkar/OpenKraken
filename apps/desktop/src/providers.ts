@@ -3,6 +3,10 @@ import { mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import {
+  providerMergeDiscussionActionSchema,
+  providerWriteMergeDiscussionSchema,
+  type ProviderMergeDiscussionAction,
+  type ProviderWriteMergeDiscussion,
   providerMergeRequestDiscussionsOptionsSchema,
   type ProviderMergeRequestDiscussionsOptions,
   providerMergeRequestFilesOptionsSchema,
@@ -395,6 +399,34 @@ export class ProviderService {
           'Choose a GitLab account to read merge requests.',
         );
       return this.gitlab.mergeRequestDiscussions(account.origin, token, options, signal);
+    });
+  }
+  previewMergeDiscussionAction(
+    id: string,
+    input: ProviderMergeDiscussionAction,
+    signal?: AbortSignal,
+  ) {
+    return this.run(async () => {
+      const options = providerMergeDiscussionActionSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to manage discussions.',
+        );
+      return this.gitlab.previewMergeDiscussionAction(account.origin, token, options, signal);
+    });
+  }
+  writeMergeDiscussion(id: string, input: ProviderWriteMergeDiscussion, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerWriteMergeDiscussionSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to manage discussions.',
+        );
+      return this.gitlab.writeMergeDiscussion(account.origin, token, options, signal);
     });
   }
   issues(id: string, input: ProviderIssueListOptions, signal?: AbortSignal) {

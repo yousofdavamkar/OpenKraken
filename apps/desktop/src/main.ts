@@ -281,6 +281,8 @@ else {
           request.method === 'providerMergeRequest' ||
           request.method === 'providerMergeRequestFiles' ||
           request.method === 'providerMergeRequestDiscussions' ||
+          request.method === 'providerMergeDiscussionPreview' ||
+          request.method === 'providerWriteMergeDiscussion' ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerPollingPolicy' ||
@@ -487,6 +489,24 @@ else {
                 controller.signal,
               ),
             });
+          if (request.method === 'providerMergeDiscussionPreview')
+            return resultSchema.parse({
+              kind: 'providerMergeDiscussionPreview',
+              preview: await providers.previewMergeDiscussionAction(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerWriteMergeDiscussion')
+            return resultSchema.parse({
+              kind: 'providerMergeDiscussionWritten',
+              result: await providers.writeMergeDiscussion(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerMergeRequestDiscussions')
             return resultSchema.parse({
               kind: 'providerMergeRequestDiscussions',
@@ -634,6 +654,8 @@ else {
           request.method === 'providerMergeRequest' ||
           request.method === 'providerMergeRequestFiles' ||
           request.method === 'providerMergeRequestDiscussions' ||
+          request.method === 'providerMergeDiscussionPreview' ||
+          request.method === 'providerWriteMergeDiscussion' ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerPollingPolicy' ||

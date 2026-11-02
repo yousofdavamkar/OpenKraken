@@ -1,3 +1,4 @@
+import { previewMergeDiscussionAction, writeMergeDiscussion } from './gitlab-discussion-actions.js';
 import { Users, Projects } from '@gitbeaker/rest';
 import { createRequesterFn, type BaseResourceOptions } from '@gitbeaker/requester-utils';
 import { z } from 'zod';
@@ -14,6 +15,8 @@ import { loadMergeRequestDiscussions } from './gitlab-discussions.js';
 import { loadMergeRequestFiles } from './gitlab-files.js';
 import { loadMergeRequest, loadMergeRequests } from './gitlab-merges.js';
 import type {
+  ProviderMergeDiscussionAction,
+  ProviderWriteMergeDiscussion,
   ProviderMergeRequestDiscussionsOptions,
   ProviderMergeRequestFilesOptions,
   ProviderPullListOptions,
@@ -149,12 +152,40 @@ export class GitLabProvider {
       input,
     );
   }
+  previewMergeDiscussionAction(
+    origin: string,
+    token: string,
+    input: ProviderMergeDiscussionAction,
+    signal?: AbortSignal,
+  ) {
+    this.cache.clear();
+    return previewMergeDiscussionAction(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      origin,
+      input,
+    );
+  }
+  writeMergeDiscussion(
+    origin: string,
+    token: string,
+    input: ProviderWriteMergeDiscussion,
+    signal?: AbortSignal,
+  ) {
+    this.cache.clear();
+    return writeMergeDiscussion(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      (endpoint, method, perform) => this.request(origin, token, signal, perform, endpoint, method),
+      origin,
+      input,
+    );
+  }
   private async request<T>(
     origin: string,
     token: string,
     signal: AbortSignal | undefined,
     perform: (options: BaseResourceOptions<false>) => Promise<T>,
     expectedEndpoint: string,
+    method: 'GET' | 'POST' | 'PUT' = 'GET',
   ) {
     const host = providerOriginSchema.parse(origin);
     this.policy.assertAllowed(host, token);
@@ -178,19 +209,22 @@ export class GitLabProvider {
             if (
               dispatched ||
               target !== `${host}/api/v4/${expectedEndpoint}` ||
-              options?.method !== 'GET'
+              options?.method !== method
             )
               throw new Error('endpoint');
-            dispatched = true;
             const url = new URL(target);
             url.search = typeof options.searchParams === 'string' ? options.searchParams : '';
             const requestHeaders = new Headers(options.headers as Record<string, string>);
             requestHeaders.set('User-Agent', 'OpenKraken/0.1.0');
             const key = this.cache.key(host, token, url.href, requestHeaders);
-            const cached = this.cache.get(key);
+            const cached = method === 'GET' ? this.cache.get(key) : undefined;
             if (cached) requestHeaders.set('If-None-Match', cached.etag);
+            combined.throwIfAborted();
+            if (method !== 'GET') this.cache.clear();
+            dispatched = true;
             const response = await this.fetcher(url.href, {
-              method: 'GET',
+              method,
+              ...(method === 'GET' ? {} : { body: options.body as BodyInit | undefined }),
               headers: requestHeaders,
               credentials: 'omit',
               redirect: 'error',
@@ -211,6 +245,13 @@ export class GitLabProvider {
                 chunks.push(cached.body);
                 if (!this.cache.storageAllowed(response.headers)) this.cache.discard(key);
               } else if (!response.ok) {
+                if (method !== 'GET')
+                  throw new ProviderError(
+                    [400, 401, 403, 404, 405, 409, 410, 422, 429].includes(response.status)
+                      ? 'PROVIDER_WRITE_REJECTED'
+                      : 'PROVIDER_WRITE_UNCERTAIN',
+                    'The GitLab action was not acknowledged. Check its current state before trying again.',
+                  );
                 this.policy.assertAllowed(host, token);
                 throw new ProviderError(
                   response.status === 401 || response.status === 403
@@ -234,7 +275,8 @@ export class GitLabProvider {
               await reader?.cancel().catch(() => {});
             }
             const body = Buffer.concat(chunks);
-            if (response.status === 200) this.cache.set(key, response.headers, body);
+            if (method === 'GET' && response.status === 200)
+              this.cache.set(key, response.headers, body);
             return {
               body: z
                 .union([
@@ -252,6 +294,13 @@ export class GitLabProvider {
       combined.throwIfAborted();
       return result;
     } catch (error) {
+      if (method !== 'GET' && dispatched) {
+        if (error instanceof ProviderError && error.code === 'PROVIDER_WRITE_REJECTED') throw error;
+        throw new ProviderError(
+          'PROVIDER_WRITE_UNCERTAIN',
+          'This GitLab action may have completed. Check existing results before trying again.',
+        );
+      }
       if (signal?.aborted) throw new ProviderError('CANCELLED', 'GitLab request cancelled.');
       if (error instanceof ProviderError) throw error;
       if (error instanceof z.ZodError)

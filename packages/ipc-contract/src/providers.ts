@@ -469,6 +469,57 @@ export type ProviderMergeRequestDiscussionsOptions = z.infer<
 >;
 export type ProviderMergeRequestDiscussion = z.infer<typeof providerMergeRequestDiscussionSchema>;
 export type ProviderMergeRequestPosition = z.infer<typeof providerMergeRequestPositionSchema>;
+const mergeDiscussionBodySchema = z
+  .string()
+  .min(1)
+  .max(65536)
+  .refine((body) => body.trim().length > 0);
+const mergeDiscussionIdSchema = z.string().regex(/^[0-9a-f]{40}$/);
+export const providerMergeDiscussionActionSchema = z.discriminatedUnion('action', [
+  providerPullOptionsSchema
+    .extend({ action: z.literal('comment'), body: mergeDiscussionBodySchema })
+    .strict(),
+  providerPullOptionsSchema
+    .extend({
+      action: z.literal('reply'),
+      discussionId: mergeDiscussionIdSchema,
+      body: mergeDiscussionBodySchema,
+    })
+    .strict(),
+  providerPullOptionsSchema
+    .extend({
+      action: z.literal('resolve'),
+      discussionId: mergeDiscussionIdSchema,
+      resolved: z.boolean(),
+    })
+    .strict(),
+]);
+export const providerWriteMergeDiscussionSchema = z
+  .object({
+    intent: providerMergeDiscussionActionSchema,
+    revision: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .strict();
+export const providerMergeDiscussionPreviewSchema = z
+  .object({
+    mergeRequest: providerMergeRequestDetailsSchema,
+    discussion: providerMergeRequestDiscussionSchema.nullable(),
+    revision: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .strict();
+export const providerMergeDiscussionWrittenSchema = z.discriminatedUnion('kind', [
+  z
+    .object({ kind: z.literal('commented'), discussion: providerMergeRequestDiscussionSchema })
+    .strict(),
+  z.object({ kind: z.literal('replied'), note: providerMergeRequestNoteSchema }).strict(),
+  z
+    .object({ kind: z.literal('resolved'), discussion: providerMergeRequestDiscussionSchema })
+    .strict(),
+]);
+export type ProviderMergeDiscussionAction = z.infer<typeof providerMergeDiscussionActionSchema>;
+export type ProviderWriteMergeDiscussion = z.infer<typeof providerWriteMergeDiscussionSchema>;
+export type ProviderMergeDiscussionPreview = z.infer<typeof providerMergeDiscussionPreviewSchema>;
+export type ProviderMergeDiscussionWritten = z.infer<typeof providerMergeDiscussionWrittenSchema>;
 export const providerPullRevisionSchema = z
   .object({ head: providerCommitSchema, base: providerCommitSchema })
   .strict();

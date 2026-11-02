@@ -37,6 +37,10 @@ import {
   providerPullOptionsSchema,
   providerPullPageSchema,
   providerPullDetailsSchema,
+  providerMergeDiscussionActionSchema,
+  providerWriteMergeDiscussionSchema,
+  providerMergeDiscussionPreviewSchema,
+  providerMergeDiscussionWrittenSchema,
   providerMergeRequestDetailsSchema,
   providerMergeRequestDiscussionsOptionsSchema,
   providerMergeRequestDiscussionsPageSchema,
@@ -1308,6 +1312,22 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerMergeDiscussionPreview'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerMergeDiscussionActionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerWriteMergeDiscussion'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerWriteMergeDiscussionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerMergeRequest'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerPullOptionsSchema,
@@ -1560,6 +1580,18 @@ export const resultSchema = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({ kind: z.literal('providerReviewSubmitted'), review: providerPullReviewSchema })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerMergeDiscussionPreview'),
+      preview: providerMergeDiscussionPreviewSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerMergeDiscussionWritten'),
+      result: providerMergeDiscussionWrittenSchema,
+    })
     .strict(),
   z
     .object({

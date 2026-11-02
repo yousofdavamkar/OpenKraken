@@ -1,6 +1,9 @@
 import { MergeRequestDiscussions } from '@gitbeaker/rest';
 import { z } from 'zod';
 import {
+  providerMergeRequestDiscussionSchema,
+  providerMergeRequestNoteSchema,
+  type ProviderMergeRequestDetails,
   providerMergeRequestDiscussionsOptionsSchema,
   providerMergeRequestDiscussionsPageSchema,
   providerMergeRequestPositionSchema,
@@ -115,40 +118,47 @@ export async function loadMergeRequestDiscussions(
           ),
         );
       return providerMergeRequestDiscussionsPageSchema.parse({
-        discussions: data.map((discussion) => ({
-          id: discussion.id,
-          individual: discussion.individual_note,
-          notes: discussion.notes.map((note) => {
-            if (
-              String(note.project_id) !== merge.target.projectId ||
-              String(note.noteable_id) !== merge.id ||
-              (note.noteable_iid !== null &&
-                note.noteable_iid !== undefined &&
-                note.noteable_iid !== merge.number)
-            )
-              throw new ProviderError(
-                'PROVIDER_RESPONSE',
-                'GitLab returned a note from another merge request.',
-              );
-            return {
-              id: note.id,
-              type: note.type,
-              body: note.body,
-              author: note.author?.username ?? null,
-              createdAt: note.created_at,
-              updatedAt: note.updated_at,
-              system: note.system,
-              resolvable: note.resolvable,
-              resolved: note.resolved ?? null,
-              resolvedBy: note.resolved_by?.username ?? null,
-              resolvedAt: note.resolved_at ?? null,
-              position: position(note.position),
-            };
-          }),
-        })),
+        discussions: data.map((discussion) => parseMergeDiscussion(discussion, merge)),
         nextPage: data.length === 100 && options.page < 10 ? options.page + 1 : null,
         limited: data.length === 100 && options.page === 10,
       });
     },
   );
+}
+
+export function parseMergeNote(value: unknown, merge: ProviderMergeRequestDetails) {
+  const note = noteSchema.parse(value);
+  if (
+    String(note.project_id) !== merge.target.projectId ||
+    String(note.noteable_id) !== merge.id ||
+    (note.noteable_iid !== null &&
+      note.noteable_iid !== undefined &&
+      note.noteable_iid !== merge.number)
+  )
+    throw new ProviderError(
+      'PROVIDER_RESPONSE',
+      'GitLab returned a note from another merge request.',
+    );
+  return providerMergeRequestNoteSchema.parse({
+    id: note.id,
+    type: note.type,
+    body: note.body,
+    author: note.author?.username ?? null,
+    createdAt: note.created_at,
+    updatedAt: note.updated_at,
+    system: note.system,
+    resolvable: note.resolvable,
+    resolved: note.resolved ?? null,
+    resolvedBy: note.resolved_by?.username ?? null,
+    resolvedAt: note.resolved_at ?? null,
+    position: position(note.position),
+  });
+}
+export function parseMergeDiscussion(value: unknown, merge: ProviderMergeRequestDetails) {
+  const discussion = discussionSchema.parse(value);
+  return providerMergeRequestDiscussionSchema.parse({
+    id: discussion.id,
+    individual: discussion.individual_note,
+    notes: discussion.notes.map((note) => parseMergeNote(note, merge)),
+  });
 }
