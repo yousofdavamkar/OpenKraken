@@ -77,6 +77,7 @@ test('reviewed merge and mainline revert update native history', async () => {
     expect(parents).toHaveLength(3);
     expect(parents[2]).toBe(target);
     await page.getByRole('button', { name: 'Integrate commits', exact: true }).click();
+    await expect(dialog.getByText(parents[0]!, { exact: true })).toBeVisible();
     await dialog.getByRole('combobox', { name: 'Operation', exact: true }).selectOption('revert');
     await dialog
       .getByRole('combobox', { name: 'Target commit', exact: true })
@@ -85,7 +86,9 @@ test('reviewed merge and mainline revert update native history', async () => {
       .getByRole('spinbutton', { name: 'Mainline parent (merge commits only)' })
       .fill('1');
     await dialog.getByRole('button', { name: 'Start revert', exact: true }).click();
-    await expect(dialog).toHaveCount(0);
+    await expect
+      .poll(async () => ((await dialog.count()) ? await dialog.innerText() : 'closed'))
+      .toBe('closed');
     expect(fixtureGit(path, ['rev-parse', 'HEAD^{tree}'])).toBe(
       fixtureGit(path, ['rev-parse', `${parents[1]}^{tree}`]),
     );
@@ -218,6 +221,43 @@ test('automatic three-way merge stages non-overlapping text changes from a nativ
     await expect(dialog).toHaveCount(0);
     expect(fixtureGit(path, ['show', ':tracked.txt'])).toBe('ours\ntwo\nthree\nfour\ntheirs');
     expect(fixtureGit(path, ['ls-files', '--unmerged'])).toBe('');
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+test('configured external merge tool is available from the conflict editor', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-mergetool-e2e-'));
+  const path = createFixture(join(root, 'repository'));
+  fixtureGit(path, ['switch', '-c', 'incoming']);
+  writeFileSync(join(path, 'tracked.txt'), 'theirs\n');
+  fixtureGit(path, ['commit', '-am', 'Theirs']);
+  fixtureGit(path, ['switch', 'main']);
+  writeFileSync(join(path, 'tracked.txt'), 'ours\n');
+  fixtureGit(path, ['commit', '-am', 'Ours']);
+  expect(() => fixtureGit(path, ['merge', 'incoming'])).toThrow();
+  fixtureGit(path, ['config', 'merge.tool', 'fixture']);
+  fixtureGit(path, [
+    'config',
+    'mergetool.fixture.cmd',
+    'printf "external UI resolution\\n" > "$MERGED"',
+  ]);
+  fixtureGit(path, ['config', 'mergetool.fixture.trustExitCode', 'true']);
+  fixtureGit(path, ['config', 'mergetool.keepBackup', 'false']);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('button', { name: 'Resolve tracked.txt', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Resolve tracked.txt' });
+    await dialog.getByRole('button', { name: 'Open fixture merge tool' }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(fixtureGit(path, ['show', ':tracked.txt'])).toBe('external UI resolution');
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

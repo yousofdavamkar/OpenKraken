@@ -212,8 +212,10 @@ export const useRepository = create<State>()(
           const query = sameRepository ? previous.query : '';
           set((s) => {
             s.snapshot = result.snapshot;
+            // A new snapshot starts a new status read. Do not let action dialogs
+            // freeze the previous HEAD/index revision during that handoff.
+            s.workingState = undefined;
             if (!sameRepository) {
-              s.workingState = undefined;
               s.watcherMode = undefined;
             }
             s.rows = rows;
