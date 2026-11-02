@@ -1,0 +1,13 @@
+# GitHub device authorization
+
+GitHub.com sign-in uses the documented device grant with a configured application client ID. OpenKraken does not embed an application secret or borrow another application's registration. The initial scope is `read:user public_repo`; private repository access explicitly selects `repo` instead. GitHub Enterprise continues to use its host-specific token connection.
+
+Main owns a single in-memory authorization session. Public results expose only a random session ID, user code, the fixed `https://github.com/login/device` URL and polling/expiry times. The private device code and resulting credentials never cross renderer IPC or enter unencrypted profile data. Replacing or cancelling a session aborts its pending request. Opening the browser must resolve an unexpired session ID back to the fixed allowlisted URL.
+
+Requests go directly to GitHub's fixed HTTPS OAuth endpoints, omit cookies, refuse redirects and cap JSON responses at 32 KiB with a 20-second timeout. Polling is enforced in main, including the initial interval and the additional delay on `slow_down`; overlapping token polls cannot execute. Expired/declined codes and malformed responses are retired. Errors use fixed messages rather than provider response text.
+
+Successful authorization revalidates `/user` before committing the account. Access tokens, optional refresh tokens, expiry times, scopes and client ID are stored together inside the existing protected vault. Account metadata may expose the authorization method and access-token expiry, but no token. Verification refreshes a token within 60 seconds of expiry when possible and rechecks the same provider identity before persisting rotation. Refresh requires no client secret for device-generated credentials. Missing/expired refresh credentials require signing in again. A failed local write after server-side token rotation can require reconnection; the old server token cannot be restored by a local rollback.
+
+Protocol fixtures cover initial polling, slow-down, expiry, denial, URL validation, redirect refusal, concurrent polls/cancellation and refresh exchange. Account-service fixtures cover encrypted persistence, restart, refresh rotation and identity revalidation. These fixtures do not prove a real OAuth application registration or live sign-in.
+
+Reference: [GitHub OAuth device flow and refresh](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow).

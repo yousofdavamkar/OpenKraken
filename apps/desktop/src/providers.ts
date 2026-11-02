@@ -8,9 +8,16 @@ import {
   providerConnectSchema,
   type ProviderAccount,
   type ProviderConnect,
+  type DeviceStart,
 } from '@openkraken/ipc-contract';
 import { GitHubProvider, ProviderError, type ProviderDriver } from './github-provider.js';
 import { ProviderCredentialError, ProviderVault } from './provider-vault.js';
+import {
+  GitHubDeviceFlow,
+  GitHubOAuth,
+  githubCredentialSchema,
+  type GitHubCredential,
+} from './github-device.js';
 
 function scope(account: Pick<ProviderAccount, 'provider' | 'origin' | 'providerUserId'>) {
   return JSON.stringify([account.provider, account.origin, account.providerUserId]);
@@ -22,12 +29,25 @@ function idFor(account: Pick<ProviderAccount, 'provider' | 'origin' | 'providerU
 export class ProviderService {
   private queue: Promise<unknown> = Promise.resolve();
   private manifest: string;
+  private device: GitHubDeviceFlow;
   constructor(
     private directory: string,
     private vault: ProviderVault,
     private github: ProviderDriver = new GitHubProvider(),
+    private oauth = new GitHubOAuth(),
+    private now = Date.now,
   ) {
     this.manifest = join(directory, 'provider-accounts.json');
+    this.device = new GitHubDeviceFlow(
+      (credential, signal) =>
+        this.connectCredential(
+          { provider: 'github', origin: 'https://github.com', token: credential.accessToken },
+          signal,
+          credential,
+        ),
+      oauth,
+      now,
+    );
   }
   private run<T>(work: () => Promise<T>) {
     const pending = this.queue.then(work, work);
@@ -94,6 +114,26 @@ export class ProviderService {
     }));
   }
   connect(input: ProviderConnect, signal?: AbortSignal) {
+    return this.connectCredential(input, signal);
+  }
+  async deviceStart(options: DeviceStart, signal?: AbortSignal) {
+    if (!(await this.vault.available())) throw new ProviderCredentialError('KEYCHAIN_UNAVAILABLE');
+    return this.device.start(options, signal);
+  }
+  devicePoll(id: string, signal?: AbortSignal) {
+    return this.device.poll(id, signal);
+  }
+  deviceCancel(id?: string) {
+    this.device.cancel(id);
+  }
+  deviceVerificationUri(id: string) {
+    return this.device.verificationUri(id);
+  }
+  private connectCredential(
+    input: ProviderConnect,
+    signal?: AbortSignal,
+    credential?: GitHubCredential,
+  ) {
     return this.run(async () => {
       const options = providerConnectSchema.parse(input);
       if (!(await this.vault.available()))
@@ -107,12 +147,19 @@ export class ProviderService {
         providerUserId: identity.id,
         login: identity.login,
       };
-      const account = providerAccountSchema.parse({ ...fields, id: idFor(fields) });
+      const account = providerAccountSchema.parse({
+        ...fields,
+        id: idFor(fields),
+        ...(credential ? { authentication: 'device', expiresAt: credential.expiresAt } : {}),
+      });
       const existing = accounts.findIndex((item) => item.id === account.id);
       if (existing < 0 && accounts.length >= 50)
         throw new ProviderError('PROVIDER_LIMIT', 'Remove an account before connecting another.');
       signal?.throwIfAborted();
-      await this.vault.write(scope(account), options.token);
+      await this.vault.write(
+        scope(account),
+        credential ? JSON.stringify(credential) : options.token,
+      );
       if (existing < 0) accounts.push(account);
       else accounts[existing] = account;
       try {
@@ -121,6 +168,54 @@ export class ProviderService {
         if (existing < 0) await this.vault.remove(scope(account)).catch(() => {});
         throw error;
       }
+      return { keychainAvailable: true, accounts };
+    });
+  }
+  verify(id: string, signal?: AbortSignal) {
+    return this.run(async () => {
+      signal?.throwIfAborted();
+      const accounts = await this.load();
+      const index = accounts.findIndex((account) => account.id === id);
+      const account = accounts[index];
+      if (!account)
+        throw new ProviderError(
+          'PROVIDER_ACCOUNT',
+          'This provider account is no longer connected.',
+        );
+      const saved = await this.vault.read(scope(account));
+      if (!saved) throw new ProviderCredentialError('CREDENTIAL_INVALID');
+      let credential: GitHubCredential | undefined;
+      if (account.authentication === 'device') {
+        try {
+          credential = githubCredentialSchema.parse(JSON.parse(saved));
+        } catch {
+          throw new ProviderCredentialError('CREDENTIAL_INVALID');
+        }
+      }
+      let rotated = false;
+      if (credential?.expiresAt !== undefined && credential.expiresAt <= this.now() + 60000) {
+        credential = await this.oauth.refresh(credential, signal);
+        rotated = true;
+      }
+      const identity = await this.github.identity(
+        account.origin,
+        credential?.accessToken ?? saved,
+        signal,
+      );
+      if (identity.id !== account.providerUserId)
+        throw new ProviderError(
+          'PROVIDER_ACCOUNT',
+          'The authorization now identifies another account. Sign in again.',
+        );
+      signal?.throwIfAborted();
+      if (rotated) await this.vault.write(scope(account), JSON.stringify(credential));
+      const { expiresAt: _expiresAt, ...metadata } = account;
+      accounts[index] = providerAccountSchema.parse({
+        ...metadata,
+        login: identity.login,
+        ...(credential?.expiresAt ? { expiresAt: credential.expiresAt } : {}),
+      });
+      await this.save(accounts);
       return { keychainAvailable: true, accounts };
     });
   }

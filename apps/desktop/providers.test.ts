@@ -7,6 +7,7 @@ import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { ProviderService } from './src/providers.js';
 import { ProviderVault, type SecretProtection } from './src/provider-vault.js';
+import { GitHubOAuth } from './src/github-device.js';
 const root = await mkdtemp(join(tmpdir(), 'openkraken-providers-'));
 const server = setupServer();
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
@@ -186,4 +187,70 @@ test('imprecise provider user IDs cannot bind a credential to the wrong account'
     providers.connect({ provider: 'github', origin: 'https://github.com', token: 'fixture-pat' }),
   ).rejects.toMatchObject({ code: 'PROVIDER_RESPONSE' });
   expect((await providers.accounts()).accounts).toEqual([]);
+});
+
+test('device sign-in protects refresh tokens and revalidates the same identity after rotation', async () => {
+  const directory = join(root, 'device');
+  const vault = new ProviderVault(directory, protection());
+  let now = 100000,
+    refreshes = 0;
+  const oauth = new GitHubOAuth(undefined, () => now);
+  const providers = new ProviderService(directory, vault, undefined, oauth, () => now);
+  server.use(
+    http.post('https://github.com/login/device/code', () =>
+      HttpResponse.json({
+        device_code: 'private-device',
+        user_code: 'ABCD-EFGH',
+        verification_uri: 'https://github.com/login/device',
+        expires_in: 900,
+        interval: 5,
+      }),
+    ),
+    http.post('https://github.com/login/oauth/access_token', async ({ request }) => {
+      const params = new URLSearchParams(await request.text());
+      const refreshing = params.get('grant_type') === 'refresh_token';
+      if (refreshing) {
+        refreshes++;
+        expect(params.get('refresh_token')).toBe('first-refresh');
+      }
+      return HttpResponse.json({
+        access_token: refreshing ? 'second-access' : 'first-access',
+        token_type: 'bearer',
+        scope: 'repo',
+        expires_in: 120,
+        refresh_token: refreshing ? 'second-refresh' : 'first-refresh',
+        refresh_token_expires_in: 600,
+      });
+    }),
+    http.get('https://api.github.com/user', ({ request }) => {
+      expect(request.headers.get('authorization')).toBe(
+        refreshes ? 'token second-access' : 'token first-access',
+      );
+      return HttpResponse.json({ id: 543, login: refreshes ? 'renamed-user' : 'fixture-user' });
+    }),
+  );
+  const opened = await providers.deviceStart({
+    clientId: 'fixture-client',
+    privateRepositories: true,
+  });
+  now += 5000;
+  const completed = await providers.devicePoll(opened.id);
+  expect(completed.kind).toBe('providerAccounts');
+  const account = (await providers.accounts()).accounts[0]!;
+  expect(account).toMatchObject({ authentication: 'device', expiresAt: 225000 });
+  for (const secret of ['private-device', 'first-access', 'first-refresh']) {
+    expect(JSON.stringify(completed)).not.toContain(secret);
+    expect(await readFile(join(directory, 'provider-accounts.json'), 'utf8')).not.toContain(secret);
+  }
+  const restarted = new ProviderService(directory, vault, undefined, oauth, () => now);
+  now += 121000;
+  const checked = await restarted.verify(account.id);
+  expect(refreshes).toBe(1);
+  expect(checked.accounts[0]).toMatchObject({
+    id: account.id,
+    login: 'renamed-user',
+    expiresAt: 346000,
+  });
+  await restarted.verify(account.id);
+  expect(refreshes).toBe(1);
 });
