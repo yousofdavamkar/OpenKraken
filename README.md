@@ -133,4 +133,6 @@ In **Manage remotes**, **Fetch authentication** lets you choose a saved account 
 
 **Pull requests** opens a repository picker and paged PR list. Filter by state, search loaded PRs, use the keyboard to open details, and refresh or retry results. Descriptions display as text; changing repositories or closing the panel cancels pending requests.
 
-PR creation/review/merge, repository creation/forking and other providers remain in development. A real OAuth application registration and live sign-in still require environment-specific verification. Existing Git credential helpers and SSH agents remain available for manual clone/fetch/push. See [M6 progress](docs/verification/m6-progress.md).
+**Files** shows paged changed files, rename metadata and read-only provider patches; missing or truncated patches are labeled. **Reviews** lists submitted reviews. **Write review** previews a comment, approval or request for changes before sending, checks the displayed commits again and preserves the draft on errors. If the outcome is uncertain, check the submitted reviews before trying again. Review drafts are not saved across app restarts.
+
+Inline review threads, PR creation/merge, repository creation/forking and other providers remain in development. A real OAuth application registration and live sign-in still require environment-specific verification. Existing Git credential helpers and SSH agents remain available for manual clone/fetch/push. See [M6 progress](docs/verification/m6-progress.md).
