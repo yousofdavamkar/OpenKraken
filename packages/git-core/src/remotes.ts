@@ -1,3 +1,5 @@
+import { providerCloneSettings } from './provider-transport.js';
+import type { ProviderGitTarget } from '@openkraken/ipc-contract';
 import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -113,7 +115,12 @@ export class Remotes {
       remotes: [...remotes.values()].sort((a, b) => a.name.localeCompare(b.name)),
     };
   }
-  async clone(input: CloneOptions, signal?: AbortSignal) {
+  async clone(input: CloneOptions, signal?: AbortSignal, provider?: ProviderGitTarget) {
+    if (provider && input.url !== provider.url)
+      throw new GitError(
+        'PROVIDER_CLONE_URL',
+        'The provider authorization does not match this clone URL.',
+      );
     const options = cloneOptionsSchema.parse(input);
     validateUrl(options.url);
     if (
@@ -150,12 +157,13 @@ export class Remotes {
       ],
       signal,
       false,
-      { timeoutMs: 1800000 },
+      { timeoutMs: 1800000, provider },
     );
     if (options.sparse)
       await this.network(['sparse-checkout', 'set', '--cone', '--stdin'], signal, false, {
         stdin: options.sparse.map((path) => JSON.stringify(path)).join('\n') + '\n',
         timeoutMs: 1800000,
+        provider,
       });
   }
   async fetch(input: string, signal?: AbortSignal, background = false) {
@@ -183,8 +191,11 @@ export class Remotes {
     args: string[],
     signal?: AbortSignal,
     background = false,
-    options: { stdin?: string; timeoutMs?: number } = {},
+    options: { stdin?: string; timeoutMs?: number; provider?: ProviderGitTarget } = {},
   ) {
+    const protectedTransport = options.provider
+      ? await providerCloneSettings(this.run, options.provider, signal, this.authentication)
+      : undefined;
     const progress = this.onProgress ? new GitProgressLines(this.onProgress) : undefined;
     // URL-specific settings can outrank the global TLS setting, even in local config.
     const tls = await this.run(['config', '--null', '--get-regexp', '^http\\..*\\.sslverify$'], {
@@ -198,7 +209,12 @@ export class Remotes {
       .flatMap((record) => ['-c', `${record.split('\n')[0]}=true`]);
     try {
       const result = await this.run(
-        [...overrides, ...(background ? ['-c', 'credential.interactive=false'] : []), ...args],
+        [
+          ...overrides,
+          ...(protectedTransport?.args ?? []),
+          ...(background ? ['-c', 'credential.interactive=false'] : []),
+          ...args,
+        ],
         {
           signal,
           readOnly: false,
@@ -208,7 +224,8 @@ export class Remotes {
           allowedExitCodes: [0, 1],
           env: {
             ...this.authentication,
-            GIT_ALLOW_PROTOCOL: 'file:https:http:ssh:git',
+            ...protectedTransport?.env,
+            GIT_ALLOW_PROTOCOL: options.provider ? 'https' : 'file:https:http:ssh:git',
             ...(background
               ? {
                   GIT_ASKPASS: '',

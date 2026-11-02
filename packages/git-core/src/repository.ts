@@ -1,3 +1,4 @@
+import type { ProviderGitTarget } from '@openkraken/ipc-contract';
 import { createHash } from 'node:crypto';
 import { access, readdir, realpath, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -101,6 +102,7 @@ export class RepositoryService {
     signal?: AbortSignal,
     onProgress?: (text: string) => void,
     authentication?: NodeJS.ProcessEnv,
+    provider?: ProviderGitTarget,
   ) {
     const path = await realpath(input);
     return this.queue(path).run(
@@ -116,7 +118,7 @@ export class RepositoryService {
           onProgress,
           authentication,
         );
-        await manager.clone(options, signal);
+        await manager.clone(options, signal, provider);
         return this.open(path, signal);
       },
       signal,

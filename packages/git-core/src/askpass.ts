@@ -4,7 +4,11 @@ import { mkdtemp, chmod, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import type { AuthenticationEvent } from '@openkraken/ipc-contract';
+import {
+  providerGitCredentialSchema,
+  type ProviderGitCredential,
+  type AuthenticationEvent,
+} from '@openkraken/ipc-contract';
 import { GitError } from './runner.js';
 import { redactGitMessage } from './progress.js';
 const messageSchema = z
@@ -14,7 +18,13 @@ const messageSchema = z
     hint: z.enum(['', 'confirm']),
   })
   .strict();
-type Scope = { id: string; token: Buffer; context: string; close: () => void };
+type Scope = {
+  id: string;
+  token: Buffer;
+  context: string;
+  credential?: ProviderGitCredential;
+  close: () => void;
+};
 type Pending = {
   scope: Scope;
   kind: 'username' | 'secret' | 'confirm';
@@ -54,7 +64,13 @@ export class AskpassBroker {
     if (process.platform !== 'win32') await chmod(path, 0o600);
     return path;
   }
-  async open(id: string, context: string, signal?: AbortSignal) {
+  async open(
+    id: string,
+    context: string,
+    signal?: AbortSignal,
+    credential?: ProviderGitCredential,
+  ) {
+    if (credential) credential = providerGitCredentialSchema.parse(credential);
     if (this.stopped) throw new GitError('CANCELLED', 'Authentication cancelled');
     const path = await this.start();
     if (this.stopped || signal?.aborted)
@@ -63,6 +79,7 @@ export class AskpassBroker {
       throw new GitError('AUTH_BUSY', 'Too many authentication requests');
     const scope: Scope = {
       id,
+      credential,
       token: randomBytes(32),
       context: redactGitMessage(context).slice(0, 1024),
       close: () => {
@@ -70,6 +87,7 @@ export class AskpassBroker {
         signal?.removeEventListener('abort', scope.close);
         for (const pending of this.pending.values())
           if (pending.scope === scope) pending.finish(null);
+        scope.credential = undefined;
         scope.token.fill(0);
       },
     };
@@ -129,6 +147,36 @@ export class AskpassBroker {
       const scope = [...this.scopes.values()].find((scope) => timingSafeEqual(scope.token, token));
       if (!scope || [...this.pending.values()].some((pending) => pending.scope === scope)) {
         socket.destroy();
+        return;
+      }
+      if (scope.credential) {
+        // Git runs in the C locale. A saved credential never answers SSH, proxy, or another URL.
+        let answer: string | undefined;
+        const match = /^(Username|Password) for '([^']+)': ?$/.exec(input.prompt);
+        if (match && input.hint === '') {
+          try {
+            const url = new URL(match[2]!);
+            const credential = scope.credential;
+            if (
+              `${url.origin}${url.pathname}` === credential.url &&
+              !url.password &&
+              !url.search &&
+              !url.hash
+            ) {
+              if (match[1] === 'Username' && !url.username) answer = credential.username;
+              if (
+                match[1] === 'Password' &&
+                decodeURIComponent(url.username) === credential.username
+              )
+                answer = credential.password;
+            }
+          } catch {
+            /* Invalid prompt URLs cannot receive credentials. */
+          }
+        }
+        socket.end(
+          JSON.stringify(answer === undefined ? { ok: false } : { ok: true, answer }) + '\n',
+        );
         return;
       }
       const promptId = randomUUID();

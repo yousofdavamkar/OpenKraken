@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { mkdtemp, mkdir, copyFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, copyFile, rm, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -52,6 +52,171 @@ test('verified HTTPS clone uses native username/password prompts with a helper p
     await broker.close();
     await service.dispose();
     await remote.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('saved-provider HTTPS clone keeps credentials out of helpers, config, traces and UI events', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-provider-clone-'));
+  const source = createFixture(join(root, 'source'));
+  const bare = join(root, 'remote.git');
+  fixtureGit(source, ['clone', '--bare', '.', bare]);
+  const remote = await authenticatedRemote(bare, {
+    basePath: '/team/project.git',
+    password: 'fixture-provider-token',
+  });
+  const config = join(root, 'gitconfig'),
+    store = join(root, 'plaintext-store'),
+    trace = join(root, 'curl-trace');
+  fixtureGit(source, [
+    'config',
+    '--file',
+    config,
+    `credential.${remote.url}.helper`,
+    `store --file=${store}`,
+  ]);
+  fixtureGit(source, ['config', '--file', config, `credential.${remote.url}.useHttpPath`, 'false']);
+  fixtureGit(source, [
+    'config',
+    '--file',
+    config,
+    `credential.${remote.url}.username`,
+    'wrong-user',
+  ]);
+  const events: unknown[] = [];
+  const broker = new AskpassBroker(
+    resolve(
+      'apps/desktop/dist/helpers',
+      process.platform === 'win32' ? 'openkraken-askpass.exe' : 'openkraken-askpass',
+    ),
+    (event) => {
+      events.push(event);
+      if (event.type === 'authenticationPrompt') broker.answer(event.id, event.promptId, null);
+    },
+  );
+  const service = new RepositoryService('git');
+  try {
+    const target = join(root, 'target');
+    await mkdir(target);
+    const credential = {
+      url: remote.url,
+      ...{ username: remote.credentials.username, password: remote.credentials.password },
+    };
+    const scope = await broker.open(
+      randomUUID(),
+      'Clone provider repository',
+      undefined,
+      credential,
+    );
+    const repo = await service.clone(
+      target,
+      { url: remote.url },
+      undefined,
+      undefined,
+      {
+        ...scope.environment,
+        GIT_SSL_CAINFO: remote.certificate,
+        GIT_CONFIG_GLOBAL: config,
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_TRACE_CURL: trace,
+        GIT_TRACE_REDACT: '0',
+      },
+      { url: credential.url, username: credential.username },
+    );
+    scope.close();
+    expect(repo.head.oid).toBe(fixtureGit(source, ['rev-parse', 'HEAD']));
+    expect(remote.authenticated()).toBeGreaterThan(1);
+    expect(events).toEqual([]);
+    await expect(stat(store)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(stat(trace)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readFile(join(target, '.git/config'), 'utf8')).not.toContain(
+      remote.credentials.password,
+    );
+  } finally {
+    await broker.close();
+    await service.dispose();
+    await remote.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('provider clones refuse Git URL rewrites and authenticated redirects even with URL-specific overrides', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-provider-boundary-'));
+  const source = createFixture(join(root, 'source'));
+  const bare = join(root, 'remote.git');
+  fixtureGit(source, ['clone', '--bare', '.', bare]);
+  const destination = await authenticatedRemote(bare, {
+    basePath: '/team/project.git',
+    password: 'fixture-provider-token',
+  });
+  const redirect = await authenticatedRemote(bare, {
+    basePath: '/team/project.git',
+    password: 'fixture-provider-token',
+    redirect: destination.url + '/info/refs',
+  });
+  const config = join(root, 'gitconfig');
+  fixtureGit(source, ['config', '--file', config, `http.${redirect.url}.followRedirects`, 'true']);
+  const broker = new AskpassBroker(
+    resolve(
+      'apps/desktop/dist/helpers',
+      process.platform === 'win32' ? 'openkraken-askpass.exe' : 'openkraken-askpass',
+    ),
+    () => {
+      throw new Error('Provider clone must not expose a credential prompt');
+    },
+  );
+  const service = new RepositoryService('git');
+  try {
+    const target = join(root, 'redirect');
+    await mkdir(target);
+    const credential = {
+      url: redirect.url,
+      username: redirect.credentials.username,
+      password: redirect.credentials.password,
+    };
+    const scope = await broker.open(
+      randomUUID(),
+      'Clone provider repository',
+      undefined,
+      credential,
+    );
+    const environment = {
+      ...scope.environment,
+      GIT_SSL_CAINFO: redirect.certificate,
+      GIT_CONFIG_GLOBAL: config,
+      GIT_CONFIG_NOSYSTEM: '1',
+    };
+    await expect(
+      service.clone(target, { url: redirect.url }, undefined, undefined, environment, {
+        url: credential.url,
+        username: credential.username,
+      }),
+    ).rejects.toThrow(/redirect|302/i);
+    expect(redirect.authenticated()).toBeGreaterThan(0);
+    expect(destination.requests()).toBe(0);
+    scope.close();
+    fixtureGit(source, [
+      'config',
+      '--file',
+      config,
+      `url.${destination.url}.insteadOf`,
+      redirect.url,
+    ]);
+    const rewritten = join(root, 'rewritten');
+    await mkdir(rewritten);
+    await expect(
+      service.clone(rewritten, { url: redirect.url }, undefined, undefined, environment, {
+        url: credential.url,
+        username: credential.username,
+      }),
+    ).rejects.toMatchObject({ code: 'PROVIDER_CLONE_REWRITE' });
+    expect(destination.requests()).toBe(0);
+    expect(await stat(join(rewritten, '.git')).catch(() => undefined)).toBeUndefined();
+  } finally {
+    await broker.close();
+    await service.dispose();
+    await redirect.close();
+    await destination.close();
     await rm(root, { recursive: true, force: true });
   }
 });

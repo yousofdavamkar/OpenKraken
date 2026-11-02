@@ -101,3 +101,53 @@ test('SSH host-key confirmation without a hint is explicit and replies cannot cr
     await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
   }
 });
+
+test('saved HTTPS credentials answer only their exact repository and account without renderer prompts', async () => {
+  const events: unknown[] = [];
+  const broker = new AskpassBroker(helper, (event) => {
+    events.push(event);
+    if (event.type === 'authenticationPrompt') broker.answer(event.id, event.promptId, null);
+  });
+  const credential = {
+    url: 'https://github.com/team/project.git',
+    username: 'fixture-user',
+    password: 'fixture-provider-token',
+  };
+  try {
+    const scope = await broker.open(
+      randomUUID(),
+      'Clone provider repository',
+      undefined,
+      credential,
+    );
+    expect(
+      (
+        await runProcess(helper, ["Username for 'https://github.com/team/project.git': "], {
+          env: scope.environment,
+        })
+      ).stdout.toString(),
+    ).toBe('fixture-user\n');
+    for (const prompt of [
+      "Password for 'https://fixture-user@other.test/team/project.git': ",
+      "Password for 'https://fixture-user@github.com/team/other.git': ",
+      "Password for 'http://fixture-user@github.com/team/project.git': ",
+      "Password for 'https://someone-else@github.com/team/project.git': ",
+      "Password for 'https://fixture-user@github.com/team/project.git?secret': ",
+      'Enter passphrase for SSH key: ',
+    ])
+      await expect(runProcess(helper, [prompt], { env: scope.environment })).rejects.toThrow();
+    const prompt = "Password for 'https://fixture-user@github.com/team/project.git': ";
+    expect((await runProcess(helper, [prompt], { env: scope.environment })).stdout.toString()).toBe(
+      'fixture-provider-token\n',
+    );
+    expect((await runProcess(helper, [prompt], { env: scope.environment })).stdout.toString()).toBe(
+      'fixture-provider-token\n',
+    );
+    expect(events).toEqual([]);
+    expect(JSON.stringify(scope.environment)).not.toContain('fixture-provider-token');
+    scope.close();
+    await expect(runProcess(helper, [prompt], { env: scope.environment })).rejects.toThrow();
+  } finally {
+    await broker.close();
+  }
+});

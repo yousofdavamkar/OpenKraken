@@ -119,3 +119,33 @@ export const providerRepositoryPageSchema = z
   .strict();
 export type ProviderRepository = z.infer<typeof providerRepositorySchema>;
 export type ProviderRepositoryPage = z.infer<typeof providerRepositoryPageSchema>;
+
+export const providerCloneUrlSchema = z
+  .string()
+  .max(4096)
+  .refine((value) => {
+    try {
+      const url = new URL(value);
+      const parts = url.pathname.split('/');
+      return (
+        providerOriginSchema.safeParse(url.origin).success &&
+        value === `${url.origin}${url.pathname}` &&
+        parts.length === 3 &&
+        providerRepositoryNameSchema.safeParse(parts[1]).success &&
+        parts[2]!.endsWith('.git') &&
+        providerRepositoryNameSchema.safeParse(parts[2]!.slice(0, -4)).success
+      );
+    } catch {
+      return false;
+    }
+  });
+/** Main-to-utility only. Never accepted in renderer requests or returned in results. */
+export const providerGitCredentialSchema = z
+  .object({
+    url: providerCloneUrlSchema,
+    username: providerRepositoryNameSchema,
+    password: providerConnectSchema.shape.token,
+  })
+  .strict();
+export type ProviderGitCredential = z.infer<typeof providerGitCredentialSchema>;
+export type ProviderGitTarget = Pick<ProviderGitCredential, 'url' | 'username'>;
