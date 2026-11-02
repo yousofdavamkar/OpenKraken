@@ -244,6 +244,8 @@ else {
           );
         }
         if (
+          request.method === 'providerPullComments' ||
+          request.method === 'providerCreateComment' ||
           request.method === 'providerPullFiles' ||
           request.method === 'providerPullReviews' ||
           request.method === 'providerSubmitReview' ||
@@ -262,6 +264,24 @@ else {
           providers = getProviders();
           const controller = new AbortController();
           providerRequests.set(request.id, controller);
+          if (request.method === 'providerPullComments')
+            return resultSchema.parse({
+              kind: 'providerPullComments',
+              page: await providers.pullComments(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerCreateComment')
+            return resultSchema.parse({
+              kind: 'providerCommentCreated',
+              comment: await providers.createComment(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerPullFiles')
             return resultSchema.parse({
               kind: 'providerPullFiles',
@@ -406,6 +426,8 @@ else {
         if (
           request.method === 'providerGit' ||
           (request.method === 'clone' && !!request.providerAccountId) ||
+          request.method === 'providerPullComments' ||
+          request.method === 'providerCreateComment' ||
           request.method === 'providerPullFiles' ||
           request.method === 'providerPullReviews' ||
           request.method === 'providerSubmitReview' ||

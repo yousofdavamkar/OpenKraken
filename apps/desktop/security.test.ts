@@ -365,3 +365,39 @@ test('PR files and review IPC require bounded pages, revisions and explicit revi
       requestSchema.safeParse({ ...review, options: { ...review.options, ...extra } }).success,
     ).toBe(false);
 });
+
+test('inline comment IPC accepts only explicit line or reply targets and stays out of the Git utility', () => {
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    accountId: 'a'.repeat(64),
+    method: 'providerCreateComment',
+    options: {
+      repository: { owner: 'team', name: 'project' },
+      number: 1,
+      revision: { head: '1'.repeat(40), base: '2'.repeat(40) },
+      body: 'A comment',
+      target: { kind: 'line', path: 'src/main.ts', side: 'RIGHT', line: 2 },
+    },
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  expect(
+    requestSchema.safeParse({
+      ...request,
+      options: { ...request.options, target: { kind: 'reply', commentId: 10 } },
+    }).success,
+  ).toBe(true);
+  for (const extra of [
+    { body: ' ' },
+    { body: 'x'.repeat(65537) },
+    { revision: undefined },
+    { url: 'https://other.test' },
+    { token: 'secret' },
+    { target: { kind: 'line', path: 'x', line: 0, side: 'LEFT' } },
+    { target: { kind: 'reply', commentId: Number.MAX_SAFE_INTEGER + 1 } },
+    { target: { kind: 'reply', commentId: 10, path: 'x' } },
+  ])
+    expect(
+      requestSchema.safeParse({ ...request, options: { ...request.options, ...extra } }).success,
+    ).toBe(false);
+});

@@ -3,6 +3,8 @@ import { mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import {
+  providerCreateCommentSchema,
+  type ProviderCreateComment,
   providerPullReviewsOptionsSchema,
   providerSubmitReviewSchema,
   type ProviderPullReviewsOptions,
@@ -220,6 +222,20 @@ export class ProviderService {
       const options = providerPullFilesOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
       return this.github.pullFiles(account.origin, token, options, signal);
+    });
+  }
+  createComment(id: string, input: ProviderCreateComment, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerCreateCommentSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.createComment(account.origin, token, options, signal);
+    });
+  }
+  pullComments(id: string, input: ProviderPullReviewsOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerPullReviewsOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.pullComments(account.origin, token, options, signal);
     });
   }
   pullReviews(id: string, input: ProviderPullReviewsOptions, signal?: AbortSignal) {

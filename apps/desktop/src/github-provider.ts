@@ -1,5 +1,11 @@
 import { Octokit } from '@octokit/rest';
 import {
+  providerCreateCommentSchema,
+  type ProviderCreateComment,
+  type ProviderPullComment,
+  providerPullCommentSchema,
+  providerPullCommentsPageSchema,
+  type ProviderPullCommentsPage,
   providerPullReviewsOptionsSchema,
   providerPullReviewsPageSchema,
   providerPullReviewSchema,
@@ -36,6 +42,18 @@ export class ProviderError extends Error {
   }
 }
 export interface ProviderDriver {
+  createComment(
+    origin: string,
+    token: string,
+    options: ProviderCreateComment,
+    signal?: AbortSignal,
+  ): Promise<ProviderPullComment>;
+  pullComments(
+    origin: string,
+    token: string,
+    options: ProviderPullReviewsOptions,
+    signal?: AbortSignal,
+  ): Promise<ProviderPullCommentsPage>;
   pullReviews(
     origin: string,
     token: string,
@@ -260,6 +278,36 @@ export class GitHubProvider implements ProviderDriver {
     await this.checkPullRevision(origin, token, options, signal);
     return result;
   }
+  async pullComments(
+    origin: string,
+    token: string,
+    input: ProviderPullReviewsOptions,
+    signal?: AbortSignal,
+  ) {
+    const options = providerPullReviewsOptionsSchema.parse(input);
+    return this.request(origin, token, signal, async (client, headers) => {
+      const { data } = await client.pulls.listReviewComments({
+        headers,
+        owner: options.repository.owner,
+        repo: options.repository.name,
+        pull_number: options.number,
+        page: options.page,
+        per_page: 100,
+        sort: 'created',
+        direction: 'asc',
+      });
+      if (!Array.isArray(data) || data.length > 100)
+        throw new ProviderError(
+          'PROVIDER_RESPONSE',
+          'The provider returned an invalid comment page.',
+        );
+      return providerPullCommentsPageSchema.parse({
+        comments: data.map(pullComment),
+        nextPage: data.length === 100 && options.page < 100 ? options.page + 1 : null,
+        limited: data.length === 100 && options.page === 100,
+      });
+    });
+  }
   async pullReviews(
     origin: string,
     token: string,
@@ -345,6 +393,97 @@ export class GitHubProvider implements ProviderDriver {
         throw new ProviderError(
           'PROVIDER_WRITE_UNCERTAIN',
           'The provider may have received this review. Refresh the reviews and check before submitting again.',
+        );
+      }
+    });
+  }
+  async createComment(
+    origin: string,
+    token: string,
+    input: ProviderCreateComment,
+    signal?: AbortSignal,
+  ) {
+    const options = providerCreateCommentSchema.parse(input);
+    const current = await this.checkPullRevision(origin, token, options, signal);
+    if (current.state !== 'open' || current.merged)
+      throw new ProviderError(
+        'PROVIDER_PULL_CLOSED',
+        'This pull request is closed. Refresh details before continuing.',
+      );
+    const host = providerOriginSchema.parse(origin);
+    const api = host === 'https://github.com' ? 'https://api.github.com' : `${host}/api/v3`;
+    const expectedUrl =
+      `${api}/repos/${options.repository.owner}/${options.repository.name}/pulls/${options.number}`.toLowerCase();
+    const belongs = (url: unknown) => typeof url === 'string' && url.toLowerCase() === expectedUrl;
+    const target = options.target;
+    if (target.kind === 'reply') {
+      await this.request(origin, token, signal, async (client, headers) => {
+        const { data } = await client.pulls.getReviewComment({
+          headers,
+          owner: options.repository.owner,
+          repo: options.repository.name,
+          comment_id: target.commentId,
+        });
+        const parent = pullComment(data);
+        if (
+          parent.id !== target.commentId ||
+          parent.replyTo !== null ||
+          !belongs(data.pull_request_url)
+        )
+          throw new ProviderError(
+            'PROVIDER_COMMENT_TARGET',
+            'The original comment is no longer available in this pull request. Refresh comments before replying.',
+          );
+      });
+    }
+    signal?.throwIfAborted();
+    return this.request(origin, token, signal, async (client, headers) => {
+      try {
+        const common = {
+          headers,
+          owner: options.repository.owner,
+          repo: options.repository.name,
+          pull_number: options.number,
+          body: options.body,
+        };
+        const { data } =
+          target.kind === 'reply'
+            ? await client.pulls.createReplyForReviewComment({
+                ...common,
+                comment_id: target.commentId,
+              })
+            : await client.pulls.createReviewComment({
+                ...common,
+                commit_id: options.revision.head,
+                path: target.path,
+                line: target.line,
+                side: target.side,
+              });
+        const comment = pullComment(data);
+        const matches =
+          target.kind === 'reply'
+            ? comment.replyTo === target.commentId
+            : comment.replyTo === null &&
+              comment.commitId === options.revision.head &&
+              comment.path === target.path &&
+              comment.line === target.line &&
+              comment.side === target.side;
+        if (!belongs(data.pull_request_url) || !matches)
+          throw new Error('Unexpected comment acknowledgment');
+        return comment;
+      } catch (error) {
+        const status =
+          typeof error === 'object' && error !== null && 'status' in error
+            ? Number(error.status)
+            : 0;
+        if ([400, 401, 403, 404, 422, 429].includes(status))
+          throw new ProviderError(
+            'PROVIDER_COMMENT_REJECTED',
+            'The provider rejected the comment. Check access and the selected location or thread before retrying.',
+          );
+        throw new ProviderError(
+          'PROVIDER_WRITE_UNCERTAIN',
+          'The provider may have received this comment. Refresh comments and check before submitting again.',
         );
       }
     });
@@ -512,5 +651,55 @@ function pullReview(data: {
   });
   if (!parsed.success)
     throw new ProviderError('PROVIDER_RESPONSE', 'The provider returned an invalid review.');
+  return parsed.data;
+}
+
+function pullComment(data: {
+  id: number;
+  in_reply_to_id?: number;
+  user: { login?: string } | null;
+  body: string;
+  path: string;
+  diff_hunk: string;
+  commit_id: string;
+  original_commit_id: string;
+  line?: number | null;
+  original_line?: number | null;
+  start_line?: number | null;
+  original_start_line?: number | null;
+  side?: string;
+  start_side?: string | null;
+  created_at: string;
+  updated_at: string;
+}) {
+  if (typeof data?.diff_hunk !== 'string')
+    throw new ProviderError(
+      'PROVIDER_RESPONSE',
+      'The provider returned an invalid review comment.',
+    );
+  const parsed = providerPullCommentSchema.safeParse({
+    id: data.id,
+    replyTo: data.in_reply_to_id ?? null,
+    author: data.user?.login ?? null,
+    body: data.body,
+    path: data.path,
+    hunk: data.diff_hunk.slice(0, 262144),
+    hunkTruncated: data.diff_hunk.length > 262144,
+    commitId: data.commit_id,
+    originalCommitId: data.original_commit_id,
+    line: data.line ?? null,
+    originalLine: data.original_line ?? null,
+    startLine: data.start_line ?? null,
+    originalStartLine: data.original_start_line ?? null,
+    side: data.side ?? null,
+    startSide: data.start_side ?? null,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+  });
+  if (!parsed.success)
+    throw new ProviderError(
+      'PROVIDER_RESPONSE',
+      'The provider returned an invalid review comment.',
+    );
   return parsed.data;
 }

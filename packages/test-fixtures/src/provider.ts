@@ -22,3 +22,24 @@ export function githubPullFixture(number = 1) {
     deletions: 1,
   };
 }
+
+export function githubCommentFixture(id = 10) {
+  return {
+    id,
+    user: { login: 'reviewer' },
+    body: 'Please explain this change.',
+    path: 'src/main.ts',
+    diff_hunk: '@@ -2,2 +2,2 @@\n-old\n+new\n context',
+    commit_id: '1'.repeat(40),
+    original_commit_id: '1'.repeat(40),
+    line: 2,
+    original_line: 2,
+    side: 'RIGHT',
+    start_line: null,
+    original_start_line: null,
+    start_side: null,
+    created_at: '2026-10-03T00:00:00Z',
+    updated_at: '2026-10-03T00:00:00Z',
+    pull_request_url: 'https://api.github.com/repos/team/project/pulls/1',
+  };
+}

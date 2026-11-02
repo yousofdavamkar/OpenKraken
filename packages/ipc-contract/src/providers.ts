@@ -303,3 +303,59 @@ export type ProviderPullReviewsOptions = z.infer<typeof providerPullReviewsOptio
 export type ProviderPullReviewsPage = z.infer<typeof providerPullReviewsPageSchema>;
 export type ProviderPullReview = z.infer<typeof providerPullReviewSchema>;
 export type ProviderSubmitReview = z.infer<typeof providerSubmitReviewSchema>;
+
+const providerPositiveIntegerSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const providerCommentSideSchema = z.enum(['LEFT', 'RIGHT']);
+export const providerPullCommentSchema = z
+  .object({
+    id: providerPositiveIntegerSchema,
+    replyTo: providerPositiveIntegerSchema.nullable(),
+    author: z.string().min(1).max(255).nullable(),
+    body: z.string().max(262144),
+    path: z.string().min(1).max(4096),
+    hunk: z.string().max(262144),
+    hunkTruncated: z.boolean(),
+    commitId: providerCommitSchema,
+    originalCommitId: providerCommitSchema,
+    line: providerPositiveIntegerSchema.nullable(),
+    originalLine: providerPositiveIntegerSchema.nullable(),
+    startLine: providerPositiveIntegerSchema.nullable(),
+    originalStartLine: providerPositiveIntegerSchema.nullable(),
+    side: providerCommentSideSchema.nullable(),
+    startSide: providerCommentSideSchema.nullable(),
+    createdAt: providerDateSchema,
+    updatedAt: providerDateSchema,
+  })
+  .strict();
+export const providerPullCommentsPageSchema = z
+  .object({
+    comments: z.array(providerPullCommentSchema).max(100),
+    nextPage: providerRepositoryPageNumberSchema.nullable(),
+    limited: z.boolean(),
+  })
+  .strict();
+export type ProviderPullComment = z.infer<typeof providerPullCommentSchema>;
+export type ProviderPullCommentsPage = z.infer<typeof providerPullCommentsPageSchema>;
+export const providerCommentTargetSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('line'),
+      path: z.string().min(1).max(4096),
+      line: providerPositiveIntegerSchema,
+      side: providerCommentSideSchema,
+    })
+    .strict(),
+  z.object({ kind: z.literal('reply'), commentId: providerPositiveIntegerSchema }).strict(),
+]);
+export const providerCreateCommentSchema = providerPullOptionsSchema
+  .extend({
+    revision: providerPullRevisionSchema,
+    body: z
+      .string()
+      .max(65536)
+      .refine((body) => !!body.trim(), 'Enter comment text'),
+    target: providerCommentTargetSchema,
+  })
+  .strict();
+export type ProviderCommentTarget = z.infer<typeof providerCommentTargetSchema>;
+export type ProviderCreateComment = z.infer<typeof providerCreateCommentSchema>;
