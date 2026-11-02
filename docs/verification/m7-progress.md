@@ -1,30 +1,35 @@
 # M7 progress — productivity and polish
 
-M7 is in progress as of 2026-11-02 at implementation checkpoint `79085c2`. M6 continues to have the gaps recorded in [M6 progress](m6-progress.md); M7 and M8 are not complete. React 19.3.1 and TypeScript 7.0.2 remain pinned.
+M7 is in progress as of 2026-11-02 at implementation checkpoint `f1f1667`. M6 continues to have the gaps recorded in [M6 progress](m6-progress.md); M7 and M8 are not complete. React 19.3.1 and TypeScript 7.0.2 remain pinned.
 
 ## Implemented
 
-- A typed command catalogue groups repository, references, history, working-tree, provider, and settings actions by domain. The palette opens with Ctrl/Cmd+P, fuzzy-searches labels and aliases with fuzzysort, filters categories, supports keyboard navigation, and persists bounded frequency/recency weights locally.
+- A typed command catalogue groups repository, references, history, working-tree, provider, and settings actions by domain. The palette opens with Ctrl/Cmd+P, fuzzy-searches labels and aliases with fuzzysort, filters categories, supports keyboard navigation, and persists bounded frequency/recency weights in main-owned profile settings.
 - Commands use existing mounted controls and their enabled conditions. Missing or disabled controls stay discoverable but cannot execute. Dispatch checks availability again and uses existing review dialogs and action handlers. The catalogue does not introduce new Git or provider write paths.
 - Palette dismissal restores prior focus; an invoked action owns subsequent focus. Input composition and repeated Enter cannot execute commands. Open dialogs suppress global command shortcuts.
 - A JSON keymap editor validates known command IDs, version/schema/size, shortcut syntax, reserved keys, and collisions with inherited defaults on both macOS and Windows/Linux. Explicit null unbinds. Apply persists before activating the map; invalid saved data falls back to defaults and stays available for repair. Restore defaults edits the draft before Apply.
+- Native command menus and accelerators use the shared catalogue and saved keymap. Sender-validated context updates mirror availability; modal, revision and typing checks run again before existing actions execute. Native input suppresses repeat/composition, and reload restores context without retaining stale enabled commands.
+- Main-owned atomic `settings.json` persistence includes one-time legacy migration, revision-checked keymap saves, serialized usage updates, failed-write retention, and explicit backup repair of damaged settings.
 - Commit search is part of the catalogue, with overridable Mod+F. Its previous hard-coded global handler is removed. Action shortcuts pause in text editors; opening the palette and focusing commit search remain available outside dialogs.
 - Assigned bindings appear in palette rows, button tooltips, and the keymap editor's active shortcut table. No query, repository path, token, arbitrary code, selector, or shell command is stored or executed by the keymap.
 
 ## Verification
 
-At this checkpoint, the six targeted real Electron tests pass. They cover unavailable commands, fuzzy category search, existing-dialog dispatch and modal suppression, ranking across restart, keymap validation and persistence, corrupt-preference repair, keyboard option navigation, repository availability updates, cancellation without ref changes, typing context, commit-search remapping, focus transfer, and composing/repeated Enter.
+At this checkpoint, the thirteen targeted real Electron tests pass. They cover unavailable commands, fuzzy category search, existing-dialog dispatch and modal suppression, ranking across restart, keymap validation and persistence, corrupt-preference repair, keyboard option navigation, repository availability updates, cancellation without ref changes, typing context, commit-search remapping, focus transfer, and composing/repeated Enter. Native menu tests additionally cover assigned/unbound accelerators, menu availability and clicks, repeat suppression, single invocation and renderer reload. Settings tests cover persistence after clearing renderer storage, one-time migration, main-side conflict/stale-write rejection, reopening the latest revision, corrupt-file preservation/backup repair, and failed writes.
 
-`pnpm test`: 504 tests passed across 67 files. `pnpm build` (including TypeScript project checking), full ESLint, and repository Prettier checks passed. The full desktop suite with Gitea enabled passed: **98 passed, 1 skipped** (the separately invoked real-repository benchmark), exit 0. Linux packaging and fuse verification also passed. The packaged ASAR smoke check passed: renderer isolation and native askpass/editor helpers with hardened fuses.
+`pnpm test`: **506 tests passed across 67 files**. TypeScript project checking, build, full ESLint and repository Prettier checks passed. The thirteen targeted command/settings/menu tests pass. The corrected asynchronous avatar-preference test also passes three repeats.
 
-Observed Linux performance: 2,000-commit first paint **247.9 ms**; 5,000-commit page including layout/UI **172.0 ms**; 12k-row scrolling frame p95 **16.7 ms**; 50k-line comparison **539.4 ms**; 10k-line blame first screen **141.1 ms**. These are fixture measurements on this host, not cross-platform evidence.
+**The latest full desktop run is not green:** 104 passed, one dedicated real-repository benchmark skipped, and one paging timing failure (340 ms against 300 ms), exit 1. Gitea was enabled. Linux packaging, fuse verification, and packaged ASAR smoke acceptance passed, including renderer isolation and native askpass/editor helpers. The initial full run exposed a graph shortcut test that used CDP input instead of native accelerator input; this was corrected without changing its assertions. Another run exposed an asynchronous checkbox assumption in the avatar test; the test now waits for the persisted checked state.
 
-Logs: `/tmp/openkraken-m7-{commands,full-unit,lint,build,full-e2e,package,smoke}.log`.
+Performance acceptance is sensitive to host contention and has not been waived. During a load spike (18.1 load average on 12 logical CPUs), the 50k-line comparison missed its 1,000 ms limit. An isolated pre-menu baseline also missed that gate (1,216 ms), followed by passing repeats. A temporary native-build probe measured 647 ms end to end, 501 ms click to paint and 12 ms renderer JavaScript. A later full run passed the diff gate but missed the 300 ms blame gate; three isolated blame repeats passed at 166, 138 and 139 ms. The temporary probe and baseline worktree were removed. Production timing limits and diff/blame code remain unchanged. The final full run passed first paint (257 ms), large comparison (616 ms), and blame (127 ms), but paging failed. Three isolated paging repeats also failed at 432, 511 and 342 ms. Their response stages took 216–283 ms, worker stages 86–138 ms, and UI updates 40–90 ms. Paging performance remains unresolved; contention is evidence to investigate, not proof that the code is free of a regression. A clean regression result is required before claiming all desktop checks pass.
+
+Logs are retained under `/tmp/openkraken-command-{settings,menu,native}-*.log`, including all full-run failures, baseline comparison, probe, and isolated repeats. The paging follow-up should compare the pre-menu commit on the same host and inspect native menu-context update costs before changing production behavior or any budget.
 
 ## Remaining M7 scope
 
-- Main-owned atomic settings persistence for command preferences (blueprint §5); the current renderer-local persistence is an interim step.
-- Native menu accelerators and broader command coverage, including dynamic branch/file domains and contextual commands. Renderer shortcuts are implemented; this is not an Atom selector keymap interpreter.
+- Resolve the paging performance failure and establish a clean complete desktop regression run.
+
+- Broader command coverage, including dynamic branch/file domains and contextual commands. Native accelerators are implemented; this is not an Atom selector keymap interpreter. Other older preferences (for example graph view settings) still need consolidation into the main settings store.
 - Theme tokens, light/dark/system selection, and validated user JSON themes.
 - Integrated xterm terminal, PTY utility host, and OSC 133 integration.
 - Worktree/submodule UI and LFS awareness.
@@ -37,3 +42,6 @@ Cross-platform keyboard execution and packaging remain unverified on macOS/Windo
 
 - [0059 — Context-aware command palette](../decisions/0059-command-palette.md)
 - [0060 — Validated renderer keymaps](../decisions/0060-json-keybindings.md)
+
+- [0061 — Main-owned atomic command preferences](../decisions/0061-main-command-preferences.md)
+- [0062 — Native command menu and accelerators](../decisions/0062-native-command-accelerators.md)

@@ -12,6 +12,8 @@ Renderer dispatch ignores handled/repeated/composing/AltGraph events, open dialo
 
 ## Scope and follow-up
 
+Subsequently superseded by ADR 0061 (main settings persistence) and ADR 0062 (native accelerators and native key interpretation).
+
 This implements renderer keybindings only. Renderer-local persistence is interim; the native accelerator integration must move command preferences into the main-owned atomic settings store specified by blueprint §5. Native menu accelerators remain follow-up work. Commit search now belongs to the catalogue with Mod+F as its overridable default; its previous global shortcut handler is removed. Terminal/editor contexts retain their own shortcuts. Cross-platform validation is implemented, but desktop execution is currently verified on Linux only.
 
 ## Evidence

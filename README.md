@@ -174,4 +174,4 @@ Use **Keybindings** to edit the JSON map. Missing entries inherit defaults; `nul
 }
 ```
 
-Apply validates conflicts, including inherited bindings on both platforms, before saving. The editor lists command IDs and active shortcuts. Restore defaults changes the draft; Apply saves it. Shortcuts pause in dialogs; action shortcuts also pause in text fields, except opening the palette or focusing commit search. These shortcuts currently run in the renderer; native accelerators and the rest of M7 remain open. See [M7 progress](docs/verification/m7-progress.md).
+Apply validates conflicts, including inherited bindings on both platforms, before saving. The editor lists command IDs and active shortcuts. Restore defaults changes the draft; Apply saves it. Shortcuts pause in dialogs; action shortcuts also pause in text fields, except opening the palette or focusing commit search. The native Commands menu uses the same keymap and availability checks. Settings and usage are saved atomically in the profile’s `settings.json`; older renderer preferences migrate once. The rest of M7 remains open. See [M7 progress](docs/verification/m7-progress.md).
