@@ -1,3 +1,4 @@
+import { pressShortcut } from '../electron-shortcut.js';
 import { _electron as electron, expect, test } from '@playwright/test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,7 +30,7 @@ async function launch(kind: FixtureKind = 'merge', count?: number) {
   };
 }
 test('Canvas search dims without moving rows; keyboard, ancestry, multi-select and details', async () => {
-  const { page, close } = await launch();
+  const { app, page, close } = await launch();
   try {
     const grid = page.getByRole('grid');
     await grid.focus();
@@ -73,7 +74,8 @@ test('Canvas search dims without moving rows; keyboard, ancestry, multi-select a
     await grid.press('Enter');
     await expect(page.getByRole('region', { name: 'Commit details' })).toBeVisible();
     await page.getByRole('button', { name: 'Close details' }).click();
-    await grid.press(process.platform === 'darwin' ? 'Meta+f' : 'Control+f');
+    await grid.focus();
+    await pressShortcut(app, process.platform === 'darwin' ? 'Meta+F' : 'Control+F');
     await expect(page.getByRole('textbox', { name: 'Search commits' })).toBeFocused();
     await page.getByRole('textbox', { name: 'Search commits' }).fill('Commit 2');
     await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
