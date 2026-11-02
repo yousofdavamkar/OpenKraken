@@ -1119,3 +1119,46 @@ footer {
 .file-history-scroll small {
   color: #94a3b8;
 }
+
+.blame-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.blame-panel p {
+  margin: 0 0 8px;
+}
+.blame-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #304358;
+}
+.blame-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: pre;
+  width: max-content;
+  min-width: 100%;
+  font: 13px/26px monospace;
+}
+.blame-attribution {
+  display: flex;
+  gap: 12px;
+  width: 260px;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: #233244;
+  padding: 0 8px;
+}
+.blame-line .line-number {
+  color: #94a3b8;
+  width: 48px;
+  flex-shrink: 0;
+  text-align: right;
+}
+.blame-line > code {
+  white-space: pre;
+}

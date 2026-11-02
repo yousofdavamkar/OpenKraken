@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { BlamePanel } from './blame.js';
 import { FileHistoryPanel } from './file-history.js';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { EditorState, type Text } from '@codemirror/state';
@@ -236,6 +237,7 @@ export function FileComparisonDialog({
   const dialog = useRef<HTMLDialogElement>(null);
   const [selection, setSelection] = useState(options);
   const [history, setHistory] = useState(false);
+  const [blame, setBlame] = useState(false);
   const [data, setData] = useState<FileComparison>();
   const [error, setError] = useState('');
   const [mode, setMode] = useState<ViewMode>('hunks');
@@ -297,6 +299,15 @@ export function FileComparisonDialog({
       <div className="comparison-toolbar">
         <button aria-pressed={history} onClick={() => setHistory(!history)}>
           File history
+        </button>
+        <button
+          aria-pressed={blame}
+          disabled={
+            !data || data.newVersion.kind !== 'text' || data.newVersion.encoding !== 'UTF-8'
+          }
+          onClick={() => setBlame(!blame)}
+        >
+          {blame ? 'Show comparison' : 'Blame'}
         </button>
         <label>
           Diff view{' '}
@@ -374,7 +385,14 @@ export function FileComparisonDialog({
             {data.newVersion.encoding ?? data.newVersion.kind} ·{' '}
             {data.newVersion.bytes.toLocaleString()} bytes · {data.file.newMode}
           </p>
-          {data.guard ? (
+          {blame ? (
+            <BlamePanel
+              key={`${commit}:${pathBytes}`}
+              repoId={repoId}
+              commit={commit}
+              pathBytes={pathBytes}
+            />
+          ) : data.guard ? (
             <div>
               <p>
                 This file exceeds the {data.guard.limit.toLocaleString()} {data.guard.reason}{' '}

@@ -227,3 +227,55 @@ test('file history appends older revisions and opens the original name before a 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('10k-line blame streams its first screen within budget and virtualizes attribution', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-blame-ui-'));
+  const path = createFixture(join(root, 'repository'));
+  const lines = Array.from({ length: 10000 }, (_, index) => `line ${index + 1}\n`);
+  writeFileSync(join(path, 'lines.txt'), lines.join(''));
+  fixtureGit(path, ['add', '.']);
+  fixtureGit(path, ['commit', '-m', 'Original attribution']);
+  const original = fixtureGit(path, ['rev-parse', 'HEAD']);
+  lines[0] = 'changed first\n';
+  lines[9999] = 'changed last\n';
+  writeFileSync(join(path, 'lines.txt'), lines.join(''));
+  fixtureGit(path, ['commit', '-am', 'Changed attribution']);
+  const changed = fixtureGit(path, ['rev-parse', 'HEAD']);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    await grid.press('Home');
+    await grid.press('Enter');
+    await page.getByRole('button', { name: 'Compare lines.txt', exact: true }).click();
+    const viewer = page.getByRole('dialog', { name: 'File comparison' });
+    await expect(viewer.getByRole('button', { name: 'Blame', exact: true })).toBeEnabled();
+    const start = performance.now();
+    await viewer.getByRole('button', { name: 'Blame', exact: true }).click();
+    const blame = viewer.getByRole('region', { name: 'File blame' });
+    await expect(blame.getByText('changed first', { exact: true })).toBeVisible();
+    const elapsed = performance.now() - start;
+    console.log(`10k-line blame first screen: ${elapsed.toFixed(1)}ms`);
+    expect(elapsed).toBeLessThan(300);
+    await expect(blame.getByRole('status')).toHaveText('10,000 lines attributed');
+    expect(await blame.locator('.blame-line').count()).toBeLessThan(100);
+    await expect(blame.locator('.blame-line').nth(0)).toContainText(changed.slice(0, 8));
+    await expect(blame.locator('.blame-line').nth(1)).toContainText(original.slice(0, 8));
+    await blame.locator('.blame-scroll').evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect(blame.getByText('changed last', { exact: true })).toBeVisible();
+    await viewer.getByRole('button', { name: 'Show comparison', exact: true }).click();
+    await expect(blame).toHaveCount(0);
+    expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

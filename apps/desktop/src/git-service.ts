@@ -120,6 +120,13 @@ async function executeGit(
       kind: 'fileComparison',
       comparison: await git.commitComparison(request.repoId, request.options, signal),
     };
+  if (request.method === 'blame')
+    return {
+      kind: 'blameComplete',
+      ...(await git.blame(request.repoId, request.options, signal, (lines) =>
+        parent!.postMessage({ type: 'blameLines', id: request.id, lines }),
+      )),
+    };
   if (request.method === 'fileHistory')
     return {
       kind: 'fileHistory',

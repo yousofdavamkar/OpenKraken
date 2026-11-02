@@ -376,6 +376,23 @@ export const workingDiffSchema = z.object({
   ),
 });
 export type WorkingDiff = z.infer<typeof workingDiffSchema>;
+export const blameOptionsSchema = z
+  .object({ commit: oidSchema, pathBytes: pathBytesSchema })
+  .strict();
+export const blameLineSchema = z
+  .object({
+    oid: oidSchema,
+    originalLine: z.number().int().positive(),
+    line: z.number().int().positive(),
+    author: z.string(),
+    email: z.string(),
+    time: z.number().int(),
+    summary: z.string(),
+    text: z.string(),
+  })
+  .strict();
+export type BlameOptions = z.infer<typeof blameOptionsSchema>;
+export type BlameLine = z.infer<typeof blameLineSchema>;
 export const fileHistoryOptionsSchema = z
   .object({
     commit: oidSchema,
@@ -726,6 +743,14 @@ const workingRequests = [
   z
     .object({
       id: requestId,
+      method: z.literal('blame'),
+      repoId: repoIdSchema,
+      options: blameOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('fileHistory'),
       repoId: repoIdSchema,
       options: fileHistoryOptionsSchema,
@@ -1053,6 +1078,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('commitFiles'), files: commitFilesSchema }),
   z.object({ kind: z.literal('fileComparison'), comparison: fileComparisonSchema }),
   z.object({ kind: z.literal('fileHistory'), page: fileHistoryPageSchema }),
+  z.object({ kind: z.literal('blameComplete'), lines: z.number().int().min(0).max(50000) }),
   z.object({ kind: z.literal('workingState'), state: workingStateSchema }),
   z.object({ kind: z.literal('conflictPreview'), preview: conflictPreviewSchema }),
   z.object({ kind: z.literal('mergePrediction'), prediction: mergePredictionSchema }),
@@ -1163,6 +1189,13 @@ export const gitProgressEventSchema = z
   .strict();
 export const desktopEventSchema = z.discriminatedUnion('type', [
   repositoryEventSchema,
+  z
+    .object({
+      type: z.literal('blameLines'),
+      id: requestId,
+      lines: z.array(blameLineSchema).max(64),
+    })
+    .strict(),
   gitProgressEventSchema,
   authenticationPromptSchema,
   authenticationClosedSchema,
