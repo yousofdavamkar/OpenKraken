@@ -180,3 +180,44 @@ test('provider Git requests expose account selection but keep resolved targets a
       requestSchema.safeParse({ ...request, operation: { ...operation, ...extra } }).success,
     ).toBe(false);
 });
+
+test('saved-account push accepts a reviewed plan but no caller-supplied destination URL or credential', () => {
+  const id = '00000000-0000-4000-8000-000000000000',
+    repoId = 'a'.repeat(64),
+    accountId = 'b'.repeat(64),
+    revision = 'c'.repeat(64);
+  const selection = { name: 'origin', source: 'refs/heads/main', destination: 'refs/heads/main' };
+  const preview = {
+    id,
+    method: 'providerGit',
+    accountId,
+    operation: { method: 'pushPreview', repoId, selection, revision },
+  };
+  expect(requestSchema.safeParse(preview).success).toBe(true);
+  expect(
+    requestSchema.safeParse({
+      ...preview,
+      operation: { ...preview.operation, url: 'https://other.test/team/project.git' },
+    }).success,
+  ).toBe(false);
+  const plan = {
+    ...selection,
+    sourceOid: '1'.repeat(40),
+    remoteOid: '2'.repeat(40),
+    token: revision,
+    url: 'https://github.com/team/project.git',
+  };
+  const push = {
+    id,
+    method: 'providerGit',
+    accountId,
+    operation: { method: 'push', repoId, options: { plan, force: true, upstream: true } },
+  };
+  expect(requestSchema.safeParse(push).success).toBe(true);
+  expect(
+    requestSchema.safeParse({
+      ...push,
+      operation: { ...push.operation, credential: { password: 'secret' } },
+    }).success,
+  ).toBe(false);
+});

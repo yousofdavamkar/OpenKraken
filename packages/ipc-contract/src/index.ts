@@ -780,14 +780,27 @@ const editorAnswer = z
     text: editorTextSchema.nullable(),
   })
   .strict();
-export const providerGitOperationSchema = z
-  .object({
-    method: z.literal('fetch'),
-    repoId: repoIdSchema,
-    name: remoteNameSchema,
-    revision: remoteTokenSchema,
-  })
-  .strict();
+export const providerGitOperationSchema = z.discriminatedUnion('method', [
+  z
+    .object({
+      method: z.literal('fetch'),
+      repoId: repoIdSchema,
+      name: remoteNameSchema,
+      revision: remoteTokenSchema,
+    })
+    .strict(),
+  z
+    .object({
+      method: z.literal('pushPreview'),
+      repoId: repoIdSchema,
+      selection: pushSelectionSchema,
+      revision: remoteTokenSchema,
+    })
+    .strict(),
+  z
+    .object({ method: z.literal('push'), repoId: repoIdSchema, options: pushOptionsSchema })
+    .strict(),
+]);
 const workingRequests = [
   z
     .object({

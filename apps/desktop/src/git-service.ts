@@ -88,7 +88,9 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
     (request.method === 'fetch' && !request.background);
   const context =
     request.method === 'providerGit'
-      ? `Fetch ${request.operation.name}`
+      ? request.operation.method === 'fetch'
+        ? `Fetch ${request.operation.name}`
+        : 'Push repository'
       : request.method === 'clone'
         ? `Clone ${request.options.url}`
         : request.method === 'fetch'
@@ -128,44 +130,88 @@ async function executeGit(
     if ((request.method === 'clone' && request.credential) || request.method === 'providerGit') {
       // Remote diagnostics are untrusted and may echo authentication material.
       const progress =
-        /^(Receiving objects|Resolving deltas|Updating files|Checking out files):\s+(\d{1,3})%/.exec(
+        /^(Receiving objects|Resolving deltas|Updating files|Checking out files|Writing objects|Counting objects|Compressing objects):\s+(\d{1,3})%/.exec(
           text,
         );
       text = progress
         ? `${progress[1]}: ${Math.min(100, Number(progress[2]))}%`
         : request.method === 'clone'
           ? 'Cloning provider repository…'
-          : 'Fetching provider repository…';
+          : request.operation.method === 'push'
+            ? 'Pushing provider repository…'
+            : request.operation.method === 'pushPreview'
+              ? 'Reviewing provider push…'
+              : 'Fetching provider repository…';
     }
     parent!.postMessage({ type: 'gitProgress', id: request.id, text });
   };
-  if (request.method === 'providerGitTarget')
+  if (request.method === 'providerGitTarget') {
+    const operation = request.operation;
+    const name =
+      operation.method === 'fetch'
+        ? operation.name
+        : operation.method === 'pushPreview'
+          ? operation.selection.name
+          : operation.options.plan.name;
     return {
       kind: 'providerGitTarget',
       target: await git.providerRemoteTarget(
-        request.operation.repoId,
-        request.operation.name,
-        'fetch',
+        operation.repoId,
+        name,
+        operation.method === 'fetch' ? 'fetch' : 'push',
         signal,
       ),
     };
-  if (request.method === 'providerGit')
+  }
+  if (request.method === 'providerGit') {
+    const operation = request.operation;
+    const provider = {
+      url: request.credential.url,
+      username: request.credential.username,
+      token: request.token,
+    };
+    if (operation.method === 'pushPreview')
+      return {
+        kind: 'pushPreview',
+        plan: await git.pushPreview(
+          operation.repoId,
+          operation.selection,
+          signal,
+          progress,
+          auth,
+          provider,
+        ),
+      };
+    if (operation.method === 'push') {
+      const result = await git.push(
+        operation.repoId,
+        operation.options,
+        signal,
+        progress,
+        auth,
+        provider,
+      );
+      return {
+        kind: 'pushed',
+        state: result.state,
+        warning: result.warning
+          ? 'Push completed, but upstream tracking could not be set. Set upstream after refreshing.'
+          : undefined,
+      };
+    }
     return {
       kind: 'remotes',
       state: await git.fetch(
-        request.operation.repoId,
-        request.operation.name,
+        operation.repoId,
+        operation.name,
         signal,
         false,
         progress,
         auth,
-        {
-          url: request.credential.url,
-          username: request.credential.username,
-          token: request.token,
-        },
+        provider,
       ),
     };
+  }
   if (request.method === 'commitComparison')
     return {
       kind: 'fileComparison',
@@ -476,13 +522,21 @@ parent.on('message', (event) => {
                 request.method === 'providerGit'
                   ? error instanceof GitError && error.code === 'PROVIDER_TRANSPORT_REWRITE'
                     ? 'Git rewrites this URL. Disable the rewrite or use Git credential helpers.'
-                    : error instanceof GitError && error.code === 'STALE_PROVIDER_REMOTE'
-                      ? 'The remote configuration or tracking refs changed. Review the remote and retry.'
-                      : error instanceof GitError && error.code === 'CLONE_DESTINATION_NOT_EMPTY'
-                        ? 'Choose an empty folder for this clone.'
-                        : error instanceof GitError && error.code === 'TLS_CERTIFICATE_INVALID'
-                          ? 'The HTTPS certificate could not be verified.'
-                          : 'Provider Git operation failed. Check repository access and HTTPS settings, or use Git credential helpers.'
+                    : error instanceof GitError && error.code === 'PUSH_REJECTED'
+                      ? 'Push rejected by the server. Fetch and review the destination before retrying.'
+                      : error instanceof GitError && error.code === 'PUSH_LEASE_REJECTED'
+                        ? 'The destination changed since review. Review the push again before retrying.'
+                        : error instanceof GitError && error.code === 'STALE_PUSH'
+                          ? 'The local tip or remote settings changed. Review the push again.'
+                          : error instanceof GitError && error.code === 'STALE_PROVIDER_REMOTE'
+                            ? 'The remote configuration or tracking refs changed. Review the remote and retry.'
+                            : error instanceof GitError &&
+                                error.code === 'CLONE_DESTINATION_NOT_EMPTY'
+                              ? 'Choose an empty folder for this clone.'
+                              : error instanceof GitError &&
+                                  error.code === 'TLS_CERTIFICATE_INVALID'
+                                ? 'The HTTPS certificate could not be verified.'
+                                : 'Provider Git operation failed. Check repository access and HTTPS settings, or use Git credential helpers.'
                   : error instanceof Error
                     ? error.message
                     : String(error),

@@ -214,7 +214,12 @@ else {
           if (target.kind === 'error' || target.kind === 'cancelled') return target;
           if (target.kind !== 'providerGitTarget')
             throw new ProviderError('PROVIDER_REMOTE', 'The remote could not be resolved.');
-          if (target.target.token !== request.operation.revision)
+          if (
+            target.target.token !==
+            (request.operation.method === 'push'
+              ? request.operation.options.plan.token
+              : request.operation.revision)
+          )
             throw new ProviderError(
               'STALE_PROVIDER_REMOTE',
               'The remote configuration or tracking refs changed. Reload remotes before retrying.',

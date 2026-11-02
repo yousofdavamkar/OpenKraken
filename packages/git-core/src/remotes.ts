@@ -376,6 +376,7 @@ export class Remotes {
     const state = await this.state(signal);
     if (!state.remotes.some((remote) => remote.name === selection.name))
       throw new GitError('UNKNOWN_REMOTE', 'Choose an existing remote');
+    await this.checkProvider(selection.name, 'push', signal);
     const sourceOid = await this.sourceOid(selection.source, signal);
     await this.run(['check-ref-format', selection.destination], { signal });
     const url = await this.pushUrl(selection.name, signal);
@@ -399,6 +400,7 @@ export class Remotes {
         'STALE_PUSH',
         'The source or remote configuration changed. Review the push again.',
       );
+    await this.checkProvider(plan.name, 'push', signal);
     await this.pushUrl(plan.name, signal);
     if (
       upstream &&

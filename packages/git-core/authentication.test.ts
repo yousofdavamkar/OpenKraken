@@ -312,3 +312,81 @@ test('saved-account fetch validates the current remote before updating tracking 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('saved-account push review uses the push URL and refuses a changed destination before writing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-provider-push-'));
+  const source = createFixture(join(root, 'source'));
+  const bare = join(root, 'remote.git');
+  fixtureGit(source, ['clone', '--bare', '.', bare]);
+  const remote = await authenticatedRemote(bare, {
+    basePath: '/team/project.git',
+    password: 'fixture-provider-token',
+  });
+  const local = createFixture(join(root, 'local'));
+  fixtureGit(local, ['remote', 'set-url', '--push', 'origin', remote.url]);
+  fixtureGit(local, ['commit', '--allow-empty', '-m', 'Local push tip']);
+  const broker = new AskpassBroker(
+    resolve(
+      'apps/desktop/dist/helpers',
+      process.platform === 'win32' ? 'openkraken-askpass.exe' : 'openkraken-askpass',
+    ),
+    (event) => {
+      if (event.type === 'authenticationPrompt') broker.answer(event.id, event.promptId, null);
+    },
+  );
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(local);
+    const target = await service.providerRemoteTarget(repo.id, 'origin', 'push');
+    expect(target.url).toBe(remote.url);
+    const credential = {
+      url: target.url,
+      username: remote.credentials.username,
+      password: remote.credentials.password,
+    };
+    const scope = await broker.open(randomUUID(), 'Review push', undefined, credential);
+    const environment = {
+      ...scope.environment,
+      GIT_SSL_CAINFO: remote.certificate,
+      GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1',
+    };
+    const provider = { ...target, username: credential.username };
+    const plan = await service.pushPreview(
+      repo.id,
+      { name: 'origin', source: 'refs/heads/main', destination: 'refs/heads/main' },
+      undefined,
+      undefined,
+      environment,
+      provider,
+    );
+    expect(plan.url).toBe(remote.url);
+    expect(plan.sourceOid).toBe(fixtureGit(local, ['rev-parse', 'HEAD']));
+    expect(plan.remoteOid).toBe(fixtureGit(source, ['rev-parse', 'HEAD']));
+    const requests = remote.requests();
+    await expect(
+      service.push(repo.id, { plan }, undefined, undefined, environment, {
+        ...provider,
+        url: remote.url.replace('/team/', '/elsewhere/'),
+      }),
+    ).rejects.toMatchObject({ code: 'STALE_PROVIDER_REMOTE' });
+    expect(remote.requests()).toBe(requests);
+    fixtureGit(local, [
+      'remote',
+      'set-url',
+      '--push',
+      'origin',
+      remote.url.replace('/team/', '/changed/'),
+    ]);
+    await expect(
+      service.push(repo.id, { plan }, undefined, undefined, environment, provider),
+    ).rejects.toMatchObject({ code: 'STALE_PUSH' });
+    expect(remote.requests()).toBe(requests);
+    scope.close();
+  } finally {
+    await broker.close();
+    await service.dispose();
+    await remote.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
