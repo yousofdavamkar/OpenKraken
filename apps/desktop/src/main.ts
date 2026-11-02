@@ -265,6 +265,7 @@ else {
           request.method === 'providerPullRequest' ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
+          request.method === 'providerPollingPolicy' ||
           request.method === 'providerConnect' ||
           request.method === 'providerDisconnect' ||
           request.method === 'providerVerify' ||
@@ -276,6 +277,12 @@ else {
           providers = getProviders();
           const controller = new AbortController();
           providerRequests.set(request.id, controller);
+
+          if (request.method === 'providerPollingPolicy')
+            return resultSchema.parse({
+              kind: 'providerPollingPolicy',
+              policy: await providers.pollingPolicy(request.accountId),
+            });
 
           if (request.method === 'providerMergePreview')
             return resultSchema.parse({
@@ -560,6 +567,7 @@ else {
           request.method === 'providerPullRequest' ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
+          request.method === 'providerPollingPolicy' ||
           request.method === 'providerConnect' ||
           request.method === 'providerDisconnect' ||
           request.method === 'providerVerify' ||
@@ -583,6 +591,9 @@ else {
               error instanceof ProviderError || error instanceof ProviderCredentialError
                 ? error.message
                 : 'The provider account request could not be completed.',
+            ...(error instanceof ProviderError && error.retryAt !== undefined
+              ? { retryAt: error.retryAt }
+              : {}),
           };
         }
         return {

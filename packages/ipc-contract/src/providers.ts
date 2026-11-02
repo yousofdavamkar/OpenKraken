@@ -1,5 +1,14 @@
 import { z } from 'zod';
 
+export const providerRetryAtSchema = z.number().int().nonnegative().max(8640000000000000);
+export const providerPollingPolicySchema = z
+  .object({
+    minimumIntervalMs: providerRetryAtSchema,
+    blockedUntil: providerRetryAtSchema.nullable(),
+  })
+  .strict();
+export type ProviderPollingPolicy = z.infer<typeof providerPollingPolicySchema>;
+
 export const providerOriginSchema = z
   .string()
   .max(2048)

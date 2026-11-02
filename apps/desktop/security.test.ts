@@ -4,6 +4,7 @@ import {
   requestSchema,
   serviceRequestSchema,
   serviceResponseSchema,
+  resultSchema,
 } from '../../packages/ipc-contract/src/index.js';
 test('exact top-level document only', () => {
   const url = 'file:///app/index.html';
@@ -542,6 +543,49 @@ test('issue browsing IPC permits bounded repository selectors but no credentials
         requestSchema.safeParse({ ...request, options: { ...request.options, ...extra } }).success,
       ).toBe(false);
   }
+});
+
+test('polling policy IPC exposes only account timing and validates retry timestamps', () => {
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    method: 'providerPollingPolicy',
+    accountId: 'a'.repeat(64),
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  expect(requestSchema.safeParse({ ...request, token: 'secret' }).success).toBe(false);
+  const policy = { minimumIntervalMs: 120000, blockedUntil: 1793491320000 };
+  expect(resultSchema.safeParse({ kind: 'providerPollingPolicy', policy }).success).toBe(true);
+  expect(
+    resultSchema.safeParse({
+      kind: 'providerPollingPolicy',
+      policy: { ...policy, token: 'secret' },
+    }).success,
+  ).toBe(false);
+  for (const retryAt of [-1, Infinity, 1.5, 8640000000000001]) {
+    expect(
+      resultSchema.safeParse({
+        kind: 'error',
+        code: 'PROVIDER_RATE_LIMIT',
+        message: 'Wait',
+        retryAt,
+      }).success,
+    ).toBe(false);
+    expect(
+      resultSchema.safeParse({
+        kind: 'providerPollingPolicy',
+        policy: { ...policy, blockedUntil: retryAt },
+      }).success,
+    ).toBe(false);
+  }
+  expect(
+    resultSchema.parse({
+      kind: 'error',
+      code: 'PROVIDER_RATE_LIMIT',
+      message: 'Wait',
+      retryAt: 1793491320000,
+    }),
+  ).toMatchObject({ retryAt: 1793491320000 });
 });
 
 test('issue action IPC requires bounded text and reviewed state without unrelated changes', () => {

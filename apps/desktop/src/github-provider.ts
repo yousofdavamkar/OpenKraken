@@ -1,6 +1,7 @@
 import { Octokit } from '@octokit/rest';
 import {
   providerMergePreviewSchema,
+  type ProviderPollingPolicy as PollingPolicy,
   providerPullChecksOptionsSchema,
   type ProviderPullChecksOptions,
   type ProviderPullChecksPage,
@@ -79,10 +80,12 @@ import {
 import { loadPullChecks } from './github-checks.js';
 import { ProviderError } from './provider-error.js';
 import { ProviderReadCache } from './provider-read-cache.js';
+import { ProviderPollingPolicy } from './provider-polling-policy.js';
 export { ProviderError } from './provider-error.js';
 import { loadPullTemplates, loadPullTemplate } from './github-templates.js';
 export interface ProviderDriver {
   clearReadCache(): void;
+  pollingPolicy(origin: string, token: string): PollingPolicy;
   previewIssueAction(
     origin: string,
     token: string,
@@ -211,6 +214,10 @@ export interface ProviderDriver {
 }
 export class GitHubProvider implements ProviderDriver {
   private readCache = new ProviderReadCache();
+  private polling = new ProviderPollingPolicy();
+  pollingPolicy(origin: string, token: string) {
+    return this.polling.get(origin, token);
+  }
   clearReadCache() {
     this.readCache.clear();
   }
@@ -947,13 +954,23 @@ export class GitHubProvider implements ProviderDriver {
   ): Promise<T> {
     const host = providerOriginSchema.parse(origin);
     const baseUrl = host === 'https://github.com' ? 'https://api.github.com' : `${host}/api/v3`;
+    if (signal?.aborted) throw new ProviderError('CANCELLED', 'Provider request cancelled.');
+    this.polling.assertAllowed(host, token);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
     const boundedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    let blockedBeforeDispatch: ProviderError | undefined;
+    let writeDispatched = false;
     const guardedFetch: typeof fetch = async (input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
       if (url.origin !== new URL(baseUrl).origin || url.username || url.password)
         throw new ProviderError('PROVIDER_HOST', 'Provider request changed its configured host.');
+      try {
+        this.polling.assertAllowed(host, token);
+      } catch (error) {
+        if (error instanceof ProviderError) blockedBeforeDispatch = error;
+        throw error;
+      }
       const headers = new Headers(
         init?.headers ?? (input instanceof Request ? input.headers : undefined),
       );
@@ -961,8 +978,10 @@ export class GitHubProvider implements ProviderDriver {
         init?.method ?? (input instanceof Request ? input.method : 'GET')
       ).toUpperCase();
       // Only the fixed check-rollup query opts in; future GraphQL mutations invalidate reads.
-      if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && !options.readOnlyGraphQL)
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && !options.readOnlyGraphQL) {
         this.readCache.clear();
+        writeDispatched = true;
+      }
       const key =
         method === 'GET' && !headers.has('if-none-match') && !headers.has('if-modified-since')
           ? this.readCache.key(host, token, url.href, headers)
@@ -976,6 +995,7 @@ export class GitHubProvider implements ProviderDriver {
         redirect: 'error',
         credentials: 'omit',
       });
+      this.polling.observe(host, token, url.href, response.status, response.headers);
       boundedSignal.throwIfAborted();
       if ([401, 403, 404].includes(response.status)) this.readCache.clear();
       if (response.status === 304 && cached) {
@@ -1012,6 +1032,7 @@ export class GitHubProvider implements ProviderDriver {
       }
       const body = Buffer.concat(chunks);
       boundedSignal.throwIfAborted();
+      if (response.status === 403) this.polling.observeForbiddenBody(host, token, url.href, body);
       if (key !== undefined && response.status === 200)
         this.readCache.set(key, response.headers, body);
       return new Response(bytes ? body : null, {
@@ -1031,6 +1052,9 @@ export class GitHubProvider implements ProviderDriver {
         'X-GitHub-Api-Version': host === 'https://github.com' ? '2026-03-10' : '2022-11-28',
       });
     } catch (error) {
+      // SDK/write wrappers may obscure a local refusal. No write was sent in this case.
+      if (blockedBeforeDispatch && !writeDispatched) throw blockedBeforeDispatch;
+      if (error instanceof ProviderError) error.retryAt = this.polling.retryAt(host, token);
       if (error instanceof ProviderError && error.code === 'PROVIDER_WRITE_UNCERTAIN') throw error;
       if (signal?.aborted) throw new ProviderError('CANCELLED', 'Provider request cancelled.');
       if (controller.signal.aborted)
@@ -1052,6 +1076,7 @@ export class GitHubProvider implements ProviderDriver {
             : status === 429
               ? 'The provider rate limit was reached. Try again later.'
               : 'The provider request failed. Check the host and connection.',
+        this.polling.retryAt(host, token),
       );
     } finally {
       clearTimeout(timeout);

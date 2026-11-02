@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import {
+  providerPollingPolicySchema,
+  providerRetryAtSchema,
   providerPullChecksOptionsSchema,
   providerPullChecksPageSchema,
   providerWriteIssueSchema,
@@ -1345,6 +1347,13 @@ export const requestSchema = z.discriminatedUnion('method', [
     .strict(),
   z.object({ id: requestId, method: z.literal('providerAccounts') }).strict(),
   z
+    .object({
+      id: requestId,
+      method: z.literal('providerPollingPolicy'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict(),
+  z
     .object({ id: requestId, method: z.literal('providerConnect'), options: providerConnectSchema })
     .strict(),
   z
@@ -1513,6 +1522,9 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('providerDeviceOpened') }).strict(),
   z.object({ kind: z.literal('providerAccounts'), state: providerAccountsSchema }),
   z
+    .object({ kind: z.literal('providerPollingPolicy'), policy: providerPollingPolicySchema })
+    .strict(),
+  z
     .object({ kind: z.literal('providerRepositories'), page: providerRepositoryPageSchema })
     .strict(),
   z.object({ kind: z.literal('deleteRemotePreview'), plan: deleteRemotePlanSchema }),
@@ -1571,7 +1583,12 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('snapshot'), snapshot: snapshotSchema }),
   z.object({ kind: z.literal('discovery'), paths: z.array(z.string()) }),
   z.object({ kind: z.literal('cancelled') }),
-  z.object({ kind: z.literal('error'), code: z.string(), message: z.string() }),
+  z.object({
+    kind: z.literal('error'),
+    code: z.string(),
+    message: z.string(),
+    retryAt: providerRetryAtSchema.optional(),
+  }),
 ]);
 export const serviceResponseSchema = z.object({ id: requestId, result: resultSchema });
 export const CHANNEL = 'openkraken:request';

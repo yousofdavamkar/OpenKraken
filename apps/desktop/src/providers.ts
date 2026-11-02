@@ -4,6 +4,7 @@ import { constants } from 'node:fs';
 import { join } from 'node:path';
 import {
   providerPullChecksOptionsSchema,
+  providerPollingPolicySchema,
   type ProviderPullChecksOptions,
   providerIssueOptionsSchema,
   providerIssueCommentsOptionsSchema,
@@ -217,6 +218,18 @@ export class ProviderService {
       return { keychainAvailable: true, accounts };
     });
   }
+  pollingPolicy(id: string) {
+    return this.run(async () => {
+      const account = (await this.load()).find((account) => account.id === id);
+      if (!account)
+        throw new ProviderError(
+          'PROVIDER_ACCOUNT',
+          'This provider account is no longer connected.',
+        );
+      const { token } = await this.storedCredential(account);
+      return providerPollingPolicySchema.parse(this.github.pollingPolicy(account.origin, token));
+    });
+  }
   repositories(id: string, page: number, signal?: AbortSignal) {
     return this.run(async () => {
       providerRepositoryPageNumberSchema.parse(page);
@@ -389,16 +402,8 @@ export class ProviderService {
         'PROVIDER_CLONE_URL',
         'The repository URL does not match this provider account.',
       );
-    const saved = await this.vault.read(scope(account));
-    if (!saved) throw new ProviderCredentialError('CREDENTIAL_INVALID');
-    let credential: GitHubCredential | undefined;
-    if (account.authentication === 'device') {
-      try {
-        credential = githubCredentialSchema.parse(JSON.parse(saved));
-      } catch {
-        throw new ProviderCredentialError('CREDENTIAL_INVALID');
-      }
-    }
+    const stored = await this.storedCredential(account);
+    let credential = stored.credential;
     let rotated = false;
     if (credential?.expiresAt !== undefined && credential.expiresAt <= this.now() + 60000) {
       this.github.clearReadCache();
@@ -407,7 +412,7 @@ export class ProviderService {
     }
     const identity = await this.github.identity(
       account.origin,
-      credential?.accessToken ?? saved,
+      credential?.accessToken ?? stored.token,
       signal,
     );
     if (identity.id !== account.providerUserId)
@@ -424,7 +429,20 @@ export class ProviderService {
       ...(credential?.expiresAt ? { expiresAt: credential.expiresAt } : {}),
     });
     await this.save(accounts);
-    return { accounts, account: accounts[index]!, token: credential?.accessToken ?? saved };
+    return { accounts, account: accounts[index]!, token: credential?.accessToken ?? stored.token };
+  }
+  private async storedCredential(account: ProviderAccount) {
+    const saved = await this.vault.read(scope(account));
+    if (!saved) throw new ProviderCredentialError('CREDENTIAL_INVALID');
+    let credential: GitHubCredential | undefined;
+    if (account.authentication === 'device') {
+      try {
+        credential = githubCredentialSchema.parse(JSON.parse(saved));
+      } catch {
+        throw new ProviderCredentialError('CREDENTIAL_INVALID');
+      }
+    }
+    return { credential, token: credential?.accessToken ?? saved };
   }
   disconnect(id: string) {
     return this.run(async () => {
