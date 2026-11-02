@@ -8,7 +8,7 @@ type Entry = {
   timer: ReturnType<typeof setTimeout>;
 };
 const lifetime = 5 * 60 * 1000;
-const maximumEntries = 64;
+const maximumEntries = 256;
 const maximumBytes = 16 * 1024 * 1024;
 
 /** Main-process memory only. A hit still requires an authenticated HTTP 304. */

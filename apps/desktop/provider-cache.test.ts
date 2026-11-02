@@ -6,7 +6,11 @@ import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { ProviderService } from './src/providers.js';
 import { ProviderVault } from './src/provider-vault.js';
-import { githubIssueFixture as issue } from '../../packages/test-fixtures/src/provider.js';
+import {
+  githubIssueFixture as issue,
+  githubPullFixture,
+  githubCommentFixture,
+} from '../../packages/test-fixtures/src/provider.js';
 import { protection } from '../../tests/provider-protection.js';
 
 const root = await mkdtemp(join(tmpdir(), 'openkraken-provider-cache-'));
@@ -187,7 +191,7 @@ test('private response bodies expire after five minutes even when repeatedly rev
 });
 
 test.each([
-  { name: 'entry count', count: 65, padding: 0 },
+  { name: 'entry count', count: 257, padding: 0 },
   { name: 'total bytes', count: 5, padding: 3500000 },
 ])(
   'the provider cache evicts old responses when its $name limit is reached',
@@ -305,6 +309,41 @@ test('a no-store revalidation drops its saved representation for the next reques
   );
   for (let i = 0; i < 3; i++) await providers.issue(account.id, { repository, number: 1 });
   expect(validators).toEqual([null, '"one-use"', null]);
+});
+
+test('a fully loaded PR list and discussion can both revalidate their pages without cache thrashing', async () => {
+  const { providers, account, api } = await setup('loaded-pages');
+  let conditional = 0;
+  const response = (request: globalThis.Request, comments: boolean) => {
+    const page = Number(new URL(request.url).searchParams.get('page'));
+    const etag = `"${comments ? 'comments' : 'pulls'}-${page}"`;
+    if (request.headers.get('if-none-match') === etag) {
+      conditional++;
+      return new HttpResponse(null, { status: 304 });
+    }
+    return HttpResponse.json(
+      Array.from({ length: 100 }, (_, i) =>
+        comments
+          ? githubCommentFixture((page - 1) * 100 + i + 1)
+          : githubPullFixture((page - 1) * 100 + i + 1),
+      ),
+      { headers: { etag } },
+    );
+  };
+  server.use(
+    http.get(`${api}/repos/team/project/pulls`, ({ request }) => response(request, false)),
+    http.get(`${api}/repos/team/project/pulls/1`, () => HttpResponse.json(githubPullFixture())),
+    http.get(`${api}/repos/team/project/pulls/1/comments`, ({ request }) =>
+      response(request, true),
+    ),
+  );
+  for (let cycle = 0; cycle < 2; cycle++) {
+    for (let page = 1; page <= 100; page++)
+      await providers.pullRequests(account.id, { repository, state: 'open', page });
+    for (let page = 1; page <= 100; page++)
+      await providers.pullComments(account.id, { repository, number: 1, page });
+  }
+  expect(conditional).toBe(200);
 });
 
 test.each([
