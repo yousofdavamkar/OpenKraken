@@ -227,6 +227,7 @@ function Palette({ close }: { close: () => void }) {
             setNotice('');
           }}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || (event.key === 'Enter' && event.repeat)) return;
             if (event.key === 'ArrowDown') setActive(Math.min(results.length - 1, index + 1));
             else if (event.key === 'ArrowUp') setActive(Math.max(0, index - 1));
             else if (event.key === 'Home') setActive(0);

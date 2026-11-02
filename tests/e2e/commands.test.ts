@@ -251,3 +251,24 @@ test('commit search participates in keymap conflicts and respects remapping and 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('composing or repeated Enter does not execute a palette command', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-command-composition-'));
+  const app = await electron.launch({ args: [resolve('apps/desktop'), `--user-data-dir=${root}`] });
+  try {
+    const page = await app.firstWindow();
+    await page.getByRole('button', { name: 'Commands', exact: true }).click();
+    const palette = page.getByRole('dialog', { name: 'Command palette' });
+    const search = palette.getByLabel('Search commands');
+    await search.fill('Clone repository');
+    await search.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', isComposing: true });
+    await expect(palette).toBeVisible({ timeout: 1000 });
+    await search.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', repeat: true });
+    await expect(palette).toBeVisible();
+    await search.press('Enter');
+    await expect(page.getByRole('dialog', { name: 'Clone repository', exact: true })).toBeVisible();
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
