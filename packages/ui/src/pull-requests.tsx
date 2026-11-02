@@ -452,7 +452,20 @@ function PullPages({
       </section>
       {selected !== undefined ? (
         target.provider === 'gitlab' ? (
-          <MergeRequestDetails key={selected} target={target} number={selected} />
+          <MergeRequestDetails
+            key={selected}
+            target={target}
+            number={selected}
+            refreshList={() => {
+              setPulls([]);
+              setSelected(undefined);
+              setNext(null);
+              setPage(1);
+              setAttempt((value) => value + 1);
+              setActive(0);
+              scroll.current?.scrollTo(0, 0);
+            }}
+          />
         ) : (
           <PullDetails
             key={selected}

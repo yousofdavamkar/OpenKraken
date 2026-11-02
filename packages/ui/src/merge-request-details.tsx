@@ -1,3 +1,4 @@
+import { GitLabMerge } from './gitlab-merge.js';
 import { useEffect, useState } from 'react';
 import type { ProviderMergeRequestDetails, ProviderPullOptions } from '@openkraken/ipc-contract';
 import { MergeApprovals } from './merge-approvals.js';
@@ -8,9 +9,11 @@ import { useProviderPoll } from './provider-polling.js';
 export function MergeRequestDetails({
   target,
   number,
+  refreshList,
 }: {
   target: { accountId: string; repository: ProviderPullOptions['repository'] };
   number: number;
+  refreshList: () => void;
 }) {
   const [tab, setTab] = useState<'details' | 'files' | 'discussions' | 'approvals'>('details');
   const [detail, setDetail] = useState<ProviderMergeRequestDetails>();
@@ -78,6 +81,11 @@ export function MergeRequestDetails({
       {error && <p role="alert">{error}</p>}
       {detail && (
         <>
+          <GitLabMerge
+            disabled={detail.state !== 'open'}
+            target={{ ...target, number, origin: new URL(detail.url).origin }}
+            changed={refreshList}
+          />
           <h3>
             !{detail.number} {detail.title}
           </h3>
