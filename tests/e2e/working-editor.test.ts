@@ -72,3 +72,52 @@ test('a stale editor save preserves both the newer disk file and the unsaved dra
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('closing the application reviews an unsaved working-file draft', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-editor-close-ui-'));
+  const path = createFixture(join(root, 'repository'));
+  writeFileSync(join(path, 'draft.txt'), 'before\n');
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+      dialog.showMessageBoxSync = () => 0;
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('button', { name: 'Edit draft.txt', exact: true }).click();
+    const editor = page.getByRole('dialog', { name: 'Working file editor' });
+    await editor.getByRole('textbox', { name: 'Working file text' }).fill('unsaved draft\n');
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.close();
+    });
+    await expect(editor.getByRole('textbox', { name: 'Working file text' })).toContainText(
+      'unsaved draft',
+    );
+    expect(readFileSync(join(path, 'draft.txt'), 'utf8')).toBe('before\n');
+    // Cancelling an application Quit must also keep the repository service alive.
+    await app.evaluate(({ app }) => {
+      app.quit();
+    });
+    await expect(editor.getByRole('textbox', { name: 'Working file text' })).toContainText(
+      'unsaved draft',
+    );
+    await editor.getByRole('button', { name: 'Save file', exact: true }).click();
+    await expect(editor).toHaveCount(0);
+    expect(readFileSync(join(path, 'draft.txt'), 'utf8')).toBe('unsaved draft\n');
+    await page.getByRole('button', { name: 'Edit draft.txt', exact: true }).click();
+    await editor.getByRole('textbox', { name: 'Working file text' }).fill('discard this draft\n');
+    const closed = app.waitForEvent('close');
+    await app.evaluate(({ app, dialog }) => {
+      dialog.showMessageBoxSync = () => 1;
+      setTimeout(() => app.quit(), 20);
+    });
+    await closed;
+    expect(readFileSync(join(path, 'draft.txt'), 'utf8')).toBe('unsaved draft\n');
+  } finally {
+    await app.close().catch(() => {});
+    rmSync(root, { recursive: true, force: true });
+  }
+});

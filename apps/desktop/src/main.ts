@@ -118,6 +118,20 @@ function createWindow() {
     webPreferences: { ...windowPreferences, preload: join(__dirname, 'preload.cjs') },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.webContents.on('will-prevent-unload', (event) => {
+    if (!window || window.isDestroyed()) return;
+    const choice = dialog.showMessageBoxSync(window, {
+      type: 'question',
+      buttons: ['Keep editing', 'Discard changes'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'Unsaved changes',
+      message: 'Discard unsaved changes?',
+      detail: 'Your editor draft has not been saved to disk.',
+      noLink: true,
+    });
+    if (choice === 1) event.preventDefault();
+  });
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   window.on('closed', () => {
@@ -221,7 +235,8 @@ else {
     if (process.platform !== 'darwin') app.quit();
   });
   let quitting = false;
-  app.on('before-quit', (event) => {
+  // Keep the service and caches alive if a renderer cancels the window close.
+  app.on('will-quit', (event) => {
     avatars?.close();
     if (!service || quitting) return;
     event.preventDefault();

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
@@ -87,6 +87,15 @@ function Draft({
   const [closing, setClosing] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const dirty = text !== normalize(file.text) || (!!newline && newline !== file.newline);
+  useLayoutEffect(() => {
+    if (!dirty) return;
+    const prevent = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', prevent);
+    return () => window.removeEventListener('beforeunload', prevent);
+  }, [dirty]);
   const close = () => {
     if (busy) return;
     if (dirty) setClosing(true);
