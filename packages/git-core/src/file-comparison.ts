@@ -7,6 +7,7 @@ import {
   type CommitComparisonOptions,
   type FileVersion,
 } from '@openkraken/ipc-contract';
+import { decodeText } from './text-encoding.js';
 import { commitFiles } from './commit-files.js';
 import { parsePatch } from './patch.js';
 import { GitError, type RunOptions, type runGit } from './runner.js';
@@ -20,6 +21,7 @@ async function version(
   oid: string | undefined,
   mode: string,
   allowLarge: boolean,
+  encoding: CommitComparisonOptions['encoding'],
   signal?: AbortSignal,
 ): Promise<FileVersion> {
   if (!oid) return { kind: 'missing', bytes: 0, mode };
@@ -31,18 +33,14 @@ async function version(
     throw new GitError('INVALID_OBJECT', 'Git returned an invalid blob size');
   if (bytes > (allowLarge ? HARD_BYTES : SOFT_BYTES)) return { kind: 'large', oid, mode, bytes };
   const content = (await run(['cat-file', 'blob', oid], { signal, maxBytes: HARD_BYTES })).stdout;
-  let text: string;
-  try {
-    if (content.includes(0)) throw new Error('Binary');
-    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(content);
-  } catch {
-    return { kind: 'binary', oid, mode, bytes };
-  }
+  const decoded = decodeText(content, encoding);
+  if (!decoded) return { kind: 'binary', oid, mode, bytes };
+  const { text } = decoded;
   let lines = text.length && !text.endsWith('\n') ? 1 : 0;
   for (let index = 0; index < text.length; index++) if (text.charCodeAt(index) === 10) lines++;
   if (lines > (allowLarge ? HARD_LINES : SOFT_LINES))
-    return { kind: 'large', oid, mode, bytes, lines, encoding: 'UTF-8' };
-  return { kind: 'text', oid, mode, bytes, text, encoding: 'UTF-8', lines };
+    return { kind: 'large', oid, mode, bytes, lines, encoding: decoded.encoding };
+  return { kind: 'text', oid, mode, bytes, text, encoding: decoded.encoding, lines };
 }
 export async function commitComparison(
   run: Run,
@@ -54,8 +52,8 @@ export async function commitComparison(
   const file = changed.files.find((file) => file.pathBytes === options.pathBytes);
   if (!file) throw new GitError('UNKNOWN_FILE', 'Select a file changed by this commit');
   const [oldVersion, newVersion] = await Promise.all([
-    version(run, file.oldOid, file.oldMode, !!options.allowLarge, signal),
-    version(run, file.newOid, file.newMode, !!options.allowLarge, signal),
+    version(run, file.oldOid, file.oldMode, !!options.allowLarge, options.encoding, signal),
+    version(run, file.newOid, file.newMode, !!options.allowLarge, options.encoding, signal),
   ]);
   const whitespace = options.whitespace ?? 'exact';
   const large = [oldVersion, newVersion].filter((version) => version.kind === 'large');

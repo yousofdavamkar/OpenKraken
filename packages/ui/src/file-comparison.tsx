@@ -5,6 +5,7 @@ import { EditorView, lineNumbers } from '@codemirror/view';
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { javascript } from '@codemirror/lang-javascript';
 import { Change, MergeView, presentableDiff, unifiedMergeView } from '@codemirror/merge';
+import { textEncodingSchema, type TextEncoding } from '@openkraken/ipc-contract';
 import type { CommitComparisonOptions, FileComparison } from '@openkraken/ipc-contract';
 type ViewMode = 'hunks' | 'inline' | 'split';
 const theme = EditorView.theme(
@@ -180,6 +181,7 @@ export function FileComparisonDialog({
   const [mode, setMode] = useState<ViewMode>('hunks');
   const [whitespace, setWhitespace] =
     useState<NonNullable<CommitComparisonOptions['whitespace']>>('exact');
+  const [encoding, setEncoding] = useState<TextEncoding>();
   const [allowLarge, setAllowLarge] = useState(false);
   const [words, setWords] = useState(true);
   useEffect(() => {
@@ -196,7 +198,7 @@ export function FileComparisonDialog({
         id,
         method: 'commitComparison',
         repoId,
-        options: { commit, parent, pathBytes, whitespace, allowLarge },
+        options: { commit, parent, pathBytes, whitespace, allowLarge, encoding },
       })
       .then((result) => {
         if (!alive) return;
@@ -210,7 +212,7 @@ export function FileComparisonDialog({
       alive = false;
       void window.openkraken.cancel(id);
     };
-  }, [repoId, commit, parent, pathBytes, whitespace, allowLarge]);
+  }, [repoId, commit, parent, pathBytes, whitespace, allowLarge, encoding]);
   const text =
     data &&
     [data.oldVersion, data.newVersion].every(
@@ -256,6 +258,25 @@ export function FileComparisonDialog({
             <option value="all">Ignore all whitespace</option>
             <option value="changes">Ignore whitespace amount</option>
             <option value="eol">Ignore trailing whitespace</option>
+          </select>
+        </label>
+        <label>
+          Encoding{' '}
+          <select
+            aria-label="Encoding"
+            value={encoding ?? ''}
+            onChange={(event) =>
+              setEncoding(
+                event.target.value ? textEncodingSchema.parse(event.target.value) : undefined,
+              )
+            }
+          >
+            <option value="">Auto-detect</option>
+            {textEncodingSchema.options.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
           </select>
         </label>
         {mode !== 'hunks' && (

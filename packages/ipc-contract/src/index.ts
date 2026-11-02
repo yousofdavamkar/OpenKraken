@@ -376,6 +376,20 @@ export const workingDiffSchema = z.object({
   ),
 });
 export type WorkingDiff = z.infer<typeof workingDiffSchema>;
+export const textEncodingSchema = z.enum([
+  'UTF-8',
+  'UTF-16LE',
+  'UTF-16BE',
+  'Shift_JIS',
+  'EUC-JP',
+  'EUC-KR',
+  'GB18030',
+  'Big5',
+  'windows-1252',
+  'windows-1251',
+  'ISO-8859-1',
+]);
+export type TextEncoding = z.infer<typeof textEncodingSchema>;
 export const whitespaceSchema = z.enum(['exact', 'all', 'changes', 'eol']);
 export const commitComparisonOptionsSchema = z
   .object({
@@ -383,6 +397,7 @@ export const commitComparisonOptionsSchema = z
     parent: oidSchema.optional(),
     pathBytes: pathBytesSchema,
     whitespace: whitespaceSchema.optional(),
+    encoding: textEncodingSchema.optional(),
     allowLarge: z.boolean().optional(),
   })
   .strict();
