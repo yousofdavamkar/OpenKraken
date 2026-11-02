@@ -159,7 +159,7 @@ export const useRepository = create<State>()(
       set((s) => {
         s.busy = request.id;
         if (background) s.syncing = request.id;
-        s.error = undefined;
+        if (!background) s.error = undefined;
       });
       if (previousPage) await window.openkraken.cancel(previousPage);
       if (previousSearch) await window.openkraken.cancel(previousSearch);
