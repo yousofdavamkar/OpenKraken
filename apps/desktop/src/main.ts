@@ -282,6 +282,7 @@ else {
           request.method === 'providerSubmitReview' ||
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
+          request.method === 'providerBitbucketPullRequest' ||
           request.method === 'providerMergeRequest' ||
           request.method === 'providerMergeRequestPipelines' ||
           request.method === 'providerMergeRequestPipelineJobs' ||
@@ -502,6 +503,15 @@ else {
             return resultSchema.parse({
               kind: 'providerPullRequest',
               pullRequest: await providers.pullRequest(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerBitbucketPullRequest')
+            return resultSchema.parse({
+              kind: 'providerBitbucketPullRequest',
+              pullRequest: await providers.bitbucketPullRequest(
                 request.accountId,
                 request.options,
                 controller.signal,
@@ -815,6 +825,7 @@ else {
           request.method === 'providerSubmitReview' ||
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
+          request.method === 'providerBitbucketPullRequest' ||
           request.method === 'providerMergeRequest' ||
           request.method === 'providerMergeRequestPipelines' ||
           request.method === 'providerMergeRequestPipelineJobs' ||

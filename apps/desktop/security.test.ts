@@ -6,6 +6,22 @@ import {
   serviceResponseSchema,
   resultSchema,
 } from '../../packages/ipc-contract/src/index.js';
+test('Bitbucket pull details have a separate strict main-process IPC request', () => {
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    method: 'providerBitbucketPullRequest',
+    accountId: 'a'.repeat(64),
+    options: { repository: { owner: 'team', name: 'project' }, number: 7 },
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  for (const options of [
+    { ...request.options, number: 0 },
+    { ...request.options, token: 'private' },
+    { ...request.options, url: 'https://other.test' },
+  ])
+    expect(requestSchema.safeParse({ ...request, options }).success).toBe(false);
+});
 test('Bitbucket workspace IPC keeps scoped reads in main and rejects arbitrary URLs and numeric identities', () => {
   const id = '00000000-0000-4000-8000-000000000000';
   const accountId = 'a'.repeat(64);

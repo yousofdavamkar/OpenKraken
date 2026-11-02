@@ -490,7 +490,7 @@ export class GitHubProvider implements ProviderDriver {
   ) {
     const options = providerPullListOptionsSchema.parse(input);
     const state = options.state;
-    if (state === 'merged' || state === 'locked')
+    if (state !== 'open' && state !== 'closed' && state !== 'all')
       throw new ProviderError(
         'PROVIDER_UNSUPPORTED',
         'Choose an open, closed or all pull-request filter for GitHub.',

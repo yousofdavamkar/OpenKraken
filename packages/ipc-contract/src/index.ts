@@ -1,3 +1,4 @@
+import { providerBitbucketPullDetailsSchema } from './providers.js';
 import { z } from 'zod';
 import {
   providerMergeRequestMergeStateSchema,
@@ -1449,6 +1450,14 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerBitbucketPullRequest'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerPullOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerMergeRequest'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerPullOptionsSchema,
@@ -1825,6 +1834,12 @@ export const resultSchema = z.discriminatedUnion('kind', [
     })
     .strict(),
   z.object({ kind: z.literal('providerPullRequests'), page: providerPullPageSchema }).strict(),
+  z
+    .object({
+      kind: z.literal('providerBitbucketPullRequest'),
+      pullRequest: providerBitbucketPullDetailsSchema,
+    })
+    .strict(),
   z
     .object({
       kind: z.literal('providerMergeRequest'),

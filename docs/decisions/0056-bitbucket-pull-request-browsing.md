@@ -1,0 +1,13 @@
+# ADR 0056: Native Bitbucket Cloud pull-request browsing
+
+Use the shared pull-request list with distinct Bitbucket Open, Merged, Declined and Superseded filters. All sends all four native `state` parameters because omitting the parameter returns only open requests. GitHub and GitLab reject Bitbucket-only filters. Preserve draft as a separate flag. Never infer a merge timestamp from `updated_on`.
+
+Resolve the selected repository's UUID and full path before each page or detail read. Every pull request must identify that destination repository; details must also match the requested local number. Reject unsafe source paths, invalid identifiers, repeated rows, mismatched state filters and oversized arrays. Lists use 100 entries per page, at most 100 pages, the shared validated continuation metadata and locally reconstructed queries. Mutable server listings can overlap; the desktop deduplicates pages and refreshes the loaded range.
+
+Separate strict Bitbucket details preserve source/destination repository identities, nullable deleted-source metadata, branch names, native commit identifiers, comments and open-task counts, queue/source-close flags, decline reason, closing user, reviewers and participant metadata. Bitbucket permits abbreviated commit identifiers: they are display values, not full-SHA write guards. Missing optional metadata remains unavailable rather than becoming a zero count or an eligibility claim. Reviewers and participants have separate meanings and are capped at 1,000 entries each, with virtualized keyboard lists. Participant approval and native state are displayed separately; neither establishes current mergeability.
+
+Descriptions and reasons render literally. Returned HTML and links never become executable content or credential destinations; display URLs are reconstructed. Manual and scheduled reads reuse the protected account, bounded transport, conditional cache, cooldown and cancellation machinery. Scheduled refresh preserves list search/selection and updates the selected details. Repository/state changes and panel closure cancel obsolete reads.
+
+This slice enables read-only list/details and participant status. Files, comments, submitted reviews, creation, mergeability checks, status checks and reviewed writes require subsequent native workflows. No GitHub-specific action is shown for Bitbucket. Live Bitbucket acceptance remains separate from fixture evidence.
+
+References: https://developer.atlassian.com/cloud/bitbucket/rest/api-group-pullrequests/ and its linked OpenAPI schema, https://developer.atlassian.com/cloud/bitbucket/rest/api-group-repositories/.

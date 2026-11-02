@@ -248,7 +248,7 @@ export const providerPullNumberSchema = z.number().int().positive().max(Number.M
 export const providerPullListOptionsSchema = z
   .object({
     repository: providerRepositoryTargetSchema,
-    state: z.enum(['open', 'closed', 'merged', 'locked', 'all']),
+    state: z.enum(['open', 'closed', 'merged', 'locked', 'declined', 'superseded', 'all']),
     page: providerRepositoryPageNumberSchema,
   })
   .strict();
@@ -261,7 +261,7 @@ export const providerPullSummarySchema = z
     number: providerPullNumberSchema,
     title: z.string().min(1).max(4096),
     author: z.string().min(1).max(255).nullable(),
-    state: z.enum(['open', 'closed', 'merged', 'locked']),
+    state: z.enum(['open', 'closed', 'merged', 'locked', 'declined', 'superseded']),
     draft: z.boolean(),
     createdAt: providerDateSchema,
     updatedAt: providerDateSchema,
@@ -280,6 +280,13 @@ export const providerPullSummarySchema = z
             providerRepositoryNameSchema.safeParse(parts[2]).success &&
             parts[3] === 'pull' &&
             /^[1-9][0-9]*$/.test(parts[4]!);
+          const bitbucket =
+            url.origin === 'https://bitbucket.org' &&
+            parts.length === 5 &&
+            providerRepositoryPathComponentSchema.safeParse(parts[1]).success &&
+            providerRepositoryPathComponentSchema.safeParse(parts[2]).success &&
+            parts[3] === 'pull-requests' &&
+            /^[1-9][0-9]*$/.test(parts[4]!);
           const gitlab =
             parts.length >= 6 &&
             parts.at(-3) === '-' &&
@@ -290,7 +297,7 @@ export const providerPullSummarySchema = z
           return (
             value === `${url.origin}${url.pathname}` &&
             providerOriginSchema.safeParse(url.origin).success &&
-            (github || gitlab)
+            (github || gitlab || bitbucket)
           );
         } catch {
           return false;
@@ -336,6 +343,55 @@ export type ProviderPullPage = z.infer<typeof providerPullPageSchema>;
 export type ProviderPullDetails = z.infer<typeof providerPullDetailsSchema>;
 
 const providerCommitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
+// Bitbucket may return abbreviated commit identifiers; these are display metadata, not write guards.
+export const providerBitbucketCommitSchema = z.string().regex(/^[0-9a-f]{7,64}$/);
+const providerBitbucketPersonSchema = z
+  .object({ id: providerBitbucketIdSchema, name: z.string().min(1).max(255) })
+  .strict();
+const providerBitbucketEndpointSchema = z
+  .object({
+    repository: providerRepositoryTargetSchema
+      .extend({ id: providerBitbucketIdSchema })
+      .strict()
+      .refine((repo) => !repo.owner.includes('/'))
+      .nullable(),
+    branch: z.string().min(1).max(1024).nullable(),
+    commit: providerBitbucketCommitSchema.nullable(),
+  })
+  .strict();
+export const providerBitbucketPullDetailsSchema = providerPullSummarySchema
+  .extend({
+    provider: z.literal('bitbucket'),
+    state: z.enum(['open', 'merged', 'declined', 'superseded']),
+    repositoryId: providerBitbucketIdSchema,
+    body: z.string().max(262144),
+    source: providerBitbucketEndpointSchema,
+    destination: providerBitbucketEndpointSchema,
+    mergeCommit: providerBitbucketCommitSchema.nullable(),
+    comments: providerCountSchema.nullable(),
+    openTasks: providerCountSchema.nullable(),
+    queued: z.boolean().nullable(),
+    closeSourceBranch: z.boolean().nullable(),
+    closedBy: providerBitbucketPersonSchema.nullable(),
+    reason: z.string().max(262144),
+    reviewers: z.array(providerBitbucketPersonSchema.nullable()).max(1000).nullable(),
+    participants: z
+      .array(
+        z
+          .object({
+            user: providerBitbucketPersonSchema.nullable(),
+            role: z.enum(['PARTICIPANT', 'REVIEWER']),
+            approved: z.boolean(),
+            state: z.enum(['approved', 'changes_requested']).nullable(),
+            participatedAt: providerDateSchema.nullable(),
+          })
+          .strict(),
+      )
+      .max(1000)
+      .nullable(),
+  })
+  .strict();
+export type ProviderBitbucketPullDetails = z.infer<typeof providerBitbucketPullDetailsSchema>;
 const providerProjectIdSchema = z.string().regex(/^[1-9][0-9]{0,19}$/);
 export const providerMergeRequestRevisionSchema = z
   .object({

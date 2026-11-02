@@ -1,3 +1,6 @@
+import { loadBitbucketPulls, loadBitbucketPull } from './bitbucket-pulls.js';
+import type { ProviderPullListOptions, ProviderPullOptions } from '@openkraken/ipc-contract';
+import { bitbucketPagination, bitbucketPageSchema, bitbucketUnique } from './bitbucket-response.js';
 import {
   providerBitbucketWorkspacePageSchema,
   providerBitbucketRepositoriesOptionsSchema,
@@ -25,40 +28,6 @@ const repositorySchema = z.object({
   is_private: z.boolean(),
   description: z.string().max(4096).nullish(),
 });
-function pagination(data: { page?: number; next?: string | null }, page: number, endpoint: string) {
-  if (data.page !== undefined && data.page !== page)
-    throw new ProviderError('PROVIDER_RESPONSE', 'Bitbucket returned a different page.');
-  if (data.next) {
-    const next = new URL(data.next);
-    if (
-      next.origin !== 'https://api.bitbucket.org' ||
-      next.username ||
-      next.password ||
-      next.hash ||
-      next.pathname !== `/2.0/${endpoint}` ||
-      next.searchParams.getAll('page').length !== 1 ||
-      next.searchParams.get('page') !== String(page + 1)
-    )
-      throw new ProviderError('PROVIDER_RESPONSE', 'Bitbucket returned invalid pagination.');
-  }
-  // Reconstruct subsequent requests locally, never follow provider links.
-  return {
-    nextPage: data.next && page < 100 ? page + 1 : null,
-    limited: !!data.next && page === 100,
-  };
-}
-function pageSchema<T extends z.ZodType>(item: T) {
-  return z.object({
-    page: z.number().int().positive().optional(),
-    next: z.string().url().max(4096).nullish(),
-    values: z.array(item).max(100),
-  });
-}
-function unique(ids: string[]) {
-  if (new Set(ids).size !== ids.length)
-    throw new ProviderError('PROVIDER_RESPONSE', 'Bitbucket returned duplicate entries.');
-}
-
 /** Cloud API only; caller-supplied and server-returned URLs never receive credentials. */
 export class BitbucketProvider {
   private policy = new ProviderPollingPolicy();
@@ -86,15 +55,15 @@ export class BitbucketProvider {
       `user/workspaces?page=${page}&pagelen=100&sort=slug`,
       signal,
       (data) => {
-        const result = pageSchema(z.object({ workspace: workspaceSchema })).parse(data);
-        unique(result.values.map((value) => value.workspace.uuid));
-        unique(result.values.map((value) => value.workspace.slug));
+        const result = bitbucketPageSchema(z.object({ workspace: workspaceSchema })).parse(data);
+        bitbucketUnique(result.values.map((value) => value.workspace.uuid));
+        bitbucketUnique(result.values.map((value) => value.workspace.slug));
         return providerBitbucketWorkspacePageSchema.parse({
           workspaces: result.values.map(({ workspace }) => ({
             id: workspace.uuid,
             slug: workspace.slug,
           })),
-          ...pagination(result, page, 'user/workspaces'),
+          ...bitbucketPagination(result, page, 'user/workspaces'),
         });
       },
     );
@@ -113,9 +82,9 @@ export class BitbucketProvider {
       `${endpoint}?page=${page}&pagelen=100&sort=name`,
       signal,
       (data) => {
-        const result = pageSchema(repositorySchema).parse(data);
-        unique(result.values.map((repo) => repo.uuid));
-        unique(result.values.map((repo) => repo.full_name));
+        const result = bitbucketPageSchema(repositorySchema).parse(data);
+        bitbucketUnique(result.values.map((repo) => repo.uuid));
+        bitbucketUnique(result.values.map((repo) => repo.full_name));
         return providerRepositoryPageSchema.parse({
           repositories: result.values.map((repo) => {
             const [owner, name, ...extra] = repo.full_name.split('/');
@@ -142,9 +111,26 @@ export class BitbucketProvider {
               cloneUrl: `https://bitbucket.org/${owner}/${name}.git`,
             };
           }),
-          ...pagination(result, page, endpoint),
+          ...bitbucketPagination(result, page, endpoint),
         });
       },
+    );
+  }
+  pullRequests(
+    origin: string,
+    token: string,
+    input: ProviderPullListOptions,
+    signal?: AbortSignal,
+  ) {
+    return loadBitbucketPulls(
+      (endpoint, parse) => this.request(origin, token, endpoint, signal, parse),
+      input,
+    );
+  }
+  pullRequest(origin: string, token: string, input: ProviderPullOptions, signal?: AbortSignal) {
+    return loadBitbucketPull(
+      (endpoint, parse) => this.request(origin, token, endpoint, signal, parse),
+      input,
     );
   }
   private async request<T>(

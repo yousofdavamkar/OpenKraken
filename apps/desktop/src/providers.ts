@@ -421,7 +421,21 @@ export class ProviderService {
     return this.run(async () => {
       const options = providerPullListOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
-      return this.repositoryDriver(account).pullRequests(account.origin, token, options, signal);
+      return this.accountDriver(account.provider).pullRequests(
+        account.origin,
+        token,
+        options,
+        signal,
+      );
+    });
+  }
+  bitbucketPullRequest(id: string, input: ProviderPullOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerPullOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'bitbucket')
+        throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
+      return this.bitbucket.pullRequest(account.origin, token, options, signal);
     });
   }
   pullRequest(id: string, input: ProviderPullOptions, signal?: AbortSignal) {

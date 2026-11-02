@@ -75,9 +75,11 @@ export async function loadMergeRequests(
   input: ProviderPullListOptions,
 ) {
   const options = providerPullListOptionsSchema.parse(input);
+  if (options.state === 'declined' || options.state === 'superseded')
+    throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a GitLab merge-request state.');
+  const state = options.state === 'open' ? 'opened' : options.state;
   const projectId = await resolveProject(read, options.repository);
   return read(`projects/${projectId}/merge_requests`, async (client) => {
-    const state = options.state === 'open' ? 'opened' : options.state;
     const data = z
       .array(summarySchema)
       .max(100)
