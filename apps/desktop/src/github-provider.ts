@@ -1112,6 +1112,8 @@ function pullSummary(
   repository: ProviderPullOptions['repository'],
   data: GitHubPullSummary,
 ) {
+  if (data?.state !== 'open' && data?.state !== 'closed')
+    throw new ProviderError('PROVIDER_RESPONSE', 'GitHub returned an invalid pull-request state.');
   const result = providerPullSummarySchema.safeParse({
     number: data?.number,
     title: data?.title,

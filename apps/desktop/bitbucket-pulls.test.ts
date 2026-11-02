@@ -313,3 +313,34 @@ test('GitHub and GitLab refuse Bitbucket-only state filters without dispatching 
     ).rejects.toMatchObject({ code: 'PROVIDER_UNSUPPORTED' });
   }
 });
+
+test('GitHub response metadata rejects native states belonging to other providers', async () => {
+  const { service } = await setup('github-state-response');
+  server.use(
+    http.get('https://api.github.com/user', () => HttpResponse.json({ id: 73, login: 'fixture' })),
+  );
+  const account = (
+    await service.connect({ provider: 'github', origin: 'https://github.com', token: 'fixture' })
+  ).accounts.find((account) => account.provider === 'github')!;
+  for (const state of ['declined', 'superseded', 'merged', 'locked']) {
+    server.use(
+      http.get('https://api.github.com/repos/team/project/pulls', () =>
+        HttpResponse.json([
+          {
+            number: 7,
+            title: 'Wrong state',
+            user: { login: 'fixture' },
+            draft: false,
+            state,
+            created_at: '2026-10-01T12:00:00Z',
+            updated_at: '2026-10-02T12:00:00Z',
+            merged_at: null,
+          },
+        ]),
+      ),
+    );
+    await expect(
+      service.pullRequests(account.id, { repository, state: 'open', page: 1 }),
+    ).rejects.toMatchObject({ code: 'PROVIDER_RESPONSE' });
+  }
+});
