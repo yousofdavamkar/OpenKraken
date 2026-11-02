@@ -1,9 +1,10 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import { EditorState } from '@codemirror/state';
 import { Decoration, EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap } from '@codemirror/commands';
 import { PullComments } from './pull-comments.js';
+import { pollNumberedPages, useProviderPoll } from './provider-polling.js';
 import type {
   ProviderCommentTarget,
   ProviderPullComment,
@@ -126,6 +127,12 @@ export function PullFiles({ context }: { context: PullContext }) {
   const [active, setActive] = useState(0);
   const listId = useId();
   const scroll = useRef<HTMLDivElement>(null);
+  const restoreScroll = useRef<number | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (restoreScroll.current !== undefined && scroll.current)
+      scroll.current.scrollTop = restoreScroll.current;
+    restoreScroll.current = undefined;
+  }, [files]);
   useEffect(() => {
     const id = crypto.randomUUID();
     let alive = true;
@@ -172,7 +179,50 @@ export function PullFiles({ context }: { context: PullContext }) {
       alive = false;
       void window.openkraken.cancel(id);
     };
-  }, [accountId, repository, detail, page, attempt]);
+  }, [accountId, repository, detail.number, detail.head.sha, detail.base.sha, page, attempt]);
+  useProviderPoll(
+    pending,
+    `${detail.number}/${detail.head.sha}/${detail.base.sha}/${page}/${attempt}`,
+    async (read) => {
+      const currentPath = files[active]?.path;
+      const top = Math.floor((scroll.current?.scrollTop ?? 0) / 42);
+      const anchor = files[top]?.path;
+      const offset = (scroll.current?.scrollTop ?? 0) % 42;
+      const result = await pollNumberedPages(
+        page,
+        async (page) => {
+          const result = await read({
+            method: 'providerPullFiles',
+            accountId,
+            options: {
+              repository,
+              number: detail.number,
+              revision: { head: detail.head.sha, base: detail.base.sha },
+              page,
+            },
+          });
+          if (result.kind !== 'providerPullFiles')
+            throw new Error('Changed files could not be refreshed.');
+          return { ...result.page, items: result.page.files };
+        },
+        (file) => file.path,
+      );
+      return {
+        commit: () => {
+          const index = result.items.findIndex((file) => file.path === currentPath);
+          const anchorIndex = result.items.findIndex((file) => file.path === anchor);
+          restoreScroll.current =
+            anchorIndex >= 0 ? anchorIndex * 42 + offset : scroll.current?.scrollTop;
+          setFiles(result.items);
+          setNext(result.nextPage);
+          setLimited(result.limited);
+          setError('');
+          setActive(index >= 0 ? index : Math.max(0, Math.min(active, result.items.length - 1)));
+          if (!result.items.some((file) => file.path === selected)) setSelected(undefined);
+        },
+      };
+    },
+  );
   const virtual = useVirtualizer({
     count: files.length,
     getScrollElement: () => scroll.current,
@@ -328,6 +378,30 @@ export function PullReviews({
       void window.openkraken.cancel(id);
     };
   }, [accountId, repository, detail.number, page, attempt]);
+  useProviderPoll(pending, `${detail.number}/${page}/${attempt}`, async (read) => {
+    const result = await pollNumberedPages(
+      page,
+      async (page) => {
+        const result = await read({
+          method: 'providerPullReviews',
+          accountId,
+          options: { repository, number: detail.number, page },
+        });
+        if (result.kind !== 'providerPullReviews')
+          throw new Error('Reviews could not be refreshed.');
+        return { ...result.page, items: result.page.reviews };
+      },
+      (review) => review.id,
+    );
+    return {
+      commit: () => {
+        setReviews(result.items);
+        setNext(result.nextPage);
+        setLimited(result.limited);
+        setError('');
+      },
+    };
+  });
   const virtual = useVirtualizer({
     count: reviews.length,
     getScrollElement: () => scroll.current,

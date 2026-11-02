@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { ProviderCheck, ProviderPullChecksPage } from '@openkraken/ipc-contract';
 import type { PullContext } from './pull-review.js';
+import { useProviderPoll } from './provider-polling.js';
 
 export function PullChecks({ context }: { context: PullContext }) {
   const [rows, setRows] = useState<ProviderCheck[]>([]);
@@ -87,6 +88,46 @@ export function PullChecks({ context }: { context: PullContext }) {
       void window.openkraken.cancel(id);
     };
   }, [accountId, repository, number, head, after, attempt]);
+  useProviderPoll(busy, `${number}/${head}/${after}/${pages}/${attempt}`, async (read) => {
+    const checks = new Map<string, ProviderCheck>();
+    const seen = new Set<string>();
+    let cursor: string | null = null;
+    let latest: ProviderPullChecksPage | undefined;
+    let loaded = 0;
+    for (let i = 0; i < Math.min(10, pages); i++) {
+      const result = await read({
+        method: 'providerPullChecks',
+        accountId,
+        options: { repository, number, head, after: cursor },
+      });
+      if (result.kind !== 'providerPullChecks')
+        throw new Error('Check results could not be refreshed.');
+      latest = result.page;
+      loaded++;
+      if (latest.state === null) {
+        checks.clear();
+        break;
+      }
+      for (const check of latest.checks) checks.set(check.id, check);
+      cursor = latest.nextCursor;
+      if (cursor === null) break;
+      if (seen.has(cursor))
+        throw new Error('The provider repeated a check page. Refresh checks to start again.');
+      seen.add(cursor);
+    }
+    const page = latest!;
+    return {
+      commit: () => {
+        setRows([...checks.values()]);
+        setSummary({ state: page.state, total: page.total });
+        setNext(page.nextCursor);
+        setPages(loaded);
+        cursors.current = seen;
+        setStale(false);
+        setError('');
+      },
+    };
+  });
   const virtual = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scroll.current,
@@ -182,6 +223,7 @@ export function PullChecks({ context }: { context: PullContext }) {
             onClick={() => {
               setAfter(next);
               setPages((value) => value + 1);
+              setAttempt((value) => value + 1);
             }}
           >
             Load more checks

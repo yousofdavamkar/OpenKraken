@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import type {
   ProviderPullDetails,
@@ -10,6 +10,7 @@ import { PullChecks } from './pull-checks.js';
 import { MergePullRequest } from './pull-merge.js';
 import { CreatePullRequest } from './pull-create.js';
 import { ProviderRepositoryPicker } from './provider-repositories.js';
+import { ProviderPolling, pollNumberedPages, useProviderPoll } from './provider-polling.js';
 
 type RepositorySelection = {
   accountId: string;
@@ -62,6 +63,31 @@ function PullDetails({
       void window.openkraken.cancel(id);
     };
   }, [target, number, attempt]);
+  useProviderPoll(
+    pending,
+    `${number}/${attempt}`,
+    async (read) => {
+      const result = await read({
+        method: 'providerPullRequest',
+        accountId: target.accountId,
+        options: { repository: target.repository, number },
+      });
+      if (result.kind !== 'providerPullRequest')
+        throw new Error('Pull-request details could not be refreshed.');
+      return {
+        commit: () => {
+          setDetail(result.pullRequest);
+          setError('');
+        },
+        resetChildren:
+          (tab === 'checks' && detail?.head.sha !== result.pullRequest.head.sha) ||
+          (tab === 'files' &&
+            (detail?.head.sha !== result.pullRequest.head.sha ||
+              detail?.base.sha !== result.pullRequest.base.sha)),
+      };
+    },
+    1,
+  );
   return (
     <section className="pull-details" aria-label="Pull-request details">
       {pending && <p role="status">Loading pull request #{number}…</p>}
@@ -134,7 +160,12 @@ function PullDetails({
           </div>
           {tab === 'checks' && <PullChecks key={detail.head.sha} context={{ ...target, detail }} />}
           {tab === 'comments' && <CommentDiscussion context={{ ...target, detail }} />}
-          {tab === 'files' && <PullFiles context={{ ...target, detail }} />}
+          {tab === 'files' && (
+            <PullFiles
+              key={`${detail.head.sha}/${detail.base.sha}`}
+              context={{ ...target, detail }}
+            />
+          )}
           {tab === 'reviews' && (
             <PullReviews key={reviewsVersion} context={{ ...target, detail }} />
           )}
@@ -180,6 +211,12 @@ function PullPages({
   const [selected, setSelected] = useState<number>();
   const scroll = useRef<HTMLDivElement>(null);
   const listId = useId();
+  const restoreScroll = useRef<number | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (restoreScroll.current !== undefined && scroll.current)
+      scroll.current.scrollTop = restoreScroll.current;
+    restoreScroll.current = undefined;
+  }, [pulls]);
   useEffect(() => {
     const id = crypto.randomUUID();
     let alive = true;
@@ -218,6 +255,47 @@ function PullPages({
   const search = query.trim().toLocaleLowerCase();
   const visible = pulls.filter((pr) =>
     `#${pr.number} ${pr.title} ${pr.author ?? ''}`.toLocaleLowerCase().includes(search),
+  );
+  useProviderPoll(
+    pending,
+    `${state}/${page}/${attempt}`,
+    async (read) => {
+      const currentId = visible[active]?.number;
+      const top = Math.floor((scroll.current?.scrollTop ?? 0) / 56);
+      const anchor = visible[top]?.number;
+      const offset = (scroll.current?.scrollTop ?? 0) % 56;
+      const result = await pollNumberedPages(
+        page,
+        async (page) => {
+          const result = await read({
+            method: 'providerPullRequests',
+            accountId: target.accountId,
+            options: { repository: target.repository, state, page },
+          });
+          if (result.kind !== 'providerPullRequests')
+            throw new Error('Pull requests could not be refreshed.');
+          return { ...result.page, items: result.page.pullRequests };
+        },
+        (pull) => pull.number,
+      );
+      const matches = result.items.filter((pull) =>
+        `#${pull.number} ${pull.title} ${pull.author ?? ''}`.toLocaleLowerCase().includes(search),
+      );
+      return {
+        commit: () => {
+          const index = matches.findIndex((pull) => pull.number === currentId);
+          const anchorIndex = matches.findIndex((pull) => pull.number === anchor);
+          restoreScroll.current =
+            anchorIndex >= 0 ? anchorIndex * 56 + offset : scroll.current?.scrollTop;
+          setPulls(result.items);
+          setNext(result.nextPage);
+          setLimited(result.limited);
+          setError('');
+          setActive(index >= 0 ? index : Math.max(0, Math.min(active, matches.length - 1)));
+        },
+      };
+    },
+    0,
   );
   const virtual = useVirtualizer({
     count: visible.length,
@@ -430,11 +508,13 @@ function PullRequestDialog({ close }: { close: () => void }) {
               </select>
             </label>
           </div>
-          <PullPages
+          <ProviderPolling
             key={`${target.accountId}/${target.repository.owner}/${target.repository.name}/${state}/${version}`}
-            target={target}
-            state={state}
-          />
+            accountId={target.accountId}
+            scope={`pulls/${target.repository.owner}/${target.repository.name}`}
+          >
+            <PullPages target={target} state={state} />
+          </ProviderPolling>
         </>
       ) : (
         <ProviderRepositoryPicker

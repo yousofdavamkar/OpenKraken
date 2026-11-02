@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { ProviderPullComment } from '@openkraken/ipc-contract';
 import type { PullContext } from './pull-review.js';
+import { pollNumberedPages, useProviderPoll } from './provider-polling.js';
 
 export function PullComments({
   context,
@@ -62,6 +63,30 @@ export function PullComments({
       void window.openkraken.cancel(id);
     };
   }, [accountId, repository, detail.number, page, attempt]);
+  useProviderPoll(pending, `${detail.number}/${page}/${attempt}`, async (read) => {
+    const result = await pollNumberedPages(
+      page,
+      async (page) => {
+        const result = await read({
+          method: 'providerPullComments',
+          accountId,
+          options: { repository, number: detail.number, page },
+        });
+        if (result.kind !== 'providerPullComments')
+          throw new Error('Inline comments could not be refreshed.');
+        return { ...result.page, items: result.page.comments };
+      },
+      (comment) => comment.id,
+    );
+    return {
+      commit: () => {
+        setComments(result.items);
+        setNext(result.nextPage);
+        setLimited(result.limited);
+        setError('');
+      },
+    };
+  });
   const threads = new Map<number, ProviderPullComment[]>();
   for (const comment of comments) {
     const id = comment.replyTo ?? comment.id;
