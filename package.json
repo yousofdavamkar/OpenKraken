@@ -22,24 +22,25 @@
     "build:helper": "node scripts/build-askpass.mjs"
   },
   "devDependencies": {
-    "typescript": "7.0.2",
-    "vite": "8.3.5",
-    "vitest": "5.0.5",
-    "fast-check": "latest",
-    "electron": "45.2.1",
+    "@babel/core": "latest",
+    "@babel/eslint-parser": "latest",
+    "@babel/plugin-syntax-typescript": "latest",
     "@electron/fuses": "latest",
     "@electron/packager": "20.3.0",
+    "@eslint/js": "latest",
     "@playwright/test": "latest",
-    "esbuild": "latest",
-    "tsx": "latest",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "electron": "45.2.1",
+    "esbuild": "latest",
     "eslint": "latest",
-    "@eslint/js": "latest",
-    "@babel/eslint-parser": "latest",
-    "@babel/core": "latest",
-    "@babel/plugin-syntax-typescript": "latest",
-    "prettier": "latest"
+    "fast-check": "latest",
+    "msw": "3.0.3",
+    "prettier": "latest",
+    "tsx": "latest",
+    "typescript": "7.0.2",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
   }
 }

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { providerAccountsSchema, providerConnectSchema } from './providers.js';
+export * from './providers.js';
 
 export const oidSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 export const headSchema = z.discriminatedUnion('kind', [
@@ -1046,6 +1048,17 @@ const workingRequests = [
     .strict(),
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  z.object({ id: requestId, method: z.literal('providerAccounts') }).strict(),
+  z
+    .object({ id: requestId, method: z.literal('providerConnect'), options: providerConnectSchema })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerDisconnect'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict(),
   authenticationAnswer,
   editorAnswer,
   z.object({ id: requestId, method: z.literal('clone'), options: cloneOptionsSchema }).strict(),
@@ -1114,6 +1127,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('providerAccounts'), state: providerAccountsSchema }),
   z.object({ kind: z.literal('deleteRemotePreview'), plan: deleteRemotePlanSchema }),
   z.object({ kind: z.literal('authenticationAnswered'), accepted: z.boolean() }),
   z.object({ kind: z.literal('editorAnswered'), accepted: z.boolean() }),

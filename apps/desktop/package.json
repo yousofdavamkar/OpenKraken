@@ -5,6 +5,7 @@
   "type": "module",
   "main": "dist/main.cjs",
   "dependencies": {
+    "@octokit/rest": "22.0.1",
     "@openkraken/git-core": "workspace:*",
     "@openkraken/ipc-contract": "workspace:*"
   }
