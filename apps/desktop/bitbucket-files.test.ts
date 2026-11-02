@@ -224,3 +224,82 @@ test('Bitbucket refuses foreign comparisons, changed revisions, inconsistent fil
     code: 'STALE_PROVIDER_MERGE',
   });
 });
+
+test('Bitbucket diff reads revalidate cached text, reject HTML and oversized bodies, and honor cancellation', async () => {
+  const { service, account } = await setup('transport');
+  const options = { repository, number: 1, revision, page: 1, path: 'file.ts' };
+  let mode: 'text' | 'cached' | 'html' | 'large' | 'wait' = 'text';
+  let started = () => {};
+  const entered = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  server.use(
+    http.get(
+      `${api}/repositories/team/project/pullrequests/1/:kind`,
+      ({ params }) =>
+        new HttpResponse(null, {
+          status: 302,
+          headers: {
+            Location: `${api}/repositories/team/project/${params.kind}/${spec}?topic=true`,
+          },
+        }),
+    ),
+    http.get(`${api}/repositories/team/project/diffstat/${spec}`, () =>
+      HttpResponse.json({
+        page: 1,
+        values: [
+          {
+            status: 'added',
+            old: null,
+            new: { path: 'file.ts' },
+            lines_added: 1,
+            lines_removed: 0,
+          },
+        ],
+      }),
+    ),
+    http.get(`${api}/repositories/team/project/diff/${spec}`, async ({ request }) => {
+      if (mode === 'cached') {
+        expect(request.headers.get('if-none-match')).toBe('"patch"');
+        return new HttpResponse(null, { status: 304 });
+      }
+      if (mode === 'html')
+        return new HttpResponse('<html>files-secret</html>', {
+          headers: { 'Content-Type': 'text/html' },
+        });
+      if (mode === 'large') return HttpResponse.text('x'.repeat(4 * 1024 * 1024 + 1));
+      if (mode === 'wait') {
+        started();
+        await new Promise<void>((resolve) => {
+          if (request.signal.aborted) resolve();
+          else request.signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+      }
+      return HttpResponse.text('literal patch', { headers: { ETag: '"patch"' } });
+    }),
+  );
+  expect(await service.bitbucketPullDiff(account.id, options)).toEqual({
+    text: 'literal patch',
+    truncated: false,
+  });
+  mode = 'cached';
+  expect(await service.bitbucketPullDiff(account.id, options)).toEqual({
+    text: 'literal patch',
+    truncated: false,
+  });
+  mode = 'html';
+  await expect(service.bitbucketPullDiff(account.id, options)).rejects.toMatchObject({
+    code: 'PROVIDER_RESPONSE',
+  });
+  mode = 'large';
+  await expect(service.bitbucketPullDiff(account.id, options)).rejects.toMatchObject({
+    code: 'PROVIDER_REQUEST',
+  });
+  mode = 'wait';
+  const controller = new AbortController();
+  const pending = service.bitbucketPullDiff(account.id, options, controller.signal);
+  const cancelled = expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
+  await entered;
+  controller.abort();
+  await cancelled;
+});
