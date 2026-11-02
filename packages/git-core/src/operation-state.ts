@@ -136,7 +136,13 @@ export async function inspectOperation(gitDir: string) {
           files.get('MERGE_MSG') ??
           ''),
     ...(kind !== 'none'
-      ? { originalHead: oid(`${backend}/orig-head`, 'sequencer/head', 'ORIG_HEAD') }
+      ? {
+          originalHead:
+            kind === 'merge' ? oid('ORIG_HEAD') : oid(`${backend}/orig-head`, 'sequencer/head'),
+        }
+      : {}),
+    ...(['cherry-pick', 'revert'].includes(kind)
+      ? { currentCommit: oid(kind === 'cherry-pick' ? 'CHERRY_PICK_HEAD' : 'REVERT_HEAD') }
       : {}),
     ...(kind === 'rebase'
       ? {

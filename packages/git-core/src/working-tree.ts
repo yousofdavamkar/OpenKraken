@@ -432,18 +432,46 @@ export class WorkingTree {
           'Commit or stash tracked changes before starting this operation.',
         );
       await this.run(['cat-file', '-e', `${options.target}^{commit}`], { signal });
+      let args: string[];
+      if (options.kind === 'merge')
+        args = ['merge', `--${options.mode}`, '--no-autostash', '--no-edit', options.target];
+      else if (options.kind === 'rebase')
+        args = [
+          'rebase',
+          '--merge',
+          '--no-autostash',
+          '--no-update-refs',
+          '--no-rebase-merges',
+          options.target,
+        ];
+      else {
+        const parents = (
+          await this.run(['rev-list', '--parents', '-1', options.target], { signal })
+        ).stdout
+          .toString()
+          .trim()
+          .split(' ')
+          .slice(1);
+        if (parents.length > 1 && !options.mainline)
+          throw new GitError(
+            'MAINLINE_REQUIRED',
+            'Choose the mainline parent number for this merge commit (starting at 1).',
+          );
+        if (options.mainline && options.mainline > parents.length)
+          throw new GitError(
+            'INVALID_MAINLINE',
+            'The selected mainline parent does not exist in this commit.',
+          );
+        args = [
+          options.kind,
+          '--no-edit',
+          ...(options.mainline ? ['--mainline', String(options.mainline)] : []),
+          options.target,
+        ];
+      }
       await this.runOperation(
-        options.kind === 'rebase'
-          ? [
-              'rebase',
-              '--merge',
-              '--no-autostash',
-              '--no-update-refs',
-              '--no-rebase-merges',
-              options.target,
-            ]
-          : ['merge', `--${options.mode}`, '--no-autostash', '--no-edit', options.target],
-        options.kind === 'rebase' ? 'Rebase' : `Merge (${options.mode})`,
+        args,
+        options.kind === 'merge' ? `Merge (${options.mode})` : options.kind,
         indexFile,
         publish,
         signal,

@@ -42,7 +42,7 @@ test('reopened native rebase shows progress and requires confirmation before abo
     rmSync(root, { recursive: true, force: true });
   }
 });
-test('reviewed no-ff merge creates a merge commit and refreshes history', async () => {
+test('reviewed merge and mainline revert update native history', async () => {
   const root = mkdtempSync(join(tmpdir(), 'openkraken-merge-e2e-'));
   const path = createFixture(join(root, 'repository'));
   fixtureGit(path, ['switch', '-c', 'incoming']);
@@ -60,8 +60,8 @@ test('reviewed no-ff merge creates a merge commit and refreshes history', async 
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
     }, path);
     await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
-    await page.getByRole('button', { name: 'Merge or rebase', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: 'Merge or rebase', exact: true });
+    await page.getByRole('button', { name: 'Integrate commits', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Integrate commits', exact: true });
     await dialog
       .getByRole('combobox', { name: 'Target commit', exact: true })
       .selectOption({ label: 'incoming' });
@@ -72,6 +72,20 @@ test('reviewed no-ff merge creates a merge commit and refreshes history', async 
     const parents = fixtureGit(path, ['rev-list', '--parents', '-1', 'HEAD']).split(' ');
     expect(parents).toHaveLength(3);
     expect(parents[2]).toBe(target);
+    await page.getByRole('button', { name: 'Integrate commits', exact: true }).click();
+    await dialog.getByRole('combobox', { name: 'Operation', exact: true }).selectOption('revert');
+    await dialog
+      .getByRole('combobox', { name: 'Target commit', exact: true })
+      .selectOption({ label: 'main' });
+    await dialog
+      .getByRole('spinbutton', { name: 'Mainline parent (merge commits only)' })
+      .fill('1');
+    await dialog.getByRole('button', { name: 'Start revert', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(fixtureGit(path, ['rev-parse', 'HEAD^{tree}'])).toBe(
+      fixtureGit(path, ['rev-parse', `${parents[1]}^{tree}`]),
+    );
+
     await expect(page.getByTestId('head')).toHaveText('main');
     await expect(
       page

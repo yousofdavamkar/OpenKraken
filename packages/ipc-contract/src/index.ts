@@ -115,6 +115,14 @@ export const startOperationSchema = z.discriminatedUnion('kind', [
       revision: z.string().regex(/^[0-9a-f]{64}$/),
     })
     .strict(),
+  z
+    .object({
+      kind: z.enum(['cherry-pick', 'revert']),
+      target: oidSchema,
+      revision: z.string().regex(/^[0-9a-f]{64}$/),
+      mainline: z.number().int().min(1).max(128).optional(),
+    })
+    .strict(),
 ]);
 export type StartOperation = z.infer<typeof startOperationSchema>;
 

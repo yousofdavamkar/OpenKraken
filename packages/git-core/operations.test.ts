@@ -193,3 +193,71 @@ test('starting integration refuses changed HEAD, dirty tracked files and an exis
     await service.dispose();
   }
 });
+test('cherry-pick and revert require an explicit mainline for merge commits', async () => {
+  const path = createFixture(join(root, 'mainline'));
+  fixtureGit(path, ['switch', '-c', 'feature']);
+  await writeFile(join(path, 'feature.txt'), 'feature\n');
+  fixtureGit(path, ['add', '.']);
+  fixtureGit(path, ['commit', '-m', 'Feature']);
+  fixtureGit(path, ['switch', 'main']);
+  const original = fixtureGit(path, ['rev-parse', 'HEAD']);
+  fixtureGit(path, ['merge', '--no-ff', '--no-edit', 'feature']);
+  const target = fixtureGit(path, ['rev-parse', 'HEAD']);
+  fixtureGit(path, ['switch', '-c', 'test-mainline', original]);
+  const service = new RepositoryService('git', { dataDir: join(root, 'mainline-profile') });
+  try {
+    const repo = await service.open(path);
+    for (const kind of ['cherry-pick', 'revert'] as const) {
+      const state = await service.workingState(repo.id);
+      await expect(
+        service.startOperation(repo.id, { kind, target, revision: state.revision }),
+      ).rejects.toMatchObject({ code: 'MAINLINE_REQUIRED' });
+      await service.startOperation(repo.id, {
+        kind,
+        target,
+        mainline: 1,
+        revision: state.revision,
+      });
+      expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
+      if (kind === 'cherry-pick')
+        expect(fixtureGit(path, ['show', 'HEAD:feature.txt'])).toBe('feature');
+      else
+        expect(fixtureGit(path, ['rev-parse', 'HEAD^{tree}'])).toBe(
+          fixtureGit(path, ['rev-parse', `${original}^{tree}`]),
+        );
+    }
+  } finally {
+    await service.dispose();
+  }
+});
+for (const kind of ['cherry-pick', 'revert'] as const)
+  for (const action of ['continue', 'skip', 'abort'] as const)
+    test(`${kind} conflict supports ${action} with native index stages`, async () => {
+      const { path, service, repo, first } = await divergent(`${kind}-${action}`);
+      try {
+        if (kind === 'revert') {
+          await writeFile(join(path, 'tracked.txt'), 'later edit\n');
+          fixtureGit(path, ['commit', '-am', 'Later edit']);
+        }
+        const original = fixtureGit(path, ['rev-parse', 'HEAD']);
+        const target = kind === 'cherry-pick' ? fixtureGit(path, ['rev-parse', 'incoming']) : first;
+        const state = await service.workingState(repo.id);
+        await expect(
+          service.startOperation(repo.id, { kind, target, revision: state.revision }),
+        ).rejects.toMatchObject({ code: 'GIT_FAILED' });
+        expect((await service.operationState(repo.id)).kind).toBe(kind);
+        if (action === 'continue') {
+          await writeFile(join(path, 'tracked.txt'), 'resolved result\n');
+          fixtureGit(path, ['add', 'tracked.txt']);
+        }
+        const reviewed = await service.operationState(repo.id);
+        await service.operationAction(repo.id, { action, token: reviewed.token });
+        expect((await service.operationState(repo.id)).kind).toBe('none');
+        expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
+        if (action === 'continue')
+          expect(fixtureGit(path, ['show', 'HEAD:tracked.txt'])).toBe('resolved result');
+        else expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(original);
+      } finally {
+        await service.dispose();
+      }
+    });

@@ -14,7 +14,8 @@ function IntegrationDialog({
   close: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [kind, setKind] = useState<'merge' | 'rebase'>('merge');
+  const [kind, setKind] = useState<StartOperation['kind']>('merge');
+  const [mainline, setMainline] = useState('');
   const [mode, setMode] = useState<'ff' | 'no-ff' | 'squash'>('ff');
   const choices = snapshot.refs.filter(
     (ref) => ref.objectType === 'commit' || ref.peeledType === 'commit',
@@ -41,7 +42,14 @@ function IntegrationDialog({
       const options: StartOperation =
         kind === 'merge'
           ? { kind, mode, target, revision: state.revision }
-          : { kind, target, revision: state.revision };
+          : kind === 'rebase'
+            ? { kind, target, revision: state.revision }
+            : {
+                kind,
+                target,
+                revision: state.revision,
+                ...(mainline ? { mainline: Number(mainline) } : {}),
+              };
       const result = await window.openkraken.request({
         id,
         method: 'startOperation',
@@ -65,7 +73,7 @@ function IntegrationDialog({
   return (
     <dialog
       ref={dialog}
-      aria-label="Merge or rebase"
+      aria-label="Integrate commits"
       className="reference-dialog"
       onCancel={(event) => {
         event.preventDefault();
@@ -78,7 +86,7 @@ function IntegrationDialog({
           void submit();
         }}
       >
-        <h2>Merge or rebase</h2>
+        <h2>Integrate commits</h2>
         <p>
           Current {state.head.kind === 'branch' ? state.head.ref.slice(11) : 'detached HEAD'}:{' '}
           <code>{state.head.oid}</code>
@@ -88,10 +96,21 @@ function IntegrationDialog({
           <select
             disabled={pending}
             value={kind}
-            onChange={(event) => setKind(event.target.value === 'merge' ? 'merge' : 'rebase')}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (
+                value === 'merge' ||
+                value === 'rebase' ||
+                value === 'cherry-pick' ||
+                value === 'revert'
+              )
+                setKind(value);
+            }}
           >
             <option value="merge">Merge</option>
             <option value="rebase">Rebase current branch</option>
+            <option value="cherry-pick">Cherry-pick commit</option>
+            <option value="revert">Revert commit</option>
           </select>
         </label>
         <label>
@@ -129,12 +148,29 @@ function IntegrationDialog({
             </select>
           </label>
         )}
+        {(kind === 'cherry-pick' || kind === 'revert') && (
+          <label>
+            Mainline parent (merge commits only)
+            <input
+              type="number"
+              min="1"
+              max="128"
+              value={mainline}
+              disabled={pending}
+              onChange={(event) => setMainline(event.target.value)}
+            />
+          </label>
+        )}
         <p>
-          {kind === 'rebase'
-            ? 'Replay the current branch on the target commit. This changes commit IDs.'
-            : mode === 'squash'
-              ? 'Stage the combined changes for you to review and commit.'
-              : 'Integrate the target into the current branch.'}
+          {kind === 'cherry-pick'
+            ? 'Apply the selected commit’s changes as a new commit on the current branch.'
+            : kind === 'revert'
+              ? 'Create a new commit reversing the selected commit. Reverting a merge also affects what later merges bring in.'
+              : kind === 'rebase'
+                ? 'Replay the current branch on the target commit. This changes commit IDs.'
+                : mode === 'squash'
+                  ? 'Stage the combined changes for you to review and commit.'
+                  : 'Integrate the target into the current branch.'}
         </p>
         <p>
           Commit or stash tracked edits first. If conflicts occur, close this dialog to resolve them
@@ -188,7 +224,7 @@ export function Integration() {
             });
         }}
       >
-        Merge or rebase
+        Integrate commits
       </button>
       {review && <IntegrationDialog {...review} close={() => setReview(undefined)} />}
     </>
