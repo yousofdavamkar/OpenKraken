@@ -159,3 +159,138 @@ test('self-managed GitLab pages retain safe long paths and refuse malformed meta
     await expect(service.repositories(account.id, page)).rejects.toThrow();
   expect(calls).toBe(previous);
 });
+
+test('GitLab revalidates repository pages with isolated validators and never substitutes cached data for errors', async () => {
+  const { service, account } = await setup('cache');
+  const validators: Array<string | null> = [];
+  let failure = false;
+  server.use(
+    http.get('https://gitlab.com/api/v4/projects', ({ request }) => {
+      const page = new URL(request.url).searchParams.get('page');
+      const validator = request.headers.get('if-none-match');
+      validators.push(validator);
+      if (failure) return HttpResponse.json({ message: 'repository-secret' }, { status: 503 });
+      if (validator) return new HttpResponse(null, { status: 304 });
+      return HttpResponse.json([project(page === '1' ? 1 : 2)], {
+        headers: { ETag: `"page-${page}"` },
+      });
+    }),
+  );
+  const first = await service.repositories(account.id, 1);
+  expect(await service.repositories(account.id, 1)).toEqual(first);
+  expect((await service.repositories(account.id, 2)).repositories[0]!.id).toBe('2');
+  failure = true;
+  await expect(service.repositories(account.id, 1)).rejects.toMatchObject({
+    code: 'PROVIDER_REQUEST',
+  });
+  failure = false;
+  await service.connect({
+    provider: 'gitlab',
+    origin: account.origin,
+    token: 'replacement-secret',
+  });
+  expect(await service.repositories(account.id, 1)).toEqual(first);
+  expect(validators).toEqual([null, '"page-1"', null, '"page-1"', null]);
+});
+
+test('GitLab repository reads reject redirects, oversized bodies and cancelled work without contacting foreign URLs', async () => {
+  const { service, account } = await setup('transport');
+  let escaped = false;
+  server.use(
+    http.get('https://gitlab.com/api/v4/projects', () =>
+      HttpResponse.redirect('https://attacker.test/projects'),
+    ),
+    http.get('https://attacker.test/projects', () => {
+      escaped = true;
+      return HttpResponse.json([project(1)]);
+    }),
+  );
+  await expect(service.repositories(account.id, 1)).rejects.toMatchObject({
+    code: 'PROVIDER_REQUEST',
+  });
+  expect(escaped).toBe(false);
+  server.use(
+    http.get(
+      'https://gitlab.com/api/v4/projects',
+      () => new HttpResponse('x'.repeat(4 * 1024 * 1024 + 1)),
+    ),
+  );
+  await expect(service.repositories(account.id, 1)).rejects.toMatchObject({
+    code: 'PROVIDER_REQUEST',
+  });
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  server.use(
+    http.get('https://gitlab.com/api/v4/projects', async ({ request }) => {
+      entered();
+      await new Promise<void>((resolve) =>
+        request.signal.addEventListener('abort', () => resolve(), { once: true }),
+      );
+      return HttpResponse.json([project(1)]);
+    }),
+  );
+  const controller = new AbortController();
+  const pending = expect(
+    service.repositories(account.id, 1, controller.signal),
+  ).rejects.toMatchObject({ code: 'CANCELLED' });
+  await started;
+  controller.abort();
+  await pending;
+});
+
+test('GitLab quota headers stop subsequent identity and repository requests during the server cooldown', async () => {
+  const { service, account } = await setup('rate-limit');
+  let calls = 0;
+  const reset = Math.ceil(Date.now() / 1000) + 120;
+  server.use(
+    http.get('https://gitlab.com/api/v4/projects', () => {
+      calls++;
+      return HttpResponse.json(
+        { message: 'repository-secret' },
+        { status: 429, headers: { 'RateLimit-Remaining': '0', 'RateLimit-Reset': String(reset) } },
+      );
+    }),
+  );
+  for (let attempt = 0; attempt < 2; attempt++)
+    await expect(service.repositories(account.id, 1)).rejects.toMatchObject({
+      code: 'PROVIDER_RATE_LIMIT',
+      retryAt: reset * 1000,
+    });
+  expect(calls).toBe(1);
+  expect(await service.pollingPolicy(account.id)).toEqual({
+    minimumIntervalMs: 0,
+    blockedUntil: reset * 1000,
+  });
+});
+
+test('GitLab no-store and revoked access discard conditional-read bodies', async () => {
+  const { service, account } = await setup('cache-policy');
+  const validators: Array<string | null> = [];
+  let mode: 'no-store' | 'cache' | 'denied' = 'no-store';
+  server.use(
+    http.get('https://gitlab.com/api/v4/projects', ({ request }) => {
+      validators.push(request.headers.get('if-none-match'));
+      if (mode === 'denied')
+        return HttpResponse.json({ message: 'repository-secret' }, { status: 403 });
+      return HttpResponse.json([project(1)], {
+        headers: {
+          ETag: '"project"',
+          ...(mode === 'no-store' ? { 'Cache-Control': 'no-store' } : {}),
+        },
+      });
+    }),
+  );
+  await service.repositories(account.id, 1);
+  await service.repositories(account.id, 1);
+  mode = 'cache';
+  await service.repositories(account.id, 1);
+  mode = 'denied';
+  await expect(service.repositories(account.id, 1)).rejects.toMatchObject({
+    code: 'PROVIDER_AUTH',
+  });
+  mode = 'cache';
+  await service.repositories(account.id, 1);
+  expect(validators).toEqual([null, null, null, '"project"', null]);
+});

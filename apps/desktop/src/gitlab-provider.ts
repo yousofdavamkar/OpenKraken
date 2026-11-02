@@ -10,6 +10,7 @@ import {
 } from '@openkraken/ipc-contract';
 import { ProviderError } from './provider-error.js';
 import { ProviderPollingPolicy } from './provider-polling-policy.js';
+import { ProviderReadCache } from './provider-read-cache.js';
 
 const projectSchema = z.object({
   id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
@@ -22,8 +23,11 @@ const projectSchema = z.object({
 /** Gitbeaker endpoints with a bounded, cancellable transport and no implicit retries. */
 export class GitLabProvider {
   private policy = new ProviderPollingPolicy();
+  private cache = new ProviderReadCache();
   constructor(private fetcher: typeof fetch = (...args) => fetch(...args)) {}
-  clearReadCache() {}
+  clearReadCache() {
+    this.cache.clear();
+  }
   pollingPolicy(origin: string, token: string) {
     return this.policy.get(origin, token);
   }
@@ -107,12 +111,14 @@ export class GitLabProvider {
             dispatched = true;
             const url = new URL(`${host}/api/v4/${endpoint}`);
             url.search = typeof options.searchParams === 'string' ? options.searchParams : '';
+            const requestHeaders = new Headers(options.headers as Record<string, string>);
+            requestHeaders.set('User-Agent', 'OpenKraken/0.1.0');
+            const key = this.cache.key(host, token, url.href, requestHeaders);
+            const cached = this.cache.get(key);
+            if (cached) requestHeaders.set('If-None-Match', cached.etag);
             const response = await this.fetcher(url.href, {
               method: 'GET',
-              headers: {
-                ...(options.headers as Record<string, string>),
-                'User-Agent': 'OpenKraken/0.1.0',
-              },
+              headers: requestHeaders,
               credentials: 'omit',
               redirect: 'error',
               signal: combined,
@@ -123,11 +129,15 @@ export class GitLabProvider {
               if (value !== null) headers.set(`x-ratelimit-${name}`, value);
             }
             this.policy.observe(host, token, url.href, response.status, headers);
+            if ([401, 403, 404].includes(response.status)) this.cache.clear();
             const reader = response.body?.getReader();
             const chunks: Uint8Array[] = [];
             let length = 0;
             try {
-              if (!response.ok) {
+              if (response.status === 304 && cached) {
+                chunks.push(cached.body);
+                if (!this.cache.storageAllowed(response.headers)) this.cache.discard(key);
+              } else if (!response.ok) {
                 this.policy.assertAllowed(host, token);
                 throw new ProviderError(
                   response.status === 401 || response.status === 403
@@ -138,7 +148,7 @@ export class GitLabProvider {
                     : 'The GitLab request failed. Check the connection and try again.',
                 );
               }
-              if (reader)
+              if (reader && response.status !== 304)
                 for (;;) {
                   const chunk = await reader.read();
                   if (chunk.done) break;
@@ -150,16 +160,18 @@ export class GitLabProvider {
             } finally {
               await reader?.cancel().catch(() => {});
             }
+            const body = Buffer.concat(chunks);
+            if (response.status === 200) this.cache.set(key, response.headers, body);
             return {
               body: z
                 .union([
                   z.record(z.string(), z.unknown()),
                   z.array(z.record(z.string(), z.unknown())).max(100),
                 ])
-                .parse(JSON.parse(Buffer.concat(chunks).toString('utf8'))),
+                .parse(JSON.parse(body.toString('utf8'))),
               // Continuation is local and bounded; provider Link URLs never enter the SDK pager.
               headers: {},
-              status: response.status,
+              status: response.status === 304 ? 200 : response.status,
             };
           },
         ),

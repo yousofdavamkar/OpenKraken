@@ -106,7 +106,7 @@ export class ProviderService {
       now,
     );
   }
-  private identityDriver(provider: ProviderAccount['provider']) {
+  private accountDriver(provider: ProviderAccount['provider']) {
     return provider === 'gitlab' ? this.gitlab : this.github;
   }
   private collaborationDriver(account: ProviderAccount) {
@@ -222,7 +222,7 @@ export class ProviderService {
         throw new ProviderCredentialError('KEYCHAIN_UNAVAILABLE');
       signal?.throwIfAborted();
       const accounts = await this.load();
-      const driver = this.identityDriver(options.provider);
+      const driver = this.accountDriver(options.provider);
       driver.clearReadCache();
       const identity = await driver.identity(options.origin, options.token, signal);
       const fields = {
@@ -276,7 +276,7 @@ export class ProviderService {
         );
       const { token } = await this.storedCredential(account);
       return providerPollingPolicySchema.parse(
-        this.identityDriver(account.provider).pollingPolicy(account.origin, token),
+        this.accountDriver(account.provider).pollingPolicy(account.origin, token),
       );
     });
   }
@@ -284,12 +284,7 @@ export class ProviderService {
     return this.run(async () => {
       providerRepositoryPageNumberSchema.parse(page);
       const { account, token } = await this.authorize(id, signal);
-      return this.identityDriver(account.provider).repositories(
-        account.origin,
-        token,
-        page,
-        signal,
-      );
+      return this.accountDriver(account.provider).repositories(account.origin, token, page, signal);
     });
   }
   pullTemplates(id: string, input: ProviderPullTemplatesOptions, signal?: AbortSignal) {
@@ -486,7 +481,7 @@ export class ProviderService {
     let credential = stored.credential;
     let rotated = false;
     if (credential?.expiresAt !== undefined && credential.expiresAt <= this.now() + 60000) {
-      this.identityDriver(account.provider).clearReadCache();
+      this.accountDriver(account.provider).clearReadCache();
       if ('redirectUri' in credential) {
         credential = await this.gitlabOAuth.refresh(account.origin, credential, signal);
         // GitLab invalidates the old refresh token immediately. Preserve the replacement
@@ -497,7 +492,7 @@ export class ProviderService {
         rotated = true;
       }
     }
-    const identity = await this.identityDriver(account.provider).identity(
+    const identity = await this.accountDriver(account.provider).identity(
       account.origin,
       credential?.accessToken ?? stored.token,
       signal,
@@ -542,7 +537,7 @@ export class ProviderService {
           'PROVIDER_ACCOUNT',
           'This provider account is no longer connected.',
         );
-      this.identityDriver(account.provider).clearReadCache();
+      this.accountDriver(account.provider).clearReadCache();
       await this.vault.remove(scope(account));
       const remaining = accounts.filter((item) => item.id !== id);
       await this.save(remaining);
