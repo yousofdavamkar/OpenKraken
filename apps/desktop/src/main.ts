@@ -281,6 +281,9 @@ else {
           request.method === 'providerMergeRequest' ||
           request.method === 'providerMergeRequestFiles' ||
           request.method === 'providerMergeRequestDiscussions' ||
+          request.method === 'providerMergeRequestMergeState' ||
+          request.method === 'providerMergeRequestMergePreview' ||
+          request.method === 'providerMergeRequestMerge' ||
           request.method === 'providerPreviewMergeCreation' ||
           request.method === 'providerCreateMergeRequest' ||
           request.method === 'providerMergeTemplates' ||
@@ -491,6 +494,33 @@ else {
             return resultSchema.parse({
               kind: 'providerMergeRequestFiles',
               page: await providers.mergeRequestFiles(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerMergeRequestMergeState')
+            return resultSchema.parse({
+              kind: 'providerMergeRequestMergeState',
+              snapshot: await providers.mergeRequestMergeState(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerMergeRequestMergePreview')
+            return resultSchema.parse({
+              kind: 'providerMergeRequestMergePreview',
+              preview: await providers.previewMergeRequestMerge(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerMergeRequestMerge')
+            return resultSchema.parse({
+              kind: 'providerMergeRequestMerged',
+              result: await providers.mergeMergeRequest(
                 request.accountId,
                 request.options,
                 controller.signal,
@@ -724,6 +754,9 @@ else {
           request.method === 'providerMergeRequest' ||
           request.method === 'providerMergeRequestFiles' ||
           request.method === 'providerMergeRequestDiscussions' ||
+          request.method === 'providerMergeRequestMergeState' ||
+          request.method === 'providerMergeRequestMergePreview' ||
+          request.method === 'providerMergeRequestMerge' ||
           request.method === 'providerPreviewMergeCreation' ||
           request.method === 'providerCreateMergeRequest' ||
           request.method === 'providerMergeTemplates' ||

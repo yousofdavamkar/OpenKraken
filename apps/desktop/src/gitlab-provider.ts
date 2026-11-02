@@ -1,3 +1,8 @@
+import {
+  loadMergeRequestMergeState,
+  previewMergeRequestMerge,
+  mergeMergeRequest,
+} from './gitlab-merge-action.js';
 import { loadMergeTemplates, loadMergeTemplate } from './gitlab-templates.js';
 import { previewMergeCreation, createMergeRequest } from './gitlab-create.js';
 import { previewMergeDiscussionAction, writeMergeDiscussion } from './gitlab-discussion-actions.js';
@@ -24,6 +29,8 @@ import { loadMergeRequest, loadMergeRequests } from './gitlab-merges.js';
 import type {
   ProviderPullTemplatesOptions,
   ProviderMergeTemplateOptions,
+  ProviderMergeRequestMergeIntent,
+  ProviderMergeMergeRequest,
   ProviderMergeCreationIntent,
   ProviderCreateMergeRequest,
   ProviderMergeApprovalOptions,
@@ -162,6 +169,50 @@ export class GitLabProvider {
     return loadMergeRequestDiscussions(
       (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
       providerOriginSchema.parse(origin),
+      input,
+    );
+  }
+  mergeRequestMergeState(
+    origin: string,
+    token: string,
+    input: ProviderPullOptions,
+    signal?: AbortSignal,
+  ) {
+    this.cache.clear();
+    return loadMergeRequestMergeState(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      origin,
+      input,
+    );
+  }
+  previewMergeRequestMerge(
+    origin: string,
+    token: string,
+    userId: string,
+    input: ProviderMergeRequestMergeIntent,
+    signal?: AbortSignal,
+  ) {
+    this.cache.clear();
+    return previewMergeRequestMerge(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      origin,
+      userId,
+      input,
+    );
+  }
+  mergeMergeRequest(
+    origin: string,
+    token: string,
+    userId: string,
+    input: ProviderMergeMergeRequest,
+    signal?: AbortSignal,
+  ) {
+    this.cache.clear();
+    return mergeMergeRequest(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      (endpoint, method, perform) => this.request(origin, token, signal, perform, endpoint, method),
+      origin,
+      userId,
       input,
     );
   }

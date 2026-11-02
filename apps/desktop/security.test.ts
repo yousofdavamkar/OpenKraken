@@ -937,3 +937,45 @@ test('GitLab creation and template IPC bind drafts and reviewed selections witho
       requestSchema.safeParse({ ...template, options: { ...template.options, key } }).success,
     ).toBe(false);
 });
+test('GitLab merge IPC requires reviewed intent and rejects queues, unsupported methods and message mismatches', () => {
+  const envelope = { id: '00000000-0000-4000-8000-000000000000', accountId: 'a'.repeat(64) };
+  const target = { repository: { owner: 'group/subgroup', name: 'project' }, number: 7 };
+  const intent = {
+    ...target,
+    head: 'b'.repeat(40),
+    squash: true,
+    removeSourceBranch: false,
+    squashMessage: 'Message',
+  };
+  const write = {
+    ...envelope,
+    method: 'providerMergeRequestMerge',
+    options: { intent, revision: 'c'.repeat(64) },
+  };
+  expect(requestSchema.safeParse(write).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(write).success).toBe(false);
+  expect(requestSchema.safeParse({ ...write, options: { intent } }).success).toBe(false);
+  for (const changed of [
+    { ...intent, autoMerge: true },
+    { ...intent, method: 'rebase' },
+    { ...intent, head: 'bad' },
+    { ...intent, squash: false },
+  ])
+    expect(
+      requestSchema.safeParse({ ...write, options: { ...write.options, intent: changed } }).success,
+    ).toBe(false);
+  expect(
+    requestSchema.safeParse({
+      ...envelope,
+      method: 'providerMergeRequestMergeState',
+      options: target,
+    }).success,
+  ).toBe(true);
+  expect(
+    requestSchema.safeParse({
+      ...envelope,
+      method: 'providerMergeRequestMergePreview',
+      options: intent,
+    }).success,
+  ).toBe(true);
+});

@@ -1,5 +1,10 @@
 import { z } from 'zod';
 import {
+  providerMergeRequestMergeStateSchema,
+  providerMergeRequestMergeIntentSchema,
+  providerMergeRequestMergePreviewSchema,
+  providerMergeMergeRequestSchema,
+  providerMergeRequestMergedSchema,
   providerMergeCreationIntentSchema,
   providerMergeCreationPreviewSchema,
   providerCreateMergeRequestSchema,
@@ -1323,6 +1328,30 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerMergeRequestMergeState'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerPullOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerMergeRequestMergePreview'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerMergeRequestMergeIntentSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerMergeRequestMerge'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerMergeMergeRequestSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerPreviewMergeCreation'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerMergeCreationIntentSchema,
@@ -1647,6 +1676,24 @@ export const resultSchema = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({ kind: z.literal('providerReviewSubmitted'), review: providerPullReviewSchema })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerMergeRequestMergeState'),
+      snapshot: providerMergeRequestMergeStateSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerMergeRequestMergePreview'),
+      preview: providerMergeRequestMergePreviewSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerMergeRequestMerged'),
+      result: providerMergeRequestMergedSchema,
+    })
     .strict(),
   z
     .object({

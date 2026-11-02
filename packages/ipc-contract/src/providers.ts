@@ -773,6 +773,88 @@ export const providerCreateMergeRequestSchema = z
 export type ProviderMergeCreationIntent = z.infer<typeof providerMergeCreationIntentSchema>;
 export type ProviderMergeCreationPreview = z.infer<typeof providerMergeCreationPreviewSchema>;
 export type ProviderCreateMergeRequest = z.infer<typeof providerCreateMergeRequestSchema>;
+export const providerMergeRequestMergeIntentSchema = providerPullOptionsSchema
+  .extend({
+    head: providerCommitSchema,
+    squash: z.boolean(),
+    removeSourceBranch: z.boolean(),
+    mergeMessage: z
+      .string()
+      .min(1)
+      .max(65536)
+      .refine((text) => !!text.trim())
+      .optional(),
+    squashMessage: z
+      .string()
+      .min(1)
+      .max(65536)
+      .refine((text) => !!text.trim())
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (value) => value.squash || value.squashMessage === undefined,
+    'Squash message requires squash',
+  );
+export const providerMergeRequestMergeStateSchema = z
+  .object({
+    mergeRequest: providerMergeRequestDetailsSchema,
+    head: providerCommitSchema.nullable(),
+    base: providerCommitSchema,
+    sourceProtected: z.boolean().nullable(),
+    sourceDefault: z.boolean().nullable(),
+    canMerge: z.boolean().nullable(),
+    squash: z.boolean(),
+    removeSourceBranch: z.boolean().nullable(),
+    forceRemoveSourceBranch: z.boolean().nullable(),
+    mergeAfter: providerDateSchema.nullable(),
+    autoMerge: z.boolean().nullable(),
+    discussionsResolved: z.boolean().nullable(),
+    pipeline: z
+      .object({
+        id: z.string().regex(/^[1-9][0-9]*$/),
+        sha: providerCommitSchema,
+        status: z.string().min(1).max(128),
+      })
+      .strict()
+      .nullable(),
+    policy: z
+      .object({
+        method: z.enum(['merge', 'rebase_merge', 'ff']),
+        squash: z.enum(['never', 'always', 'default_on', 'default_off']),
+        archived: z.boolean(),
+        pipelineRequired: z.boolean().nullable(),
+        discussionsRequired: z.boolean().nullable(),
+      })
+      .strict(),
+  })
+  .strict();
+export const providerMergeRequestMergePreviewSchema = z
+  .object({
+    snapshot: providerMergeRequestMergeStateSchema,
+    revision: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .strict();
+export const providerMergeMergeRequestSchema = z
+  .object({
+    intent: providerMergeRequestMergeIntentSchema,
+    revision: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .strict();
+export const providerMergeRequestMergedSchema = z
+  .object({
+    mergeRequest: providerPullSummarySchema,
+    mergeCommit: providerCommitSchema.nullable(),
+    squashCommit: providerCommitSchema.nullable(),
+  })
+  .strict();
+export type ProviderMergeRequestMergeIntent = z.infer<typeof providerMergeRequestMergeIntentSchema>;
+export type ProviderMergeRequestMergeState = z.infer<typeof providerMergeRequestMergeStateSchema>;
+export type ProviderMergeRequestMergePreview = z.infer<
+  typeof providerMergeRequestMergePreviewSchema
+>;
+export type ProviderMergeMergeRequest = z.infer<typeof providerMergeMergeRequestSchema>;
+export type ProviderMergeRequestMerged = z.infer<typeof providerMergeRequestMergedSchema>;
 export const providerPullTemplatesOptionsSchema = z
   .object({ repository: providerRepositoryTargetSchema })
   .strict();

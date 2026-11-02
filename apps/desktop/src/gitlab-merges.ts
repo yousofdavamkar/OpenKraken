@@ -137,36 +137,47 @@ export async function loadMergeRequest(
   const options = providerPullOptionsSchema.parse(input);
   const projectId = await resolveProject(read, options.repository);
   return read(`projects/${projectId}/merge_requests/${options.number}`, async (client) => {
-    const data = detailSchema.parse(
+    return parseMergeRequest(
       await new MergeRequests(client).show(projectId, options.number),
+      projectId,
+      origin,
+      options,
     );
-    if (data.iid !== options.number)
-      throw new ProviderError('PROVIDER_RESPONSE', 'GitLab returned another merge request.');
-    const refs = data.diff_refs;
-    return providerMergeRequestDetailsSchema.parse({
-      ...mergeRequestSummary(data, projectId, origin, options.repository),
-      provider: 'gitlab',
-      id: String(data.id),
-      body: data.description ?? '',
-      source: {
-        projectId: data.source_project_id === null ? null : String(data.source_project_id),
-        branch: data.source_branch,
-        sha: data.sha,
-      },
-      target: { projectId: String(data.target_project_id), branch: data.target_branch },
-      diffRefs:
-        refs && 'base_sha' in refs
-          ? { base: refs.base_sha, head: refs.head_sha, start: refs.start_sha }
-          : null,
-      changesCount: data.changes_count
-        ? {
-            count: Number(data.changes_count.replace(/\+$/, '')),
-            limited: data.changes_count.endsWith('+'),
-          }
+  });
+}
+export function parseMergeRequest(
+  value: unknown,
+  projectId: number,
+  origin: string,
+  options: ProviderPullOptions,
+) {
+  const data = detailSchema.parse(value);
+  if (data.iid !== options.number)
+    throw new ProviderError('PROVIDER_RESPONSE', 'GitLab returned another merge request.');
+  const refs = data.diff_refs;
+  return providerMergeRequestDetailsSchema.parse({
+    ...mergeRequestSummary(data, projectId, origin, options.repository),
+    provider: 'gitlab',
+    id: String(data.id),
+    body: data.description ?? '',
+    source: {
+      projectId: data.source_project_id === null ? null : String(data.source_project_id),
+      branch: data.source_branch,
+      sha: data.sha,
+    },
+    target: { projectId: String(data.target_project_id), branch: data.target_branch },
+    diffRefs:
+      refs && 'base_sha' in refs
+        ? { base: refs.base_sha, head: refs.head_sha, start: refs.start_sha }
         : null,
-      notesCount: data.user_notes_count,
-      mergeStatus: data.detailed_merge_status,
-      conflicts: data.has_conflicts,
-    });
+    changesCount: data.changes_count
+      ? {
+          count: Number(data.changes_count.replace(/\+$/, '')),
+          limited: data.changes_count.endsWith('+'),
+        }
+      : null,
+    notesCount: data.user_notes_count,
+    mergeStatus: data.detailed_merge_status,
+    conflicts: data.has_conflicts,
   });
 }

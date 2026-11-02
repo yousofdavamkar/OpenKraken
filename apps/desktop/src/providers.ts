@@ -1,4 +1,10 @@
 import {
+  providerMergeRequestMergeIntentSchema,
+  providerMergeMergeRequestSchema,
+  type ProviderMergeRequestMergeIntent,
+  type ProviderMergeMergeRequest,
+} from '@openkraken/ipc-contract';
+import {
   providerMergeTemplateOptionsSchema,
   type ProviderMergeTemplateOptions,
 } from '@openkraken/ipc-contract';
@@ -413,6 +419,58 @@ export class ProviderService {
           'Choose a GitLab account to read merge requests.',
         );
       return this.gitlab.mergeRequestDiscussions(account.origin, token, options, signal);
+    });
+  }
+  mergeRequestMergeState(id: string, input: ProviderPullOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerPullOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to merge requests.',
+        );
+      return this.gitlab.mergeRequestMergeState(account.origin, token, options, signal);
+    });
+  }
+  previewMergeRequestMerge(
+    id: string,
+    input: ProviderMergeRequestMergeIntent,
+    signal?: AbortSignal,
+  ) {
+    return this.run(async () => {
+      const options = providerMergeRequestMergeIntentSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to merge requests.',
+        );
+      return this.gitlab.previewMergeRequestMerge(
+        account.origin,
+        token,
+        account.providerUserId,
+        options,
+        signal,
+      );
+    });
+  }
+  mergeMergeRequest(id: string, input: ProviderMergeMergeRequest, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerMergeMergeRequestSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to merge requests.',
+        );
+      return this.gitlab.mergeMergeRequest(
+        account.origin,
+        token,
+        account.providerUserId,
+        options,
+        signal,
+      );
     });
   }
   mergeTemplates(id: string, input: ProviderPullTemplatesOptions, signal?: AbortSignal) {
