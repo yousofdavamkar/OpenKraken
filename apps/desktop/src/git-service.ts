@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { serviceRequestSchema, shutdownSchema, cancelSchema } from '@openkraken/ipc-contract';
 import type { Result, ServiceRequest, Repository } from '@openkraken/ipc-contract';
 import {
@@ -18,6 +19,31 @@ const editorHelper = join(
 const authentication = new AskpassBroker(editorHelper, (event) => parent.postMessage(event));
 let shuttingDown = false;
 const active = new Map<string, AbortController>();
+const editorPrompts = new Map<
+  string,
+  { requestId: string; finish: (text: string | null) => void }
+>();
+function reviewDocument(
+  id: string,
+  document: { path: string; text: string },
+  signal: AbortSignal,
+): Promise<string | null> {
+  if (signal.aborted) return Promise.resolve(null);
+  if (editorPrompts.size >= 8) throw new GitError('EDITOR_BUSY', 'Too many Git editor requests');
+  return new Promise((resolve) => {
+    const promptId = randomUUID();
+    const cancel = () => finish(null);
+    const finish = (text: string | null) => {
+      if (!editorPrompts.delete(promptId)) return;
+      signal.removeEventListener('abort', cancel);
+      parent!.postMessage({ type: 'editorClosed', id, promptId });
+      resolve(text);
+    };
+    editorPrompts.set(promptId, { requestId: id, finish });
+    signal.addEventListener('abort', cancel, { once: true });
+    parent!.postMessage({ type: 'editorPrompt', id, promptId, ...document });
+  });
+}
 let service: Promise<RepositoryService> | undefined;
 let gitPath = '';
 let watcher: RepositoryWatcher | undefined;
@@ -40,6 +66,12 @@ function getService() {
   }));
 }
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
+  if (request.method === 'answerEditor') {
+    const prompt = editorPrompts.get(request.promptId);
+    const accepted = !!prompt && prompt.requestId === request.requestId;
+    if (accepted) prompt!.finish(request.text);
+    return { kind: 'editorAnswered', accepted };
+  }
   if (request.method === 'answerPrompt')
     return {
       kind: 'authenticationAnswered',
@@ -71,7 +103,7 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
   }
 }
 async function executeGit(
-  request: Exclude<ServiceRequest, { method: 'answerPrompt' }>,
+  request: Exclude<ServiceRequest, { method: 'answerPrompt' | 'answerEditor' }>,
   signal: AbortSignal,
   auth?: NodeJS.ProcessEnv,
 ): Promise<Result> {
@@ -210,12 +242,24 @@ async function executeGit(
   if (request.method === 'interactiveRebase')
     return {
       kind: 'workingState',
-      state: await git.interactiveRebase(request.repoId, request.options, signal, progress),
+      state: await git.interactiveRebase(
+        request.repoId,
+        request.options,
+        signal,
+        progress,
+        (document, editorSignal) => reviewDocument(request.id, document, editorSignal),
+      ),
     };
   if (request.method === 'operationAction')
     return {
       kind: 'workingState',
-      state: await git.operationAction(request.repoId, request.options, signal, progress),
+      state: await git.operationAction(
+        request.repoId,
+        request.options,
+        signal,
+        progress,
+        (document, editorSignal) => reviewDocument(request.id, document, editorSignal),
+      ),
     };
   if (request.method === 'workingState')
     return { kind: 'workingState', state: await git.workingState(request.repoId, signal) };

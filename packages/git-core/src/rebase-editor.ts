@@ -3,6 +3,7 @@ import { lstat, open, realpath } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import type { InteractiveRebase, Repository } from '@openkraken/ipc-contract';
 import { GitError } from './runner.js';
+import { editGitDocument, type GitEditor } from './editor-document.js';
 async function metadata(path: string) {
   if ((await lstat(path)).isSymbolicLink())
     throw new GitError('INVALID_EDITOR_PATH', 'Git editor metadata must not be a symbolic link');
@@ -19,13 +20,15 @@ export async function editRebaseFile(
   plan: InteractiveRebase,
   requested: string,
   signal: AbortSignal,
+  edit?: GitEditor,
 ) {
   signal.throwIfAborted();
   const gitDir = await realpath(repo.gitDir);
   const path = resolve(repo.path, requested);
   const todo = join(gitDir, 'rebase-merge', 'git-rebase-todo');
   const message = join(gitDir, 'COMMIT_EDITMSG');
-  if (![todo, message].includes(path) || (await realpath(dirname(path))) !== dirname(path))
+  if (![todo, message].includes(path)) return editGitDocument(repo, path, edit, signal);
+  if ((await realpath(dirname(path))) !== dirname(path))
     throw new GitError('INVALID_EDITOR_PATH', 'Git requested an unapproved rebase editor path');
   let text: string | undefined;
   if (path === todo) text = plan.steps.map((step) => `${step.action} ${step.oid}\n`).join('');

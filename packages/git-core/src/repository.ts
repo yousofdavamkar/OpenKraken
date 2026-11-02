@@ -32,6 +32,7 @@ import { HistoryCursor } from './history.js';
 import { Remotes } from './remotes.js';
 import { predictMerge } from './merge-prediction.js';
 import { WorkingTree } from './working-tree.js';
+import type { GitEditor } from './editor-document.js';
 import { RepositoryQueue } from './queue.js';
 
 async function exists(path: string) {
@@ -615,11 +616,12 @@ export class RepositoryService {
     options: InteractiveRebase,
     signal?: AbortSignal,
     onProgress?: (text: string) => void,
+    edit?: GitEditor,
   ) {
     const work = this.working(id);
     return this.queue(work.repo.commonDir).run(
       true,
-      () => work.interactiveRebase(options, signal, onProgress),
+      () => work.interactiveRebase(options, signal, onProgress, edit),
       signal,
     );
   }
@@ -628,11 +630,12 @@ export class RepositoryService {
     options: OperationAction,
     signal?: AbortSignal,
     onProgress?: (text: string) => void,
+    edit?: GitEditor,
   ) {
     const work = this.working(id);
     return this.queue(work.repo.commonDir).run(
       true,
-      () => work.operationAction(options, signal, onProgress),
+      () => work.operationAction(options, signal, onProgress, edit),
       signal,
     );
   }

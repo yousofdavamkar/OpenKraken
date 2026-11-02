@@ -589,6 +589,19 @@ const authenticationAnswer = z
       .nullable(),
   })
   .strict();
+const editorTextSchema = z
+  .string()
+  .max(1048576)
+  .refine((text) => !text.includes('\0') && new TextEncoder().encode(text).length <= 1048576);
+const editorAnswer = z
+  .object({
+    id: requestId,
+    method: z.literal('answerEditor'),
+    requestId,
+    promptId: requestId,
+    text: editorTextSchema.nullable(),
+  })
+  .strict();
 const workingRequests = [
   z
     .object({
@@ -810,6 +823,7 @@ const workingRequests = [
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
   authenticationAnswer,
+  editorAnswer,
   z.object({ id: requestId, method: z.literal('clone'), options: cloneOptionsSchema }).strict(),
   ...workingRequests,
   z
@@ -844,6 +858,7 @@ export const requestSchema = z.discriminatedUnion('method', [
 const repositoryPath = z.string().min(1).max(32768);
 export const serviceRequestSchema = z.discriminatedUnion('method', [
   authenticationAnswer,
+  editorAnswer,
   z
     .object({
       id: requestId,
@@ -877,6 +892,7 @@ export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('deleteRemotePreview'), plan: deleteRemotePlanSchema }),
   z.object({ kind: z.literal('authenticationAnswered'), accepted: z.boolean() }),
+  z.object({ kind: z.literal('editorAnswered'), accepted: z.boolean() }),
   z.object({
     kind: z.literal('stashAction'),
     state: workingStateSchema,
@@ -1003,5 +1019,15 @@ export const desktopEventSchema = z.discriminatedUnion('type', [
   authenticationPromptSchema,
   authenticationClosedSchema,
   transportProblemSchema,
+  z
+    .object({
+      type: z.literal('editorPrompt'),
+      id: requestId,
+      promptId: requestId,
+      path: z.string().max(16384),
+      text: editorTextSchema,
+    })
+    .strict(),
+  z.object({ type: z.literal('editorClosed'), id: requestId, promptId: requestId }).strict(),
 ]);
 export type DesktopEvent = z.infer<typeof desktopEventSchema>;

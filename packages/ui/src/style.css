@@ -922,3 +922,36 @@ footer {
   min-width: 120px;
   margin: 8px 0 0;
 }
+.git-editor-dialog {
+  width: min(800px, 90vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+.git-editor-dialog p,
+.git-editor-dialog .dialog-actions {
+  margin: 12px 0;
+}
+.git-editor-dialog textarea {
+  font-family: ui-monospace, monospace;
+  resize: vertical;
+}
+.rebase-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.rebase-dialog > * {
+  flex-shrink: 0;
+}
+.rebase-dialog .rebase-steps {
+  flex-shrink: 1;
+  min-height: 90px;
+}
+.rebase-dialog [role='alert'] {
+  max-height: 15vh;
+  overflow: auto;
+}
+.rebase-dialog .dialog-actions .primary,
+.git-editor-dialog .dialog-actions .primary {
+  margin: 0;
+}

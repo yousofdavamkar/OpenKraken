@@ -8,6 +8,7 @@ import { NewReferences, ReferenceActions } from './references.js';
 import { GitProgress } from './git-progress.js';
 import { Clone } from './clone.js';
 import { Authentication } from './authentication.js';
+import { GitEditors } from './git-editor.js';
 import { Stashes } from './stashes.js';
 import { Push } from './push.js';
 import { Reset } from './reset.js';
@@ -83,6 +84,7 @@ function App() {
       </header>
       <GitProgress />
       <Authentication />
+      <GitEditors />
       <ReferenceDropActions key={snapshot?.repository.id} />
       {init && (
         <form

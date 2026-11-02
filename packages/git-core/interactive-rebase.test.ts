@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from 'vitest';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile, link } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { RepositoryService } from './src/repository.js';
@@ -229,3 +229,114 @@ test('a reordered conflict resumes after restart and still uses the later review
     await service.dispose();
   }
 });
+test('an additional native editor document is reviewed before it is saved', async () => {
+  const { path, base, ids, service, repo } = await fixture('additional-editor');
+  const document = join(path, '.git', 'review-message.txt');
+  await writeFile(document, 'Native editor draft\n');
+  await writeFile(
+    join(path, '.git/hooks/pre-rebase'),
+    '#!/bin/sh\ndocument="$(git rev-parse --absolute-git-dir)/review-message.txt"\neval "$GIT_EDITOR \\"\\$document\\""\n',
+    { mode: 0o755 },
+  );
+  try {
+    const preview = await service.interactiveRebasePreview(repo.id, base);
+    let reviewed = false;
+    await service.interactiveRebase(
+      repo.id,
+      { base, token: preview.token, steps: ids.map((oid) => ({ action: 'pick', oid })) },
+      undefined,
+      undefined,
+      async (input, signal) => {
+        expect(input.path).toBe(document);
+        expect(input.text).toBe('Native editor draft\n');
+        expect(signal.aborted).toBe(false);
+        expect(await readFile(document, 'utf8')).toBe('Native editor draft\n');
+        reviewed = true;
+        return 'Reviewed extra document\n';
+      },
+    );
+    expect(reviewed).toBe(true);
+    expect(await readFile(document, 'utf8')).toBe('Reviewed extra document\n');
+    expect((await service.operationState(repo.id)).kind).toBe('none');
+  } finally {
+    await service.dispose();
+  }
+});
+test.each(['newer edit', 'cancel'] as const)(
+  'additional editor preserves its document on %s',
+  async (action) => {
+    const { path, base, ids, service, repo } = await fixture('editor-' + action.replace(' ', '-'));
+    const document = join(path, '.git', 'review-message.txt');
+    await writeFile(document, 'Original draft\n');
+    await writeFile(
+      join(path, '.git/hooks/pre-rebase'),
+      '#!/bin/sh\ndocument="$(git rev-parse --absolute-git-dir)/review-message.txt"\neval "$GIT_EDITOR \\"\\$document\\""\n',
+      { mode: 0o755 },
+    );
+    try {
+      const preview = await service.interactiveRebasePreview(repo.id, base);
+      await expect(
+        service.interactiveRebase(
+          repo.id,
+          { base, token: preview.token, steps: ids.map((oid) => ({ action: 'pick', oid })) },
+          undefined,
+          undefined,
+          async () => {
+            if (action === 'cancel') return null;
+            await writeFile(document, 'Newer external edit\n');
+            return 'Stale edited draft\n';
+          },
+        ),
+      ).rejects.toMatchObject({ code: action === 'cancel' ? 'CANCELLED' : 'STALE_EDITOR' });
+      expect(await readFile(document, 'utf8')).toBe(
+        action === 'cancel' ? 'Original draft\n' : 'Newer external edit\n',
+      );
+      expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(ids[2]);
+      expect((await service.operationState(repo.id)).kind).toBe('none');
+    } finally {
+      await service.dispose();
+    }
+  },
+);
+test.each(['outside', 'binary', 'hardlink'] as const)(
+  'additional editor refuses %s documents before asking the renderer',
+  async (kind) => {
+    const { path, base, ids, service, repo } = await fixture('editor-guard-' + kind);
+    const document = join(path, '.git/review-message.txt');
+    const original = await readFile(join(path, 'tracked.txt'));
+    if (kind === 'hardlink') await link(join(path, 'tracked.txt'), document);
+    else await writeFile(document, Buffer.from([0, 1, 2, 255]));
+    const location =
+      kind === 'outside'
+        ? '$(git rev-parse --show-toplevel)/tracked.txt'
+        : '$(git rev-parse --absolute-git-dir)/review-message.txt';
+    await writeFile(
+      join(path, '.git/hooks/pre-rebase'),
+      `#!/bin/sh\ndocument="${location}"\neval "$GIT_EDITOR \\"\\$document\\""\n`,
+      { mode: 0o755 },
+    );
+    try {
+      const preview = await service.interactiveRebasePreview(repo.id, base);
+      let asked = false;
+      await expect(
+        service.interactiveRebase(
+          repo.id,
+          { base, token: preview.token, steps: ids.map((oid) => ({ action: 'pick', oid })) },
+          undefined,
+          undefined,
+          async () => {
+            asked = true;
+            return 'invalid overwrite';
+          },
+        ),
+      ).rejects.toMatchObject({
+        code: kind === 'outside' ? 'INVALID_EDITOR_PATH' : 'EDITOR_LIMIT',
+      });
+      expect(asked).toBe(false);
+      expect(await readFile(join(path, 'tracked.txt'))).toEqual(original);
+      expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(ids[2]);
+    } finally {
+      await service.dispose();
+    }
+  },
+);

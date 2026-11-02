@@ -47,6 +47,7 @@ import { Conflicts } from './conflicts.js';
 import { inspectOperation } from './operation-state.js';
 import { openGitEditor } from './editor.js';
 import { editRebaseFile } from './rebase-editor.js';
+import type { GitEditor } from './editor-document.js';
 import { GitProgressLines, redactGitMessage } from './progress.js';
 import { RepositoryQueue } from './queue.js';
 import { FileBackups, fileImageSchema, sameImages, type FileImage } from './file-backups.js';
@@ -818,6 +819,7 @@ export class WorkingTree {
     input: InteractiveRebase,
     signal?: AbortSignal,
     onProgress?: (text: string) => void,
+    edit?: GitEditor,
   ) {
     const plan = interactiveRebaseSchema.parse(input);
     if (!this.editorHelper)
@@ -870,6 +872,7 @@ export class WorkingTree {
         true,
         false,
         plan,
+        edit,
       );
     }, signal);
     return this.state();
@@ -884,6 +887,7 @@ export class WorkingTree {
     recordUndo: boolean | OperationOrigin = false,
     discardUndo = false,
     plan?: InteractiveRebase,
+    edit?: GitEditor,
   ) {
     const before = await this.saved(indexFile);
     const id = randomUUID();
@@ -905,13 +909,21 @@ export class WorkingTree {
     const progress = onProgress ? new GitProgressLines(onProgress) : undefined;
     let failure: unknown;
     let editor: Awaited<ReturnType<typeof openGitEditor>> | undefined;
+    let editorFailure: unknown;
     try {
       if (origin?.plan && !discardUndo) {
         if (!this.editorHelper)
           throw new GitError('EDITOR_UNAVAILABLE', 'The native Git editor helper is unavailable');
         editor = await openGitEditor(
           this.editorHelper,
-          (path, editorSignal) => editRebaseFile(this.repo, origin.plan!, path, editorSignal),
+          async (path, editorSignal) => {
+            try {
+              await editRebaseFile(this.repo, origin.plan!, path, editorSignal, edit);
+            } catch (error) {
+              editorFailure = error;
+              throw error;
+            }
+          },
           signal,
         );
       }
@@ -930,7 +942,8 @@ export class WorkingTree {
           redactGitMessage(`${result.stdout.toString()}\n${result.stderr}`.trim()),
         );
     } catch (error) {
-      failure = error;
+      failure =
+        error instanceof GitError && error.code === 'CANCELLED' ? error : (editorFailure ?? error);
     } finally {
       progress?.end();
       await editor?.close();
@@ -1005,6 +1018,7 @@ export class WorkingTree {
     input: OperationAction,
     signal?: AbortSignal,
     onProgress?: (text: string) => void,
+    edit?: GitEditor,
   ) {
     const options = operationActionSchema.parse(input);
     await this.locked(async (indexFile, publish) => {
@@ -1033,6 +1047,8 @@ export class WorkingTree {
         onProgress,
         await this.operationOrigin(),
         options.action === 'abort',
+        undefined,
+        edit,
       );
     }, signal);
     return this.state();
