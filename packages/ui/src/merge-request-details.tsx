@@ -1,3 +1,4 @@
+import { MergeRequestPipelines } from './merge-request-pipelines.js';
 import { GitLabMerge } from './gitlab-merge.js';
 import { useEffect, useState } from 'react';
 import type { ProviderMergeRequestDetails, ProviderPullOptions } from '@openkraken/ipc-contract';
@@ -15,7 +16,9 @@ export function MergeRequestDetails({
   number: number;
   refreshList: () => void;
 }) {
-  const [tab, setTab] = useState<'details' | 'files' | 'discussions' | 'approvals'>('details');
+  const [tab, setTab] = useState<'details' | 'files' | 'discussions' | 'approvals' | 'pipelines'>(
+    'details',
+  );
   const [detail, setDetail] = useState<ProviderMergeRequestDetails>();
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
@@ -66,11 +69,17 @@ export function MergeRequestDetails({
           setError('');
         },
         resetChildren:
-          tab === 'files' &&
-          (detail?.diffRefs?.base !== result.mergeRequest.diffRefs?.base ||
-            detail?.diffRefs?.head !== result.mergeRequest.diffRefs?.head ||
-            detail?.diffRefs?.start !== result.mergeRequest.diffRefs?.start ||
-            detail?.source.sha !== result.mergeRequest.source.sha),
+          (tab === 'pipelines' &&
+            (detail?.source.sha !== result.mergeRequest.source.sha ||
+              detail?.source.projectId !== result.mergeRequest.source.projectId ||
+              detail?.source.branch !== result.mergeRequest.source.branch ||
+              detail?.target.projectId !== result.mergeRequest.target.projectId ||
+              detail?.target.branch !== result.mergeRequest.target.branch)) ||
+          (tab === 'files' &&
+            (detail?.diffRefs?.base !== result.mergeRequest.diffRefs?.base ||
+              detail?.diffRefs?.head !== result.mergeRequest.diffRefs?.head ||
+              detail?.diffRefs?.start !== result.mergeRequest.diffRefs?.start ||
+              detail?.source.sha !== result.mergeRequest.source.sha)),
       };
     },
     1,
@@ -161,9 +170,26 @@ export function MergeRequestDetails({
             <button aria-pressed={tab === 'approvals'} onClick={() => setTab('approvals')}>
               Approvals
             </button>
+            <button
+              aria-pressed={tab === 'pipelines'}
+              disabled={!detail.source.sha}
+              onClick={() => setTab('pipelines')}
+            >
+              Pipelines
+            </button>
           </div>
           {tab === 'details' ? (
             <pre className="pull-body">{detail.body || 'No description.'}</pre>
+          ) : tab === 'pipelines' ? (
+            detail.source.sha && (
+              <MergeRequestPipelines
+                key={`${detail.source.sha}/${detail.source.projectId}/${detail.source.branch}/${detail.target.projectId}/${detail.target.branch}`}
+                accountId={target.accountId}
+                repository={target.repository}
+                number={number}
+                head={detail.source.sha}
+              />
+            )
           ) : tab === 'approvals' ? (
             <MergeApprovals
               accountId={target.accountId}

@@ -11,3 +11,5 @@ The renderer receives strict typed read contracts without credentials. Main hand
 Ordinary jobs exclude retried attempts. Trigger/bridge jobs, downstream traversal, logs, artifacts, job actions, and pipeline creation are separate capabilities, not implied by this view.
 
 Public references: https://docs.gitlab.com/api/merge_requests/#list-merge-request-pipelines, https://docs.gitlab.com/api/pipelines/, https://docs.gitlab.com/api/jobs/#list-all-jobs-by-pipeline.
+
+The desktop presents separate virtualized pipeline and job lists with loaded-result search, append/deduplicate paging, and Home/End/arrow/Enter navigation. The page containing a selected pipeline is retained across append and rebuilt during scheduled refresh. Automatic refresh reads all loaded pages before committing, preserves searches and surviving selections, and resets child job reads if the selected pipeline changes page or commit. Merge-request context changes reset the pipeline view before any old child request can commit. Manual refresh and errors clear the selected detail; switching sections cancels obsolete reads.

@@ -1545,3 +1545,11 @@ footer {
   overflow: auto;
   overflow-wrap: anywhere;
 }
+
+.pull-check-row[role='option'][aria-selected='true'] {
+  background: #243b4b;
+}
+.pull-check-row[role='option'][data-active='true'] {
+  outline: 1px solid #6bdfc2;
+  outline-offset: -2px;
+}
