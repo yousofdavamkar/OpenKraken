@@ -1,3 +1,4 @@
+import { BitbucketPullDetails } from './bitbucket-pull-details.js';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import type {
@@ -394,11 +395,15 @@ function PullPages({
                       ? 'Merged'
                       : pr.state === 'locked'
                         ? 'Locked'
-                        : pr.state === 'closed'
-                          ? 'Closed'
-                          : pr.draft
-                            ? 'Draft'
-                            : 'Open'}{' '}
+                        : pr.state === 'declined'
+                          ? 'Declined'
+                          : pr.state === 'superseded'
+                            ? 'Superseded'
+                            : pr.state === 'closed'
+                              ? 'Closed'
+                              : pr.draft
+                                ? 'Draft'
+                                : 'Open'}{' '}
                     · {pr.author ?? 'Deleted account'}
                   </span>
                 </div>
@@ -451,7 +456,9 @@ function PullPages({
         <p>Search covers loaded results. Use arrow keys and Enter to open details.</p>
       </section>
       {selected !== undefined ? (
-        target.provider === 'gitlab' ? (
+        target.provider === 'bitbucket' ? (
+          <BitbucketPullDetails key={selected} target={target} number={selected} />
+        ) : target.provider === 'gitlab' ? (
           <MergeRequestDetails
             key={selected}
             target={target}
@@ -513,13 +520,15 @@ function PullRequestDialog({ close }: { close: () => void }) {
             {target.origin}/{target.repository.owner}/{target.repository.name}
           </p>
           <div className="dialog-actions">
-            <CreatePullRequest
-              target={target}
-              created={() => {
-                setState('open');
-                setVersion((value) => value + 1);
-              }}
-            />
+            {target.provider !== 'bitbucket' && (
+              <CreatePullRequest
+                target={target}
+                created={() => {
+                  setState('open');
+                  setVersion((value) => value + 1);
+                }}
+              />
+            )}
             <button type="button" onClick={() => setTarget(undefined)}>
               Choose repository
             </button>
@@ -534,21 +543,32 @@ function PullRequestDialog({ close }: { close: () => void }) {
                   const value = event.target.value;
                   if (
                     value === 'open' ||
-                    value === 'closed' ||
+                    (target.provider !== 'bitbucket' && value === 'closed') ||
                     value === 'all' ||
-                    (target.provider === 'gitlab' && (value === 'merged' || value === 'locked'))
+                    (target.provider === 'gitlab' && (value === 'merged' || value === 'locked')) ||
+                    (target.provider === 'bitbucket' &&
+                      (value === 'merged' || value === 'declined' || value === 'superseded'))
                   )
                     setState(value);
                 }}
               >
                 <option value="open">Open</option>
-                <option value="closed">
-                  {target.provider === 'gitlab' ? 'Closed' : 'Closed (including merged)'}
-                </option>
+                {target.provider !== 'bitbucket' && (
+                  <option value="closed">
+                    {target.provider === 'gitlab' ? 'Closed' : 'Closed (including merged)'}
+                  </option>
+                )}
                 {target.provider === 'gitlab' && (
                   <>
                     <option value="merged">Merged</option>
                     <option value="locked">Locked</option>
+                  </>
+                )}
+                {target.provider === 'bitbucket' && (
+                  <>
+                    <option value="merged">Merged</option>
+                    <option value="declined">Declined</option>
+                    <option value="superseded">Superseded</option>
                   </>
                 )}
                 <option value="all">All</option>
@@ -565,7 +585,7 @@ function PullRequestDialog({ close }: { close: () => void }) {
         </>
       ) : (
         <ProviderRepositoryPicker
-          collaboration
+          collaboration="pulls"
           onSelect={(url, accountId, repository, provider) => {
             setState('open');
             setTarget({

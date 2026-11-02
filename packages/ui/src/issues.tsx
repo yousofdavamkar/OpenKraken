@@ -699,7 +699,7 @@ function IssueDialog({ close }: { close: () => void }) {
         </>
       ) : (
         <ProviderRepositoryPicker
-          collaboration
+          collaboration="issues"
           onSelect={(url, accountId, repository, provider) => {
             setState('open');
             setTarget({

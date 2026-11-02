@@ -221,7 +221,7 @@ function BitbucketRepositories({
 }
 export function ProviderRepositoryPicker({
   onSelect,
-  collaboration = false,
+  collaboration,
 }: {
   onSelect: (
     url: string,
@@ -229,7 +229,7 @@ export function ProviderRepositoryPicker({
     repository: ProviderRepository,
     provider: ProviderAccount['provider'],
   ) => void;
-  collaboration?: boolean;
+  collaboration?: 'pulls' | 'issues';
 }) {
   const [state, setState] = useState<ProviderAccounts>();
   const [unavailable, setUnavailable] = useState(false);
@@ -246,11 +246,11 @@ export function ProviderRepositoryPicker({
         if (!alive) return;
         if (result.kind === 'providerAccounts') {
           setUnavailable(
-            collaboration &&
+            collaboration === 'issues' &&
               result.state.accounts.some((account) => account.provider === 'bitbucket'),
           );
           const accounts = result.state.accounts.filter(
-            (account) => !collaboration || account.provider !== 'bitbucket',
+            (account) => collaboration !== 'issues' || account.provider !== 'bitbucket',
           );
           setState({ ...result.state, accounts });
           setAccountId(accounts[0]?.id ?? '');
@@ -270,7 +270,7 @@ export function ProviderRepositoryPicker({
       : RepositoryPages;
   return (
     <section className="provider-picker" aria-label="Browse provider repositories">
-      {unavailable && <p>Bitbucket collaboration is not available yet.</p>}
+      {unavailable && <p>Bitbucket issues are not available yet.</p>}
       {!state && !error && <p>Loading accounts…</p>}
       {error && (
         <p role="alert">
@@ -285,7 +285,7 @@ export function ProviderRepositoryPicker({
       )}
       {state?.accounts.length === 0 && (
         <p>
-          {collaboration
+          {collaboration === 'issues'
             ? 'Connect a GitHub or GitLab account in Provider accounts to browse collaboration.'
             : 'Connect an account in Provider accounts to browse its repositories.'}
         </p>

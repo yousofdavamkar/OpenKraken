@@ -187,7 +187,8 @@ function AccountsDialog({ close }: { close: () => void }) {
         {provider === 'bitbucket' && (
           <p>
             Use a scoped API token with read:user:bitbucket, read:workspace:bitbucket and
-            read:repository:bitbucket. Pushing also requires write:repository:bitbucket.
+            read:repository:bitbucket. Pull-request browsing also requires
+            read:pullrequest:bitbucket. Pushing also requires write:repository:bitbucket.
           </p>
         )}
         <p>

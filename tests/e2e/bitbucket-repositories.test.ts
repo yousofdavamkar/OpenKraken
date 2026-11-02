@@ -139,7 +139,7 @@ test('Bitbucket account, workspace paging and repository search feed the saved-a
     await clone.getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByRole('button', { name: 'Issues', exact: true }).click();
     const issues = page.getByRole('dialog', { name: 'Browse issues', exact: true });
-    await expect(issues).toContainText('Bitbucket collaboration is not available yet.');
+    await expect(issues).toContainText('Bitbucket issues are not available yet.');
     await expect(issues.getByRole('listbox')).toHaveCount(0);
     await issues.getByRole('button', { name: 'Close', exact: true }).click();
     expect(readFileSync(join(root, 'provider-accounts.json'), 'utf8')).not.toContain(
