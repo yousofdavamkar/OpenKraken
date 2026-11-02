@@ -155,3 +155,88 @@ export const providerRemoteTargetSchema = z
   .strict();
 export type ProviderRemoteTarget = z.infer<typeof providerRemoteTargetSchema>;
 export type ProviderRemoteAuthorization = ProviderRemoteTarget & { username: string };
+
+export const providerRepositoryTargetSchema = z
+  .object({ owner: providerRepositoryNameSchema, name: providerRepositoryNameSchema })
+  .strict();
+export const providerPullNumberSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+export const providerPullListOptionsSchema = z
+  .object({
+    repository: providerRepositoryTargetSchema,
+    state: z.enum(['open', 'closed', 'all']),
+    page: providerRepositoryPageNumberSchema,
+  })
+  .strict();
+export const providerPullOptionsSchema = z
+  .object({ repository: providerRepositoryTargetSchema, number: providerPullNumberSchema })
+  .strict();
+const providerDateSchema = z.string().datetime({ offset: true });
+export const providerPullSummarySchema = z
+  .object({
+    number: providerPullNumberSchema,
+    title: z.string().min(1).max(4096),
+    author: z.string().min(1).max(255).nullable(),
+    state: z.enum(['open', 'closed']),
+    draft: z.boolean(),
+    createdAt: providerDateSchema,
+    updatedAt: providerDateSchema,
+    mergedAt: providerDateSchema.nullable(),
+    url: z
+      .string()
+      .url()
+      .max(4096)
+      .refine((value) => {
+        try {
+          const url = new URL(value);
+          const parts = url.pathname.split('/');
+          return (
+            value === `${url.origin}${url.pathname}` &&
+            providerOriginSchema.safeParse(url.origin).success &&
+            parts.length === 5 &&
+            providerRepositoryNameSchema.safeParse(parts[1]).success &&
+            providerRepositoryNameSchema.safeParse(parts[2]).success &&
+            parts[3] === 'pull' &&
+            /^[1-9][0-9]*$/.test(parts[4]!)
+          );
+        } catch {
+          return false;
+        }
+      }),
+  })
+  .strict();
+export const providerPullPageSchema = z
+  .object({
+    pullRequests: z.array(providerPullSummarySchema).max(100),
+    nextPage: providerRepositoryPageNumberSchema.nullable(),
+    limited: z.boolean(),
+  })
+  .strict();
+const providerPullBranchSchema = z
+  .object({
+    label: z.string().min(1).max(2048),
+    ref: z.string().min(1).max(1024),
+    sha: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
+  })
+  .strict();
+const providerCountSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+export const providerPullDetailsSchema = providerPullSummarySchema
+  .extend({
+    body: z.string().max(262144),
+    head: providerPullBranchSchema,
+    base: providerPullBranchSchema,
+    merged: z.boolean(),
+    mergeable: z.boolean().nullable(),
+    mergeableState: z.string().max(64),
+    comments: providerCountSchema,
+    reviewComments: providerCountSchema,
+    commits: providerCountSchema,
+    changedFiles: providerCountSchema,
+    additions: providerCountSchema,
+    deletions: providerCountSchema,
+  })
+  .strict();
+export type ProviderPullListOptions = z.infer<typeof providerPullListOptionsSchema>;
+export type ProviderPullOptions = z.infer<typeof providerPullOptionsSchema>;
+export type ProviderPullSummary = z.infer<typeof providerPullSummarySchema>;
+export type ProviderPullPage = z.infer<typeof providerPullPageSchema>;
+export type ProviderPullDetails = z.infer<typeof providerPullDetailsSchema>;

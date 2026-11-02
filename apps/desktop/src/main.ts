@@ -244,6 +244,8 @@ else {
           );
         }
         if (
+          request.method === 'providerPullRequests' ||
+          request.method === 'providerPullRequest' ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerConnect' ||
@@ -257,6 +259,24 @@ else {
           providers = getProviders();
           const controller = new AbortController();
           providerRequests.set(request.id, controller);
+          if (request.method === 'providerPullRequests')
+            return resultSchema.parse({
+              kind: 'providerPullRequests',
+              page: await providers.pullRequests(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerPullRequest')
+            return resultSchema.parse({
+              kind: 'providerPullRequest',
+              pullRequest: await providers.pullRequest(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerRepositories')
             return resultSchema.parse({
               kind: 'providerRepositories',
@@ -356,6 +376,8 @@ else {
         if (
           request.method === 'providerGit' ||
           (request.method === 'clone' && !!request.providerAccountId) ||
+          request.method === 'providerPullRequests' ||
+          request.method === 'providerPullRequest' ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerConnect' ||

@@ -422,3 +422,206 @@ test('native clone credentials are bound to the connected provider origin and a 
     providers.gitCredential(account.id, 'https://github.com/team/project.git', controller.signal),
   ).rejects.toThrow();
 });
+
+test('saved accounts browse repository-scoped pull requests and validated details without following API links', async () => {
+  const directory = join(root, 'pull-requests');
+  const providers = new ProviderService(directory, new ProviderVault(directory, protection()));
+  const repository = { owner: 'team', name: 'project' };
+  const pr = (number: number) => ({
+    number,
+    title: `Pull ${number}`,
+    state: 'open',
+    draft: true,
+    user: { login: 'contributor' },
+    created_at: '2026-10-01T12:00:00Z',
+    updated_at: '2026-10-02T12:00:00Z',
+    merged_at: null,
+    head: { ref: 'feature', label: 'fork:feature', sha: '1'.repeat(40) },
+    base: { ref: 'main', label: 'team:main', sha: '2'.repeat(40) },
+    html_url: 'https://secret@attacker.test',
+    body: '<script>untrusted</script>\nDescription',
+    merged: false,
+    mergeable: null,
+    mergeable_state: 'unknown',
+    comments: 2,
+    review_comments: 1,
+    commits: 3,
+    changed_files: 4,
+    additions: 10,
+    deletions: 5,
+  });
+  let detailInvalid = false;
+  const pages: string[] = [];
+  server.use(
+    http.get('https://api.github.com/user', () =>
+      HttpResponse.json({ id: 123, login: 'fixture-user' }),
+    ),
+    http.get('https://api.github.com/repos/team/project/pulls', ({ request }) => {
+      const url = new URL(request.url);
+      expect(request.headers.get('authorization')).toBe('token pr-secret');
+      expect(url.searchParams.get('state')).toBe('open');
+      expect(url.searchParams.get('sort')).toBe('created');
+      expect(url.searchParams.get('direction')).toBe('desc');
+      expect(url.searchParams.get('per_page')).toBe('100');
+      const page = url.searchParams.get('page')!;
+      pages.push(page);
+      return HttpResponse.json(
+        Array.from({ length: page === '1' ? 100 : 1 }, (_, index) =>
+          pr(page === '1' ? index + 1 : 101),
+        ),
+        { headers: { link: '<https://attacker.test/steal>; rel="next"' } },
+      );
+    }),
+    http.get('https://api.github.com/repos/team/project/pulls/101', () =>
+      HttpResponse.json({ ...pr(detailInvalid ? 102 : 101), user: null }),
+    ),
+  );
+  const account = (
+    await providers.connect({
+      provider: 'github',
+      origin: 'https://github.com',
+      token: 'pr-secret',
+    })
+  ).accounts[0]!;
+  const first = await providers.pullRequests(account.id, { repository, state: 'open', page: 1 });
+  expect(first.pullRequests).toHaveLength(100);
+  expect(first.nextPage).toBe(2);
+  expect(first.pullRequests[0]).toMatchObject({
+    number: 1,
+    title: 'Pull 1',
+    draft: true,
+    url: 'https://github.com/team/project/pull/1',
+  });
+  expect(first.pullRequests[0]).not.toHaveProperty('body');
+  expect(
+    (await providers.pullRequests(account.id, { repository, state: 'open', page: 2 })).nextPage,
+  ).toBeNull();
+  const detail = await providers.pullRequest(account.id, { repository, number: 101 });
+  expect(detail).toMatchObject({
+    number: 101,
+    author: null,
+    body: '<script>untrusted</script>\nDescription',
+    mergeable: null,
+    changedFiles: 4,
+    head: { sha: '1'.repeat(40), ref: 'feature' },
+  });
+  expect(JSON.stringify([first, detail])).not.toContain('pr-secret');
+  expect(JSON.stringify([first, detail])).not.toContain('attacker.test');
+  expect(pages).toEqual(['1', '2']);
+  detailInvalid = true;
+  await expect(
+    providers.pullRequest(account.id, { repository, number: 101 }),
+  ).rejects.toMatchObject({ code: 'PROVIDER_RESPONSE' });
+  await providers.disconnect(account.id);
+  await expect(
+    providers.pullRequests(account.id, { repository, state: 'open', page: 1 }),
+  ).rejects.toMatchObject({ code: 'PROVIDER_ACCOUNT' });
+});
+
+test('Enterprise PR pages enforce bounds and malformed responses fail without exposing diagnostics', async () => {
+  const directory = join(root, 'enterprise-pulls');
+  const providers = new ProviderService(directory, new ProviderVault(directory, protection()));
+  const repository = { owner: 'team', name: 'project' };
+  let invalid: 'number' | 'title' | 'state' | 'date' | 'count' | 'denied' | undefined;
+  let calls = 0;
+  server.use(
+    http.get('https://git.example.test/api/v3/user', () =>
+      HttpResponse.json({ id: 123, login: 'fixture-user' }),
+    ),
+    http.get('https://git.example.test/api/v3/repos/team/project/pulls', ({ request }) => {
+      calls++;
+      const url = new URL(request.url);
+      expect(request.headers.get('x-github-api-version')).toBe('2022-11-28');
+      expect(url.searchParams.get('state')).toBe('closed');
+      expect(url.searchParams.get('page')).toBe('100');
+      if (invalid === 'denied')
+        return HttpResponse.json({ message: 'Never expose enterprise-secret' }, { status: 403 });
+      return HttpResponse.json(
+        Array.from({ length: invalid === 'count' ? 101 : 100 }, (_, i) => ({
+          number: invalid === 'number' ? Number.MAX_SAFE_INTEGER + 1 : i + 1,
+          title: invalid === 'title' ? 'x'.repeat(4097) : 'PR',
+          state: invalid === 'state' ? 'unknown' : 'closed',
+          draft: false,
+          user: null,
+          created_at: invalid === 'date' ? 'invalid' : '2026-10-01T00:00:00Z',
+          updated_at: '2026-10-02T00:00:00Z',
+          merged_at: '2026-10-02T00:00:00Z',
+        })),
+        { headers: { link: '<https://attacker.test/next>; rel="next"' } },
+      );
+    }),
+  );
+  const account = (
+    await providers.connect({
+      provider: 'github',
+      origin: 'https://git.example.test',
+      token: 'enterprise-secret',
+    })
+  ).accounts[0]!;
+  const options = { repository, state: 'closed' as const, page: 100 };
+  const page = await providers.pullRequests(account.id, options);
+  expect(page).toMatchObject({ limited: true, nextPage: null });
+  expect(page.pullRequests[0]!.url).toBe('https://git.example.test/team/project/pull/1');
+  for (const value of ['number', 'title', 'state', 'date', 'count'] as const) {
+    invalid = value;
+    await expect(providers.pullRequests(account.id, options)).rejects.toMatchObject({
+      code: 'PROVIDER_RESPONSE',
+    });
+  }
+  invalid = 'denied';
+  await expect(providers.pullRequests(account.id, options)).rejects.toMatchObject({
+    code: 'PROVIDER_FORBIDDEN',
+    message: 'The provider denied access. Check account permissions or rate limits.',
+  });
+  for (const page of [0, 101, 1.5])
+    await expect(providers.pullRequests(account.id, { ...options, page })).rejects.toThrow();
+  expect(calls).toBe(7);
+});
+
+test('cancelling PR browsing aborts the provider request and releases the account queue', async () => {
+  const directory = join(root, 'cancel-pulls');
+  const providers = new ProviderService(directory, new ProviderVault(directory, protection()));
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let aborted = false;
+  server.use(
+    http.get('https://api.github.com/user', () =>
+      HttpResponse.json({ id: 123, login: 'fixture-user' }),
+    ),
+    http.get('https://api.github.com/repos/team/project/pulls', async ({ request }) => {
+      entered();
+      await new Promise<void>((resolve) =>
+        request.signal.addEventListener(
+          'abort',
+          () => {
+            aborted = true;
+            resolve();
+          },
+          { once: true },
+        ),
+      );
+      return HttpResponse.json([]);
+    }),
+  );
+  const account = (
+    await providers.connect({
+      provider: 'github',
+      origin: 'https://github.com',
+      token: 'pr-secret',
+    })
+  ).accounts[0]!;
+  const controller = new AbortController();
+  const pending = providers.pullRequests(
+    account.id,
+    { repository: { owner: 'team', name: 'project' }, state: 'open', page: 1 },
+    controller.signal,
+  );
+  await started;
+  controller.abort();
+  await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
+  await providers.idle();
+  expect(aborted).toBe(true);
+  expect((await providers.accounts()).accounts).toHaveLength(1);
+});

@@ -3,6 +3,10 @@ import { mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import {
+  providerPullListOptionsSchema,
+  providerPullOptionsSchema,
+  type ProviderPullListOptions,
+  type ProviderPullOptions,
   providerAccountSchema,
   providerCloneUrlSchema,
   providerGitCredentialSchema,
@@ -189,6 +193,20 @@ export class ProviderService {
       providerRepositoryPageNumberSchema.parse(page);
       const { account, token } = await this.authorize(id, signal);
       return this.github.repositories(account.origin, token, page, signal);
+    });
+  }
+  pullRequests(id: string, input: ProviderPullListOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerPullListOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.pullRequests(account.origin, token, options, signal);
+    });
+  }
+  pullRequest(id: string, input: ProviderPullOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerPullOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.pullRequest(account.origin, token, options, signal);
     });
   }
   /** Internal main-process API; the result must never be returned to the renderer. */

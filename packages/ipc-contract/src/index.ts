@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import {
+  providerPullListOptionsSchema,
+  providerPullOptionsSchema,
+  providerPullPageSchema,
+  providerPullDetailsSchema,
   providerAccountsSchema,
   providerGitCredentialSchema,
   providerRemoteTargetSchema,
@@ -1112,6 +1116,22 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerPullRequests'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerPullListOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerPullRequest'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerPullOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerGit'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       operation: providerGitOperationSchema,
@@ -1263,6 +1283,10 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('providerPullRequests'), page: providerPullPageSchema }).strict(),
+  z
+    .object({ kind: z.literal('providerPullRequest'), pullRequest: providerPullDetailsSchema })
+    .strict(),
   z
     .object({
       kind: z.literal('providerPullPreview'),

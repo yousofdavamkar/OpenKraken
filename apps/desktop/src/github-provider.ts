@@ -1,5 +1,14 @@
 import { Octokit } from '@octokit/rest';
 import {
+  providerPullListOptionsSchema,
+  providerPullOptionsSchema,
+  providerPullSummarySchema,
+  providerPullPageSchema,
+  providerPullDetailsSchema,
+  type ProviderPullListOptions,
+  type ProviderPullOptions,
+  type ProviderPullPage,
+  type ProviderPullDetails,
   providerOriginSchema,
   providerRepositoryPageSchema,
   providerRepositoryPageNumberSchema,
@@ -15,6 +24,18 @@ export class ProviderError extends Error {
   }
 }
 export interface ProviderDriver {
+  pullRequests(
+    origin: string,
+    token: string,
+    options: ProviderPullListOptions,
+    signal?: AbortSignal,
+  ): Promise<ProviderPullPage>;
+  pullRequest(
+    origin: string,
+    token: string,
+    options: ProviderPullOptions,
+    signal?: AbortSignal,
+  ): Promise<ProviderPullDetails>;
   repositories(
     origin: string,
     token: string,
@@ -77,6 +98,86 @@ export class GitHubProvider implements ProviderDriver {
         throw new ProviderError(
           'PROVIDER_RESPONSE',
           'The provider returned an invalid repository page.',
+        );
+      return result.data;
+    });
+  }
+  async pullRequests(
+    origin: string,
+    token: string,
+    input: ProviderPullListOptions,
+    signal?: AbortSignal,
+  ) {
+    const options = providerPullListOptionsSchema.parse(input);
+    const host = providerOriginSchema.parse(origin);
+    return this.request(host, token, signal, async (client, headers) => {
+      const { data } = await client.pulls.list({
+        headers,
+        owner: options.repository.owner,
+        repo: options.repository.name,
+        state: options.state,
+        page: options.page,
+        per_page: 100,
+        sort: 'created',
+        direction: 'desc',
+      });
+      if (!Array.isArray(data) || data.length > 100)
+        throw new ProviderError(
+          'PROVIDER_RESPONSE',
+          'The provider returned an invalid pull-request page.',
+        );
+      const result = providerPullPageSchema.safeParse({
+        pullRequests: data.map((pr) => pullSummary(host, options.repository, pr)),
+        nextPage: data.length === 100 && options.page < 100 ? options.page + 1 : null,
+        limited: data.length === 100 && options.page === 100,
+      });
+      if (!result.success)
+        throw new ProviderError(
+          'PROVIDER_RESPONSE',
+          'The provider returned an invalid pull-request page.',
+        );
+      return result.data;
+    });
+  }
+  async pullRequest(
+    origin: string,
+    token: string,
+    input: ProviderPullOptions,
+    signal?: AbortSignal,
+  ) {
+    const options = providerPullOptionsSchema.parse(input);
+    const host = providerOriginSchema.parse(origin);
+    return this.request(host, token, signal, async (client, headers) => {
+      const { data } = await client.pulls.get({
+        headers,
+        owner: options.repository.owner,
+        repo: options.repository.name,
+        pull_number: options.number,
+      });
+      const branch = (value: typeof data.head) => ({
+        label: value?.label,
+        ref: value?.ref,
+        sha: value?.sha,
+      });
+      const result = providerPullDetailsSchema.safeParse({
+        ...pullSummary(host, options.repository, data),
+        body: data.body ?? '',
+        head: branch(data.head),
+        base: branch(data.base),
+        merged: data.merged,
+        mergeable: data.mergeable,
+        mergeableState: data.mergeable_state,
+        comments: data.comments,
+        reviewComments: data.review_comments,
+        commits: data.commits,
+        changedFiles: data.changed_files,
+        additions: data.additions,
+        deletions: data.deletions,
+      });
+      if (!result.success || result.data.number !== options.number)
+        throw new ProviderError(
+          'PROVIDER_RESPONSE',
+          'The provider returned invalid pull-request details.',
         );
       return result.data;
     });
@@ -168,4 +269,38 @@ export class GitHubProvider implements ProviderDriver {
       clearTimeout(timeout);
     }
   }
+}
+
+type GitHubPullSummary = {
+  number: unknown;
+  title: unknown;
+  state: unknown;
+  draft?: unknown;
+  user?: { login?: unknown } | null;
+  created_at?: unknown;
+  updated_at?: unknown;
+  merged_at?: unknown;
+};
+function pullSummary(
+  host: string,
+  repository: ProviderPullOptions['repository'],
+  data: GitHubPullSummary,
+) {
+  const result = providerPullSummarySchema.safeParse({
+    number: data?.number,
+    title: data?.title,
+    author: data?.user?.login ?? null,
+    state: data?.state,
+    draft: data?.draft ?? false,
+    createdAt: data?.created_at,
+    updatedAt: data?.updated_at,
+    mergedAt: data?.merged_at,
+    url: `${host}/${repository.owner}/${repository.name}/pull/${data?.number}`,
+  });
+  if (!result.success)
+    throw new ProviderError(
+      'PROVIDER_RESPONSE',
+      'The provider returned invalid pull-request metadata.',
+    );
+  return result.data;
 }

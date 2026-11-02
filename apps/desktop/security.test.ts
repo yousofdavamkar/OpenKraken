@@ -292,3 +292,40 @@ test('saved remote deletion requires a reviewed ref and exact tip without caller
         .success,
     ).toBe(false);
 });
+
+test('pull-request browsing accepts only bounded repository selectors and account IDs', () => {
+  const id = '00000000-0000-4000-8000-000000000000',
+    accountId = 'a'.repeat(64);
+  const repository = { owner: 'team', name: 'project' };
+  const list = {
+    id,
+    method: 'providerPullRequests',
+    accountId,
+    options: { repository, state: 'open', page: 1 },
+  };
+  const detail = {
+    id,
+    method: 'providerPullRequest',
+    accountId,
+    options: { repository, number: 1 },
+  };
+  expect(requestSchema.safeParse(list).success).toBe(true);
+  expect(requestSchema.safeParse(detail).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(list).success).toBe(false);
+  expect(serviceRequestSchema.safeParse(detail).success).toBe(false);
+  for (const extra of [
+    { page: 0 },
+    { page: 101 },
+    { state: 'merged' },
+    { origin: 'https://other.test' },
+    { token: 'secret' },
+    { repository: { owner: '../other', name: 'project' } },
+  ])
+    expect(
+      requestSchema.safeParse({ ...list, options: { ...list.options, ...extra } }).success,
+    ).toBe(false);
+  for (const number of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
+    expect(
+      requestSchema.safeParse({ ...detail, options: { ...detail.options, number } }).success,
+    ).toBe(false);
+});
