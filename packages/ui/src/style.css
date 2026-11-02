@@ -1431,3 +1431,37 @@ footer {
   overflow: auto;
   font: inherit;
 }
+.pr-create-dialog {
+  width: min(760px, calc(100vw - 64px));
+  max-width: none;
+}
+.pr-create-dialog fieldset {
+  border: 1px solid var(--border);
+}
+.pr-create-dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-block: 10px;
+}
+.pr-create-dialog label:has(input[type='checkbox']) {
+  flex-direction: row;
+  align-items: center;
+}
+.pr-create-branches {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.pr-create-dialog pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow: auto;
+  font: inherit;
+}
+.pr-existing {
+  max-height: 240px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}

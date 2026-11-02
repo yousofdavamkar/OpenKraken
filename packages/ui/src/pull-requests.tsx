@@ -6,6 +6,7 @@ import type {
   ProviderPullSummary,
 } from '@openkraken/ipc-contract';
 import { CommentDiscussion, PullFiles, PullReviews, WriteReview } from './pull-review.js';
+import { CreatePullRequest } from './pull-create.js';
 import { ProviderRepositoryPicker } from './provider-repositories.js';
 
 type RepositorySelection = {
@@ -345,6 +346,7 @@ function PullRequestDialog({ close }: { close: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [target, setTarget] = useState<RepositorySelection>();
   const [state, setState] = useState<ProviderPullListOptions['state']>('open');
+  const [version, setVersion] = useState(0);
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
@@ -365,6 +367,13 @@ function PullRequestDialog({ close }: { close: () => void }) {
             {target.origin}/{target.repository.owner}/{target.repository.name}
           </p>
           <div className="dialog-actions">
+            <CreatePullRequest
+              target={target}
+              created={() => {
+                setState('open');
+                setVersion((value) => value + 1);
+              }}
+            />
             <button type="button" onClick={() => setTarget(undefined)}>
               Choose repository
             </button>
@@ -385,7 +394,7 @@ function PullRequestDialog({ close }: { close: () => void }) {
             </label>
           </div>
           <PullPages
-            key={`${target.accountId}/${target.repository.owner}/${target.repository.name}/${state}`}
+            key={`${target.accountId}/${target.repository.owner}/${target.repository.name}/${state}/${version}`}
             target={target}
             state={state}
           />
