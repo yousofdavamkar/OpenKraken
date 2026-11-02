@@ -262,3 +262,110 @@ test('device sign-in protects refresh tokens and revalidates the same identity a
   await expect(restarted.verify(account.id)).rejects.toMatchObject({ code: 'PROVIDER_ACCOUNT' });
   expect((await restarted.accounts()).accounts).toEqual(checked.accounts);
 });
+
+test('connected accounts list bounded repository pages with canonical clone URLs and no credentials', async () => {
+  const directory = join(root, 'repositories');
+  const providers = new ProviderService(directory, new ProviderVault(directory, protection()));
+  const pages: string[] = [];
+  server.use(
+    http.get('https://api.github.com/user', () =>
+      HttpResponse.json({ id: 123, login: 'fixture-user' }),
+    ),
+    http.get('https://api.github.com/user/repos', ({ request }) => {
+      const url = new URL(request.url);
+      expect(request.headers.get('authorization')).toBe('token repository-secret');
+      expect(url.searchParams.get('per_page')).toBe('100');
+      expect(url.searchParams.get('sort')).toBe('full_name');
+      expect(url.searchParams.get('direction')).toBe('asc');
+      const page = url.searchParams.get('page')!;
+      pages.push(page);
+      return HttpResponse.json(
+        Array.from({ length: page === '1' ? 100 : 1 }, (_, index) => ({
+          id: (page === '1' ? 1 : 101) + index,
+          name: `repo-${index}`,
+          owner: { login: 'fixture-org' },
+          private: index === 0,
+          archived: false,
+          description: index === 0 ? 'Fixture repository' : null,
+          clone_url: 'https://repository-secret@attacker.test/untrusted.git',
+        })),
+      );
+    }),
+  );
+  const account = (
+    await providers.connect({
+      provider: 'github',
+      origin: 'https://github.com',
+      token: 'repository-secret',
+    })
+  ).accounts[0]!;
+  const first = await providers.repositories(account.id, 1);
+  expect(first.repositories).toHaveLength(100);
+  expect(first.nextPage).toBe(2);
+  expect(first.limited).toBe(false);
+  expect(first.repositories[0]).toEqual({
+    id: '1',
+    owner: 'fixture-org',
+    name: 'repo-0',
+    private: true,
+    archived: false,
+    description: 'Fixture repository',
+    cloneUrl: 'https://github.com/fixture-org/repo-0.git',
+  });
+  const second = await providers.repositories(account.id, first.nextPage!);
+  expect(second.repositories).toHaveLength(1);
+  expect(second.nextPage).toBeNull();
+  expect(pages).toEqual(['1', '2']);
+  expect(JSON.stringify([first, second])).not.toContain('repository-secret');
+  await providers.disconnect(account.id);
+  await expect(providers.repositories(account.id, 1)).rejects.toMatchObject({
+    code: 'PROVIDER_ACCOUNT',
+  });
+});
+
+test('Enterprise repository pages reject malformed metadata and never follow provider pagination URLs', async () => {
+  const directory = join(root, 'enterprise-repositories');
+  const providers = new ProviderService(directory, new ProviderVault(directory, protection()));
+  let invalid: 'owner' | 'id' | 'oversized' | undefined;
+  let calls = 0;
+  server.use(
+    http.get('https://git.example.test/api/v3/user', () =>
+      HttpResponse.json({ id: 123, login: 'fixture-user' }),
+    ),
+    http.get('https://git.example.test/api/v3/user/repos', ({ request }) => {
+      calls++;
+      expect(request.headers.get('x-github-api-version')).toBe('2022-11-28');
+      expect(new URL(request.url).searchParams.get('page')).toBe('100');
+      const data = Array.from({ length: invalid === 'oversized' ? 101 : 100 }, (_, index) => ({
+        id: invalid === 'id' ? Number.MAX_SAFE_INTEGER + 1 : index + 1,
+        name: 'project',
+        owner: { login: invalid === 'owner' ? '../elsewhere' : 'team' },
+        description: null,
+        private: false,
+        archived: true,
+      }));
+      return HttpResponse.json(data, {
+        headers: { link: '<https://attacker.test/steal>; rel="next"' },
+      });
+    }),
+  );
+  const account = (
+    await providers.connect({
+      provider: 'github',
+      origin: 'https://git.example.test',
+      token: 'enterprise-secret',
+    })
+  ).accounts[0]!;
+  const result = await providers.repositories(account.id, 100);
+  expect(result).toMatchObject({ nextPage: null, limited: true });
+  expect(result.repositories[0]!.cloneUrl).toBe('https://git.example.test/team/project.git');
+  for (const value of ['owner', 'id', 'oversized'] as const) {
+    invalid = value;
+    await expect(providers.repositories(account.id, 100)).rejects.toMatchObject({
+      code: 'PROVIDER_RESPONSE',
+    });
+  }
+  for (const page of [0, -1, 101, 1.5])
+    await expect(providers.repositories(account.id, page)).rejects.toThrow();
+  expect(calls).toBe(4);
+});

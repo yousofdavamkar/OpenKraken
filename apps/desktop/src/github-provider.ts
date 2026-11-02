@@ -1,5 +1,10 @@
 import { Octokit } from '@octokit/rest';
-import { providerOriginSchema } from '@openkraken/ipc-contract';
+import {
+  providerOriginSchema,
+  providerRepositoryPageSchema,
+  providerRepositoryPageNumberSchema,
+  type ProviderRepositoryPage,
+} from '@openkraken/ipc-contract';
 
 export class ProviderError extends Error {
   constructor(
@@ -10,6 +15,12 @@ export class ProviderError extends Error {
   }
 }
 export interface ProviderDriver {
+  repositories(
+    origin: string,
+    token: string,
+    page: number,
+    signal?: AbortSignal,
+  ): Promise<ProviderRepositoryPage>;
   identity(
     origin: string,
     token: string,
@@ -19,6 +30,63 @@ export interface ProviderDriver {
 export class GitHubProvider implements ProviderDriver {
   constructor(private fetcher: typeof fetch = (...args) => fetch(...args)) {}
   async identity(origin: string, token: string, signal?: AbortSignal) {
+    return this.request(origin, token, signal, async (client, headers) => {
+      const { data } = await client.users.getAuthenticated({ headers });
+      if (!Number.isSafeInteger(data.id) || data.id <= 0 || typeof data.login !== 'string')
+        throw new ProviderError(
+          'PROVIDER_RESPONSE',
+          'The provider returned an invalid account identity.',
+        );
+      return { id: String(data.id), login: data.login };
+    });
+  }
+  async repositories(origin: string, token: string, page: number, signal?: AbortSignal) {
+    providerRepositoryPageNumberSchema.parse(page);
+    const host = providerOriginSchema.parse(origin);
+    return this.request(host, token, signal, async (client, headers) => {
+      const { data } = await client.repos.listForAuthenticatedUser({
+        headers,
+        page,
+        per_page: 100,
+        sort: 'full_name',
+        direction: 'asc',
+      });
+      if (
+        !Array.isArray(data) ||
+        data.length > 100 ||
+        data.some((repo) => !Number.isSafeInteger(repo?.id) || repo.id <= 0)
+      )
+        throw new ProviderError(
+          'PROVIDER_RESPONSE',
+          'The provider returned an invalid repository page.',
+        );
+      const result = providerRepositoryPageSchema.safeParse({
+        repositories: data.map((repo) => ({
+          id: String(repo.id),
+          owner: repo.owner?.login,
+          name: repo.name,
+          description: repo.description ?? '',
+          private: repo.private,
+          archived: repo.archived,
+          cloneUrl: `${host}/${repo.owner?.login}/${repo.name}.git`,
+        })),
+        nextPage: data.length === 100 && page < 100 ? page + 1 : null,
+        limited: data.length === 100 && page === 100,
+      });
+      if (!result.success)
+        throw new ProviderError(
+          'PROVIDER_RESPONSE',
+          'The provider returned an invalid repository page.',
+        );
+      return result.data;
+    });
+  }
+  private async request<T>(
+    origin: string,
+    token: string,
+    signal: AbortSignal | undefined,
+    perform: (client: Octokit, headers: Record<string, string>) => Promise<T>,
+  ): Promise<T> {
     const host = providerOriginSchema.parse(origin);
     const baseUrl = host === 'https://github.com' ? 'https://api.github.com' : `${host}/api/v3`;
     const controller = new AbortController();
@@ -71,17 +139,9 @@ export class GitHubProvider implements ProviderDriver {
       log: { debug() {}, info() {}, warn() {}, error() {} },
     });
     try {
-      const { data } = await client.users.getAuthenticated({
-        headers: {
-          'X-GitHub-Api-Version': host === 'https://github.com' ? '2026-03-10' : '2022-11-28',
-        },
+      return await perform(client, {
+        'X-GitHub-Api-Version': host === 'https://github.com' ? '2026-03-10' : '2022-11-28',
       });
-      if (!Number.isSafeInteger(data.id) || data.id <= 0 || typeof data.login !== 'string')
-        throw new ProviderError(
-          'PROVIDER_RESPONSE',
-          'The provider returned an invalid account identity.',
-        );
-      return { id: String(data.id), login: data.login };
     } catch (error) {
       if (signal?.aborted) throw new ProviderError('CANCELLED', 'Provider request cancelled.');
       if (controller.signal.aborted)

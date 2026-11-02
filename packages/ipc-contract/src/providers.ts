@@ -79,3 +79,43 @@ export const deviceChallengeSchema = z
   .strict();
 export type DeviceStart = z.infer<typeof deviceStartSchema>;
 export type DeviceChallenge = z.infer<typeof deviceChallengeSchema>;
+
+// GitHub/GHES repository components are literal path segments, never URLs.
+export const providerRepositoryNameSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .regex(/^[A-Za-z0-9_.-]+$/)
+  .refine((value) => value !== '.' && value !== '..');
+export const providerRepositoryPageNumberSchema = z.number().int().min(1).max(100);
+export const providerRepositorySchema = z
+  .object({
+    id: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    owner: providerRepositoryNameSchema,
+    name: providerRepositoryNameSchema,
+    description: z.string().max(1000),
+    private: z.boolean(),
+    archived: z.boolean(),
+    cloneUrl: z.string().max(4096),
+  })
+  .strict()
+  .refine((repo) => {
+    try {
+      const url = new URL(repo.cloneUrl);
+      return (
+        providerOriginSchema.safeParse(url.origin).success &&
+        repo.cloneUrl === `${url.origin}/${repo.owner}/${repo.name}.git`
+      );
+    } catch {
+      return false;
+    }
+  });
+export const providerRepositoryPageSchema = z
+  .object({
+    repositories: z.array(providerRepositorySchema).max(100),
+    nextPage: providerRepositoryPageNumberSchema.nullable(),
+    limited: z.boolean(),
+  })
+  .strict();
+export type ProviderRepository = z.infer<typeof providerRepositorySchema>;
+export type ProviderRepositoryPage = z.infer<typeof providerRepositoryPageSchema>;

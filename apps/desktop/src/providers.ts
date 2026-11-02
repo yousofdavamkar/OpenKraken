@@ -4,6 +4,7 @@ import { constants } from 'node:fs';
 import { join } from 'node:path';
 import {
   providerAccountSchema,
+  providerRepositoryPageNumberSchema,
   providerAccountsSchema,
   providerConnectSchema,
   type ProviderAccount,
@@ -173,51 +174,59 @@ export class ProviderService {
   }
   verify(id: string, signal?: AbortSignal) {
     return this.run(async () => {
-      signal?.throwIfAborted();
-      const accounts = await this.load();
-      const index = accounts.findIndex((account) => account.id === id);
-      const account = accounts[index];
-      if (!account)
-        throw new ProviderError(
-          'PROVIDER_ACCOUNT',
-          'This provider account is no longer connected.',
-        );
-      const saved = await this.vault.read(scope(account));
-      if (!saved) throw new ProviderCredentialError('CREDENTIAL_INVALID');
-      let credential: GitHubCredential | undefined;
-      if (account.authentication === 'device') {
-        try {
-          credential = githubCredentialSchema.parse(JSON.parse(saved));
-        } catch {
-          throw new ProviderCredentialError('CREDENTIAL_INVALID');
-        }
-      }
-      let rotated = false;
-      if (credential?.expiresAt !== undefined && credential.expiresAt <= this.now() + 60000) {
-        credential = await this.oauth.refresh(credential, signal);
-        rotated = true;
-      }
-      const identity = await this.github.identity(
-        account.origin,
-        credential?.accessToken ?? saved,
-        signal,
-      );
-      if (identity.id !== account.providerUserId)
-        throw new ProviderError(
-          'PROVIDER_ACCOUNT',
-          'The authorization now identifies another account. Sign in again.',
-        );
-      signal?.throwIfAborted();
-      if (rotated) await this.vault.write(scope(account), JSON.stringify(credential));
-      const { expiresAt: _expiresAt, ...metadata } = account;
-      accounts[index] = providerAccountSchema.parse({
-        ...metadata,
-        login: identity.login,
-        ...(credential?.expiresAt ? { expiresAt: credential.expiresAt } : {}),
-      });
-      await this.save(accounts);
+      const { accounts } = await this.authorize(id, signal);
       return { keychainAvailable: true, accounts };
     });
+  }
+  repositories(id: string, page: number, signal?: AbortSignal) {
+    return this.run(async () => {
+      providerRepositoryPageNumberSchema.parse(page);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.repositories(account.origin, token, page, signal);
+    });
+  }
+  private async authorize(id: string, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    const accounts = await this.load();
+    const index = accounts.findIndex((account) => account.id === id);
+    const account = accounts[index];
+    if (!account)
+      throw new ProviderError('PROVIDER_ACCOUNT', 'This provider account is no longer connected.');
+    const saved = await this.vault.read(scope(account));
+    if (!saved) throw new ProviderCredentialError('CREDENTIAL_INVALID');
+    let credential: GitHubCredential | undefined;
+    if (account.authentication === 'device') {
+      try {
+        credential = githubCredentialSchema.parse(JSON.parse(saved));
+      } catch {
+        throw new ProviderCredentialError('CREDENTIAL_INVALID');
+      }
+    }
+    let rotated = false;
+    if (credential?.expiresAt !== undefined && credential.expiresAt <= this.now() + 60000) {
+      credential = await this.oauth.refresh(credential, signal);
+      rotated = true;
+    }
+    const identity = await this.github.identity(
+      account.origin,
+      credential?.accessToken ?? saved,
+      signal,
+    );
+    if (identity.id !== account.providerUserId)
+      throw new ProviderError(
+        'PROVIDER_ACCOUNT',
+        'The authorization now identifies another account. Sign in again.',
+      );
+    signal?.throwIfAborted();
+    if (rotated) await this.vault.write(scope(account), JSON.stringify(credential));
+    const { expiresAt: _expiresAt, ...metadata } = account;
+    accounts[index] = providerAccountSchema.parse({
+      ...metadata,
+      login: identity.login,
+      ...(credential?.expiresAt ? { expiresAt: credential.expiresAt } : {}),
+    });
+    await this.save(accounts);
+    return { accounts, account: accounts[index]!, token: credential?.accessToken ?? saved };
   }
   disconnect(id: string) {
     return this.run(async () => {
