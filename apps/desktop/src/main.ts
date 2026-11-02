@@ -48,6 +48,18 @@ const pending = new Map<
 >();
 const inFlight = new Set<string>();
 const cancelled = new Set<string>();
+function getProviders() {
+  const fetchProvider: typeof fetch = (input, init) =>
+    session
+      .fromPartition('openkraken-providers')
+      .fetch(input instanceof Request ? input.url : String(input), init);
+  return (providers ??= new ProviderService(
+    app.getPath('userData'),
+    new ProviderVault(app.getPath('userData'), electronSecretProtection(safeStorage)),
+    new GitHubProvider(fetchProvider),
+    new GitHubOAuth(fetchProvider),
+  ));
+}
 function startService() {
   const child = utilityProcess.fork(join(__dirname, 'git-service.cjs'), [app.getPath('userData')], {
     serviceName: 'OpenKraken Git',
@@ -200,16 +212,7 @@ else {
           request.method === 'providerDeviceCancel' ||
           request.method === 'providerDeviceOpen'
         ) {
-          const fetchProvider: typeof fetch = (input, init) =>
-            session
-              .fromPartition('openkraken-providers')
-              .fetch(input instanceof Request ? input.url : String(input), init);
-          providers ??= new ProviderService(
-            app.getPath('userData'),
-            new ProviderVault(app.getPath('userData'), electronSecretProtection(safeStorage)),
-            new GitHubProvider(fetchProvider),
-            new GitHubOAuth(fetchProvider),
-          );
+          providers = getProviders();
           const controller = new AbortController();
           providerRequests.set(request.id, controller);
           if (request.method === 'providerRepositories')
@@ -283,16 +286,33 @@ else {
             return { kind: 'cancelled' };
           path = selected.filePaths[0];
         }
+        if (request.method === 'clone') {
+          const controller = new AbortController();
+          providerRequests.set(request.id, controller);
+          const credential = request.providerAccountId
+            ? await getProviders().cloneCredential(
+                request.providerAccountId,
+                request.options.url,
+                controller.signal,
+              )
+            : undefined;
+          controller.signal.throwIfAborted();
+          return await callService({
+            id: request.id,
+            method: 'clone',
+            path: path!,
+            options: request.options,
+            ...(credential ? { credential } : {}),
+          });
+        }
         return await callService(
-          request.method === 'open' ||
-            request.method === 'init' ||
-            request.method === 'discover' ||
-            request.method === 'clone'
+          request.method === 'open' || request.method === 'init' || request.method === 'discover'
             ? { ...request, path: path! }
             : request,
         );
       } catch (error) {
         if (
+          (request.method === 'clone' && !!request.providerAccountId) ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerConnect' ||

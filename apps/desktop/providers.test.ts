@@ -380,3 +380,47 @@ test('Enterprise repository pages reject malformed metadata and never follow pro
     await expect(providers.repositories(account.id, page)).rejects.toThrow();
   expect(calls).toBe(4);
 });
+
+test('native clone credentials are bound to the connected provider origin and a canonical repository URL', async () => {
+  const directory = join(root, 'clone-credential');
+  const providers = new ProviderService(directory, new ProviderVault(directory, protection()));
+  let validations = 0;
+  server.use(
+    http.get('https://api.github.com/user', () => {
+      validations++;
+      return HttpResponse.json({ id: 123, login: 'fixture-user' });
+    }),
+  );
+  const account = (
+    await providers.connect({
+      provider: 'github',
+      origin: 'https://github.com',
+      token: 'fixture-clone-token',
+    })
+  ).accounts[0]!;
+  expect(
+    await providers.cloneCredential(account.id, 'https://github.com/team/project.git'),
+  ).toEqual({
+    url: 'https://github.com/team/project.git',
+    username: 'fixture-user',
+    password: 'fixture-clone-token',
+  });
+  const checked = validations;
+  for (const url of [
+    'https://github.com.evil.test/team/project.git',
+    'http://github.com/team/project.git',
+    'https://user@github.com/team/project.git',
+    'https://github.com/team/../project.git',
+    'https://github.com/team/project.git?token=x',
+    'https://github.com/team/project',
+  ])
+    await expect(providers.cloneCredential(account.id, url)).rejects.toMatchObject({
+      code: 'PROVIDER_CLONE_URL',
+    });
+  expect(validations).toBe(checked);
+  const controller = new AbortController();
+  controller.abort();
+  await expect(
+    providers.cloneCredential(account.id, 'https://github.com/team/project.git', controller.signal),
+  ).rejects.toThrow();
+});

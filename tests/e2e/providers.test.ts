@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createFixture, fixtureGit } from '../../packages/test-fixtures/src/index.js';
+import { authenticatedRemote } from '../../packages/test-fixtures/src/authenticated-remote.js';
 
 async function fixtureProtection(app: ElectronApplication, offline = false) {
   await app.evaluate(async ({ safeStorage, session }, offline) => {
@@ -408,6 +409,7 @@ test('provider repository picker appends pages, filters loaded repositories and 
     await page.screenshot({ path: 'test-results/provider-repository-picker.png' });
     await list.focus();
     await list.press('Enter');
+    await picker.getByLabel('Use saved provider account for HTTPS authentication').uncheck();
     await expect(picker.getByLabel('Repository URL or absolute path')).toHaveValue(
       'https://github.com/fixture-org/chosen.git',
     );
@@ -551,6 +553,164 @@ test('repository browsing cancels on account switches and close, and retries san
       .toBe(2);
   } finally {
     await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a saved provider account authenticates native HTTPS clone without exposing its token to renderer results or Git config', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-saved-clone-'));
+  const source = createFixture(join(root, 'source'));
+  const bare = join(root, 'remote.git');
+  fixtureGit(source, ['clone', '--bare', '.', bare]);
+  const remote = await authenticatedRemote(bare, {
+    basePath: '/team/project.git',
+    password: 'fixture-provider-secret',
+  });
+  const target = join(root, 'target');
+  mkdirSync(target);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+    env: {
+      ...process.env,
+      GIT_SSL_CAINFO: remote.certificate,
+      GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1',
+    },
+  });
+  try {
+    await fixtureProtection(app);
+    const origin = new URL(remote.url).origin;
+    await app.evaluate(
+      ({ session, dialog }, { origin, target }) => {
+        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [target] });
+        session.fromPartition('openkraken-providers').fetch = async (input, init) => {
+          const url = new URL(String(input));
+          if (
+            url.origin !== origin ||
+            new Headers(init?.headers).get('authorization') !== 'token fixture-provider-secret'
+          )
+            throw new Error('Unexpected provider request');
+          const body =
+            url.pathname === '/api/v3/user'
+              ? { id: 321, login: 'fixture-user' }
+              : url.pathname === '/api/v3/user/repos'
+                ? [
+                    {
+                      id: 1,
+                      owner: { login: 'team' },
+                      name: 'project',
+                      description: null,
+                      private: true,
+                      archived: false,
+                    },
+                  ]
+                : null;
+          if (!body) throw new Error('Unexpected provider endpoint');
+          return new Response(JSON.stringify(body), {
+            headers: { 'content-type': 'application/json' },
+          });
+        };
+      },
+      { origin, target },
+    );
+    const page = await app.firstWindow();
+    await page.evaluate(() => {
+      const events: unknown[] = [];
+      Object.assign(window, { providerCloneEvents: events });
+      window.openkraken.subscribe((event) => events.push(event));
+    });
+    await page.getByRole('button', { name: 'Provider accounts', exact: true }).click();
+    const accounts = page.getByRole('dialog', { name: 'Provider accounts' });
+    await accounts.getByLabel('Provider host').fill(origin);
+    await accounts
+      .getByLabel('Personal access token', { exact: true })
+      .fill(remote.credentials.password);
+    await accounts.getByRole('button', { name: 'Connect account', exact: true }).click();
+    await expect(accounts.getByRole('button', { name: 'Forget fixture-user' })).toBeVisible();
+    await accounts.getByRole('button', { name: 'Close accounts' }).click();
+    await page.getByRole('button', { name: 'Clone', exact: true }).click();
+    const clone = page.getByRole('dialog', { name: 'Clone repository' });
+    await clone.getByRole('button', { name: 'Browse provider repositories' }).click();
+    await clone.getByRole('option', { name: 'Select team/project' }).click();
+    await expect(
+      clone.getByLabel('Use saved provider account for HTTPS authentication'),
+    ).toBeChecked();
+    await clone.getByRole('button', { name: 'Choose folder and clone' }).click();
+    await expect(clone).toHaveCount(0);
+    await expect(page.getByTestId('head')).toHaveText('main');
+    expect(fixtureGit(target, ['rev-parse', 'HEAD'])).toBe(
+      fixtureGit(source, ['rev-parse', 'HEAD']),
+    );
+    expect(remote.authenticated()).toBeGreaterThan(1);
+    const rendered = await page.evaluate(() =>
+      JSON.stringify({
+        events: (window as typeof window & { providerCloneEvents: unknown[] }).providerCloneEvents,
+        storage: localStorage,
+        text: document.body.innerText,
+      }),
+    );
+    expect(rendered).not.toContain(remote.credentials.password);
+    expect(rendered).not.toContain('authenticationPrompt');
+    expect(readFileSync(join(target, '.git/config'), 'utf8')).toContain(remote.url);
+    expect(readFileSync(join(target, '.git/config'), 'utf8')).not.toContain(
+      remote.credentials.password,
+    );
+    expect(readFileSync(join(root, 'profile/provider-accounts.json'), 'utf8')).not.toContain(
+      remote.credentials.password,
+    );
+    const cancelledTarget = join(root, 'cancelled');
+    mkdirSync(cancelledTarget);
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, cancelledTarget);
+    await page.getByRole('button', { name: 'Clone', exact: true }).click();
+    await clone.getByRole('button', { name: 'Browse provider repositories' }).click();
+    await clone.getByRole('option', { name: 'Select team/project' }).click();
+    await app.evaluate(({ session }) => {
+      const partition = session.fromPartition('openkraken-providers');
+      const original = partition.fetch;
+      Object.assign(globalThis, { cloneValidationStarted: false, cloneValidationCancelled: false });
+      partition.fetch = async (input, init) => {
+        Object.assign(globalThis, { cloneValidationStarted: true });
+        await new Promise<void>((resolve) => {
+          if (init?.signal?.aborted) resolve();
+          else init?.signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+        Object.assign(globalThis, { cloneValidationCancelled: true });
+        return original(input, init);
+      };
+    });
+    const requestsBeforeCancel = remote.requests();
+    await clone.getByRole('button', { name: 'Choose folder and clone' }).click();
+    await expect
+      .poll(() =>
+        app.evaluate(
+          () =>
+            (globalThis as typeof globalThis & { cloneValidationStarted: boolean })
+              .cloneValidationStarted,
+        ),
+      )
+      .toBe(true);
+    await clone.getByRole('button', { name: 'Cancel clone', exact: true }).click();
+    await expect(clone.getByRole('button', { name: 'Choose folder and clone' })).toBeEnabled();
+    await expect
+      .poll(() =>
+        app.evaluate(
+          () =>
+            (globalThis as typeof globalThis & { cloneValidationCancelled: boolean })
+              .cloneValidationCancelled,
+        ),
+      )
+      .toBe(true);
+    expect(remote.requests()).toBe(requestsBeforeCancel);
+    expect(readdirSync(cancelledTarget)).toEqual([]);
+    await clone.getByLabel('Repository URL or absolute path').fill(source);
+    await expect(
+      clone.getByLabel('Use saved provider account for HTTPS authentication'),
+    ).toHaveCount(0);
+  } finally {
+    await app.close();
+    await remote.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

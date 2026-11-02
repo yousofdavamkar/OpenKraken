@@ -182,7 +182,11 @@ function RepositoryPages({
     </section>
   );
 }
-export function ProviderRepositoryPicker({ onSelect }: { onSelect: (url: string) => void }) {
+export function ProviderRepositoryPicker({
+  onSelect,
+}: {
+  onSelect: (url: string, accountId: string) => void;
+}) {
   const [state, setState] = useState<ProviderAccounts>();
   const [accountId, setAccountId] = useState('');
   const [error, setError] = useState('');
@@ -243,7 +247,11 @@ export function ProviderRepositoryPicker({ onSelect }: { onSelect: (url: string)
         </label>
       )}
       {accountId && state?.keychainAvailable && (
-        <RepositoryPages key={accountId} accountId={accountId} onSelect={onSelect} />
+        <RepositoryPages
+          key={accountId}
+          accountId={accountId}
+          onSelect={(url) => onSelect(url, accountId)}
+        />
       )}
     </section>
   );

@@ -66,7 +66,7 @@ function valid(value: unknown, limit: number): value is string {
 }
 /** Main-process only. Callers bind account IDs to a validated provider, origin and identity. */
 export class ProviderVault {
-  private queue: Promise<unknown> = Promise.resolve();
+  private queue: Promise<void> = Promise.resolve();
   private directory: string;
   constructor(
     profile: string,
@@ -79,7 +79,11 @@ export class ProviderVault {
   }
   private run<T>(work: () => Promise<T>) {
     const pending = this.queue.then(work, work);
-    this.queue = pending.catch(() => {});
+    // Keep only completion in the queue, never a returned plaintext credential.
+    this.queue = pending.then(
+      () => {},
+      () => {},
+    );
     return pending;
   }
   private path(account: string) {

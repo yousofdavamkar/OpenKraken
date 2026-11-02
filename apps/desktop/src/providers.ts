@@ -4,6 +4,8 @@ import { constants } from 'node:fs';
 import { join } from 'node:path';
 import {
   providerAccountSchema,
+  providerCloneUrlSchema,
+  providerGitCredentialSchema,
   providerRepositoryPageNumberSchema,
   providerAccountsSchema,
   providerConnectSchema,
@@ -28,7 +30,7 @@ function idFor(account: Pick<ProviderAccount, 'provider' | 'origin' | 'providerU
 }
 /** Provider network and credentials remain in main; public results contain account metadata only. */
 export class ProviderService {
-  private queue: Promise<unknown> = Promise.resolve();
+  private queue: Promise<void> = Promise.resolve();
   private manifest: string;
   private device: GitHubDeviceFlow;
   constructor(
@@ -52,7 +54,11 @@ export class ProviderService {
   }
   private run<T>(work: () => Promise<T>) {
     const pending = this.queue.then(work, work);
-    this.queue = pending.catch(() => {});
+    // Keep only completion in the queue, never a returned plaintext credential.
+    this.queue = pending.then(
+      () => {},
+      () => {},
+    );
     return pending;
   }
   async idle() {
@@ -185,13 +191,38 @@ export class ProviderService {
       return this.github.repositories(account.origin, token, page, signal);
     });
   }
-  private async authorize(id: string, signal?: AbortSignal) {
+  /** Internal main-process API; the result must never be returned to the renderer. */
+  cloneCredential(id: string, url: string, signal?: AbortSignal) {
+    return this.run(async () => {
+      const parsed = providerCloneUrlSchema.safeParse(url);
+      if (!parsed.success)
+        throw new ProviderError(
+          'PROVIDER_CLONE_URL',
+          'Choose a canonical HTTPS repository URL for this provider account.',
+        );
+      const { account, token } = await this.authorize(id, signal, new URL(parsed.data).origin);
+      const credential = providerGitCredentialSchema.safeParse({
+        url: parsed.data,
+        username: account.login,
+        password: token,
+      });
+      if (!credential.success) throw new ProviderCredentialError('CREDENTIAL_INVALID');
+      signal?.throwIfAborted();
+      return credential.data;
+    });
+  }
+  private async authorize(id: string, signal?: AbortSignal, origin?: string) {
     signal?.throwIfAborted();
     const accounts = await this.load();
     const index = accounts.findIndex((account) => account.id === id);
     const account = accounts[index];
     if (!account)
       throw new ProviderError('PROVIDER_ACCOUNT', 'This provider account is no longer connected.');
+    if (origin !== undefined && origin !== account.origin)
+      throw new ProviderError(
+        'PROVIDER_CLONE_URL',
+        'The repository URL does not match this provider account.',
+      );
     const saved = await this.vault.read(scope(account));
     if (!saved) throw new ProviderCredentialError('CREDENTIAL_INVALID');
     let credential: GitHubCredential | undefined;

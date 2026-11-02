@@ -105,3 +105,39 @@ test('repository browsing accepts bounded page numbers without renderer-supplied
   ])
     expect(requestSchema.safeParse({ ...request, ...fields }).success).toBe(false);
 });
+
+test('saved clone tokens are accepted only by the private utility contract for the exact requested URL', () => {
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    method: 'clone',
+    options: { url: 'https://github.com/team/project.git' },
+    providerAccountId: 'a'.repeat(64),
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  const credential = {
+    url: request.options.url,
+    username: 'fixture-user',
+    password: 'fixture-secret',
+  };
+  expect(requestSchema.safeParse({ ...request, credential }).success).toBe(false);
+  const internal = {
+    id: request.id,
+    method: 'clone',
+    path: '/chosen/folder',
+    options: request.options,
+    credential,
+  };
+  expect(serviceRequestSchema.safeParse(internal).success).toBe(true);
+  expect(
+    serviceRequestSchema.safeParse({
+      ...internal,
+      credential: { ...credential, url: 'https://other.test/team/project.git' },
+    }).success,
+  ).toBe(false);
+  expect(
+    serviceResponseSchema.safeParse({
+      id: request.id,
+      result: { kind: 'providerCredential', credential },
+    }).success,
+  ).toBe(false);
+});

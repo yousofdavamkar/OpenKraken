@@ -7,6 +7,8 @@ function CloneDialog({ close }: { close: () => void }) {
   const { run, cancel, error } = useRepository();
   const [url, setUrl] = useState('');
   const [browsing, setBrowsing] = useState(false);
+  const [providerAccountId, setProviderAccountId] = useState<string>();
+  const [savedAuthentication, setSavedAuthentication] = useState(true);
   const [branch, setBranch] = useState('');
   const [depth, setDepth] = useState('');
   const [filter, setFilter] = useState(false);
@@ -24,6 +26,7 @@ function CloneDialog({ close }: { close: () => void }) {
       await run({
         id: crypto.randomUUID(),
         method: 'clone',
+        ...(providerAccountId && savedAuthentication ? { providerAccountId } : {}),
         options: {
           url,
           ...(branch ? { branch } : {}),
@@ -62,8 +65,10 @@ function CloneDialog({ close }: { close: () => void }) {
         </button>
         {browsing && (
           <ProviderRepositoryPicker
-            onSelect={(url) => {
+            onSelect={(url, accountId) => {
               setUrl(url);
+              setProviderAccountId(accountId);
+              setSavedAuthentication(true);
               setBrowsing(false);
             }}
           />
@@ -76,10 +81,24 @@ function CloneDialog({ close }: { close: () => void }) {
             value={url}
             disabled={pending}
             maxLength={32768}
-            onChange={(event) => setUrl(event.target.value)}
+            onChange={(event) => {
+              setUrl(event.target.value);
+              setProviderAccountId(undefined);
+            }}
             placeholder="https://host/owner/repository.git"
           />
         </label>
+        {providerAccountId && (
+          <label>
+            <input
+              type="checkbox"
+              checked={savedAuthentication}
+              disabled={pending}
+              onChange={(event) => setSavedAuthentication(event.target.checked)}
+            />{' '}
+            Use saved provider account for HTTPS authentication
+          </label>
+        )}
         <label>
           Branch or tag (optional)
           <input
@@ -138,8 +157,10 @@ function CloneDialog({ close }: { close: () => void }) {
           </p>
         )}
         <p>
-          Choose an empty destination folder. Use your credential helper or SSH agent for
-          authentication.
+          Choose an empty destination folder.{' '}
+          {providerAccountId && savedAuthentication
+            ? 'The selected account will authenticate this clone. Redirects and Git URL rewrites are refused.'
+            : 'Use your credential helper or SSH agent for authentication.'}
         </p>
         <GitProgress />
         {error && (

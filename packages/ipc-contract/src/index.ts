@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   providerAccountsSchema,
+  providerGitCredentialSchema,
   providerRepositoryPageNumberSchema,
   providerRepositoryPageSchema,
   providerConnectSchema,
@@ -1107,7 +1108,17 @@ export const requestSchema = z.discriminatedUnion('method', [
     .strict(),
   authenticationAnswer,
   editorAnswer,
-  z.object({ id: requestId, method: z.literal('clone'), options: cloneOptionsSchema }).strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('clone'),
+      options: cloneOptionsSchema,
+      providerAccountId: z
+        .string()
+        .regex(/^[0-9a-f]{64}$/)
+        .optional(),
+    })
+    .strict(),
   ...workingRequests,
   z
     .object({
@@ -1148,8 +1159,10 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
       method: z.literal('clone'),
       path: repositoryPath,
       options: cloneOptionsSchema,
+      credential: providerGitCredentialSchema.optional(),
     })
-    .strict(),
+    .strict()
+    .refine((request) => !request.credential || request.options.url === request.credential.url),
   ...workingRequests,
   ...historyRequests,
   z.object({ id: requestId, method: z.literal('open'), path: repositoryPath }).strict(),
