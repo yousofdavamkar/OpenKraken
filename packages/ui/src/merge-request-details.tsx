@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ProviderMergeRequestDetails, ProviderPullOptions } from '@openkraken/ipc-contract';
+import { MergeRequestFiles } from './merge-request-files.js';
 import { useProviderPoll } from './provider-polling.js';
 
 export function MergeRequestDetails({
@@ -9,6 +10,7 @@ export function MergeRequestDetails({
   target: { accountId: string; repository: ProviderPullOptions['repository'] };
   number: number;
 }) {
+  const [tab, setTab] = useState<'details' | 'files'>('details');
   const [detail, setDetail] = useState<ProviderMergeRequestDetails>();
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
@@ -58,6 +60,12 @@ export function MergeRequestDetails({
           setDetail(result.mergeRequest);
           setError('');
         },
+        resetChildren:
+          tab === 'files' &&
+          (detail?.diffRefs?.base !== result.mergeRequest.diffRefs?.base ||
+            detail?.diffRefs?.head !== result.mergeRequest.diffRefs?.head ||
+            detail?.diffRefs?.start !== result.mergeRequest.diffRefs?.start ||
+            detail?.source.sha !== result.mergeRequest.source.sha),
       };
     },
     1,
@@ -126,7 +134,31 @@ export function MergeRequestDetails({
           {detail.source.sha && detail.diffRefs && detail.source.sha !== detail.diffRefs.head && (
             <p>The source branch has changed since this diff was prepared.</p>
           )}
-          <pre className="pull-body">{detail.body || 'No description.'}</pre>
+          <div className="dialog-actions" aria-label="Merge-request sections">
+            <button aria-pressed={tab === 'details'} onClick={() => setTab('details')}>
+              Details
+            </button>
+            <button
+              aria-pressed={tab === 'files'}
+              disabled={!detail.diffRefs}
+              onClick={() => setTab('files')}
+            >
+              Files
+            </button>
+          </div>
+          {tab === 'details' ? (
+            <pre className="pull-body">{detail.body || 'No description.'}</pre>
+          ) : (
+            detail.diffRefs && (
+              <MergeRequestFiles
+                key={`${detail.diffRefs.base}/${detail.diffRefs.head}/${detail.diffRefs.start}/${detail.source.sha}`}
+                accountId={target.accountId}
+                repository={target.repository}
+                number={number}
+                revision={detail.diffRefs}
+              />
+            )
+          )}
           <p>
             <code>{detail.url}</code>
           </p>
