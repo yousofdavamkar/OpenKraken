@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+const FileComparisonDialog = lazy(() =>
+  import('./file-comparison.js').then((module) => ({ default: module.FileComparisonDialog })),
+);
 import type { CommitFiles } from '@openkraken/ipc-contract';
 export function CommitFilesPanel({ repoId, oid }: { repoId: string; oid: string }) {
+  const [selected, setSelected] = useState<string>();
   const [data, setData] = useState<CommitFiles>();
   const [parent, setParent] = useState<string>();
   const [error, setError] = useState('');
@@ -10,6 +14,7 @@ export function CommitFilesPanel({ repoId, oid }: { repoId: string; oid: string 
     const id = crypto.randomUUID();
     let alive = true;
     setData(undefined);
+    setSelected(undefined);
     setError('');
     void window.openkraken
       .request({ id, method: 'commitFiles', repoId, oid, parent })
@@ -88,7 +93,12 @@ export function CommitFilesPanel({ repoId, oid }: { repoId: string; oid: string 
                     title={label}
                   >
                     <span className="file-change-kind">{file.status}</span>
-                    <code>{label}</code>
+                    <button
+                      aria-label={`Compare ${file.path}`}
+                      onClick={() => setSelected(file.pathBytes)}
+                    >
+                      <code>{label}</code>
+                    </button>
                     {file.oldMode !== file.newMode && file.oldOid && file.newOid && (
                       <small>
                         {file.oldMode} → {file.newMode}
@@ -100,6 +110,14 @@ export function CommitFilesPanel({ repoId, oid }: { repoId: string; oid: string 
             </ol>
           </div>
         </>
+      )}
+      {selected && data && (
+        <FileComparisonDialog
+          key={`${data.parent}:${selected}`}
+          repoId={repoId}
+          options={{ commit: oid, parent: data.parent, pathBytes: selected }}
+          onClose={() => setSelected(undefined)}
+        />
       )}
     </section>
   );

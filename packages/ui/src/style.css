@@ -976,3 +976,87 @@ footer {
   color: #91a0b5;
   font-size: 11px;
 }
+
+.commit-file-row button {
+  min-width: 0;
+  padding: 2px 6px;
+  overflow: hidden;
+  text-align: left;
+}
+.file-comparison-dialog {
+  width: min(1400px, 94vw);
+  height: 85vh;
+  max-width: 94vw;
+}
+.file-comparison-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.file-comparison-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.file-comparison-dialog h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.comparison-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+}
+.comparison-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.comparison-metadata {
+  color: #94a3b8;
+  margin: 0;
+}
+.comparison-code,
+.comparison-hunks {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #304358;
+}
+.comparison-code .cm-mergeView {
+  height: 100%;
+  overflow: auto;
+}
+.comparison-code .cm-mergeView .cm-editor {
+  height: auto;
+  min-height: 100%;
+}
+.comparison-line {
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+  gap: 8px;
+  white-space: pre;
+  font: 13px/24px monospace;
+}
+.comparison-line .line-number {
+  width: 48px;
+  flex-shrink: 0;
+  text-align: right;
+  color: #94a3b8;
+}
+.comparison-line.add {
+  background: #173c30;
+}
+.comparison-line.del {
+  background: #452b31;
+}
+.comparison-line.header {
+  background: #243449;
+}
+.file-comparison-dialog .comparison-line code {
+  white-space: pre;
+  overflow: visible;
+}

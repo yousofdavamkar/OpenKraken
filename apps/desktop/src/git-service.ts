@@ -115,6 +115,11 @@ async function executeGit(
     lastProgress = now;
     parent!.postMessage({ type: 'gitProgress', id: request.id, text });
   };
+  if (request.method === 'commitComparison')
+    return {
+      kind: 'fileComparison',
+      comparison: await git.commitComparison(request.repoId, request.options, signal),
+    };
   if (request.method === 'commitFiles')
     return {
       kind: 'commitFiles',

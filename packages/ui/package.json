@@ -7,6 +7,11 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/merge": "6.12.3",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
     "@openkraken/graph": "workspace:*",
     "@openkraken/ipc-contract": "workspace:*",
     "@tanstack/react-virtual": "latest",
