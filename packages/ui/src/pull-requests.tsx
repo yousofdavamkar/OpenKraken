@@ -565,6 +565,7 @@ function PullRequestDialog({ close }: { close: () => void }) {
         </>
       ) : (
         <ProviderRepositoryPicker
+          collaboration
           onSelect={(url, accountId, repository, provider) => {
             setState('open');
             setTarget({

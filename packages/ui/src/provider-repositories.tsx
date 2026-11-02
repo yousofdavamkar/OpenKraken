@@ -1,6 +1,8 @@
+import { BitbucketWorkspaces } from './bitbucket-workspaces.js';
 import { useEffect, useId, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import type {
+  ProviderBitbucketWorkspace,
   ProviderAccount,
   ProviderAccounts,
   ProviderRepository,
@@ -8,9 +10,11 @@ import type {
 
 function RepositoryPages({
   accountId,
+  workspace,
   onSelect,
 }: {
   accountId: string;
+  workspace?: ProviderBitbucketWorkspace;
   onSelect: (repository: ProviderRepository) => void;
 }) {
   const [repositories, setRepositories] = useState<ProviderRepository[]>([]);
@@ -30,7 +34,11 @@ function RepositoryPages({
     setPending(true);
     setError('');
     void window.openkraken
-      .request({ id, method: 'providerRepositories', accountId, page })
+      .request(
+        workspace
+          ? { id, method: 'providerBitbucketRepositories', accountId, options: { workspace, page } }
+          : { id, method: 'providerRepositories', accountId, page },
+      )
       .then((result) => {
         if (!alive) return;
         if (result.kind === 'error') setError(result.message);
@@ -54,7 +62,7 @@ function RepositoryPages({
       alive = false;
       void window.openkraken.cancel(id);
     };
-  }, [accountId, page, attempt]);
+  }, [accountId, workspace, page, attempt]);
   const search = query.trim().toLocaleLowerCase();
   const visible = repositories.filter((repo) =>
     `${repo.owner}/${repo.name} ${repo.description}`.toLocaleLowerCase().includes(search),
@@ -186,8 +194,34 @@ function RepositoryPages({
     </section>
   );
 }
+function BitbucketRepositories({
+  accountId,
+  onSelect,
+}: {
+  accountId: string;
+  onSelect: (repository: ProviderRepository) => void;
+}) {
+  const [workspace, setWorkspace] = useState<ProviderBitbucketWorkspace>();
+  return workspace ? (
+    <>
+      <p>Workspace: {workspace.slug}</p>
+      <button type="button" onClick={() => setWorkspace(undefined)}>
+        Change workspace
+      </button>
+      <RepositoryPages
+        key={`${workspace.id}/${workspace.slug}`}
+        accountId={accountId}
+        workspace={workspace}
+        onSelect={onSelect}
+      />
+    </>
+  ) : (
+    <BitbucketWorkspaces accountId={accountId} onSelect={setWorkspace} />
+  );
+}
 export function ProviderRepositoryPicker({
   onSelect,
+  collaboration = false,
 }: {
   onSelect: (
     url: string,
@@ -195,8 +229,10 @@ export function ProviderRepositoryPicker({
     repository: ProviderRepository,
     provider: ProviderAccount['provider'],
   ) => void;
+  collaboration?: boolean;
 }) {
   const [state, setState] = useState<ProviderAccounts>();
+  const [unavailable, setUnavailable] = useState(false);
   const [accountId, setAccountId] = useState('');
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
@@ -209,8 +245,15 @@ export function ProviderRepositoryPicker({
       .then((result) => {
         if (!alive) return;
         if (result.kind === 'providerAccounts') {
-          setState(result.state);
-          setAccountId(result.state.accounts[0]?.id ?? '');
+          setUnavailable(
+            collaboration &&
+              result.state.accounts.some((account) => account.provider === 'bitbucket'),
+          );
+          const accounts = result.state.accounts.filter(
+            (account) => !collaboration || account.provider !== 'bitbucket',
+          );
+          setState({ ...result.state, accounts });
+          setAccountId(accounts[0]?.id ?? '');
         } else if (result.kind === 'error') setError(result.message);
       })
       .catch(() => {
@@ -220,9 +263,14 @@ export function ProviderRepositoryPicker({
       alive = false;
       void window.openkraken.cancel(id);
     };
-  }, [attempt]);
+  }, [attempt, collaboration]);
+  const Pages =
+    state?.accounts.find((account) => account.id === accountId)?.provider === 'bitbucket'
+      ? BitbucketRepositories
+      : RepositoryPages;
   return (
     <section className="provider-picker" aria-label="Browse provider repositories">
+      {unavailable && <p>Bitbucket collaboration is not available yet.</p>}
       {!state && !error && <p>Loading accounts…</p>}
       {error && (
         <p role="alert">
@@ -236,7 +284,11 @@ export function ProviderRepositoryPicker({
         <p>Unlock your operating-system keychain to browse repositories.</p>
       )}
       {state?.accounts.length === 0 && (
-        <p>Connect an account in Provider accounts to browse its repositories.</p>
+        <p>
+          {collaboration
+            ? 'Connect a GitHub or GitLab account in Provider accounts to browse collaboration.'
+            : 'Connect an account in Provider accounts to browse its repositories.'}
+        </p>
       )}
       {!!state?.accounts.length && (
         <label>
@@ -256,7 +308,7 @@ export function ProviderRepositoryPicker({
         </label>
       )}
       {accountId && state?.keychainAvailable && (
-        <RepositoryPages
+        <Pages
           key={accountId}
           accountId={accountId}
           onSelect={(repository) => {

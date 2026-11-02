@@ -13,7 +13,7 @@ function AccountsDialog({ close }: { close: () => void }) {
   const active = useRef<string | undefined>(undefined);
   const alive = useRef(true);
   const [state, setState] = useState<ProviderAccounts>();
-  const [provider, setProvider] = useState<'github' | 'gitlab'>('github');
+  const [provider, setProvider] = useState<'github' | 'gitlab' | 'bitbucket'>('github');
   const [origin, setOrigin] = useState('https://github.com');
   const [pending, setPending] = useState(false);
   const [deviceBusy, setDeviceBusy] = useState(false);
@@ -54,7 +54,7 @@ function AccountsDialog({ close }: { close: () => void }) {
       }}
     >
       <h2>Provider accounts</h2>
-      <p>Connect GitHub, GitHub Enterprise, or GitLab to your local app.</p>
+      <p>Connect GitHub, GitHub Enterprise, GitLab, or Bitbucket Cloud to your local app.</p>
       {state && !state.keychainAvailable && (
         <p role="status">Unlock or enable your operating-system keychain to connect a provider.</p>
       )}
@@ -62,7 +62,12 @@ function AccountsDialog({ close }: { close: () => void }) {
         <section key={account.id} className="remote-entry">
           <strong>{account.login}</strong>
           <p>
-            {account.provider === 'gitlab' ? 'GitLab' : 'GitHub'} · {account.origin}
+            {account.provider === 'bitbucket'
+              ? 'Bitbucket Cloud'
+              : account.provider === 'gitlab'
+                ? 'GitLab'
+                : 'GitHub'}{' '}
+            · {account.origin}
           </p>
           <button
             disabled={pending || deviceBusy}
@@ -98,15 +103,27 @@ function AccountsDialog({ close }: { close: () => void }) {
           value={provider}
           disabled={pending || deviceBusy}
           onChange={(event) => {
-            const selected = event.target.value === 'gitlab' ? 'gitlab' : 'github';
+            const selected =
+              event.target.value === 'bitbucket'
+                ? 'bitbucket'
+                : event.target.value === 'gitlab'
+                  ? 'gitlab'
+                  : 'github';
             setProvider(selected);
-            setOrigin(selected === 'gitlab' ? 'https://gitlab.com' : 'https://github.com');
+            setOrigin(
+              selected === 'bitbucket'
+                ? 'https://bitbucket.org'
+                : selected === 'gitlab'
+                  ? 'https://gitlab.com'
+                  : 'https://github.com',
+            );
             if (token.current) token.current.value = '';
             setError(undefined);
           }}
         >
           <option value="github">GitHub / GitHub Enterprise</option>
           <option value="gitlab">GitLab / Self-Managed</option>
+          <option value="bitbucket">Bitbucket Cloud</option>
         </select>
       </label>
       <label>
@@ -116,6 +133,7 @@ function AccountsDialog({ close }: { close: () => void }) {
           form="provider-token-form"
           required
           value={origin}
+          readOnly={provider === 'bitbucket'}
           maxLength={2048}
           disabled={pending || deviceBusy}
           onChange={(event) => setOrigin(event.target.value)}
@@ -130,7 +148,7 @@ function AccountsDialog({ close }: { close: () => void }) {
             setError(undefined);
           }}
         />
-      ) : (
+      ) : provider === 'gitlab' ? (
         <GitLabSignIn
           origin={origin}
           enabled={!!state?.keychainAvailable && !pending}
@@ -140,7 +158,7 @@ function AccountsDialog({ close }: { close: () => void }) {
             setError(undefined);
           }}
         />
-      )}
+      ) : null}
       <form
         id="provider-token-form"
         onSubmit={(event) => {
@@ -155,7 +173,7 @@ function AccountsDialog({ close }: { close: () => void }) {
         }}
       >
         <label>
-          Personal access token
+          {provider === 'bitbucket' ? 'API token' : 'Personal access token'}
           <input
             ref={token}
             type="password"
@@ -166,6 +184,12 @@ function AccountsDialog({ close }: { close: () => void }) {
             disabled={pending || deviceBusy || !state?.keychainAvailable}
           />
         </label>
+        {provider === 'bitbucket' && (
+          <p>
+            Use a scoped API token with read:user:bitbucket, read:workspace:bitbucket and
+            read:repository:bitbucket. Pushing also requires write:repository:bitbucket.
+          </p>
+        )}
         <p>
           Your token is sent only to the selected provider and stored using operating-system
           protection. Forgetting an account removes the local credential; revoke it at the provider
