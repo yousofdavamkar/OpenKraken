@@ -62,6 +62,7 @@ const entrySchema = z.object({
   label: z.string(),
   before: savedSchema,
   after: savedSchema,
+  trees: z.object({ before: oidSchema, after: oidSchema }).optional(),
 });
 const journalSchema = z.object({
   undo: z.array(entrySchema).max(20),
@@ -733,6 +734,7 @@ export class WorkingTree {
         publish,
         signal,
         onProgress,
+        true,
       );
     }, signal);
     return this.state();
@@ -744,10 +746,13 @@ export class WorkingTree {
     publish: () => Promise<void>,
     signal?: AbortSignal,
     onProgress?: (text: string) => void,
+    recordUndo = false,
   ) {
     const before = await this.saved(indexFile);
-    const pending = join(this.directory, `pending-${randomUUID()}.json`);
-    const record = { label, before };
+    const beforeTree = recordUndo ? await this.indexTree(indexFile, signal) : undefined;
+    const id = randomUUID();
+    const pending = join(this.directory, `pending-${id}.json`);
+    const record = { id, label, before, beforeTree };
     await atomic(pending, JSON.stringify(record));
     const progress = onProgress ? new GitProgressLines(onProgress) : undefined;
     let failure: unknown;
@@ -773,9 +778,33 @@ export class WorkingTree {
     }
     const after = await this.saved(indexFile);
     await atomic(pending, JSON.stringify({ ...record, after }));
+    if (
+      beforeTree &&
+      !failure &&
+      (await inspectOperation(this.repo.gitDir)).details.kind === 'none' &&
+      (!sameHead(before.head, after.head) || before.signature !== after.signature)
+    ) {
+      const journal = await this.journal();
+      journal.undo.push({
+        id,
+        label,
+        before,
+        after,
+        trees: { before: beforeTree, after: await this.indexTree(indexFile) },
+      });
+      journal.redo = [];
+      await this.saveJournal(journal);
+    }
     if (!sameHead(before.head, after.head) || before.signature !== after.signature) await publish();
     await rm(pending, { force: true });
     if (failure) throw failure;
+  }
+  private async indexTree(indexFile: string, signal?: AbortSignal) {
+    return oidSchema.parse(
+      (await this.run(['write-tree'], { indexFile, signal, readOnly: false })).stdout
+        .toString()
+        .trim(),
+    );
   }
   async operationAction(
     input: OperationAction,
@@ -1836,6 +1865,110 @@ export class WorkingTree {
         'Git has removed objects required by this undo entry. Current work was left unchanged.',
       );
   }
+  private async restoreIntegration(
+    index: string,
+    publish: () => Promise<void>,
+    target: Saved,
+    expected: Saved,
+    fromTree: string,
+    toTree: string,
+    signal?: AbortSignal,
+  ) {
+    await this.noOperation();
+    if (
+      !target.head.oid ||
+      !expected.head.oid ||
+      target.head.kind !== expected.head.kind ||
+      (target.head.kind === 'branch' &&
+        (expected.head.kind !== 'branch' || target.head.ref !== expected.head.ref))
+    )
+      throw new GitError(
+        'UNDO_UNSUPPORTED',
+        'The integration changed branches unexpectedly. Restore the branch with Git before using Undo.',
+      );
+    const flags = new NulDecoder((entry) => {
+      const flag = entry.subarray(0, 1).toString();
+      if (flag === 'S' || /[a-z]/.test(flag))
+        throw new GitError(
+          'UNDO_UNSUPPORTED',
+          'Integration Undo requires clearing skip-worktree and assume-unchanged flags first.',
+        );
+    });
+    await this.run(['ls-files', '-v', '-z'], {
+      indexFile: index,
+      signal,
+      onStdout: (chunk) => flags.push(chunk),
+    });
+    flags.finish();
+    const verificationIndex = join(this.directory, `verify-${randomUUID()}.index`);
+    try {
+      for (const [saved, tree] of [
+        [expected, fromTree],
+        [target, toTree],
+      ] as const) {
+        await writeFile(verificationIndex, Buffer.from(saved.index, 'base64'));
+        await this.verifyIndex(verificationIndex);
+        // Rebuild pruned tree objects from the saved index only after checking its blobs.
+        if ((await this.indexTree(verificationIndex, signal)) !== tree)
+          throw new GitError(
+            'UNDO_CHANGED',
+            'The saved integration tree no longer matches its index.',
+          );
+      }
+    } finally {
+      await rm(verificationIndex, { force: true });
+      await rm(`${verificationIndex}.lock`, { force: true });
+    }
+    const args = ['read-tree', '-m', '-u', '--no-recurse-submodules', fromTree, toTree];
+    try {
+      await this.run([...args.slice(0, 1), '--dry-run', ...args.slice(1)], {
+        indexFile: index,
+        signal,
+      });
+    } catch (error) {
+      if (!(error instanceof GitError) || error.code !== 'GIT_FAILED') throw error;
+      throw new GitError(
+        'STALE_UNDO',
+        'Working files would be overwritten by this Undo. Commit or stash newer edits first.',
+      );
+    }
+    const pending = join(this.directory, `pending-${randomUUID()}.json`);
+    await atomic(
+      pending,
+      JSON.stringify({ label: 'Restore integration', before: expected, target, fromTree, toTree }),
+    );
+    let movedHead = false;
+    try {
+      await this.run(args, { indexFile: index, signal, readOnly: false });
+      if (!sameHead(await this.head(), expected.head))
+        throw new GitError('STALE_UNDO', 'HEAD changed while restoring the tree.');
+      if (!sameHead(target.head, expected.head)) {
+        const ref = expected.head.kind === 'branch' ? expected.head.ref : 'HEAD';
+        await this.run(['update-ref', '--no-deref', ref, target.head.oid!, expected.head.oid!], {
+          signal,
+          readOnly: false,
+        });
+        movedHead = true;
+      }
+      const actual = await this.saved(index);
+      if (!sameHead(actual.head, target.head) || actual.signature !== target.signature)
+        throw new GitError(
+          'UNDO_CHANGED',
+          `The integration result changed unexpectedly. Recovery record: ${pending}`,
+        );
+      await publish();
+      return pending;
+    } catch (error) {
+      if (!movedHead) {
+        // Native two-tree checks also protect edits made during this rollback.
+        await this.run(['read-tree', '-m', '-u', '--no-recurse-submodules', toTree, fromTree], {
+          indexFile: index,
+          readOnly: false,
+        }).catch(() => {});
+      }
+      throw error;
+    }
+  }
   async undo(redo = false, signal?: AbortSignal) {
     await this.locked(
       async (index, publish) => {
@@ -1871,6 +2004,22 @@ export class WorkingTree {
             'STALE_UNDO',
             'Branch settings changed outside this action. Newer settings were left unchanged.',
           );
+        if (entry.trees) {
+          const pending = await this.restoreIntegration(
+            index,
+            publish,
+            target,
+            expected,
+            redo ? entry.trees.before : entry.trees.after,
+            redo ? entry.trees.after : entry.trees.before,
+            signal,
+          );
+          source.pop();
+          (redo ? journal.undo : journal.redo).push(entry);
+          await this.saveJournal(journal);
+          await rm(pending, { force: true });
+          return;
+        }
         if (entry.label === 'Rename branch') {
           const pending = await this.restoreRename(target, expected, signal);
           source.pop();

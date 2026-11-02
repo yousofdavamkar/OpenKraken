@@ -76,6 +76,12 @@ test('reviewed merge and mainline revert update native history', async () => {
     const parents = fixtureGit(path, ['rev-list', '--parents', '-1', 'HEAD']).split(' ');
     expect(parents).toHaveLength(3);
     expect(parents[2]).toBe(target);
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect.poll(() => fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(parents[1]);
+    expect(fixtureGit(path, ['ls-files', 'incoming.txt'])).toBe('');
+    await page.getByRole('button', { name: 'Redo', exact: true }).click();
+    await expect.poll(() => fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(parents[0]);
+    expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
     await page.getByRole('button', { name: 'Integrate commits', exact: true }).click();
     await expect(dialog.getByText(parents[0]!, { exact: true })).toBeVisible();
     await dialog.getByRole('combobox', { name: 'Operation', exact: true }).selectOption('revert');
