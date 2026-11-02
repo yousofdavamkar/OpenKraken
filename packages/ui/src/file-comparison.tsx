@@ -8,7 +8,11 @@ import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { javascript } from '@codemirror/lang-javascript';
 import { Change, MergeView, presentableDiff, unifiedMergeView } from '@codemirror/merge';
 import { textEncodingSchema, type TextEncoding } from '@openkraken/ipc-contract';
-import type { CommitComparisonOptions, FileComparison } from '@openkraken/ipc-contract';
+import type {
+  CommitComparisonOptions,
+  WorkingComparisonOptions,
+  FileComparison,
+} from '@openkraken/ipc-contract';
 type ViewMode = 'hunks' | 'inline' | 'split';
 const theme = EditorView.theme(
   {
@@ -229,10 +233,12 @@ export function FileComparisonDialog({
   repoId,
   options,
   onClose,
+  onSelectLines,
 }: {
   repoId: string;
-  options: CommitComparisonOptions;
+  options: CommitComparisonOptions | WorkingComparisonOptions;
   onClose: () => void;
+  onSelectLines?: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [selection, setSelection] = useState(options);
@@ -249,7 +255,10 @@ export function FileComparisonDialog({
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
-  const { commit, parent, pathBytes } = selection;
+  const { pathBytes } = selection;
+  const commit = 'commit' in selection ? selection.commit : undefined;
+  const parent = 'parent' in selection ? selection.parent : undefined;
+  const side = 'side' in selection ? selection.side : undefined;
   useEffect(() => {
     const id = crypto.randomUUID();
     let alive = true;
@@ -258,9 +267,17 @@ export function FileComparisonDialog({
     void window.openkraken
       .request({
         id,
-        method: 'commitComparison',
-        repoId,
-        options: { commit, parent, pathBytes, whitespace, allowLarge, encoding },
+        ...(side
+          ? {
+              method: 'workingComparison' as const,
+              repoId,
+              options: { side, pathBytes, whitespace, allowLarge, encoding },
+            }
+          : {
+              method: 'commitComparison' as const,
+              repoId,
+              options: { commit: commit!, parent, pathBytes, whitespace, allowLarge, encoding },
+            }),
       })
       .then((result) => {
         if (!alive) return;
@@ -274,7 +291,7 @@ export function FileComparisonDialog({
       alive = false;
       void window.openkraken.cancel(id);
     };
-  }, [repoId, commit, parent, pathBytes, whitespace, allowLarge, encoding]);
+  }, [repoId, commit, parent, pathBytes, whitespace, allowLarge, encoding, side]);
   const text =
     data &&
     [data.oldVersion, data.newVersion].every(
@@ -297,18 +314,27 @@ export function FileComparisonDialog({
         </button>
       </header>
       <div className="comparison-toolbar">
-        <button aria-pressed={history} onClick={() => setHistory(!history)}>
-          File history
-        </button>
-        <button
-          aria-pressed={blame}
-          disabled={
-            !data || data.newVersion.kind !== 'text' || data.newVersion.encoding !== 'UTF-8'
-          }
-          onClick={() => setBlame(!blame)}
-        >
-          {blame ? 'Show comparison' : 'Blame'}
-        </button>
+        {commit && (
+          <button aria-pressed={history} onClick={() => setHistory(!history)}>
+            File history
+          </button>
+        )}
+        {side && onSelectLines && (
+          <button onClick={onSelectLines}>
+            {side === 'index' ? 'Select lines to unstage' : 'Select lines to stage'}
+          </button>
+        )}
+        {commit && (
+          <button
+            aria-pressed={blame}
+            disabled={
+              !data || data.newVersion.kind !== 'text' || data.newVersion.encoding !== 'UTF-8'
+            }
+            onClick={() => setBlame(!blame)}
+          >
+            {blame ? 'Show comparison' : 'Blame'}
+          </button>
+        )}
         <label>
           Diff view{' '}
           <select
@@ -364,7 +390,10 @@ export function FileComparisonDialog({
           </label>
         )}
       </div>
-      {history && (
+      {side && onSelectLines && whitespace !== 'exact' && (
+        <p>Line selection reviews all whitespace changes.</p>
+      )}
+      {history && 'commit' in options && (
         <FileHistoryPanel
           repoId={repoId}
           commit={options.commit}
@@ -380,12 +409,17 @@ export function FileComparisonDialog({
       {data && (
         <>
           <p className="comparison-metadata">
-            Commit {commit.slice(0, 8)} · Before: {data.oldVersion.encoding ?? data.oldVersion.kind}{' '}
-            · {data.oldVersion.bytes.toLocaleString()} bytes · {data.file.oldMode} → After:{' '}
+            {commit
+              ? `Commit ${commit.slice(0, 8)}`
+              : side === 'index'
+                ? 'Staged changes'
+                : 'Unstaged changes'}{' '}
+            · Before: {data.oldVersion.encoding ?? data.oldVersion.kind} ·{' '}
+            {data.oldVersion.bytes.toLocaleString()} bytes · {data.file.oldMode} → After:{' '}
             {data.newVersion.encoding ?? data.newVersion.kind} ·{' '}
             {data.newVersion.bytes.toLocaleString()} bytes · {data.file.newMode}
           </p>
-          {blame ? (
+          {blame && commit ? (
             <BlamePanel
               key={`${commit}:${pathBytes}`}
               repoId={repoId}

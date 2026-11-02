@@ -773,6 +773,14 @@ const workingRequests = [
   z
     .object({
       id: requestId,
+      method: z.literal('workingComparison'),
+      repoId: repoIdSchema,
+      options: workingComparisonOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('workingFile'),
       repoId: repoIdSchema,
       options: workingFileOptionsSchema,

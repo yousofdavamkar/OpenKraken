@@ -3,6 +3,7 @@ import type {
   Request,
   WorkingState,
   WorkingDiff,
+  WorkingComparisonOptions,
   DiscardPreview,
   ConflictPreview,
 } from '@openkraken/ipc-contract';
@@ -14,9 +15,13 @@ import { useRepository, waitForBackground } from './store.js';
 const WorkingFileEditor = lazy(() =>
   import('./working-file-editor.js').then((module) => ({ default: module.WorkingFileEditor })),
 );
+const FileComparisonDialog = lazy(() =>
+  import('./file-comparison.js').then((module) => ({ default: module.FileComparisonDialog })),
+);
 export function WorkingTreePanel() {
   const { snapshot, busy: active, syncing, workingState: state } = useRepository();
   const busy = syncing ? undefined : active;
+  const [comparison, setComparison] = useState<WorkingComparisonOptions>();
   const [editorPath, setEditorPath] = useState<string>();
   const [discard, setDiscard] = useState<{ preview: DiscardPreview; paths: string[] }>();
   const [conflict, setConflict] = useState<ConflictPreview>();
@@ -209,12 +214,29 @@ export function WorkingTreePanel() {
           />
         </Suspense>
       )}
+      {comparison && (
+        <Suspense fallback={<p role="status">Opening comparison…</p>}>
+          <FileComparisonDialog
+            repoId={repoId}
+            options={comparison}
+            onClose={() => setComparison(undefined)}
+            onSelectLines={() => {
+              setComparison(undefined);
+              void showDiff(comparison.pathBytes, comparison.side);
+            }}
+          />
+        </Suspense>
+      )}
       {preview && (
         <WorkingDiffDialog
           key={preview.token}
           diff={preview}
           busy={!!busy}
           error={error}
+          onInspect={() => {
+            setComparison({ pathBytes: preview.pathBytes, side: preview.side });
+            setPreview(undefined);
+          }}
           onClose={() => setPreview(undefined)}
           onApply={(lines) => {
             void mutate({

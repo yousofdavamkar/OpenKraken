@@ -127,6 +127,11 @@ async function executeGit(
         parent!.postMessage({ type: 'blameLines', id: request.id, lines }),
       )),
     };
+  if (request.method === 'workingComparison')
+    return {
+      kind: 'fileComparison',
+      comparison: await git.workingComparison(request.repoId, request.options, signal),
+    };
   if (request.method === 'workingFile')
     return {
       kind: 'workingFile',

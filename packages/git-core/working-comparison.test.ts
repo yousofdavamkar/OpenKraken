@@ -100,3 +100,43 @@ test('an explicitly loaded large working comparison retains a long unchanged pre
     await service.dispose();
   }
 });
+
+test('working comparisons retain staged rename paths and deletion while decoding native working-tree encoding', async () => {
+  const path = createFixture(join(root, 'changes'));
+  await writeFile(join(path, 'old.txt'), 'rename contents\n');
+  await writeFile(join(path, 'deleted.txt'), 'deleted contents\n');
+  await writeFile(join(path, '.gitattributes'), 'unicode.txt working-tree-encoding=UTF-16LE-BOM\n');
+  const encoded = (text: string) =>
+    Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]);
+  await writeFile(join(path, 'unicode.txt'), encoded('before 雪\n'));
+  fixtureGit(path, ['add', '.']);
+  fixtureGit(path, ['commit', '-m', 'Changes baseline']);
+  fixtureGit(path, ['mv', 'old.txt', 'new.txt']);
+  fixtureGit(path, ['rm', 'deleted.txt']);
+  await writeFile(join(path, 'unicode.txt'), encoded('after 雪\n'));
+  const service = new RepositoryService('git', { dataDir: join(root, 'changes-profile') });
+  try {
+    const repo = await service.open(path);
+    const selection = (name: string, side: 'index' | 'worktree') => ({
+      pathBytes: Buffer.from(name).toString('base64'),
+      side,
+    });
+    const renamed = await service.workingComparison(repo.id, selection('new.txt', 'index'));
+    expect(renamed.file).toMatchObject({
+      status: 'renamed',
+      oldPath: 'old.txt',
+      newPath: 'new.txt',
+    });
+    expect(renamed.oldVersion.text).toBe('rename contents\n');
+    expect(renamed.newVersion.text).toBe('rename contents\n');
+    const removed = await service.workingComparison(repo.id, selection('deleted.txt', 'index'));
+    expect(removed.oldVersion.text).toBe('deleted contents\n');
+    expect(removed.newVersion.kind).toBe('missing');
+    const unicode = await service.workingComparison(repo.id, selection('unicode.txt', 'worktree'));
+    expect(unicode.oldVersion.text).toBe('before 雪\n');
+    expect(unicode.newVersion.text).toBe('after 雪\n');
+    expect(unicode.newVersion.encoding).toBe('UTF-8');
+  } finally {
+    await service.dispose();
+  }
+});

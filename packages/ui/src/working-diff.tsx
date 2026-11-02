@@ -10,12 +10,14 @@ export function WorkingDiffDialog({
   error,
   onApply,
   onClose,
+  onInspect,
 }: {
   diff: WorkingDiff;
   busy: boolean;
   error?: string;
   onApply: (lines: number[]) => void;
   onClose: () => void;
+  onInspect: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null),
     scroll = useRef<HTMLDivElement>(null);
@@ -60,6 +62,9 @@ export function WorkingDiffDialog({
           <h2>{diff.path}</h2>
           <p>{diff.side === 'index' ? 'Staged changes' : 'Unstaged changes'}</p>
         </div>
+        <button disabled={busy} onClick={onInspect}>
+          Full comparison
+        </button>
         <button onClick={onClose}>Close diff</button>
       </div>
       {error && (
