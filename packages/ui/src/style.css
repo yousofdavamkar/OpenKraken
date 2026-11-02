@@ -1410,3 +1410,24 @@ footer {
   outline: 1px solid #80bfff;
   outline-offset: -2px;
 }
+.pr-comments {
+  height: 420px;
+  overflow: auto;
+}
+.pr-comments article {
+  box-sizing: border-box;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.pr-comments .pr-comment-reply {
+  padding-left: 32px;
+  border-left: 2px solid #37576e;
+}
+.pr-comments pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow: auto;
+  font: inherit;
+}

@@ -5,7 +5,7 @@ import type {
   ProviderPullListOptions,
   ProviderPullSummary,
 } from '@openkraken/ipc-contract';
-import { PullFiles, PullReviews, WriteReview } from './pull-review.js';
+import { CommentDiscussion, PullFiles, PullReviews, WriteReview } from './pull-review.js';
 import { ProviderRepositoryPicker } from './provider-repositories.js';
 
 type RepositorySelection = {
@@ -14,7 +14,7 @@ type RepositorySelection = {
   repository: ProviderPullListOptions['repository'];
 };
 function PullDetails({ target, number }: { target: RepositorySelection; number: number }) {
-  const [tab, setTab] = useState<'details' | 'files' | 'reviews'>('details');
+  const [tab, setTab] = useState<'details' | 'files' | 'reviews' | 'comments'>('details');
   const [reviewsVersion, setReviewsVersion] = useState(0);
   const [detail, setDetail] = useState<ProviderPullDetails>();
   const [error, setError] = useState('');
@@ -100,11 +100,15 @@ function PullDetails({ target, number }: { target: RepositorySelection; number: 
             <button aria-pressed={tab === 'reviews'} onClick={() => setTab('reviews')}>
               Reviews
             </button>
+            <button aria-pressed={tab === 'comments'} onClick={() => setTab('comments')}>
+              Comments
+            </button>
             <WriteReview
               context={{ ...target, detail }}
               submitted={() => setReviewsVersion((value) => value + 1)}
             />
           </div>
+          {tab === 'comments' && <CommentDiscussion context={{ ...target, detail }} />}
           {tab === 'files' && <PullFiles context={{ ...target, detail }} />}
           {tab === 'reviews' && (
             <PullReviews key={reviewsVersion} context={{ ...target, detail }} />

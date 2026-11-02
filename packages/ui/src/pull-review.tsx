@@ -3,7 +3,10 @@ import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import { EditorState } from '@codemirror/state';
 import { Decoration, EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap } from '@codemirror/commands';
+import { PullComments } from './pull-comments.js';
 import type {
+  ProviderCommentTarget,
+  ProviderPullComment,
   ProviderPullDetails,
   ProviderPullFile,
   ProviderPullOptions,
@@ -16,11 +19,42 @@ export type PullContext = {
   detail: ProviderPullDetails;
 };
 
-function Patch({ text }: { text: string }) {
+function Patch({ text, context, path }: { text: string; context: PullContext; path: string }) {
+  const [anchor, setAnchor] = useState<{ line: number; side: 'LEFT' | 'RIGHT' }>();
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!host.current) return;
+    setAnchor(undefined);
     const document = EditorState.create({ doc: text });
+    const anchors = new Map<number, { line: number; side: 'LEFT' | 'RIGHT' }>();
+    let oldLine = 0,
+      newLine = 0,
+      oldRemaining = 0,
+      newRemaining = 0;
+    for (let i = 1; i <= document.doc.lines; i++) {
+      const line = document.doc.line(i).text;
+      const header = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+      if (header) {
+        oldLine = Number(header[1]);
+        oldRemaining = Number(header[2] ?? 1);
+        newLine = Number(header[3]);
+        newRemaining = Number(header[4] ?? 1);
+      } else if (line.startsWith('-') && oldRemaining > 0) {
+        anchors.set(i, { line: oldLine++, side: 'LEFT' });
+        oldRemaining--;
+      } else if (line.startsWith('+') && newRemaining > 0) {
+        anchors.set(i, { line: newLine++, side: 'RIGHT' });
+        newRemaining--;
+      } else if (line.startsWith(' ') && oldRemaining > 0 && newRemaining > 0) {
+        anchors.set(i, { line: newLine++, side: 'RIGHT' });
+        oldLine++;
+        oldRemaining--;
+        newRemaining--;
+      } else if (!line.startsWith('\\')) {
+        oldRemaining = 0;
+        newRemaining = 0;
+      }
+    }
     const decorations = [];
     for (let i = 1; i <= document.doc.lines; i++) {
       const line = document.doc.line(i);
@@ -38,6 +72,12 @@ function Patch({ text }: { text: string }) {
       state: EditorState.create({
         doc: text,
         extensions: [
+          EditorView.updateListener.of((update) => {
+            if (update.selectionSet)
+              setAnchor(
+                anchors.get(update.state.doc.lineAt(update.state.selection.main.head).number),
+              );
+          }),
           EditorState.readOnly.of(true),
           EditorView.editable.of(false),
           EditorView.contentAttributes.of({ 'aria-label': 'Provider patch', tabindex: '0' }),
@@ -57,7 +97,21 @@ function Patch({ text }: { text: string }) {
     });
     return () => view.destroy();
   }, [text]);
-  return <div ref={host} className="pr-patch" />;
+  return (
+    <>
+      <div ref={host} className="pr-patch" />
+      {anchor ? (
+        <>
+          <p>
+            Selected {anchor.side === 'LEFT' ? 'old' : 'new'} line {anchor.line} in {path}
+          </p>
+          <WriteComment context={context} target={{ kind: 'line', path, ...anchor }} />
+        </>
+      ) : (
+        <p>Select a patch line to comment.</p>
+      )}
+    </>
+  );
 }
 export function PullFiles({ context }: { context: PullContext }) {
   const { accountId, repository, detail } = context;
@@ -209,7 +263,7 @@ export function PullFiles({ context }: { context: PullContext }) {
           {file.patch === null ? (
             <p>No patch was supplied by the provider.</p>
           ) : (
-            <Patch text={file.patch} />
+            <Patch key={file.path} text={file.patch} context={context} path={file.path} />
           )}
           {file.patchTruncated && <p>This patch exceeds the display limit and is truncated.</p>}
         </section>
@@ -353,8 +407,10 @@ function ReviewDialog({
   context,
   close,
   submitted,
+  target,
 }: {
   context: PullContext;
+  target?: ProviderCommentTarget;
   close: () => void;
   submitted: () => void;
 }) {
@@ -365,7 +421,8 @@ function ReviewDialog({
   const [confirmed, setConfirmed] = useState(false),
     [pending, setPending] = useState(false),
     [discard, setDiscard] = useState(false);
-  const [result, setResult] = useState<ProviderPullReview>();
+  const [result, setResult] = useState<ProviderPullReview | ProviderPullComment>();
+  const noun = target ? 'comment' : 'review';
   const [error, setError] = useState(''),
     [uncertain, setUncertain] = useState(false),
     [checking, setChecking] = useState(false),
@@ -387,31 +444,36 @@ function ReviewDialog({
     setPending(true);
     setError('');
     try {
-      const response = await window.openkraken.request({
-        id,
-        method: 'providerSubmitReview',
-        accountId: context.accountId,
-        options: {
-          repository: context.repository,
-          number: context.detail.number,
-          revision: { head: context.detail.head.sha, base: context.detail.base.sha },
-          event,
-          body,
-        },
-      });
-      if (response.kind === 'providerReviewSubmitted') {
-        setResult(response.review);
+      const common = { id, accountId: context.accountId };
+      const options = {
+        repository: context.repository,
+        number: context.detail.number,
+        revision: { head: context.detail.head.sha, base: context.detail.base.sha },
+        body,
+      };
+      const response = await window.openkraken.request(
+        target
+          ? { ...common, method: 'providerCreateComment', options: { ...options, target } }
+          : { ...common, method: 'providerSubmitReview', options: { ...options, event } },
+      );
+      if (
+        response.kind === 'providerReviewSubmitted' ||
+        response.kind === 'providerCommentCreated'
+      ) {
+        setResult(response.kind === 'providerReviewSubmitted' ? response.review : response.comment);
         submitted();
       } else if (response.kind === 'error') {
         setError(response.message);
         setUncertain(response.code === 'PROVIDER_WRITE_UNCERTAIN');
         setConfirmed(false);
       } else if (response.kind === 'cancelled') {
-        setError('Review cancelled before submission.');
+        setError(`${target ? 'Comment' : 'Review'} cancelled before submission.`);
         setConfirmed(false);
       }
     } catch {
-      setError('The review result is unknown. Check submitted reviews before trying again.');
+      setError(
+        `The ${noun} result is unknown. Check submitted ${target ? 'comments' : 'reviews'} before trying again.`,
+      );
       setUncertain(true);
       setConfirmed(false);
     } finally {
@@ -423,40 +485,51 @@ function ReviewDialog({
     <dialog
       ref={dialog}
       className="reference-dialog pr-review-dialog"
-      aria-label="Write pull-request review"
+      aria-label={target ? 'Write inline comment' : 'Write pull-request review'}
       onCancel={(e) => {
         e.preventDefault();
         e.stopPropagation();
         leave();
       }}
     >
-      <h2>Review #{context.detail.number}</h2>
+      <h2>
+        {target ? 'Comment on' : 'Review'} #{context.detail.number}
+      </h2>
+      {target && (
+        <p>
+          {target.kind === 'reply'
+            ? `Reply to thread #${target.commentId}`
+            : `${target.path} · ${target.side} line ${target.line}`}
+        </p>
+      )}
       <p>
         {context.repository.owner}/{context.repository.name} · {context.detail.title}
       </p>
+      {!target && (
+        <label>
+          Review action
+          <select
+            aria-label="Review action"
+            value={event}
+            disabled={pending || confirmed || !!result || uncertain}
+            onChange={(e) => {
+              const value = e.target.value;
+              if (value === 'COMMENT' || value === 'APPROVE' || value === 'REQUEST_CHANGES')
+                setEvent(value);
+            }}
+          >
+            <option value="COMMENT">Comment</option>
+            <option value="APPROVE" disabled={context.detail.draft}>
+              Approve
+            </option>
+            <option value="REQUEST_CHANGES" disabled={context.detail.draft}>
+              Request changes
+            </option>
+          </select>
+        </label>
+      )}
       <label>
-        Review action
-        <select
-          aria-label="Review action"
-          value={event}
-          disabled={pending || confirmed || !!result || uncertain}
-          onChange={(e) => {
-            const value = e.target.value;
-            if (value === 'COMMENT' || value === 'APPROVE' || value === 'REQUEST_CHANGES')
-              setEvent(value);
-          }}
-        >
-          <option value="COMMENT">Comment</option>
-          <option value="APPROVE" disabled={context.detail.draft}>
-            Approve
-          </option>
-          <option value="REQUEST_CHANGES" disabled={context.detail.draft}>
-            Request changes
-          </option>
-        </select>
-      </label>
-      <label>
-        Review text
+        {target ? 'Comment text' : 'Review text'}
         <textarea
           rows={6}
           maxLength={65536}
@@ -466,17 +539,21 @@ function ReviewDialog({
         />
       </label>
       {confirmed && (
-        <section aria-label="Confirm review submission">
+        <section aria-label={`Confirm ${noun} submission`}>
           <p>
-            Send {event.replaceAll('_', ' ').toLowerCase()} for commit{' '}
+            Send {target ? 'comment' : event.replaceAll('_', ' ').toLowerCase()} for commit{' '}
             <code>{context.detail.head.sha}</code>?
           </p>
           <pre>{body || 'No review text.'}</pre>
-          <p>This sends the review to the provider and can notify repository participants.</p>
+          <p>This sends the {noun} to the provider and can notify repository participants.</p>
         </section>
       )}
       {error && <p role="alert">{error}</p>}
-      {result && <p role="status">Review submitted for commit {result.commitId}.</p>}
+      {result && (
+        <p role="status">
+          {target ? 'Comment' : 'Review'} submitted for commit {result.commitId}.
+        </p>
+      )}
       {uncertain && (
         <>
           <button
@@ -485,9 +562,14 @@ function ReviewDialog({
               setChecked(false);
             }}
           >
-            Check submitted reviews
+            Check submitted {target ? 'comments' : 'reviews'}
           </button>
-          {checking && <PullReviews context={context} onLoaded={() => setChecked(true)} />}
+          {checking &&
+            (target ? (
+              <PullComments context={context} onLoaded={() => setChecked(true)} />
+            ) : (
+              <PullReviews context={context} onLoaded={() => setChecked(true)} />
+            ))}
           {checked && (
             <button
               onClick={() => {
@@ -503,8 +585,8 @@ function ReviewDialog({
         </>
       )}
       {discard ? (
-        <section aria-label="Discard review draft">
-          <p>Discard this unsent review text?</p>
+        <section aria-label={`Discard ${noun} draft`}>
+          <p>Discard this unsent {noun} text?</p>
           <button onClick={() => setDiscard(false)}>Keep editing</button>
           <button className="danger" onClick={close}>
             Discard draft
@@ -513,7 +595,7 @@ function ReviewDialog({
       ) : (
         <div className="dialog-actions">
           <button disabled={pending} onClick={leave}>
-            Close review
+            Close {noun}
           </button>
           {pending && (
             <button
@@ -529,18 +611,18 @@ function ReviewDialog({
             (confirmed ? (
               <>
                 <button disabled={pending} onClick={() => setConfirmed(false)}>
-                  Edit review
+                  Edit {noun}
                 </button>
                 <button disabled={pending} onClick={() => void send()}>
-                  Submit review
+                  Submit {noun}
                 </button>
               </>
             ) : (
               <button
-                disabled={pending || (event !== 'APPROVE' && !body.trim())}
+                disabled={pending || ((!!target || event !== 'APPROVE') && !body.trim())}
                 onClick={() => setConfirmed(true)}
               >
-                Preview review
+                Preview {noun}
               </button>
             ))}
         </div>
@@ -566,6 +648,55 @@ export function WriteReview({
       </button>
       {opened && (
         <ReviewDialog context={context} close={() => setOpened(false)} submitted={submitted} />
+      )}
+    </>
+  );
+}
+
+export function WriteComment({
+  context,
+  target,
+}: {
+  context: PullContext;
+  target: ProviderCommentTarget;
+}) {
+  const [opened, setOpened] = useState(false);
+  return (
+    <>
+      <button
+        disabled={context.detail.state !== 'open' || context.detail.merged}
+        onClick={() => setOpened(true)}
+      >
+        Comment on selected line
+      </button>
+      {opened && (
+        <ReviewDialog
+          context={context}
+          target={target}
+          close={() => setOpened(false)}
+          submitted={() => {}}
+        />
+      )}
+    </>
+  );
+}
+export function CommentDiscussion({ context }: { context: PullContext }) {
+  const [target, setTarget] = useState<ProviderCommentTarget>();
+  const [version, setVersion] = useState(0);
+  return (
+    <>
+      <PullComments
+        key={version}
+        context={context}
+        onReply={(commentId) => setTarget({ kind: 'reply', commentId })}
+      />
+      {target && (
+        <ReviewDialog
+          context={context}
+          target={target}
+          close={() => setTarget(undefined)}
+          submitted={() => setVersion((value) => value + 1)}
+        />
       )}
     </>
   );
