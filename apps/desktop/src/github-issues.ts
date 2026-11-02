@@ -1,6 +1,9 @@
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 import type { Octokit } from '@octokit/rest';
 import {
+  type ProviderWriteIssue,
+  type ProviderIssueWriteResult,
   providerIssueDetailsSchema,
   providerIssueCommentSchema,
   providerIssueCommentsPageSchema,
@@ -95,15 +98,25 @@ export async function loadIssue(
     issue_number: options.number,
     headers,
   });
-  if (!data || typeof data !== 'object') throw invalid();
+  return issueDetails(data, host, options.repository, options.number);
+}
+function issueDetails(
+  value: unknown,
+  host: string,
+  repository: ProviderIssueListOptions['repository'],
+  number?: number,
+) {
+  const parsed = z.record(z.string(), z.unknown()).safeParse(value);
+  if (!parsed.success) throw invalid();
+  const data = parsed.data;
   if (Object.hasOwn(data, 'pull_request'))
     throw new ProviderError(
       'PROVIDER_ISSUE_IS_PULL',
       'This item is a pull request. Open it in Pull requests.',
     );
-  if (data.number !== options.number) throw invalid();
+  if (number !== undefined && data.number !== number) throw invalid();
   const result = providerIssueDetailsSchema.safeParse({
-    ...summary(host, options.repository, data),
+    ...summary(host, repository, data),
     body: data.body ?? '',
   });
   if (!result.success) throw invalid();
@@ -156,4 +169,106 @@ export async function loadIssueComments(
     nextPage: comments.length === 100 && options.page < 100 ? options.page + 1 : null,
     limited: comments.length === 100 && options.page === 100,
   });
+}
+
+export async function previewIssueAction(
+  client: Octokit,
+  headers: Record<string, string>,
+  host: string,
+  options: ProviderIssueOptions,
+) {
+  const issue = await loadIssue(client, headers, host, options);
+  return { issue, revision: createHash('sha256').update(JSON.stringify(issue)).digest('hex') };
+}
+export async function writeIssue(
+  client: Octokit,
+  headers: Record<string, string>,
+  host: string,
+  options: ProviderWriteIssue,
+  signal?: AbortSignal,
+): Promise<ProviderIssueWriteResult> {
+  const common = { owner: options.repository.owner, repo: options.repository.name, headers };
+  const api = host === 'https://github.com' ? 'https://api.github.com' : `${host}/api/v3`;
+  const issueUrl = (number: number) =>
+    `${api}/repos/${options.repository.owner}/${options.repository.name}/issues/${number}`.toLowerCase();
+  if (options.action !== 'create') {
+    const current = await previewIssueAction(client, headers, host, options);
+    if (current.revision !== options.revision)
+      throw new ProviderError(
+        'STALE_PROVIDER_ISSUE',
+        'The issue changed. Review its current details before submitting again.',
+      );
+    if (options.action === 'comment' && current.issue.locked)
+      throw new ProviderError(
+        'PROVIDER_ISSUE_LOCKED',
+        'The issue conversation is locked. Refresh details before commenting.',
+      );
+    if (options.action === 'state' && current.issue.state === options.state)
+      throw new ProviderError(
+        'PROVIDER_ISSUE_STATE',
+        'The issue already has the requested state. Refresh details before continuing.',
+      );
+  }
+  signal?.throwIfAborted();
+  try {
+    if (options.action === 'comment') {
+      const { data } = await client.issues.createComment({
+        ...common,
+        issue_number: options.number,
+        body: options.body,
+      });
+      const parsed = commentMetadata.safeParse(data);
+      if (
+        !parsed.success ||
+        parsed.data.issue_url.toLowerCase() !== issueUrl(options.number) ||
+        parsed.data.body !== options.body
+      )
+        throw invalid();
+      const value = parsed.data;
+      const comment = providerIssueCommentSchema.parse({
+        id: String(value.id),
+        author: value.user?.login ?? null,
+        body: value.body,
+        createdAt: value.created_at,
+        updatedAt: value.updated_at,
+      });
+      return { kind: 'commented', comment };
+    }
+    const { data } =
+      options.action === 'create'
+        ? await client.issues.create({ ...common, title: options.title, body: options.body })
+        : await client.issues.update({
+            ...common,
+            issue_number: options.number,
+            state: options.state,
+            state_reason: options.reason,
+          });
+    const issue = issueDetails(
+      data,
+      host,
+      options.repository,
+      options.action === 'state' ? options.number : undefined,
+    );
+    if (typeof data.url !== 'string' || data.url.toLowerCase() !== issueUrl(issue.number))
+      throw invalid();
+    if (options.action === 'create') {
+      if (issue.title !== options.title || issue.body !== options.body || issue.state !== 'open')
+        throw invalid();
+      return { kind: 'created', issue };
+    }
+    if (issue.state !== options.state || issue.stateReason !== options.reason) throw invalid();
+    return { kind: 'updated', issue };
+  } catch (error) {
+    const status =
+      typeof error === 'object' && error !== null && 'status' in error ? Number(error.status) : 0;
+    if ([400, 401, 403, 404, 405, 409, 410, 422, 429].includes(status))
+      throw new ProviderError(
+        'PROVIDER_ISSUE_REJECTED',
+        'The provider rejected this issue action. Check access and review it again before retrying.',
+      );
+    throw new ProviderError(
+      'PROVIDER_WRITE_UNCERTAIN',
+      'This issue action may have completed. Check the provider results before trying again.',
+    );
+  }
 }

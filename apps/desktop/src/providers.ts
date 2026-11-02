@@ -9,6 +9,8 @@ import {
   providerIssueCommentsOptionsSchema,
   type ProviderIssueOptions,
   type ProviderIssueCommentsOptions,
+  providerWriteIssueSchema,
+  type ProviderWriteIssue,
   providerIssueListOptionsSchema,
   type ProviderIssueListOptions,
   providerMergePullSchema,
@@ -296,6 +298,20 @@ export class ProviderService {
       const options = providerIssueCommentsOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
       return this.github.issueComments(account.origin, token, options, signal);
+    });
+  }
+  writeIssue(id: string, input: ProviderWriteIssue, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerWriteIssueSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.writeIssue(account.origin, token, options, signal);
+    });
+  }
+  previewIssueAction(id: string, input: ProviderIssueOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerIssueOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.previewIssueAction(account.origin, token, options, signal);
     });
   }
   pullChecks(id: string, input: ProviderPullChecksOptions, signal?: AbortSignal) {

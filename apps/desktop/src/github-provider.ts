@@ -10,6 +10,10 @@ import {
   type ProviderIssueCommentsOptions,
   type ProviderIssueDetails,
   type ProviderIssueCommentsPage,
+  type ProviderIssueActionPreview,
+  providerWriteIssueSchema,
+  type ProviderWriteIssue,
+  type ProviderIssueWriteResult,
   providerIssueListOptionsSchema,
   type ProviderIssueListOptions,
   type ProviderIssuePage,
@@ -65,12 +69,30 @@ import {
   type ProviderRepositoryPage,
 } from '@openkraken/ipc-contract';
 
-import { loadIssues, loadIssue, loadIssueComments } from './github-issues.js';
+import {
+  loadIssues,
+  loadIssue,
+  loadIssueComments,
+  writeIssue,
+  previewIssueAction,
+} from './github-issues.js';
 import { loadPullChecks } from './github-checks.js';
 import { ProviderError } from './provider-error.js';
 export { ProviderError } from './provider-error.js';
 import { loadPullTemplates, loadPullTemplate } from './github-templates.js';
 export interface ProviderDriver {
+  previewIssueAction(
+    origin: string,
+    token: string,
+    options: ProviderIssueOptions,
+    signal?: AbortSignal,
+  ): Promise<ProviderIssueActionPreview>;
+  writeIssue(
+    origin: string,
+    token: string,
+    options: ProviderWriteIssue,
+    signal?: AbortSignal,
+  ): Promise<ProviderIssueWriteResult>;
   issue(
     origin: string,
     token: string,
@@ -228,6 +250,26 @@ export class GitHubProvider implements ProviderDriver {
     const host = providerOriginSchema.parse(origin);
     return this.request(host, token, signal, (client, headers) =>
       loadIssueComments(client, headers, host, options),
+    );
+  }
+  async writeIssue(origin: string, token: string, input: ProviderWriteIssue, signal?: AbortSignal) {
+    const options = providerWriteIssueSchema.parse(input);
+    const host = providerOriginSchema.parse(origin);
+    signal?.throwIfAborted();
+    return this.request(host, token, signal, (client, headers) =>
+      writeIssue(client, headers, host, options, signal),
+    );
+  }
+  async previewIssueAction(
+    origin: string,
+    token: string,
+    input: ProviderIssueOptions,
+    signal?: AbortSignal,
+  ) {
+    const options = providerIssueOptionsSchema.parse(input);
+    const host = providerOriginSchema.parse(origin);
+    return this.request(host, token, signal, (client, headers) =>
+      previewIssueAction(client, headers, host, options),
     );
   }
   async identity(origin: string, token: string, signal?: AbortSignal) {

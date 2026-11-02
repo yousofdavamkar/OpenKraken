@@ -637,3 +637,54 @@ export type ProviderIssueDetails = z.infer<typeof providerIssueDetailsSchema>;
 export type ProviderIssueCommentsOptions = z.infer<typeof providerIssueCommentsOptionsSchema>;
 export type ProviderIssueComment = z.infer<typeof providerIssueCommentSchema>;
 export type ProviderIssueCommentsPage = z.infer<typeof providerIssueCommentsPageSchema>;
+
+export const providerCreateIssueSchema = z
+  .object({
+    action: z.literal('create'),
+    repository: providerRepositoryTargetSchema,
+    title: z
+      .string()
+      .trim()
+      .min(1)
+      .max(256)
+      .refine((value) => !/[\r\n]/.test(value), 'Enter a single-line title'),
+    body: z.string().max(65536),
+  })
+  .strict();
+export const providerIssueActionPreviewSchema = z
+  .object({ issue: providerIssueDetailsSchema, revision: z.string().regex(/^[0-9a-f]{64}$/) })
+  .strict();
+const providerIssueActionTargetSchema = providerIssueOptionsSchema
+  .extend({ revision: providerIssueActionPreviewSchema.shape.revision })
+  .strict();
+export const providerWriteIssueSchema = z.discriminatedUnion('action', [
+  providerCreateIssueSchema,
+  providerIssueActionTargetSchema
+    .extend({
+      action: z.literal('comment'),
+      body: z
+        .string()
+        .min(1)
+        .max(65536)
+        .refine((value) => !!value.trim(), 'Enter a comment'),
+    })
+    .strict(),
+  providerIssueActionTargetSchema
+    .extend({
+      action: z.literal('state'),
+      state: z.enum(['open', 'closed']),
+      reason: z.enum(['completed', 'not_planned', 'reopened']),
+    })
+    .strict()
+    .refine((value) =>
+      value.state === 'open' ? value.reason === 'reopened' : value.reason !== 'reopened',
+    ),
+]);
+export type ProviderIssueActionPreview = z.infer<typeof providerIssueActionPreviewSchema>;
+export const providerIssueWriteResultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('created'), issue: providerIssueDetailsSchema }).strict(),
+  z.object({ kind: z.literal('updated'), issue: providerIssueDetailsSchema }).strict(),
+  z.object({ kind: z.literal('commented'), comment: providerIssueCommentSchema }).strict(),
+]);
+export type ProviderWriteIssue = z.infer<typeof providerWriteIssueSchema>;
+export type ProviderIssueWriteResult = z.infer<typeof providerIssueWriteResultSchema>;

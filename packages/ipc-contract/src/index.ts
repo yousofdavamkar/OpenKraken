@@ -2,6 +2,9 @@ import { z } from 'zod';
 import {
   providerPullChecksOptionsSchema,
   providerPullChecksPageSchema,
+  providerWriteIssueSchema,
+  providerIssueWriteResultSchema,
+  providerIssueActionPreviewSchema,
   providerIssueListOptionsSchema,
   providerIssueOptionsSchema,
   providerIssueCommentsOptionsSchema,
@@ -1216,6 +1219,22 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerWriteIssue'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerWriteIssueSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerIssueActionPreview'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerIssueOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerIssues'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerIssueListOptionsSchema,
@@ -1457,6 +1476,15 @@ export const resultSchema = z.discriminatedUnion('kind', [
     .object({ kind: z.literal('providerCommentCreated'), comment: providerPullCommentSchema })
     .strict(),
   z.object({ kind: z.literal('providerPullChecks'), page: providerPullChecksPageSchema }).strict(),
+  z
+    .object({ kind: z.literal('providerIssueWritten'), result: providerIssueWriteResultSchema })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerIssueActionPreview'),
+      preview: providerIssueActionPreviewSchema,
+    })
+    .strict(),
   z.object({ kind: z.literal('providerIssues'), page: providerIssuePageSchema }).strict(),
   z.object({ kind: z.literal('providerIssue'), issue: providerIssueDetailsSchema }).strict(),
   z

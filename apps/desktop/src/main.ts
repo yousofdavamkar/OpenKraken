@@ -253,6 +253,8 @@ else {
           request.method === 'providerPullComments' ||
           request.method === 'providerCreateComment' ||
           request.method === 'providerPullChecks' ||
+          request.method === 'providerWriteIssue' ||
+          request.method === 'providerIssueActionPreview' ||
           request.method === 'providerIssues' ||
           request.method === 'providerIssue' ||
           request.method === 'providerIssueComments' ||
@@ -351,6 +353,24 @@ else {
             return resultSchema.parse({
               kind: 'providerPullChecks',
               page: await providers.pullChecks(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerWriteIssue')
+            return resultSchema.parse({
+              kind: 'providerIssueWritten',
+              result: await providers.writeIssue(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerIssueActionPreview')
+            return resultSchema.parse({
+              kind: 'providerIssueActionPreview',
+              preview: await providers.previewIssueAction(
                 request.accountId,
                 request.options,
                 controller.signal,
@@ -528,6 +548,8 @@ else {
           request.method === 'providerPullComments' ||
           request.method === 'providerCreateComment' ||
           request.method === 'providerPullChecks' ||
+          request.method === 'providerWriteIssue' ||
+          request.method === 'providerIssueActionPreview' ||
           request.method === 'providerIssues' ||
           request.method === 'providerIssue' ||
           request.method === 'providerIssueComments' ||

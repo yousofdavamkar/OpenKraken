@@ -543,3 +543,49 @@ test('issue browsing IPC permits bounded repository selectors but no credentials
       ).toBe(false);
   }
 });
+
+test('issue action IPC requires bounded text and reviewed state without unrelated changes', () => {
+  const common = { id: '00000000-0000-4000-8000-000000000000', accountId: 'a'.repeat(64) };
+  const target = {
+    repository: { owner: 'team', name: 'project' },
+    number: 1,
+    revision: 'a'.repeat(64),
+  };
+  const create = { action: 'create', repository: target.repository, title: 'Title', body: '' };
+  const comment = { action: 'comment', ...target, body: 'Comment' };
+  const state = { action: 'state', ...target, state: 'closed', reason: 'completed' };
+  const preview = {
+    ...common,
+    method: 'providerIssueActionPreview',
+    options: { repository: target.repository, number: 1 },
+  };
+  expect(requestSchema.safeParse(preview).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(preview).success).toBe(false);
+  for (const options of [create, comment, state]) {
+    const request = { ...common, method: 'providerWriteIssue', options };
+    expect(requestSchema.safeParse(request).success).toBe(true);
+    expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+    for (const extra of [
+      { token: 'secret' },
+      { url: 'https://other.test' },
+      { labels: ['injected'] },
+      { body: 'x'.repeat(65537) },
+    ])
+      expect(
+        requestSchema.safeParse({ ...request, options: { ...options, ...extra } }).success,
+      ).toBe(false);
+  }
+  for (const options of [
+    { ...create, title: ' ' },
+    { ...create, title: 'a\nb' },
+    { ...comment, body: ' ' },
+    { ...comment, revision: undefined },
+    { ...state, revision: undefined },
+    { ...state, state: 'open' },
+    { ...state, reason: 'reopened' },
+    { ...state, reason: 'duplicate', duplicate_issue_id: 2 },
+  ])
+    expect(
+      requestSchema.safeParse({ ...common, method: 'providerWriteIssue', options }).success,
+    ).toBe(false);
+});
