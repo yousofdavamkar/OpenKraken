@@ -309,6 +309,32 @@ export const resolveConflictSchema = z.discriminatedUnion('choice', [
 ]);
 export type ResolveConflict = z.infer<typeof resolveConflictSchema>;
 export const diffSideSchema = z.enum(['worktree', 'index']);
+export const changedFileSchema = z
+  .object({
+    path: z.string(),
+    pathBytes: pathBytesSchema,
+    oldPath: z.string().optional(),
+    oldPathBytes: pathBytesSchema.optional(),
+    newPath: z.string().optional(),
+    newPathBytes: pathBytesSchema.optional(),
+    oldMode: z.string().regex(/^[0-7]{6}$/),
+    newMode: z.string().regex(/^[0-7]{6}$/),
+    oldOid: oidSchema.optional(),
+    newOid: oidSchema.optional(),
+    status: z.enum(['added', 'modified', 'deleted', 'renamed', 'copied', 'typechange']),
+    similarity: z.number().int().min(0).max(100).optional(),
+  })
+  .strict();
+export const commitFilesSchema = z
+  .object({
+    commit: oidSchema,
+    parent: oidSchema.optional(),
+    parents: z.array(oidSchema).max(1024),
+    files: z.array(changedFileSchema).max(10000),
+  })
+  .strict();
+export type ChangedFile = z.infer<typeof changedFileSchema>;
+export type CommitFiles = z.infer<typeof commitFilesSchema>;
 export const patchOptionsSchema = z
   .object({
     pathBytes: pathBytesSchema,

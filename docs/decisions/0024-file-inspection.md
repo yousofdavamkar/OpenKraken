@@ -1,0 +1,5 @@
+# Native file inspection
+
+Commit file lists use native `diff-tree --raw -r -z --no-abbrev -M` with external diff/textconv disabled. Paths are parsed as independent NUL records and retained as base64 bytes alongside display text; rename records contain both original and destination paths. Modes, native blob IDs and similarity scores stay attached to each change. The first parent is the default comparison, a merge's other native parents can be selected explicitly, and root commits compare against the empty tree through `--root`.
+
+The service validates commit/parent OIDs and refuses a supplied parent that is not one of the commit's native parents. File lists are bounded to 10,000 entries/16 MiB and rename matching to 1,000 candidates; execution uses the repository read queue and cancellation. Native acceptance checks renames with spaces/control characters, additions, modifications, deletion, roots and both merge parents. A seeded streaming-parser property test preserves arbitrary raw path bytes over varied chunk boundaries; malformed/truncated records are refused. Reference: [Git diff-tree](https://git-scm.com/docs/git-diff-tree).

@@ -31,6 +31,7 @@ import { RepositoryPreferences } from './preferences.js';
 import { HistoryCursor } from './history.js';
 import { Remotes } from './remotes.js';
 import { predictMerge } from './merge-prediction.js';
+import { commitFiles } from './commit-files.js';
 import { WorkingTree } from './working-tree.js';
 import type { GitEditor } from './editor-document.js';
 import { RepositoryQueue } from './queue.js';
@@ -569,6 +570,21 @@ export class RepositoryService {
           (args, options) => this.run(args, { cwd: repo.path, ...options }),
           head,
           target,
+          signal,
+        ),
+      signal,
+    );
+  }
+  commitFiles(id: string, oid: string, parent?: string, signal?: AbortSignal) {
+    const repo = this.repositories.get(id);
+    if (!repo) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
+    return this.queue(repo.commonDir).run(
+      false,
+      () =>
+        commitFiles(
+          (args, options) => this.run(args, { cwd: repo.path, ...options }),
+          oid,
+          parent,
           signal,
         ),
       signal,
