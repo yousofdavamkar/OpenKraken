@@ -159,11 +159,7 @@ function RepositoryPages({
           Load more repositories
         </button>
       )}
-      {limited && (
-        <p>
-          Showing at most 10,000 repositories. Enter a repository URL directly to clone another.
-        </p>
-      )}
+      {limited && <p>Showing at most 10,000 repositories.</p>}
       <button
         type="button"
         disabled={pending}

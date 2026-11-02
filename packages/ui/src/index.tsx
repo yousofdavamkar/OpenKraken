@@ -7,6 +7,7 @@ import { History } from './history.js';
 import { NewReferences, ReferenceActions } from './references.js';
 import { GitProgress } from './git-progress.js';
 import { Clone } from './clone.js';
+import { PullRequests } from './pull-requests.js';
 import { ProviderAccountsControl } from './providers.js';
 import { Authentication } from './authentication.js';
 import { GitEditors } from './git-editor.js';
@@ -54,6 +55,7 @@ function App() {
           <AvatarSettings />
           <Clone />
           <ProviderAccountsControl />
+          <PullRequests />
           <NewReferences />
           <ManageRemotes />
           <Pull />
