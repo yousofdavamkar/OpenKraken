@@ -154,25 +154,11 @@ export class AskpassBroker {
         let answer: string | undefined;
         const match = /^(Username|Password) for '([^']+)': ?$/.exec(input.prompt);
         if (match && input.hint === '') {
-          try {
-            const url = new URL(match[2]!);
-            const credential = scope.credential;
-            if (
-              `${url.origin}${url.pathname}` === credential.url &&
-              !url.password &&
-              !url.search &&
-              !url.hash
-            ) {
-              if (match[1] === 'Username' && !url.username) answer = credential.username;
-              if (
-                match[1] === 'Password' &&
-                decodeURIComponent(url.username) === credential.username
-              )
-                answer = credential.password;
-            }
-          } catch {
-            /* Invalid prompt URLs cannot receive credentials. */
-          }
+          const credential = scope.credential;
+          const expected = new URL(credential.url);
+          if (match[1] === 'Password') expected.username = credential.username;
+          if (match[2] === expected.href)
+            answer = match[1] === 'Username' ? credential.username : credential.password;
         }
         socket.end(
           JSON.stringify(answer === undefined ? { ok: false } : { ok: true, answer }) + '\n',

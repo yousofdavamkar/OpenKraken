@@ -130,6 +130,8 @@ test('saved HTTPS credentials answer only their exact repository and account wit
     for (const prompt of [
       "Password for 'https://fixture-user@other.test/team/project.git': ",
       "Password for 'https://fixture-user@github.com/team/other.git': ",
+      "Password for 'https://fixture-user@github.com/team/hidden/../project.git': ",
+      "Password for 'https://fixture-user@github.com:443/team/project.git': ",
       "Password for 'http://fixture-user@github.com/team/project.git': ",
       "Password for 'https://someone-else@github.com/team/project.git': ",
       "Password for 'https://fixture-user@github.com/team/project.git?secret': ",
