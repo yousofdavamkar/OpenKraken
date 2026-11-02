@@ -18,7 +18,7 @@ Gitbeaker runs through a custom requester using the isolated provider network pa
 
 ## Scope and validation
 
-This is an authentication foundation. GitLab repository discovery, nested namespace selectors, merge requests, issues and pipelines remain subsequent M6 work. Unsupported collaboration requests explicitly fail instead of routing a GitLab token to a GitHub endpoint. The current saved-account clone URL contract still supports only one namespace component.
+This decision established the authentication foundation. [GitLab repository discovery and nested namespaces](0043-gitlab-repositories.md) are now implemented. Merge requests, issues and pipelines remain subsequent M6 work. Unsupported collaboration requests explicitly fail instead of routing a GitLab token to a GitHub endpoint.
 
 Service/MSW tests exercise protected account separation and restart, malformed responses, cooldowns, a real loopback listener, S256 verification, forged/duplicate callbacks, denial, expiry, occupied ports, cancelled exchange, single-use codes and refresh recovery. Typed IPC tests reject arbitrary callback/browser URLs and private PKCE fields. Real Electron tests exercise PAT and PKCE account setup, browser dispatch, profile persistence, cancellation, reload and unavailable OS protection with only OS encryption and provider HTTP replaced by fixtures.
 
