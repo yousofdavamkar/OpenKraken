@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import type {
   ProviderIssueDetails,
@@ -8,6 +8,7 @@ import type {
 } from '@openkraken/ipc-contract';
 import { IssueAction } from './issue-actions.js';
 import { ProviderRepositoryPicker } from './provider-repositories.js';
+import { ProviderPolling, pollNumberedPages, useProviderPoll } from './provider-polling.js';
 
 type RepositorySelection = {
   accountId: string;
@@ -62,6 +63,34 @@ function IssueComments({ target, number }: { target: RepositorySelection; number
       void window.openkraken.cancel(id);
     };
   }, [target, number, page, attempt]);
+  useProviderPoll(pending, `${number}/${page}/${attempt}`, async (read) => {
+    const result = await pollNumberedPages(
+      Math.min(10, page),
+      async (page) => {
+        const result = await read({
+          method: 'providerIssueComments',
+          accountId: target.accountId,
+          options: { repository: target.repository, number, page },
+        });
+        if (result.kind !== 'providerIssueComments')
+          throw new Error('Issue comments could not be refreshed.');
+        return {
+          ...result.page,
+          items: result.page.comments,
+          limited: result.page.limited || (page === 10 && result.page.nextPage !== null),
+        };
+      },
+      (comment) => comment.id,
+    );
+    return {
+      commit: () => {
+        setComments(result.items);
+        setNext(result.nextPage);
+        setLimited(result.limited);
+        setError('');
+      },
+    };
+  });
   const virtual = useVirtualizer({
     count: comments.length,
     getScrollElement: () => scroll.current,
@@ -203,6 +232,25 @@ function IssueDetails({
       void window.openkraken.cancel(id);
     };
   }, [target, number, attempt]);
+  useProviderPoll(
+    pending,
+    `${number}/${attempt}`,
+    async (read) => {
+      const result = await read({
+        method: 'providerIssue',
+        accountId: target.accountId,
+        options: { repository: target.repository, number },
+      });
+      if (result.kind !== 'providerIssue') throw new Error('Issue details could not be refreshed.');
+      return {
+        commit: () => {
+          setDetail(result.issue);
+          setError('');
+        },
+      };
+    },
+    1,
+  );
   return (
     <section className="pull-details" aria-label="Issue details">
       {pending && <p role="status">Loading issue #{number}…</p>}
@@ -288,6 +336,12 @@ function IssuePages({
   const [selected, setSelected] = useState<number>();
   const scroll = useRef<HTMLDivElement>(null);
   const listId = useId();
+  const restoreScroll = useRef<number | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (restoreScroll.current !== undefined && scroll.current)
+      scroll.current.scrollTop = restoreScroll.current;
+    restoreScroll.current = undefined;
+  }, [issues]);
   useEffect(() => {
     const id = crypto.randomUUID();
     let alive = true;
@@ -330,6 +384,48 @@ function IssuePages({
     `#${issue.number} ${issue.title} ${issue.author ?? ''} ${issue.labels.join(' ')} ${issue.assignees.join(' ')}`
       .toLocaleLowerCase()
       .includes(search),
+  );
+  useProviderPoll(
+    pending,
+    `${state}/${page}/${attempt}`,
+    async (read) => {
+      const currentId = visible[active]?.number;
+      const top = Math.floor((scroll.current?.scrollTop ?? 0) / 56);
+      const anchor = visible[top]?.number;
+      const offset = (scroll.current?.scrollTop ?? 0) % 56;
+      const result = await pollNumberedPages(
+        page,
+        async (page) => {
+          const result = await read({
+            method: 'providerIssues',
+            accountId: target.accountId,
+            options: { repository: target.repository, state, page },
+          });
+          if (result.kind !== 'providerIssues') throw new Error('Issues could not be refreshed.');
+          return { ...result.page, items: result.page.issues };
+        },
+        (issue) => issue.number,
+      );
+      const matches = result.items.filter((issue) =>
+        `#${issue.number} ${issue.title} ${issue.author ?? ''} ${issue.labels.join(' ')} ${issue.assignees.join(' ')}`
+          .toLocaleLowerCase()
+          .includes(search),
+      );
+      return {
+        commit: () => {
+          const index = matches.findIndex((issue) => issue.number === currentId);
+          const anchorIndex = matches.findIndex((issue) => issue.number === anchor);
+          restoreScroll.current =
+            anchorIndex >= 0 ? anchorIndex * 56 + offset : scroll.current?.scrollTop;
+          setIssues(result.items);
+          setNext(result.nextPage);
+          setLimited(result.limited);
+          setError('');
+          setActive(index >= 0 ? index : Math.max(0, Math.min(active, matches.length - 1)));
+        },
+      };
+    },
+    0,
   );
   const virtual = useVirtualizer({
     count: visible.length,
@@ -541,11 +637,13 @@ function IssueDialog({ close }: { close: () => void }) {
               </select>
             </label>
           </div>
-          <IssuePages
+          <ProviderPolling
             key={`${target.accountId}/${target.repository.owner}/${target.repository.name}/${state}/${version}`}
-            target={target}
-            state={state}
-          />
+            accountId={target.accountId}
+            scope={`issues/${target.repository.owner}/${target.repository.name}`}
+          >
+            <IssuePages target={target} state={state} />
+          </ProviderPolling>
         </>
       ) : (
         <ProviderRepositoryPicker
