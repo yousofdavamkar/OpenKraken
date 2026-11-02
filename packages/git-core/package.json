@@ -11,6 +11,7 @@
     "@parcel/watcher": "2.6.0",
     "chardet": "2.2.0",
     "iconv-lite": "0.7.3",
+    "image-size": "2.0.4",
     "zod": "4.6.7"
   }
 }

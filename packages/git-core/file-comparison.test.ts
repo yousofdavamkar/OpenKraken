@@ -147,3 +147,46 @@ test('comparison detects Shift-JIS and UTF-16 and permits an explicit legacy enc
     await service.dispose();
   }
 });
+
+test('comparison exposes bounded raster images but refuses excessive dimensions and active markup', async () => {
+  const path = createFixture(join(root, 'images'));
+  const pixel = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=',
+    'base64',
+  );
+  const huge = Buffer.from(pixel);
+  huge.writeUInt32BE(100000, 16);
+  await writeFile(join(path, 'pixel.png'), pixel);
+  await writeFile(join(path, 'huge.png'), huge);
+  await writeFile(
+    join(path, 'markup.png'),
+    '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+  );
+  fixtureGit(path, ['add', '.']);
+  fixtureGit(path, ['commit', '-m', 'Image fixtures']);
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const commit = fixtureGit(path, ['rev-parse', 'HEAD']);
+    const compare = (file: string) =>
+      service.commitComparison(repo.id, {
+        commit,
+        pathBytes: Buffer.from(file).toString('base64'),
+      });
+    const result = await compare('pixel.png');
+    expect(result.newVersion).toMatchObject({
+      kind: 'image',
+      image: { mime: 'image/png', width: 1, height: 1, base64: pixel.toString('base64') },
+    });
+    expect(result.hunks).toEqual([]);
+    const refused = await compare('huge.png');
+    expect(refused.newVersion.kind).toBe('binary');
+    expect(refused.newVersion.image).toBeUndefined();
+    const markup = await compare('markup.png');
+    expect(markup.newVersion.kind).toBe('text');
+    expect(markup.newVersion.image).toBeUndefined();
+    expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
+  } finally {
+    await service.dispose();
+  }
+});

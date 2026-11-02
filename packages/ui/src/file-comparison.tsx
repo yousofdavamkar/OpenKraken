@@ -119,6 +119,63 @@ function TextComparison({
     />
   );
 }
+function ImageComparison({ data }: { data: FileComparison }) {
+  const [overlay, setOverlay] = useState(false);
+  const [opacity, setOpacity] = useState(0.5);
+  const [failed, setFailed] = useState(false);
+  const old = data.oldVersion.image,
+    next = data.newVersion.image;
+  const image = (value: typeof old, label: string) =>
+    value ? (
+      <img
+        alt={label}
+        src={`data:${value.mime};base64,${value.base64}`}
+        onError={() => setFailed(true)}
+      />
+    ) : (
+      <p>{label}: no image</p>
+    );
+  return (
+    <section className="image-comparison" aria-label="Image comparison">
+      <div className="comparison-toolbar">
+        <label>
+          <input
+            type="checkbox"
+            checked={overlay}
+            disabled={!old || !next}
+            onChange={(event) => setOverlay(event.target.checked)}
+          />
+          Overlay images
+        </label>
+        {overlay && (
+          <label>
+            After opacity
+            <input
+              type="range"
+              aria-label="After opacity"
+              min="0"
+              max="1"
+              step="0.01"
+              value={opacity}
+              onChange={(event) => setOpacity(Number(event.target.value))}
+            />
+          </label>
+        )}
+        <span>
+          Before: {old ? `${old.width} × ${old.height}` : data.oldVersion.kind} · After:{' '}
+          {next ? `${next.width} × ${next.height}` : data.newVersion.kind}
+        </span>
+      </div>
+      {failed && (
+        <p role="alert">The image could not be decoded. Its stored bytes were not changed.</p>
+      )}
+      <div className={overlay ? 'image-overlay' : 'image-pair'}>
+        <figure>{image(old, 'Before image')}</figure>
+        <figure style={overlay ? { opacity } : undefined}>{image(next, 'After image')}</figure>
+      </div>
+    </section>
+  );
+}
 function HunkComparison({ data }: { data: FileComparison }) {
   const scroll = useRef<HTMLDivElement>(null);
   const rows = useMemo(
@@ -312,6 +369,8 @@ export function FileComparisonDialog({
                 <p>The hard display limit prevents loading this file.</p>
               )}
             </div>
+          ) : data.oldVersion.image || data.newVersion.image ? (
+            <ImageComparison data={data} />
           ) : text ? (
             <>
               {!data.hunks.length && <p>No text changes with these whitespace settings.</p>}

@@ -403,13 +403,22 @@ export const commitComparisonOptionsSchema = z
   .strict();
 export const fileVersionSchema = z
   .object({
-    kind: z.enum(['missing', 'text', 'binary', 'submodule', 'large']),
+    kind: z.enum(['missing', 'text', 'binary', 'submodule', 'large', 'image']),
     oid: oidSchema.optional(),
     mode: z.string().regex(/^[0-7]{6}$/),
     bytes: z.number().int().nonnegative(),
     text: z.string().optional(),
     encoding: z.string().optional(),
     lines: z.number().int().nonnegative().optional(),
+    image: z
+      .object({
+        mime: z.enum(['image/png', 'image/jpeg', 'image/webp']),
+        width: z.number().int().positive().max(16384),
+        height: z.number().int().positive().max(16384),
+        base64: z.string().max(27962028),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export const fileComparisonSchema = z

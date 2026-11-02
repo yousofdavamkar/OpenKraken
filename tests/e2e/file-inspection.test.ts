@@ -131,3 +131,50 @@ test('50k-line comparison loads within budget and keeps all views virtualized', 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('raster comparison renders both versions and adjusts their overlay', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-image-ui-'));
+  const path = createFixture(join(root, 'repository'));
+  const pixel = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=',
+    'base64',
+  );
+  writeFileSync(join(path, 'pixel.png'), pixel);
+  fixtureGit(path, ['add', '.']);
+  fixtureGit(path, ['commit', '-m', 'Before image']);
+  // A harmless trailing byte changes the blob while retaining the image contents.
+  writeFileSync(join(path, 'pixel.png'), Buffer.concat([pixel, Buffer.from([0])]));
+  fixtureGit(path, ['commit', '-am', 'After image']);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    await grid.press('Home');
+    await grid.press('Enter');
+    await page.getByRole('button', { name: 'Compare pixel.png', exact: true }).click();
+    const viewer = page.getByRole('dialog', { name: 'File comparison' });
+    for (const label of ['Before image', 'After image']) {
+      await expect(viewer.getByRole('img', { name: label })).toBeVisible();
+      await expect
+        .poll(() =>
+          viewer
+            .getByRole('img', { name: label })
+            .evaluate((element: HTMLImageElement) => element.naturalWidth),
+        )
+        .toBe(1);
+    }
+    await viewer.getByRole('checkbox', { name: 'Overlay images' }).check();
+    await viewer.getByRole('slider', { name: 'After opacity' }).fill('0.75');
+    await expect(viewer.locator('.image-overlay figure').nth(1)).toHaveCSS('opacity', '0.75');
+    expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

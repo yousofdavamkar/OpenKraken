@@ -1060,3 +1060,36 @@ footer {
   white-space: pre;
   overflow: visible;
 }
+
+.image-comparison {
+  min-height: 0;
+  overflow: auto;
+}
+.image-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.image-pair figure,
+.image-overlay {
+  background: repeating-conic-gradient(#273444 0% 25%, #1c2734 0% 50%) 0 0 / 20px 20px;
+}
+.image-pair figure {
+  margin: 16px 0;
+  padding: 12px;
+}
+.image-comparison img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.image-overlay {
+  display: grid;
+  margin-top: 16px;
+  width: fit-content;
+  max-width: 100%;
+}
+.image-overlay figure {
+  grid-area: 1 / 1;
+  margin: 0;
+}

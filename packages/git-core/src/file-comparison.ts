@@ -7,6 +7,7 @@ import {
   type CommitComparisonOptions,
   type FileVersion,
 } from '@openkraken/ipc-contract';
+import { rasterPreview } from './raster-preview.js';
 import { decodeText } from './text-encoding.js';
 import { commitFiles } from './commit-files.js';
 import { parsePatch } from './patch.js';
@@ -33,6 +34,8 @@ async function version(
     throw new GitError('INVALID_OBJECT', 'Git returned an invalid blob size');
   if (bytes > (allowLarge ? HARD_BYTES : SOFT_BYTES)) return { kind: 'large', oid, mode, bytes };
   const content = (await run(['cat-file', 'blob', oid], { signal, maxBytes: HARD_BYTES })).stdout;
+  const image = rasterPreview(content);
+  if (image) return { kind: 'image', oid, mode, bytes, image };
   const decoded = decodeText(content, encoding);
   if (!decoded) return { kind: 'binary', oid, mode, bytes };
   const { text } = decoded;
