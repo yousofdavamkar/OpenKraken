@@ -6,6 +6,7 @@ import type {
   ProviderPullSummary,
 } from '@openkraken/ipc-contract';
 import { CommentDiscussion, PullFiles, PullReviews, WriteReview } from './pull-review.js';
+import { MergePullRequest } from './pull-merge.js';
 import { CreatePullRequest } from './pull-create.js';
 import { ProviderRepositoryPicker } from './provider-repositories.js';
 
@@ -14,7 +15,15 @@ type RepositorySelection = {
   origin: string;
   repository: ProviderPullListOptions['repository'];
 };
-function PullDetails({ target, number }: { target: RepositorySelection; number: number }) {
+function PullDetails({
+  target,
+  number,
+  refreshList,
+}: {
+  target: RepositorySelection;
+  number: number;
+  refreshList: () => void;
+}) {
   const [tab, setTab] = useState<'details' | 'files' | 'reviews' | 'comments'>('details');
   const [reviewsVersion, setReviewsVersion] = useState(0);
   const [detail, setDetail] = useState<ProviderPullDetails>();
@@ -104,6 +113,14 @@ function PullDetails({ target, number }: { target: RepositorySelection; number: 
             <button aria-pressed={tab === 'comments'} onClick={() => setTab('comments')}>
               Comments
             </button>
+            <MergePullRequest
+              target={target}
+              detail={detail}
+              finished={(changed) => {
+                if (changed) refreshList();
+                else setAttempt((value) => value + 1);
+              }}
+            />
             <WriteReview
               context={{ ...target, detail }}
               submitted={() => setReviewsVersion((value) => value + 1)}
@@ -335,7 +352,20 @@ function PullPages({
         <p>Search covers loaded results. Use arrow keys and Enter to open details.</p>
       </section>
       {selected !== undefined ? (
-        <PullDetails key={selected} target={target} number={selected} />
+        <PullDetails
+          key={selected}
+          target={target}
+          number={selected}
+          refreshList={() => {
+            setPulls([]);
+            setSelected(undefined);
+            setNext(null);
+            setPage(1);
+            setAttempt((value) => value + 1);
+            setActive(0);
+            scroll.current?.scrollTo(0, 0);
+          }}
+        />
       ) : (
         <p>Select a pull request to view its details.</p>
       )}

@@ -1465,3 +1465,27 @@ footer {
   overflow: auto;
   overflow-wrap: anywhere;
 }
+.pr-merge-dialog {
+  width: min(720px, calc(100vw - 64px));
+  max-width: none;
+}
+.pr-merge-dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-block: 12px;
+}
+.pr-merge-dialog label:has(input[type='checkbox']) {
+  flex-direction: row;
+  align-items: center;
+}
+.pr-merge-dialog fieldset {
+  border: 1px solid var(--border);
+}
+.pr-merge-dialog pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow: auto;
+  font: inherit;
+}
