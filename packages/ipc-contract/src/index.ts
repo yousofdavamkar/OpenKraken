@@ -376,6 +376,47 @@ export const workingDiffSchema = z.object({
   ),
 });
 export type WorkingDiff = z.infer<typeof workingDiffSchema>;
+export const whitespaceSchema = z.enum(['exact', 'all', 'changes', 'eol']);
+export const commitComparisonOptionsSchema = z
+  .object({
+    commit: oidSchema,
+    parent: oidSchema.optional(),
+    pathBytes: pathBytesSchema,
+    whitespace: whitespaceSchema.optional(),
+    allowLarge: z.boolean().optional(),
+  })
+  .strict();
+export const fileVersionSchema = z
+  .object({
+    kind: z.enum(['missing', 'text', 'binary', 'submodule', 'large']),
+    oid: oidSchema.optional(),
+    mode: z.string().regex(/^[0-7]{6}$/),
+    bytes: z.number().int().nonnegative(),
+    text: z.string().optional(),
+    encoding: z.string().optional(),
+    lines: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+export const fileComparisonSchema = z
+  .object({
+    file: changedFileSchema,
+    oldVersion: fileVersionSchema,
+    newVersion: fileVersionSchema,
+    whitespace: whitespaceSchema,
+    hunks: workingDiffSchema.shape.hunks,
+    guard: z
+      .object({
+        reason: z.enum(['bytes', 'lines']),
+        limit: z.number().int().positive(),
+        canLoad: z.boolean(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type CommitComparisonOptions = z.infer<typeof commitComparisonOptionsSchema>;
+export type FileVersion = z.infer<typeof fileVersionSchema>;
+export type FileComparison = z.infer<typeof fileComparisonSchema>;
 export const discardPreviewSchema = z.object({
   token: z.string().regex(/^[0-9a-f]{64}$/),
   paths: z.array(z.string()),

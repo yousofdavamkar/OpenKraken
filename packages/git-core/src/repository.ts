@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type {
   Commit,
   CommitOptions,
+  CommitComparisonOptions,
   CloneOptions,
   PatchOptions,
   ReferenceOptions,
@@ -32,6 +33,7 @@ import { HistoryCursor } from './history.js';
 import { Remotes } from './remotes.js';
 import { predictMerge } from './merge-prediction.js';
 import { commitFiles } from './commit-files.js';
+import { commitComparison } from './file-comparison.js';
 import { WorkingTree } from './working-tree.js';
 import type { GitEditor } from './editor-document.js';
 import { RepositoryQueue } from './queue.js';
@@ -585,6 +587,20 @@ export class RepositoryService {
           (args, options) => this.run(args, { cwd: repo.path, ...options }),
           oid,
           parent,
+          signal,
+        ),
+      signal,
+    );
+  }
+  commitComparison(id: string, options: CommitComparisonOptions, signal?: AbortSignal) {
+    const repo = this.repositories.get(id);
+    if (!repo) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
+    return this.queue(repo.commonDir).run(
+      false,
+      () =>
+        commitComparison(
+          (args, options) => this.run(args, { cwd: repo.path, ...options }),
+          options,
           signal,
         ),
       signal,
