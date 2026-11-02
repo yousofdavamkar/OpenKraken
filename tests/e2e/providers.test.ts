@@ -181,3 +181,140 @@ test('closing account setup cancels validation without saving a late credential'
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('GitHub device sign-in shows a user code, opens only GitHub and saves the verified account', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-device-ui-'));
+  const profile = join(root, 'profile');
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${profile}`],
+  });
+  try {
+    await fixtureProtection(app);
+    await app.evaluate(({ session, shell }) => {
+      const provider = session.fromPartition('openkraken-providers');
+      const original = provider.fetch;
+      shell.openExternal = async (url) => {
+        Reflect.set(globalThis, 'openedProviderUrl', url);
+      };
+      provider.fetch = async (input, init) => {
+        if (String(input) === 'https://api.github.com/user') return original(input, init);
+        if (init?.method !== 'POST' || init.redirect !== 'error' || init.credentials !== 'omit')
+          throw new Error('Unsafe device request');
+        const params = new URLSearchParams(String(init.body));
+        if (params.get('client_id') !== 'fixture-client') throw new Error('Unexpected client');
+        if (String(input) === 'https://github.com/login/device/code') {
+          if (params.get('scope') !== 'read:user public_repo') throw new Error('Unexpected scope');
+          return Response.json({
+            device_code: 'private-device-code',
+            user_code: 'ABCD-EFGH',
+            verification_uri: 'https://github.com/login/device',
+            expires_in: 900,
+            interval: 2,
+          });
+        }
+        if (
+          String(input) === 'https://github.com/login/oauth/access_token' &&
+          params.get('device_code') === 'private-device-code'
+        )
+          return Response.json({
+            access_token: 'fixture-pat',
+            refresh_token: 'private-refresh-token',
+            expires_in: 3600,
+            refresh_token_expires_in: 86400,
+            token_type: 'bearer',
+            scope: 'read:user,public_repo',
+          });
+        throw new Error('Unexpected device request');
+      };
+    });
+    const page = await app.firstWindow();
+    await page.getByRole('button', { name: 'Provider accounts', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Provider accounts' });
+    await dialog.getByLabel('GitHub application client ID', { exact: true }).fill('fixture-client');
+    await dialog.getByRole('button', { name: 'Sign in with GitHub', exact: true }).click();
+    await expect(dialog.getByText('ABCD-EFGH', { exact: true })).toBeVisible();
+    await expect(dialog).not.toContainText('private-device-code');
+    await dialog.getByRole('button', { name: 'Open GitHub authorization', exact: true }).click();
+    expect(await app.evaluate(() => Reflect.get(globalThis, 'openedProviderUrl'))).toBe(
+      'https://github.com/login/device',
+    );
+    await expect(dialog.getByText('fixture-user', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('ABCD-EFGH', { exact: true })).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Verify fixture-user', exact: true }).click();
+    await expect(
+      dialog.getByRole('button', { name: 'Verify fixture-user', exact: true }),
+    ).toBeEnabled();
+    await expect(dialog.getByRole('alert')).toHaveCount(0);
+    const metadata = readFileSync(join(profile, 'provider-accounts.json'), 'utf8');
+    expect(metadata).toContain('"authentication":"device"');
+    for (const secret of ['fixture-pat', 'private-refresh-token', 'private-device-code'])
+      expect(metadata).not.toContain(secret);
+    await page.screenshot({ path: 'test-results/github-device-connected.png' });
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('cancelled and closed device sign-ins cannot poll or replace a later authorization', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-device-cancel-ui-'));
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    await fixtureProtection(app);
+    await app.evaluate(({ session }) => {
+      const provider = session.fromPartition('openkraken-providers');
+      const original = provider.fetch;
+      let starts = 0;
+      const polled: string[] = [];
+      Reflect.set(globalThis, 'deviceCodesPolled', polled);
+      provider.fetch = async (input, init) => {
+        if (String(input) === 'https://api.github.com/user') return original(input, init);
+        if (String(input) === 'https://github.com/login/device/code')
+          return Response.json({
+            device_code: `private-${++starts}`,
+            user_code: 'ABCD-EFGH',
+            verification_uri: 'https://github.com/login/device',
+            expires_in: 900,
+            interval: 2,
+          });
+        if (String(input) === 'https://github.com/login/oauth/access_token') {
+          polled.push(new URLSearchParams(String(init?.body)).get('device_code') ?? 'missing');
+          return Response.json({
+            access_token: 'fixture-pat',
+            token_type: 'bearer',
+            scope: 'read:user,public_repo',
+          });
+        }
+        throw new Error('Unexpected device request');
+      };
+    });
+    const page = await app.firstWindow();
+    const dialog = page.getByRole('dialog', { name: 'Provider accounts' });
+    const start = async () => {
+      await dialog
+        .getByLabel('GitHub application client ID', { exact: true })
+        .fill('fixture-client');
+      await dialog.getByRole('button', { name: 'Sign in with GitHub', exact: true }).click();
+      await expect(dialog.getByText('ABCD-EFGH', { exact: true })).toBeVisible();
+    };
+    await page.getByRole('button', { name: 'Provider accounts', exact: true }).click();
+    await start();
+    await dialog.getByRole('button', { name: 'Cancel GitHub sign-in', exact: true }).click();
+    await expect(dialog.getByText('ABCD-EFGH', { exact: true })).toHaveCount(0);
+    await start();
+    await dialog.getByRole('button', { name: 'Close accounts', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await page.getByRole('button', { name: 'Provider accounts', exact: true }).click();
+    await start();
+    await expect(dialog.getByText('fixture-user', { exact: true })).toBeVisible();
+    expect(await app.evaluate(() => Reflect.get(globalThis, 'deviceCodesPolled'))).toEqual([
+      'private-3',
+    ]);
+    await expect(dialog.getByRole('alert')).toHaveCount(0);
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

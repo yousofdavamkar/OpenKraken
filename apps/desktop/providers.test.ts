@@ -210,8 +210,8 @@ test('device sign-in protects refresh tokens and revalidates the same identity a
       const params = new URLSearchParams(await request.text());
       const refreshing = params.get('grant_type') === 'refresh_token';
       if (refreshing) {
+        expect(params.get('refresh_token')).toBe(refreshes ? 'second-refresh' : 'first-refresh');
         refreshes++;
-        expect(params.get('refresh_token')).toBe('first-refresh');
       }
       return HttpResponse.json({
         access_token: refreshing ? 'second-access' : 'first-access',
@@ -253,4 +253,12 @@ test('device sign-in protects refresh tokens and revalidates the same identity a
   });
   await restarted.verify(account.id);
   expect(refreshes).toBe(1);
+  now += 121000;
+  server.use(
+    http.get('https://api.github.com/user', () =>
+      HttpResponse.json({ id: 999, login: 'another-user' }),
+    ),
+  );
+  await expect(restarted.verify(account.id)).rejects.toMatchObject({ code: 'PROVIDER_ACCOUNT' });
+  expect((await restarted.accounts()).accounts).toEqual(checked.accounts);
 });

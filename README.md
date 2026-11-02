@@ -117,6 +117,8 @@ From a staged or unstaged file, choose **View**, then **Full comparison** for th
 
 ## Provider accounts (M6 in progress)
 
-Use **Provider accounts** to connect GitHub or GitHub Enterprise with a personal access token. Enter an HTTPS host origin and the token; OpenKraken validates the account before storing the credential with operating-system protection. Linux plaintext storage is refused. Account metadata remains available offline; **Forget** removes the local connection without revoking the remote token. Closing the dialog cancels an unfinished validation.
+Use **Provider accounts** for GitHub browser sign-in or a GitHub/GitHub Enterprise personal access token. Browser sign-in requires your application client ID with device flow enabled: enter the displayed code at GitHub and authorize the requested access. Private repository access is an explicit option. **Cancel GitHub sign-in** or closing the dialog retires the local authorization session.
 
-Device authorization, provider repository/PR workflows and supplying these credentials to Git remain in development. Existing Git credential helpers and SSH agents continue to handle clone/fetch/push. See [M6 progress](docs/verification/m6-progress.md).
+For a personal access token, enter an HTTPS host origin and the token. Both flows validate the account before storing credentials with operating-system protection; Linux plaintext storage is refused. **Verify** checks the connected identity and refreshes expiring device credentials when possible. Account metadata remains available offline; **Forget** removes the local connection without revoking tokens remotely.
+
+Provider repository/PR workflows, other providers and supplying these credentials to Git remain in development. A real OAuth application registration and live sign-in still require environment-specific verification. Existing Git credential helpers and SSH agents continue to handle clone/fetch/push. See [M6 progress](docs/verification/m6-progress.md).

@@ -55,3 +55,34 @@ test('provider IPC rejects malformed hosts and keeps credential requests out of 
       requestSchema.safeParse({ ...request, options: { ...request.options, origin } }).success,
     ).toBe(false);
 });
+
+test('device IPC accepts only session IDs for browser opening and rejects private challenge fields', () => {
+  const id = '00000000-0000-4000-8000-000000000000';
+  const open = { id, method: 'providerDeviceOpen', challengeId: id };
+  expect(requestSchema.safeParse(open).success).toBe(true);
+  expect(requestSchema.safeParse({ ...open, url: 'https://other.test' }).success).toBe(false);
+  expect(serviceRequestSchema.safeParse(open).success).toBe(false);
+  const response = {
+    id,
+    result: {
+      kind: 'providerDevice',
+      challenge: {
+        id,
+        userCode: 'ABCD-EFGH',
+        verificationUri: 'https://github.com/login/device',
+        expiresAt: 900000,
+        nextPollAt: 5000,
+      },
+    },
+  };
+  expect(serviceResponseSchema.safeParse(response).success).toBe(true);
+  expect(
+    serviceResponseSchema.safeParse({
+      ...response,
+      result: {
+        ...response.result,
+        challenge: { ...response.result.challenge, deviceCode: 'private' },
+      },
+    }).success,
+  ).toBe(false);
+});

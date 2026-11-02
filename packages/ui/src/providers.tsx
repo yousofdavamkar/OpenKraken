@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ProviderAccounts, Request } from '@openkraken/ipc-contract';
+import { GitHubSignIn } from './github-sign-in.js';
 type ProviderRequest = Extract<
   Request,
-  { method: 'providerAccounts' | 'providerConnect' | 'providerDisconnect' }
+  { method: 'providerAccounts' | 'providerConnect' | 'providerDisconnect' | 'providerVerify' }
 >;
 
 function AccountsDialog({ close }: { close: () => void }) {
@@ -13,6 +14,7 @@ function AccountsDialog({ close }: { close: () => void }) {
   const [state, setState] = useState<ProviderAccounts>();
   const [origin, setOrigin] = useState('https://github.com');
   const [pending, setPending] = useState(false);
+  const [deviceBusy, setDeviceBusy] = useState(false);
   const [error, setError] = useState<string>();
   const perform = async (request: ProviderRequest) => {
     active.current = request.id;
@@ -59,7 +61,7 @@ function AccountsDialog({ close }: { close: () => void }) {
           <strong>{account.login}</strong>
           <p>{account.origin}</p>
           <button
-            disabled={pending}
+            disabled={pending || deviceBusy}
             onClick={() =>
               void perform({
                 id: crypto.randomUUID(),
@@ -70,9 +72,29 @@ function AccountsDialog({ close }: { close: () => void }) {
           >
             Forget {account.login}
           </button>
+          <button
+            disabled={pending || deviceBusy}
+            onClick={() =>
+              void perform({
+                id: crypto.randomUUID(),
+                method: 'providerVerify',
+                accountId: account.id,
+              })
+            }
+          >
+            Verify {account.login}
+          </button>
         </section>
       ))}
       {state?.accounts.length === 0 && <p>No provider accounts connected.</p>}
+      <GitHubSignIn
+        enabled={!!state?.keychainAvailable && !pending}
+        onBusy={setDeviceBusy}
+        onConnected={(state) => {
+          setState(state);
+          setError(undefined);
+        }}
+      />
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -92,7 +114,7 @@ function AccountsDialog({ close }: { close: () => void }) {
             required
             value={origin}
             maxLength={2048}
-            disabled={pending}
+            disabled={pending || deviceBusy}
             onChange={(event) => setOrigin(event.target.value)}
           />
         </label>
@@ -105,7 +127,7 @@ function AccountsDialog({ close }: { close: () => void }) {
             autoComplete="off"
             spellCheck={false}
             maxLength={16384}
-            disabled={pending || !state?.keychainAvailable}
+            disabled={pending || deviceBusy || !state?.keychainAvailable}
           />
         </label>
         <p>
@@ -113,7 +135,9 @@ function AccountsDialog({ close }: { close: () => void }) {
           protection. Forgetting an account removes the local credential; revoke it at the provider
           if needed.
         </p>
-        <button disabled={pending || !state?.keychainAvailable}>Connect account</button>
+        <button disabled={pending || deviceBusy || !state?.keychainAvailable}>
+          Connect account
+        </button>
       </form>
       {error && (
         <p role="alert" className="error">
@@ -122,7 +146,7 @@ function AccountsDialog({ close }: { close: () => void }) {
       )}
       <div className="dialog-actions">
         <button
-          disabled={pending}
+          disabled={pending || deviceBusy}
           onClick={() => void perform({ id: crypto.randomUUID(), method: 'providerAccounts' })}
         >
           Refresh accounts

@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { providerAccountsSchema, providerConnectSchema } from './providers.js';
+import {
+  providerAccountsSchema,
+  providerConnectSchema,
+  deviceStartSchema,
+  deviceChallengeSchema,
+} from './providers.js';
 export * from './providers.js';
 
 export const oidSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
@@ -1048,6 +1053,37 @@ const workingRequests = [
     .strict(),
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  z
+    .object({ id: requestId, method: z.literal('providerDeviceStart'), options: deviceStartSchema })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerDevicePoll'),
+      challengeId: z.string().uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerDeviceCancel'),
+      challengeId: z.string().uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerDeviceOpen'),
+      challengeId: z.string().uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerVerify'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict(),
   z.object({ id: requestId, method: z.literal('providerAccounts') }).strict(),
   z
     .object({ id: requestId, method: z.literal('providerConnect'), options: providerConnectSchema })
@@ -1127,6 +1163,8 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('providerDevice'), challenge: deviceChallengeSchema }),
+  z.object({ kind: z.literal('providerDeviceOpened') }).strict(),
   z.object({ kind: z.literal('providerAccounts'), state: providerAccountsSchema }),
   z.object({ kind: z.literal('deleteRemotePreview'), plan: deleteRemotePlanSchema }),
   z.object({ kind: z.literal('authenticationAnswered'), accepted: z.boolean() }),

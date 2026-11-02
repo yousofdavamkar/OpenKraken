@@ -6,6 +6,7 @@ import {
   utilityProcess,
   session,
   safeStorage,
+  shell,
 } from 'electron';
 import type { IpcMainInvokeEvent, UtilityProcess } from 'electron';
 import { join } from 'node:path';
@@ -19,6 +20,8 @@ import {
   cancelSchema,
   serviceResponseSchema,
   providerAccountsSchema,
+  deviceChallengeSchema,
+  resultSchema,
 } from '@openkraken/ipc-contract';
 import type { Result, ServiceRequest } from '@openkraken/ipc-contract';
 import { AvatarCache } from './avatars.js';
@@ -26,6 +29,7 @@ import { fetchAvatar } from './avatar-provider.js';
 import { isTrustedDocument, windowPreferences } from './security.js';
 import { ProviderService } from './providers.js';
 import { GitHubProvider, ProviderError } from './github-provider.js';
+import { GitHubOAuth } from './github-device.js';
 import {
   ProviderVault,
   ProviderCredentialError,
@@ -156,6 +160,7 @@ function createWindow() {
     window = undefined;
     for (const id of pending.keys()) service?.postMessage({ id });
     for (const controller of providerRequests.values()) controller.abort();
+    providers?.deviceCancel();
   });
   void window.loadFile(htmlPath);
 }
@@ -187,25 +192,52 @@ else {
         if (
           request.method === 'providerAccounts' ||
           request.method === 'providerConnect' ||
-          request.method === 'providerDisconnect'
+          request.method === 'providerDisconnect' ||
+          request.method === 'providerVerify' ||
+          request.method === 'providerDeviceStart' ||
+          request.method === 'providerDevicePoll' ||
+          request.method === 'providerDeviceCancel' ||
+          request.method === 'providerDeviceOpen'
         ) {
+          const fetchProvider: typeof fetch = (input, init) =>
+            session
+              .fromPartition('openkraken-providers')
+              .fetch(input instanceof Request ? input.url : String(input), init);
           providers ??= new ProviderService(
             app.getPath('userData'),
             new ProviderVault(app.getPath('userData'), electronSecretProtection(safeStorage)),
-            new GitHubProvider((input, init) =>
-              session
-                .fromPartition('openkraken-providers')
-                .fetch(input instanceof Request ? input.url : String(input), init),
-            ),
+            new GitHubProvider(fetchProvider),
+            new GitHubOAuth(fetchProvider),
           );
           const controller = new AbortController();
           providerRequests.set(request.id, controller);
+          if (request.method === 'providerDeviceStart')
+            return {
+              kind: 'providerDevice',
+              challenge: deviceChallengeSchema.parse(
+                await providers.deviceStart(request.options, controller.signal),
+              ),
+            };
+          if (request.method === 'providerDevicePoll')
+            return resultSchema.parse(
+              await providers.devicePoll(request.challengeId, controller.signal),
+            );
+          if (request.method === 'providerDeviceCancel') {
+            providers.deviceCancel(request.challengeId);
+            return { kind: 'cancelled' };
+          }
+          if (request.method === 'providerDeviceOpen') {
+            await shell.openExternal(providers.deviceVerificationUri(request.challengeId));
+            return { kind: 'providerDeviceOpened' };
+          }
           const state =
             request.method === 'providerAccounts'
               ? await providers.accounts()
               : request.method === 'providerConnect'
                 ? await providers.connect(request.options, controller.signal)
-                : await providers.disconnect(request.accountId);
+                : request.method === 'providerVerify'
+                  ? await providers.verify(request.accountId, controller.signal)
+                  : await providers.disconnect(request.accountId);
           return { kind: 'providerAccounts', state: providerAccountsSchema.parse(state) };
         }
         avatars ??= new AvatarCache(app.getPath('userData'), fetchAvatar);
@@ -253,7 +285,12 @@ else {
         if (
           request.method === 'providerAccounts' ||
           request.method === 'providerConnect' ||
-          request.method === 'providerDisconnect'
+          request.method === 'providerDisconnect' ||
+          request.method === 'providerVerify' ||
+          request.method === 'providerDeviceStart' ||
+          request.method === 'providerDevicePoll' ||
+          request.method === 'providerDeviceCancel' ||
+          request.method === 'providerDeviceOpen'
         ) {
           if (
             (error instanceof ProviderError && error.code === 'CANCELLED') ||
@@ -305,6 +342,7 @@ else {
   // Keep the service and caches alive if a renderer cancels the window close.
   app.on('will-quit', (event) => {
     avatars?.close();
+    providers?.deviceCancel();
     for (const controller of providerRequests.values()) controller.abort();
     if ((!service && !providers) || quitting) return;
     event.preventDefault();

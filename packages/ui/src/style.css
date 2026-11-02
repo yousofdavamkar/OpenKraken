@@ -751,6 +751,22 @@ footer {
 .reference-dialog::backdrop {
   background: #0009;
 }
+.provider-dialog {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.github-sign-in {
+  margin: 16px 0;
+  padding: 16px 0;
+  border-block: 1px solid #354153;
+}
+.github-sign-in h3 {
+  margin: 0 0 12px;
+}
+.device-code {
+  font: 700 1.5rem monospace;
+  letter-spacing: 0.15em;
+}
 .reference-dialog form {
   display: grid;
   gap: 16px;
