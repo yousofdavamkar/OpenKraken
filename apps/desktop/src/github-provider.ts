@@ -1,5 +1,12 @@
 import { Octokit } from '@octokit/rest';
 import {
+  providerMergePreviewSchema,
+  providerMergePullSchema,
+  providerMergeResultSchema,
+  type ProviderMergePreview,
+  type ProviderMergePull,
+  type ProviderMergeResult,
+  type ProviderMergeMethod,
   providerPullTemplatesOptionsSchema,
   providerPullTemplateOptionsSchema,
   type ProviderPullTemplatesOptions,
@@ -50,6 +57,18 @@ import { ProviderError } from './provider-error.js';
 export { ProviderError } from './provider-error.js';
 import { loadPullTemplates, loadPullTemplate } from './github-templates.js';
 export interface ProviderDriver {
+  previewMerge(
+    origin: string,
+    token: string,
+    options: ProviderPullOptions,
+    signal?: AbortSignal,
+  ): Promise<ProviderMergePreview>;
+  mergePull(
+    origin: string,
+    token: string,
+    options: ProviderMergePull,
+    signal?: AbortSignal,
+  ): Promise<ProviderMergeResult>;
   pullTemplates(
     origin: string,
     token: string,
@@ -650,6 +669,119 @@ export class GitHubProvider implements ProviderDriver {
         throw new ProviderError(
           'PROVIDER_WRITE_UNCERTAIN',
           'The provider may have received this comment. Refresh comments and check before submitting again.',
+        );
+      }
+    });
+  }
+  async previewMerge(
+    origin: string,
+    token: string,
+    input: ProviderPullOptions,
+    signal?: AbortSignal,
+  ) {
+    const options = providerPullOptionsSchema.parse(input);
+    const settings = await this.request(origin, token, signal, async (client, headers) => {
+      const { data } = await client.repos.get({
+        headers,
+        owner: options.repository.owner,
+        repo: options.repository.name,
+      });
+      const flags = [data.allow_merge_commit, data.allow_squash_merge, data.allow_rebase_merge];
+      if (
+        typeof data.archived !== 'boolean' ||
+        flags.some((flag) => flag !== undefined && typeof flag !== 'boolean') ||
+        (data.permissions?.push !== undefined && typeof data.permissions.push !== 'boolean')
+      )
+        throw new ProviderError(
+          'PROVIDER_RESPONSE',
+          'The provider returned invalid repository merge settings.',
+        );
+      const methods: ProviderMergeMethod[] = [];
+      if (data.allow_merge_commit === true) methods.push('merge');
+      if (data.allow_squash_merge === true) methods.push('squash');
+      if (data.allow_rebase_merge === true) methods.push('rebase');
+      return { methods, archived: data.archived, canPush: data.permissions?.push ?? null };
+    });
+    const pullRequest = await this.pullRequest(origin, token, options, signal);
+    return providerMergePreviewSchema.parse({ ...settings, pullRequest });
+  }
+  async mergePull(origin: string, token: string, input: ProviderMergePull, signal?: AbortSignal) {
+    const options = providerMergePullSchema.parse(input);
+    const preview = await this.previewMerge(
+      origin,
+      token,
+      { repository: options.repository, number: options.number },
+      signal,
+    );
+    const current = preview.pullRequest;
+    if (
+      current.head.sha !== options.revision.head ||
+      current.base.sha !== options.revision.base ||
+      current.head.ref !== options.revision.headRef ||
+      current.base.ref !== options.revision.baseRef
+    )
+      throw new ProviderError(
+        'STALE_PROVIDER_PULL',
+        'The pull-request commits or branches changed. Refresh the merge preview before continuing.',
+      );
+    if (current.state !== 'open' || current.merged)
+      throw new ProviderError(
+        'PROVIDER_PULL_CLOSED',
+        'This pull request is closed. Refresh the merge preview before continuing.',
+      );
+    if (current.draft)
+      throw new ProviderError('PROVIDER_PULL_DRAFT', 'Draft pull requests cannot be merged.');
+    if (preview.archived || preview.canPush === false)
+      throw new ProviderError(
+        'PROVIDER_MERGE_ACCESS',
+        'The repository is archived or this account cannot push to it.',
+      );
+    if (!preview.methods.includes(options.method))
+      throw new ProviderError(
+        'PROVIDER_MERGE_METHOD',
+        'The selected merge method is no longer available. Refresh the merge preview.',
+      );
+    if (current.mergeable !== true)
+      throw new ProviderError(
+        'PROVIDER_MERGE_NOT_READY',
+        'The provider has not confirmed this pull request can merge. Resolve conflicts or refresh the merge preview.',
+      );
+    signal?.throwIfAborted();
+    return this.request(origin, token, signal, async (client, headers) => {
+      try {
+        const { data } = await client.pulls.merge({
+          headers,
+          owner: options.repository.owner,
+          repo: options.repository.name,
+          pull_number: options.number,
+          sha: options.revision.head,
+          merge_method: options.method,
+          ...(options.commitTitle === undefined ? {} : { commit_title: options.commitTitle }),
+          ...(options.commitMessage === undefined ? {} : { commit_message: options.commitMessage }),
+        });
+        if (data?.merged === false)
+          throw new ProviderError(
+            'PROVIDER_MERGE_REJECTED',
+            'The provider did not merge this pull request. Refresh its state and review the repository requirements before trying again.',
+          );
+        const parsed = providerMergeResultSchema.safeParse({ sha: data?.sha });
+        if (data?.merged !== true || !parsed.success)
+          throw new Error('Unexpected merge acknowledgment');
+        return parsed.data;
+      } catch (error) {
+        if (error instanceof ProviderError && error.code === 'PROVIDER_MERGE_REJECTED') throw error;
+        const status =
+          typeof error === 'object' && error !== null && 'status' in error
+            ? Number(error.status)
+            : 0;
+        if ([400, 401, 403, 404, 405, 409, 422, 429].includes(status))
+          throw new ProviderError(
+            'PROVIDER_MERGE_REJECTED',
+            'The provider rejected the merge. Refresh the preview and check permissions, branch protection, required reviews and checks, or whether a merge queue is required.',
+          );
+        throw new ProviderError(
+          'PROVIDER_WRITE_UNCERTAIN',
+          'The provider may have merged this pull request. Check its current merge status before trying again.',
         );
       }
     });

@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import {
+  providerMergePullSchema,
+  providerMergePreviewSchema,
+  providerMergeResultSchema,
   providerPullSummarySchema,
   providerPullSourceSchema,
   providerCreatePullSchema,
@@ -1133,6 +1136,22 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerMergePreview'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerPullOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerMergePull'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerMergePullSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerPreviewPull'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerPullSourceSchema,
@@ -1372,6 +1391,10 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z
+    .object({ kind: z.literal('providerMergePreview'), preview: providerMergePreviewSchema })
+    .strict(),
+  z.object({ kind: z.literal('providerPullMerged'), merge: providerMergeResultSchema }).strict(),
   z
     .object({
       kind: z.literal('providerPullCreationPreview'),

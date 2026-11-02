@@ -444,3 +444,40 @@ export type ProviderPullTemplatesOptions = z.infer<typeof providerPullTemplatesO
 export type ProviderPullTemplateOptions = z.infer<typeof providerPullTemplateOptionsSchema>;
 export type ProviderPullTemplates = z.infer<typeof providerPullTemplatesSchema>;
 export type ProviderPullTemplate = z.infer<typeof providerPullTemplateSchema>;
+
+export const providerMergeMethodSchema = z.enum(['merge', 'squash', 'rebase']);
+export const providerMergePreviewSchema = z
+  .object({
+    pullRequest: providerPullDetailsSchema,
+    methods: z.array(providerMergeMethodSchema).max(3),
+    archived: z.boolean(),
+    canPush: z.boolean().nullable(),
+  })
+  .strict();
+export const providerMergeRevisionSchema = providerPullRevisionSchema
+  .extend({ headRef: providerBranchNameSchema, baseRef: providerBranchNameSchema })
+  .strict();
+export const providerMergePullSchema = providerPullOptionsSchema
+  .extend({
+    revision: providerMergeRevisionSchema,
+    method: providerMergeMethodSchema,
+    commitTitle: z
+      .string()
+      .min(1)
+      .max(256)
+      .refine((value) => !!value.trim() && !/[\r\n]/.test(value), 'Enter a single-line title')
+      .optional(),
+    commitMessage: z.string().max(65536).optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.method !== 'rebase' ||
+      (value.commitTitle === undefined && value.commitMessage === undefined),
+    'Rebase preserves commit messages',
+  );
+export const providerMergeResultSchema = z.object({ sha: providerCommitSchema }).strict();
+export type ProviderMergeMethod = z.infer<typeof providerMergeMethodSchema>;
+export type ProviderMergePreview = z.infer<typeof providerMergePreviewSchema>;
+export type ProviderMergePull = z.infer<typeof providerMergePullSchema>;
+export type ProviderMergeResult = z.infer<typeof providerMergeResultSchema>;

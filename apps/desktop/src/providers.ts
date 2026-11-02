@@ -3,6 +3,8 @@ import { mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import {
+  providerMergePullSchema,
+  type ProviderMergePull,
   providerPullTemplatesOptionsSchema,
   providerPullTemplateOptionsSchema,
   type ProviderPullTemplatesOptions,
@@ -223,6 +225,20 @@ export class ProviderService {
       const options = providerPullTemplateOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
       return this.github.pullTemplate(account.origin, token, options, signal);
+    });
+  }
+  previewMerge(id: string, input: ProviderPullOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerPullOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.previewMerge(account.origin, token, options, signal);
+    });
+  }
+  mergePull(id: string, input: ProviderMergePull, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerMergePullSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.mergePull(account.origin, token, options, signal);
     });
   }
   previewPull(id: string, input: ProviderPullSource, signal?: AbortSignal) {

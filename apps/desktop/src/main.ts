@@ -244,6 +244,8 @@ else {
           );
         }
         if (
+          request.method === 'providerMergePreview' ||
+          request.method === 'providerMergePull' ||
           request.method === 'providerPreviewPull' ||
           request.method === 'providerCreatePull' ||
           request.method === 'providerPullTemplates' ||
@@ -269,6 +271,24 @@ else {
           const controller = new AbortController();
           providerRequests.set(request.id, controller);
 
+          if (request.method === 'providerMergePreview')
+            return resultSchema.parse({
+              kind: 'providerMergePreview',
+              preview: await providers.previewMerge(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerMergePull')
+            return resultSchema.parse({
+              kind: 'providerPullMerged',
+              merge: await providers.mergePull(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerPreviewPull')
             return resultSchema.parse({
               kind: 'providerPullCreationPreview',
@@ -467,6 +487,8 @@ else {
         if (
           request.method === 'providerGit' ||
           (request.method === 'clone' && !!request.providerAccountId) ||
+          request.method === 'providerMergePreview' ||
+          request.method === 'providerMergePull' ||
           request.method === 'providerPreviewPull' ||
           request.method === 'providerCreatePull' ||
           request.method === 'providerPullTemplates' ||

@@ -454,3 +454,39 @@ test('PR creation IPC requires reviewed commits and literal branch/template sele
       requestSchema.safeParse({ ...template, options: { ...template.options, path } }).success,
     ).toBe(false);
 });
+
+test('PR merge IPC requires explicit method and reviewed branch identities without rule bypass options', () => {
+  const common = { id: '00000000-0000-4000-8000-000000000000', accountId: 'a'.repeat(64) };
+  const options = {
+    repository: { owner: 'team', name: 'project' },
+    number: 1,
+    revision: { head: '1'.repeat(40), base: '2'.repeat(40), headRef: 'feature', baseRef: 'main' },
+    method: 'squash',
+  };
+  const merge = { ...common, method: 'providerMergePull', options };
+  const preview = {
+    ...common,
+    method: 'providerMergePreview',
+    options: { repository: options.repository, number: 1 },
+  };
+  expect(requestSchema.safeParse(merge).success).toBe(true);
+  expect(requestSchema.safeParse(preview).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(merge).success).toBe(false);
+  expect(serviceRequestSchema.safeParse(preview).success).toBe(false);
+  for (const extra of [
+    { revision: undefined },
+    { revision: { head: options.revision.head, base: options.revision.base } },
+    { method: 'queue' },
+    { method: 'rebase', commitTitle: 'Custom' },
+    { commitTitle: ' ' },
+    { commitTitle: 'x\ny' },
+    { commitMessage: 'x'.repeat(65537) },
+    { bypass_rules: true },
+    { merge_action: 'merge_queue' },
+    { url: 'https://other.test' },
+    { token: 'secret' },
+  ])
+    expect(requestSchema.safeParse({ ...merge, options: { ...options, ...extra } }).success).toBe(
+      false,
+    );
+});
