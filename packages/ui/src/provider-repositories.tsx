@@ -1,6 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
-import type { ProviderAccounts, ProviderRepository } from '@openkraken/ipc-contract';
+import type {
+  ProviderAccount,
+  ProviderAccounts,
+  ProviderRepository,
+} from '@openkraken/ipc-contract';
 
 function RepositoryPages({
   accountId,
@@ -185,7 +189,12 @@ function RepositoryPages({
 export function ProviderRepositoryPicker({
   onSelect,
 }: {
-  onSelect: (url: string, accountId: string, repository: ProviderRepository) => void;
+  onSelect: (
+    url: string,
+    accountId: string,
+    repository: ProviderRepository,
+    provider: ProviderAccount['provider'],
+  ) => void;
 }) {
   const [state, setState] = useState<ProviderAccounts>();
   const [accountId, setAccountId] = useState('');
@@ -250,7 +259,10 @@ export function ProviderRepositoryPicker({
         <RepositoryPages
           key={accountId}
           accountId={accountId}
-          onSelect={(repository) => onSelect(repository.cloneUrl, accountId, repository)}
+          onSelect={(repository) => {
+            const account = state.accounts.find((account) => account.id === accountId);
+            if (account) onSelect(repository.cloneUrl, accountId, repository, account.provider);
+          }}
         />
       )}
     </section>

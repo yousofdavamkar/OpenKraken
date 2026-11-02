@@ -17,6 +17,7 @@ type ReadMethod =
   | 'providerIssueComments'
   | 'providerPullRequests'
   | 'providerPullRequest'
+  | 'providerMergeRequest'
   | 'providerPullFiles'
   | 'providerPullReviews'
   | 'providerPullComments'

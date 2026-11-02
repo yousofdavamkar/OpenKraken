@@ -1,11 +1,13 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import type {
+  ProviderAccount,
   ProviderPullDetails,
   ProviderPullListOptions,
   ProviderPullSummary,
 } from '@openkraken/ipc-contract';
 import { CommentDiscussion, PullFiles, PullReviews, WriteReview } from './pull-review.js';
+import { MergeRequestDetails } from './merge-request-details.js';
 import { PullChecks } from './pull-checks.js';
 import { MergePullRequest } from './pull-merge.js';
 import { CreatePullRequest } from './pull-create.js';
@@ -13,6 +15,7 @@ import { ProviderRepositoryPicker } from './provider-repositories.js';
 import { ProviderPolling, pollNumberedPages, useProviderPoll } from './provider-polling.js';
 
 type RepositorySelection = {
+  provider: ProviderAccount['provider'];
   accountId: string;
   origin: string;
   repository: ProviderPullListOptions['repository'];
@@ -199,6 +202,9 @@ function PullPages({
   target: RepositorySelection;
   state: ProviderPullListOptions['state'];
 }) {
+  const noun = target.provider === 'gitlab' ? 'merge' : 'pull';
+  const title = target.provider === 'gitlab' ? 'Merge' : 'Pull';
+  const prefix = target.provider === 'gitlab' ? '!' : '#';
   const [pulls, setPulls] = useState<ProviderPullSummary[]>([]);
   const [page, setPage] = useState(1);
   const [next, setNext] = useState<number | null>(null);
@@ -242,7 +248,7 @@ function PullPages({
         } else if (result.kind === 'error') setError(result.message);
       })
       .catch(() => {
-        if (alive) setError('Pull requests could not be loaded.');
+        if (alive) setError(`${title} requests could not be loaded.`);
       })
       .finally(() => {
         if (alive) setPending(false);
@@ -251,10 +257,10 @@ function PullPages({
       alive = false;
       void window.openkraken.cancel(id);
     };
-  }, [target, state, page, attempt]);
+  }, [target, state, page, attempt, title]);
   const search = query.trim().toLocaleLowerCase();
   const visible = pulls.filter((pr) =>
-    `#${pr.number} ${pr.title} ${pr.author ?? ''}`.toLocaleLowerCase().includes(search),
+    `${prefix}${pr.number} ${pr.title} ${pr.author ?? ''}`.toLocaleLowerCase().includes(search),
   );
   useProviderPoll(
     pending,
@@ -273,13 +279,15 @@ function PullPages({
             options: { repository: target.repository, state, page },
           });
           if (result.kind !== 'providerPullRequests')
-            throw new Error('Pull requests could not be refreshed.');
+            throw new Error(`${title} requests could not be refreshed.`);
           return { ...result.page, items: result.page.pullRequests };
         },
         (pull) => pull.number,
       );
       const matches = result.items.filter((pull) =>
-        `#${pull.number} ${pull.title} ${pull.author ?? ''}`.toLocaleLowerCase().includes(search),
+        `${prefix}${pull.number} ${pull.title} ${pull.author ?? ''}`
+          .toLocaleLowerCase()
+          .includes(search),
       );
       return {
         commit: () => {
@@ -314,9 +322,9 @@ function PullPages({
   };
   return (
     <div className="pull-browser">
-      <section aria-label="Pull-request list">
+      <section aria-label={`${title}-request list`}>
         <label>
-          Search loaded pull requests
+          Search loaded {noun} requests
           <input
             type="search"
             value={query}
@@ -329,14 +337,15 @@ function PullPages({
           />
         </label>
         <p role="status">
-          {pulls.length} pull request{pulls.length === 1 ? '' : 's'} loaded · {visible.length} match
+          {pulls.length} {noun} request{pulls.length === 1 ? '' : 's'} loaded · {visible.length}{' '}
+          match
           {pending ? ' · Loading…' : ''}
         </p>
         <div
           ref={scroll}
           className="provider-repositories pull-list"
           role="listbox"
-          aria-label="Pull requests"
+          aria-label={`${title} requests`}
           tabIndex={0}
           aria-activedescendant={
             visible[active] ? `${listId}-${visible[active].number}` : undefined
@@ -363,7 +372,7 @@ function PullPages({
                   aria-selected={item.index === active}
                   aria-posinset={item.index + 1}
                   aria-setsize={visible.length}
-                  aria-label={`Open pull request #${pr.number}: ${pr.title}`}
+                  aria-label={`Open ${noun} request ${prefix}${pr.number}: ${pr.title}`}
                   className="provider-repository"
                   style={{
                     position: 'absolute',
@@ -377,16 +386,19 @@ function PullPages({
                   }}
                 >
                   <strong>
-                    #{pr.number} {pr.title}
+                    {prefix}
+                    {pr.number} {pr.title}
                   </strong>
                   <span>
-                    {pr.mergedAt
+                    {pr.state === 'merged' || (target.provider === 'github' && pr.mergedAt)
                       ? 'Merged'
-                      : pr.state === 'closed'
-                        ? 'Closed'
-                        : pr.draft
-                          ? 'Draft'
-                          : 'Open'}{' '}
+                      : pr.state === 'locked'
+                        ? 'Locked'
+                        : pr.state === 'closed'
+                          ? 'Closed'
+                          : pr.draft
+                            ? 'Draft'
+                            : 'Open'}{' '}
                     · {pr.author ?? 'Deleted account'}
                   </span>
                 </div>
@@ -396,7 +408,9 @@ function PullPages({
         </div>
         {!pending && !error && !visible.length && (
           <p>
-            {pulls.length ? 'No loaded pull requests match.' : 'No pull requests in this state.'}
+            {pulls.length
+              ? `No loaded ${noun} requests match.`
+              : `No ${noun} requests in this state.`}
           </p>
         )}
         {error && (
@@ -407,17 +421,17 @@ function PullPages({
               disabled={pending}
               onClick={() => setAttempt((value) => value + 1)}
             >
-              Retry pull requests
+              Retry {noun} requests
             </button>
           </p>
         )}
         {next !== null && !error && (
           <button type="button" disabled={pending} onClick={() => setPage(next)}>
-            Load more pull requests
+            Load more {noun} requests
           </button>
         )}
         {limited && (
-          <p>Showing at most 10,000 pull requests. Change the state filter to narrow the list.</p>
+          <p>Showing at most 10,000 {noun} requests. Change the state filter to narrow the list.</p>
         )}
         <button
           type="button"
@@ -432,27 +446,31 @@ function PullPages({
             scroll.current?.scrollTo(0, 0);
           }}
         >
-          Refresh pull requests
+          Refresh {noun} requests
         </button>
         <p>Search covers loaded results. Use arrow keys and Enter to open details.</p>
       </section>
       {selected !== undefined ? (
-        <PullDetails
-          key={selected}
-          target={target}
-          number={selected}
-          refreshList={() => {
-            setPulls([]);
-            setSelected(undefined);
-            setNext(null);
-            setPage(1);
-            setAttempt((value) => value + 1);
-            setActive(0);
-            scroll.current?.scrollTo(0, 0);
-          }}
-        />
+        target.provider === 'gitlab' ? (
+          <MergeRequestDetails key={selected} target={target} number={selected} />
+        ) : (
+          <PullDetails
+            key={selected}
+            target={target}
+            number={selected}
+            refreshList={() => {
+              setPulls([]);
+              setSelected(undefined);
+              setNext(null);
+              setPage(1);
+              setAttempt((value) => value + 1);
+              setActive(0);
+              scroll.current?.scrollTo(0, 0);
+            }}
+          />
+        )
       ) : (
-        <p>Select a pull request to view its details.</p>
+        <p>Select a {noun} request to view its details.</p>
       )}
     </div>
   );
@@ -469,41 +487,59 @@ function PullRequestDialog({ close }: { close: () => void }) {
     <dialog
       ref={dialog}
       className="reference-dialog pull-request-dialog"
-      aria-label="Browse pull requests"
+      aria-label={target?.provider === 'gitlab' ? 'Browse merge requests' : 'Browse pull requests'}
       onCancel={(event) => {
         event.preventDefault();
         close();
       }}
     >
-      <h2>Pull requests</h2>
+      <h2>{target?.provider === 'gitlab' ? 'Merge requests' : 'Pull requests'}</h2>
       {target ? (
         <>
           <p>
             {target.origin}/{target.repository.owner}/{target.repository.name}
           </p>
           <div className="dialog-actions">
-            <CreatePullRequest
-              target={target}
-              created={() => {
-                setState('open');
-                setVersion((value) => value + 1);
-              }}
-            />
+            {target.provider === 'github' && (
+              <CreatePullRequest
+                target={target}
+                created={() => {
+                  setState('open');
+                  setVersion((value) => value + 1);
+                }}
+              />
+            )}
             <button type="button" onClick={() => setTarget(undefined)}>
               Choose repository
             </button>
             <label>
-              Pull-request state{' '}
+              {target.provider === 'gitlab' ? 'Merge-request state' : 'Pull-request state'}{' '}
               <select
-                aria-label="Pull-request state"
+                aria-label={
+                  target.provider === 'gitlab' ? 'Merge-request state' : 'Pull-request state'
+                }
                 value={state}
                 onChange={(event) => {
                   const value = event.target.value;
-                  if (value === 'open' || value === 'closed' || value === 'all') setState(value);
+                  if (
+                    value === 'open' ||
+                    value === 'closed' ||
+                    value === 'all' ||
+                    (target.provider === 'gitlab' && (value === 'merged' || value === 'locked'))
+                  )
+                    setState(value);
                 }}
               >
                 <option value="open">Open</option>
-                <option value="closed">Closed (including merged)</option>
+                <option value="closed">
+                  {target.provider === 'gitlab' ? 'Closed' : 'Closed (including merged)'}
+                </option>
+                {target.provider === 'gitlab' && (
+                  <>
+                    <option value="merged">Merged</option>
+                    <option value="locked">Locked</option>
+                  </>
+                )}
                 <option value="all">All</option>
               </select>
             </label>
@@ -518,9 +554,10 @@ function PullRequestDialog({ close }: { close: () => void }) {
         </>
       ) : (
         <ProviderRepositoryPicker
-          onSelect={(url, accountId, repository) => {
+          onSelect={(url, accountId, repository, provider) => {
             setState('open');
             setTarget({
+              provider,
               accountId,
               origin: new URL(url).origin,
               repository: { owner: repository.owner, name: repository.name },

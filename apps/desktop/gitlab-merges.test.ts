@@ -177,3 +177,53 @@ test('GitLab refuses foreign projects, wrong local numbers, partial revisions an
     code: 'PROVIDER_RESPONSE',
   });
 });
+
+test('GitLab all-state pages omit the filter, bound metadata and reject wrong-state results', async () => {
+  const { service, account, origin } = await setup('all');
+  let entries: unknown[] = [gitlabMergeFixture(1), { ...gitlabMergeFixture(2), state: 'merged' }];
+  server.use(
+    http.get(`${origin}/api/v4/projects/77/merge_requests`, ({ request }) => {
+      const url = new URL(request.url);
+      expect(url.searchParams.get('scope')).toBe('all');
+      if (url.searchParams.get('page') === '2') expect(url.searchParams.has('state')).toBe(false);
+      return HttpResponse.json(entries);
+    }),
+  );
+  const page = await service.pullRequests(account.id, { repository, state: 'all', page: 2 });
+  expect(page.pullRequests.map((request) => request.state)).toEqual(['open', 'merged']);
+  expect(page.nextPage).toBeNull();
+  await expect(
+    service.pullRequests(account.id, { repository, state: 'open', page: 1 }),
+  ).rejects.toMatchObject({ code: 'PROVIDER_RESPONSE' });
+  entries = Array.from({ length: 101 }, (_, i) => gitlabMergeFixture(i + 1));
+  await expect(
+    service.pullRequests(account.id, { repository, state: 'all', page: 2 }),
+  ).rejects.toMatchObject({ code: 'PROVIDER_RESPONSE' });
+});
+
+test('Cancelling GitLab detail reads aborts transport and never returns late metadata', async () => {
+  const { service, account, origin } = await setup('cancel');
+  let markStarted!: () => void;
+  let markAborted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const aborted = new Promise<void>((resolve) => {
+    markAborted = resolve;
+  });
+  server.use(
+    http.get(`${origin}/api/v4/projects/77/merge_requests/7`, async ({ request }) => {
+      markStarted();
+      request.signal.addEventListener('abort', () => markAborted(), { once: true });
+      await aborted;
+      return HttpResponse.json(gitlabMergeFixture(7));
+    }),
+  );
+  const controller = new AbortController();
+  const pending = service.mergeRequest(account.id, { repository, number: 7 }, controller.signal);
+  const rejected = expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
+  await started;
+  controller.abort();
+  await rejected;
+  await aborted;
+});
