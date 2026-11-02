@@ -5,6 +5,7 @@ import type {
   ProviderPullListOptions,
   ProviderPullSummary,
 } from '@openkraken/ipc-contract';
+import { PullFiles, PullReviews, WriteReview } from './pull-review.js';
 import { ProviderRepositoryPicker } from './provider-repositories.js';
 
 type RepositorySelection = {
@@ -13,6 +14,8 @@ type RepositorySelection = {
   repository: ProviderPullListOptions['repository'];
 };
 function PullDetails({ target, number }: { target: RepositorySelection; number: number }) {
+  const [tab, setTab] = useState<'details' | 'files' | 'reviews'>('details');
+  const [reviewsVersion, setReviewsVersion] = useState(0);
   const [detail, setDetail] = useState<ProviderPullDetails>();
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
@@ -87,17 +90,40 @@ function PullDetails({ target, number }: { target: RepositorySelection; number: 
                 ? 'Can merge automatically'
                 : 'Cannot merge automatically'}
           </p>
-          <p className="pull-url">{detail.url}</p>
-          <pre className="pull-body">{detail.body || 'No description provided.'}</pre>
-          <details>
-            <summary>Commit IDs</summary>
-            <p>
-              Head: <code>{detail.head.sha}</code>
-            </p>
-            <p>
-              Base: <code>{detail.base.sha}</code>
-            </p>
-          </details>
+          <div className="dialog-actions" aria-label="Pull-request sections">
+            <button aria-pressed={tab === 'details'} onClick={() => setTab('details')}>
+              Details
+            </button>
+            <button aria-pressed={tab === 'files'} onClick={() => setTab('files')}>
+              Files
+            </button>
+            <button aria-pressed={tab === 'reviews'} onClick={() => setTab('reviews')}>
+              Reviews
+            </button>
+            <WriteReview
+              context={{ ...target, detail }}
+              submitted={() => setReviewsVersion((value) => value + 1)}
+            />
+          </div>
+          {tab === 'files' && <PullFiles context={{ ...target, detail }} />}
+          {tab === 'reviews' && (
+            <PullReviews key={reviewsVersion} context={{ ...target, detail }} />
+          )}
+          {tab === 'details' && (
+            <>
+              <p className="pull-url">{detail.url}</p>
+              <pre className="pull-body">{detail.body || 'No description provided.'}</pre>
+              <details>
+                <summary>Commit IDs</summary>
+                <p>
+                  Head: <code>{detail.head.sha}</code>
+                </p>
+                <p>
+                  Base: <code>{detail.base.sha}</code>
+                </p>
+              </details>
+            </>
+          )}
         </>
       )}
       <button type="button" disabled={pending} onClick={() => setAttempt((value) => value + 1)}>

@@ -1351,3 +1351,62 @@ footer {
   border-radius: 4px;
   background: #10151e;
 }
+.pr-files {
+  height: 180px;
+  overflow: auto;
+  border: 1px solid var(--border);
+}
+.pr-file {
+  padding: 10px;
+  cursor: pointer;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.pr-file[aria-selected='true'] {
+  background: #243b4b;
+}
+.pr-reviews {
+  height: 320px;
+  overflow: auto;
+}
+.pr-reviews article {
+  box-sizing: border-box;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.pr-reviews pre,
+.pr-review-dialog pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow: auto;
+  font: inherit;
+}
+.pr-review-dialog {
+  width: min(680px, calc(100vw - 64px));
+  max-width: none;
+}
+.pr-review-dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-block: 12px;
+}
+.pr-patch-added {
+  background: #123729;
+}
+.pr-patch-removed {
+  background: #44252a;
+}
+.pr-patch-hunk {
+  color: #80bfff;
+  background: #1a293b;
+}
+
+.pr-files:focus .pr-file[data-active='true'] {
+  outline: 1px solid #80bfff;
+  outline-offset: -2px;
+}
