@@ -22,6 +22,8 @@ The desktop must clear the password after every submission attempt and on close,
 
 ProviderService/MSW tests cover Community/Enterprise fields, self-managed endpoints, exact SHA/password delivery, own-approval removal, changed snapshots and heads, unavailable permissions, foreign targets, inconsistent users, duplicate/bounded data, sanitized refusal/uncertainty and cancellation without retries. Strict IPC rejects missing reviews, invalid heads, reset-all actions and passwords in reads or removals.
 
+The Electron flow covers bounded user-list rendering and keyboard reachability, literal rule names, review before confirmation, changed-state refusal and password clearing, exact payload delivery, uncertain own-approval removal with read-only inspection, and cancelled review without writes. Approval status participates in scheduled refresh and pauses while an action dialog is open.
+
 Rule administration and full per-rule eligibility configuration are not part of this workflow. Live GitLab writes and actual project SAML behavior remain unverified.
 
 ## Public reference
