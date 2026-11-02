@@ -150,6 +150,8 @@ export function ProviderPolling({
     document.addEventListener('pointerdown', session.invalidate, true);
     document.addEventListener('keydown', session.invalidate, true);
     document.addEventListener('wheel', session.invalidate, true);
+    document.addEventListener('input', session.invalidate, true);
+    document.addEventListener('change', session.invalidate, true);
     const delay = () => Math.max(Math.min(60, minutes * 2 ** failures) * 60000, minimumInterval);
     const schedule = (deadline = Math.max(lastFinished + delay(), retryAt)) => {
       if (!stopped)
@@ -237,6 +239,8 @@ export function ProviderPolling({
       document.removeEventListener('pointerdown', session.invalidate, true);
       document.removeEventListener('keydown', session.invalidate, true);
       document.removeEventListener('wheel', session.invalidate, true);
+      document.removeEventListener('input', session.invalidate, true);
+      document.removeEventListener('change', session.invalidate, true);
     };
   }, [accountId, minutes, session]);
   return (

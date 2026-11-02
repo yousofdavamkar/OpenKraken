@@ -279,6 +279,32 @@ test('scheduled refresh honors provider intervals, keeps complete pages on failu
         ),
       )
       .toBe(true);
+    await browser.getByRole('searchbox', { name: 'Search loaded issues' }).fill('Issue 1');
+    await expect
+      .poll(() =>
+        app.evaluate(
+          () =>
+            (globalThis as typeof globalThis & { pollingControl: { cancelled: boolean } })
+              .pollingControl.cancelled,
+        ),
+      )
+      .toBe(true);
+    await app.evaluate(() => {
+      Object.assign((globalThis as typeof globalThis & { pollingControl: object }).pollingControl, {
+        started: false,
+        cancelled: false,
+      });
+    });
+    await advance(120000);
+    await expect
+      .poll(() =>
+        app.evaluate(
+          () =>
+            (globalThis as typeof globalThis & { pollingControl: { started: boolean } })
+              .pollingControl.started,
+        ),
+      )
+      .toBe(true);
     await browser.getByLabel('Automatic refresh', { exact: true }).selectOption('0');
     await expect
       .poll(() =>
@@ -301,6 +327,55 @@ test('scheduled refresh honors provider intervals, keeps complete pages on failu
     await page.getByRole('button', { name: 'Issues', exact: true }).click();
     await browser.getByRole('option', { name: 'Select team/project', exact: true }).click();
     await expect(browser.getByLabel('Automatic refresh', { exact: true })).toHaveValue('0');
+    await expect(
+      browser.getByRole('option', { name: 'Open issue #1: Issue 1 changed', exact: true }),
+    ).toBeVisible();
+    await browser.getByLabel('Automatic refresh', { exact: true }).selectOption('1');
+    const hiddenCount = (await pages()).length;
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.hide());
+    await expect
+      .poll(() =>
+        app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible()),
+      )
+      .toBe(false);
+    await advance(300000);
+    expect((await pages()).length).toBe(hiddenCount);
+    await app.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0]!;
+      window.show();
+      window.focus();
+      Object.assign((globalThis as typeof globalThis & { pollingControl: object }).pollingControl, {
+        blocked: true,
+        started: false,
+        cancelled: false,
+      });
+    });
+    await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe('visible');
+    await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
+    await advance(120000);
+    await expect
+      .poll(() =>
+        app.evaluate(
+          () =>
+            (globalThis as typeof globalThis & { pollingControl: { started: boolean } })
+              .pollingControl.started,
+        ),
+      )
+      .toBe(true);
+    await browser.getByRole('button', { name: 'Choose repository', exact: true }).click();
+    await expect
+      .poll(() =>
+        app.evaluate(
+          () =>
+            (globalThis as typeof globalThis & { pollingControl: { cancelled: boolean } })
+              .pollingControl.cancelled,
+        ),
+      )
+      .toBe(true);
+    const closedCount = (await pages()).length;
+    await browser.getByRole('button', { name: 'Close', exact: true }).click();
+    await advance(600000);
+    expect((await pages()).length).toBe(closedCount);
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });
