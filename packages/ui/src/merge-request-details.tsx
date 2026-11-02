@@ -154,6 +154,7 @@ export function MergeRequestDetails({
             <pre className="pull-body">{detail.body || 'No description.'}</pre>
           ) : tab === 'discussions' ? (
             <MergeRequestDiscussions
+              origin={new URL(detail.url).origin}
               accountId={target.accountId}
               repository={target.repository}
               number={number}

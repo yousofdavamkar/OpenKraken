@@ -20,7 +20,7 @@ Uncertain results require read-only inspection before another deliberate review.
 
 ## Verification and scope
 
-ProviderService/MSW tests cover payload delivery, nested projects and self-managed origins, stale notes and altered drafts, resolve/reopen, invalid targets, unavailable resolution, system notes, explicit refusals, malformed acknowledgments and cancellation without retries. Strict public IPC excludes these operations from the Git utility service. Live-provider writes are not exercised.
+ProviderService/MSW tests cover payload delivery, nested projects and self-managed origins, stale notes and altered drafts, resolve/reopen, invalid targets, unavailable resolution, system notes, explicit refusals, malformed acknowledgments and cancellation without retries. Strict public IPC excludes these operations from the Git utility service. The desktop composer freezes reviewed text, displays current thread notes with the existing virtualized viewer, preserves drafts on stale/error/cancelled outcomes, and refreshes discussion browsing after a completed or uncertain action. Uncertain-result inspection uses manual bounded discussion pages and never repeats the write. Modal actions pause scheduled refresh; Escape preserves the parent panel and offers keep/discard for unsent drafts. Live-provider writes are not exercised.
 
 Inline posting, approval reviews, note edits/deletion, suggestions and attachments remain separate work.
 

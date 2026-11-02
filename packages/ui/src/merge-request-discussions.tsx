@@ -8,6 +8,11 @@ import type {
 } from '@openkraken/ipc-contract';
 import { pollNumberedPages, useProviderPoll } from './provider-polling.js';
 
+import {
+  MergeDiscussionActionDialog,
+  type MergeDiscussionIntent,
+} from './merge-discussion-actions.js';
+
 type Revision = ProviderMergeRequestDetails['diffRefs'];
 function DiffContext({
   position,
@@ -198,7 +203,9 @@ export function MergeRequestDiscussions({
   repository,
   number,
   revision,
-}: ProviderPullOptions & { accountId: string; revision: Revision }) {
+  origin,
+}: ProviderPullOptions & { accountId: string; origin: string; revision: Revision }) {
+  const [action, setAction] = useState<MergeDiscussionIntent>();
   const [discussions, setDiscussions] = useState<ProviderMergeRequestDiscussion[]>([]);
   const [page, setPage] = useState(1);
   const [attempt, setAttempt] = useState(0);
@@ -264,7 +271,7 @@ export function MergeRequestDiscussions({
         .includes(search),
     );
   const visible = discussions.filter(matches);
-  useProviderPoll(pending, `${number}/${page}/${attempt}`, async (read) => {
+  useProviderPoll(pending || !!action, `${number}/${page}/${attempt}`, async (read) => {
     const activeId = visible[active]?.id;
     const top = Math.floor((scroll.current?.scrollTop ?? 0) / 56);
     const anchor = visible[top]?.id;
@@ -312,6 +319,7 @@ export function MergeRequestDiscussions({
   const discussion = discussions.find((discussion) => discussion.id === selected);
   return (
     <section aria-label="Merge-request discussions">
+      <button onClick={() => setAction({ action: 'comment' })}>New discussion</button>
       <label>
         Search loaded discussions
         <input
@@ -416,7 +424,59 @@ export function MergeRequestDiscussions({
       </button>
       <p>Search covers loaded notes. Use arrow keys and Enter to open a discussion.</p>
       {discussion && (
-        <DiscussionNotes key={discussion.id} discussion={discussion} revision={revision} />
+        <>
+          {!discussion.notes[0]!.system && (
+            <div className="dialog-actions">
+              <button onClick={() => setAction({ action: 'reply', discussionId: discussion.id })}>
+                Reply to discussion
+              </button>
+              {!discussion.individual &&
+                discussion.notes.some((note) => note.resolvable) &&
+                discussion.notes
+                  .filter((note) => note.resolvable)
+                  .every((note) => note.resolved !== null) && (
+                  <button
+                    onClick={() =>
+                      setAction({
+                        action: 'resolve',
+                        discussionId: discussion.id,
+                        resolved: !discussion.notes
+                          .filter((note) => note.resolvable)
+                          .every((note) => note.resolved),
+                      })
+                    }
+                  >
+                    {discussion.notes
+                      .filter((note) => note.resolvable)
+                      .every((note) => note.resolved)
+                      ? 'Reopen discussion'
+                      : 'Resolve discussion'}
+                  </button>
+                )}
+            </div>
+          )}
+          <DiscussionNotes key={discussion.id} discussion={discussion} revision={revision} />
+        </>
+      )}
+      {action && (
+        <MergeDiscussionActionDialog
+          accountId={accountId}
+          repository={repository}
+          number={number}
+          origin={origin}
+          intent={action}
+          renderDiscussion={(discussion) => (
+            <DiscussionNotes key={discussion.id} discussion={discussion} revision={revision} />
+          )}
+          close={(changed) => {
+            setAction(undefined);
+            if (changed) {
+              setPage(1);
+              setAttempt((value) => value + 1);
+              setNext(null);
+            }
+          }}
+        />
       )}
     </section>
   );
