@@ -830,3 +830,44 @@ footer {
   max-height: 160px;
   overflow: auto;
 }
+.conflict-editor {
+  width: min(1100px, 94vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+.conflict-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.conflict-sides > * {
+  min-width: 0;
+}
+.conflict-editor textarea {
+  width: 100%;
+  min-height: 150px;
+  font-family: monospace;
+  white-space: pre;
+}
+.conflict-editor .merge-output {
+  min-height: 240px;
+}
+.conflict-editor pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow: auto;
+}
+.conflict-editor fieldset {
+  margin: 12px 0;
+}
+.conflict-editor .merge-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+}
+.merge-line code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -88,6 +88,7 @@ function callService(request: ServiceRequest): Promise<Result> {
                 'operationAction',
                 'startOperation',
                 'reset',
+                'resolveConflict',
               ].includes(request.method)
             ? 210000
             : request.method === 'commit' || request.method === 'reference'

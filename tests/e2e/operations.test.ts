@@ -140,3 +140,86 @@ test('hard reset requires a content review and Undo restores discarded edits', a
     rmSync(root, { recursive: true, force: true });
   }
 });
+test('three-way conflict editor takes a chunk, saves editable output and continues merge', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-conflict-editor-e2e-'));
+  const path = createFixture(join(root, 'repository'));
+  fixtureGit(path, ['switch', '-c', 'incoming']);
+  writeFileSync(join(path, 'tracked.txt'), 'theirs\n');
+  fixtureGit(path, ['commit', '-am', 'Theirs']);
+  fixtureGit(path, ['switch', 'main']);
+  writeFileSync(join(path, 'tracked.txt'), 'ours\n');
+  fixtureGit(path, ['commit', '-am', 'Ours']);
+  expect(() => fixtureGit(path, ['merge', 'incoming'])).toThrow();
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('button', { name: 'Resolve tracked.txt', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Resolve tracked.txt' });
+    await expect(dialog.getByRole('textbox', { name: 'Ours', exact: true })).toHaveValue('ours\n');
+    await expect(dialog.getByRole('textbox', { name: 'Theirs', exact: true })).toHaveValue(
+      'theirs\n',
+    );
+    await dialog.getByRole('button', { name: 'Use chunk editor' }).click();
+    await dialog.getByRole('button', { name: 'Take both for chunk 1' }).click();
+    const output = dialog.getByRole('textbox', { name: 'Output', exact: true });
+    await expect(output).toHaveValue('ours\ntheirs\n');
+    await dialog.getByText('Choose individual lines', { exact: true }).click();
+    await dialog.getByRole('checkbox', { name: 'Chunk 1 ours line 1' }).uncheck();
+    await expect(output).toHaveValue('theirs\n');
+    await dialog.getByRole('checkbox', { name: 'Chunk 1 ours line 1' }).check();
+    await expect(output).toHaveValue('ours\ntheirs\n');
+
+    await output.fill('ours\ntheirs\nreviewed extra line\n');
+    await dialog.getByRole('button', { name: 'Save and stage output' }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(fixtureGit(path, ['show', ':tracked.txt'])).toBe('ours\ntheirs\nreviewed extra line');
+    const operation = page.getByRole('region', { name: 'Git operation' });
+    await operation.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect(operation).toHaveCount(0);
+    expect(fixtureGit(path, ['rev-list', '--parents', '-1', 'HEAD']).split(' ')).toHaveLength(3);
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+test('automatic three-way merge stages non-overlapping text changes from a native conflict', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-auto-merge-e2e-'));
+  const path = createFixture(join(root, 'repository'));
+  const base = 'one\ntwo\nthree\nfour\nfive\n';
+  writeFileSync(join(path, 'tracked.txt'), base);
+  writeFileSync(join(path, '.gitattributes'), 'tracked.txt -merge\n');
+  fixtureGit(path, ['add', '.']);
+  fixtureGit(path, ['commit', '-m', 'Text handled as binary by Git']);
+  fixtureGit(path, ['switch', '-c', 'incoming']);
+  writeFileSync(join(path, 'tracked.txt'), base.replace('five', 'theirs'));
+  fixtureGit(path, ['commit', '-am', 'Theirs']);
+  fixtureGit(path, ['switch', 'main']);
+  writeFileSync(join(path, 'tracked.txt'), base.replace('one', 'ours'));
+  fixtureGit(path, ['commit', '-am', 'Ours']);
+  expect(() => fixtureGit(path, ['merge', 'incoming'])).toThrow();
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('button', { name: 'Resolve tracked.txt', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Resolve tracked.txt' });
+    await dialog.getByRole('button', { name: 'Auto-merge and stage' }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(fixtureGit(path, ['show', ':tracked.txt'])).toBe('ours\ntwo\nthree\nfour\ntheirs');
+    expect(fixtureGit(path, ['ls-files', '--unmerged'])).toBe('');
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

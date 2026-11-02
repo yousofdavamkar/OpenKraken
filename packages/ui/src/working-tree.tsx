@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Request, WorkingState, WorkingDiff, DiscardPreview } from '@openkraken/ipc-contract';
+import type {
+  Request,
+  WorkingState,
+  WorkingDiff,
+  DiscardPreview,
+  ConflictPreview,
+} from '@openkraken/ipc-contract';
+import { ConflictEditor } from './conflict-editor.js';
 import { OperationPanel } from './operation.js';
 import { DiscardDialog } from './discard-dialog.js';
 import { WorkingDiffDialog } from './working-diff.js';
@@ -8,6 +15,7 @@ export function WorkingTreePanel() {
   const { snapshot, busy: active, syncing, workingState: state } = useRepository();
   const busy = syncing ? undefined : active;
   const [discard, setDiscard] = useState<{ preview: DiscardPreview; paths: string[] }>();
+  const [conflict, setConflict] = useState<ConflictPreview>();
   const [preview, setPreview] = useState<WorkingDiff>();
   const [previewBusy, setPreviewBusy] = useState(false);
   const previewSequence = useRef(0);
@@ -95,6 +103,24 @@ export function WorkingTreePanel() {
       if (sequence === previewSequence.current) setPreviewBusy(false);
     }
   };
+  const showConflict = async (pathBytes: string) => {
+    setPreviewBusy(true);
+    setError(undefined);
+    try {
+      const result = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'conflictPreview',
+        repoId,
+        pathBytes,
+      });
+      if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'conflictPreview') setConflict(result.preview);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
   const reviewDiscard = async (paths: string[]) => {
     setPreviewBusy(true);
     setError(undefined);
@@ -121,6 +147,26 @@ export function WorkingTreePanel() {
   return (
     <section aria-label="Working tree">
       <OperationPanel key={repoId} />
+      {conflict && (
+        <ConflictEditor
+          key={conflict.token}
+          document={conflict}
+          busy={!!busy}
+          error={error}
+          close={() => setConflict(undefined)}
+          resolve={(options) => {
+            void mutate({
+              id: crypto.randomUUID(),
+              method: 'resolveConflict',
+              repoId,
+              options,
+            }).then((ok) => {
+              if (ok) setConflict(undefined);
+            });
+          }}
+        />
+      )}
+
       {discard && (
         <DiscardDialog
           preview={discard.preview}
@@ -230,6 +276,15 @@ export function WorkingTreePanel() {
                       {entry.origPath && <small>from {entry.origPath}</small>}
                     </span>
                   </div>
+                  {entry.kind === 'conflict' && action === 'stage' && (
+                    <button
+                      disabled={!!busy || previewBusy}
+                      aria-label={`Resolve ${entry.path}`}
+                      onClick={() => void showConflict(entry.pathBytes)}
+                    >
+                      Resolve
+                    </button>
+                  )}
                   <button
                     disabled={!!busy || previewBusy}
                     aria-label={`View ${action === 'stage' ? 'unstaged' : 'staged'} ${entry.path}`}

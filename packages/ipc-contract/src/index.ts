@@ -682,6 +682,22 @@ const workingRequests = [
   z
     .object({
       id: requestId,
+      method: z.literal('conflictPreview'),
+      repoId: repoIdSchema,
+      pathBytes: pathBytesSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('resolveConflict'),
+      repoId: repoIdSchema,
+      options: resolveConflictSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('mergePrediction'),
       repoId: repoIdSchema,
       head: oidSchema,
@@ -821,6 +837,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('discardPreview'), preview: discardPreviewSchema }),
   z.object({ kind: z.literal('diff'), diff: workingDiffSchema }),
   z.object({ kind: z.literal('workingState'), state: workingStateSchema }),
+  z.object({ kind: z.literal('conflictPreview'), preview: conflictPreviewSchema }),
   z.object({ kind: z.literal('mergePrediction'), prediction: mergePredictionSchema }),
   z.object({ kind: z.literal('resetPreview'), preview: resetPreviewSchema }),
   z.object({ kind: z.literal('appearance'), remoteAvatars: z.boolean() }),

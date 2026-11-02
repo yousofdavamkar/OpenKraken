@@ -174,6 +174,16 @@ async function executeGit(
       kind: 'workingState',
       state: await git.commit(request.repoId, request.options, signal),
     };
+  if (request.method === 'conflictPreview')
+    return {
+      kind: 'conflictPreview',
+      preview: await git.conflictPreview(request.repoId, request.pathBytes, signal),
+    };
+  if (request.method === 'resolveConflict')
+    return {
+      kind: 'workingState',
+      state: await git.resolveConflict(request.repoId, request.options, signal),
+    };
   if (request.method === 'mergePrediction')
     return {
       kind: 'mergePrediction',
@@ -273,6 +283,7 @@ parent.on('message', (event) => {
     'operationAction',
     'startOperation',
     'reset',
+    'resolveConflict',
     'stashPush',
     'stashAction',
   ].includes(request.method);
