@@ -2,6 +2,12 @@ import { z } from 'zod';
 import {
   providerPullChecksOptionsSchema,
   providerPullChecksPageSchema,
+  providerIssueListOptionsSchema,
+  providerIssueOptionsSchema,
+  providerIssueCommentsOptionsSchema,
+  providerIssuePageSchema,
+  providerIssueDetailsSchema,
+  providerIssueCommentsPageSchema,
   providerMergePullSchema,
   providerMergePreviewSchema,
   providerMergeResultSchema,
@@ -1210,6 +1216,30 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerIssues'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerIssueListOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerIssue'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerIssueOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerIssueComments'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerIssueCommentsOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerPullFiles'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerPullFilesOptionsSchema,
@@ -1427,6 +1457,11 @@ export const resultSchema = z.discriminatedUnion('kind', [
     .object({ kind: z.literal('providerCommentCreated'), comment: providerPullCommentSchema })
     .strict(),
   z.object({ kind: z.literal('providerPullChecks'), page: providerPullChecksPageSchema }).strict(),
+  z.object({ kind: z.literal('providerIssues'), page: providerIssuePageSchema }).strict(),
+  z.object({ kind: z.literal('providerIssue'), issue: providerIssueDetailsSchema }).strict(),
+  z
+    .object({ kind: z.literal('providerIssueComments'), page: providerIssueCommentsPageSchema })
+    .strict(),
   z.object({ kind: z.literal('providerPullFiles'), page: providerPullFilesPageSchema }).strict(),
   z
     .object({ kind: z.literal('providerPullReviews'), page: providerPullReviewsPageSchema })

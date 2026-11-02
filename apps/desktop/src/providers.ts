@@ -5,6 +5,12 @@ import { join } from 'node:path';
 import {
   providerPullChecksOptionsSchema,
   type ProviderPullChecksOptions,
+  providerIssueOptionsSchema,
+  providerIssueCommentsOptionsSchema,
+  type ProviderIssueOptions,
+  type ProviderIssueCommentsOptions,
+  providerIssueListOptionsSchema,
+  type ProviderIssueListOptions,
   providerMergePullSchema,
   type ProviderMergePull,
   providerPullTemplatesOptionsSchema,
@@ -269,6 +275,27 @@ export class ProviderService {
       const options = providerPullOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
       return this.github.pullRequest(account.origin, token, options, signal);
+    });
+  }
+  issues(id: string, input: ProviderIssueListOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerIssueListOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.issues(account.origin, token, options, signal);
+    });
+  }
+  issue(id: string, input: ProviderIssueOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerIssueOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.issue(account.origin, token, options, signal);
+    });
+  }
+  issueComments(id: string, input: ProviderIssueCommentsOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerIssueCommentsOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.issueComments(account.origin, token, options, signal);
     });
   }
   pullChecks(id: string, input: ProviderPullChecksOptions, signal?: AbortSignal) {

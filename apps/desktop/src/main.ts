@@ -253,6 +253,9 @@ else {
           request.method === 'providerPullComments' ||
           request.method === 'providerCreateComment' ||
           request.method === 'providerPullChecks' ||
+          request.method === 'providerIssues' ||
+          request.method === 'providerIssue' ||
+          request.method === 'providerIssueComments' ||
           request.method === 'providerPullFiles' ||
           request.method === 'providerPullReviews' ||
           request.method === 'providerSubmitReview' ||
@@ -348,6 +351,25 @@ else {
             return resultSchema.parse({
               kind: 'providerPullChecks',
               page: await providers.pullChecks(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerIssues')
+            return resultSchema.parse({
+              kind: 'providerIssues',
+              page: await providers.issues(request.accountId, request.options, controller.signal),
+            });
+          if (request.method === 'providerIssue')
+            return resultSchema.parse({
+              kind: 'providerIssue',
+              issue: await providers.issue(request.accountId, request.options, controller.signal),
+            });
+          if (request.method === 'providerIssueComments')
+            return resultSchema.parse({
+              kind: 'providerIssueComments',
+              page: await providers.issueComments(
                 request.accountId,
                 request.options,
                 controller.signal,
@@ -506,6 +528,9 @@ else {
           request.method === 'providerPullComments' ||
           request.method === 'providerCreateComment' ||
           request.method === 'providerPullChecks' ||
+          request.method === 'providerIssues' ||
+          request.method === 'providerIssue' ||
+          request.method === 'providerIssueComments' ||
           request.method === 'providerPullFiles' ||
           request.method === 'providerPullReviews' ||
           request.method === 'providerSubmitReview' ||

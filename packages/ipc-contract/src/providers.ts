@@ -548,3 +548,92 @@ export const providerPullChecksPageSchema = z
 export type ProviderPullChecksOptions = z.infer<typeof providerPullChecksOptionsSchema>;
 export type ProviderPullChecksPage = z.infer<typeof providerPullChecksPageSchema>;
 export type ProviderCheck = z.infer<typeof providerCheckSchema>;
+
+export const providerIssueListOptionsSchema = z
+  .object({
+    repository: providerRepositoryTargetSchema,
+    state: z.enum(['open', 'closed', 'all']),
+    page: providerRepositoryPageNumberSchema,
+  })
+  .strict();
+export const providerIssueOptionsSchema = z
+  .object({
+    repository: providerRepositoryTargetSchema,
+    number: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+export const providerIssueSummarySchema = z
+  .object({
+    number: providerIssueOptionsSchema.shape.number,
+    title: z.string().min(1).max(4096),
+    author: z.string().min(1).max(255).nullable(),
+    state: z.enum(['open', 'closed']),
+    stateReason: z.string().min(1).max(64).nullable(),
+    createdAt: providerDateSchema,
+    updatedAt: providerDateSchema,
+    closedAt: providerDateSchema.nullable(),
+    labels: z.array(z.string().min(1).max(255)).max(100),
+    assignees: z.array(z.string().min(1).max(255)).max(100),
+    milestone: z.string().min(1).max(255).nullable(),
+    locked: z.boolean(),
+    comments: providerCountSchema,
+    url: z
+      .string()
+      .url()
+      .max(4096)
+      .refine((value) => {
+        try {
+          const url = new URL(value),
+            parts = url.pathname.split('/');
+          return (
+            value === `${url.origin}${url.pathname}` &&
+            providerOriginSchema.safeParse(url.origin).success &&
+            parts.length === 5 &&
+            providerRepositoryNameSchema.safeParse(parts[1]).success &&
+            providerRepositoryNameSchema.safeParse(parts[2]).success &&
+            parts[3] === 'issues' &&
+            /^[1-9][0-9]*$/.test(parts[4]!)
+          );
+        } catch {
+          return false;
+        }
+      }),
+  })
+  .strict();
+export const providerIssuePageSchema = z
+  .object({
+    issues: z.array(providerIssueSummarySchema).max(100),
+    nextPage: providerRepositoryPageNumberSchema.nullable(),
+    limited: z.boolean(),
+  })
+  .strict();
+export type ProviderIssueListOptions = z.infer<typeof providerIssueListOptionsSchema>;
+export type ProviderIssueOptions = z.infer<typeof providerIssueOptionsSchema>;
+export type ProviderIssueSummary = z.infer<typeof providerIssueSummarySchema>;
+export type ProviderIssuePage = z.infer<typeof providerIssuePageSchema>;
+export const providerIssueDetailsSchema = providerIssueSummarySchema
+  .extend({ body: z.string().max(262144) })
+  .strict();
+export const providerIssueCommentsOptionsSchema = providerIssueOptionsSchema
+  .extend({ page: providerRepositoryPageNumberSchema })
+  .strict();
+export const providerIssueCommentSchema = z
+  .object({
+    id: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    author: z.string().min(1).max(255).nullable(),
+    body: z.string().max(262144),
+    createdAt: providerDateSchema,
+    updatedAt: providerDateSchema,
+  })
+  .strict();
+export const providerIssueCommentsPageSchema = z
+  .object({
+    comments: z.array(providerIssueCommentSchema).max(100),
+    nextPage: providerRepositoryPageNumberSchema.nullable(),
+    limited: z.boolean(),
+  })
+  .strict();
+export type ProviderIssueDetails = z.infer<typeof providerIssueDetailsSchema>;
+export type ProviderIssueCommentsOptions = z.infer<typeof providerIssueCommentsOptionsSchema>;
+export type ProviderIssueComment = z.infer<typeof providerIssueCommentSchema>;
+export type ProviderIssueCommentsPage = z.infer<typeof providerIssueCommentsPageSchema>;

@@ -519,3 +519,27 @@ test('PR check IPC permits bounded selectors but no caller-supplied GraphQL or c
       requestSchema.safeParse({ ...request, options: { ...request.options, ...extra } }).success,
     ).toBe(false);
 });
+
+test('issue browsing IPC permits bounded repository selectors but no credentials or arbitrary URLs', () => {
+  const common = { id: '00000000-0000-4000-8000-000000000000', accountId: 'a'.repeat(64) };
+  const repository = { owner: 'team', name: 'project' };
+  const requests = [
+    { ...common, method: 'providerIssues', options: { repository, state: 'open', page: 1 } },
+    { ...common, method: 'providerIssue', options: { repository, number: 1 } },
+    { ...common, method: 'providerIssueComments', options: { repository, number: 1, page: 1 } },
+  ];
+  for (const request of requests) {
+    expect(requestSchema.safeParse(request).success).toBe(true);
+    expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+    for (const extra of [
+      { token: 'secret' },
+      { url: 'https://other.test' },
+      { repository: { owner: '..', name: 'project' } },
+      { page: 101 },
+      { number: -1 },
+    ])
+      expect(
+        requestSchema.safeParse({ ...request, options: { ...request.options, ...extra } }).success,
+      ).toBe(false);
+  }
+});

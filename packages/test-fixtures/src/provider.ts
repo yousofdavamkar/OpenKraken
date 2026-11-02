@@ -43,3 +43,23 @@ export function githubCommentFixture(id = 10) {
     pull_request_url: 'https://api.github.com/repos/team/project/pulls/1',
   };
 }
+
+export function githubIssueFixture(number = 1) {
+  return {
+    number,
+    title: 'A bug to fix',
+    state: 'open',
+    state_reason: null,
+    user: { login: 'author' },
+    labels: [{ name: 'bug' }, 'help wanted'],
+    assignees: [{ login: 'maintainer' }],
+    milestone: { title: 'Next release' },
+    locked: false,
+    comments: 1,
+    body: 'Steps to reproduce',
+    created_at: '2026-10-01T00:00:00Z',
+    updated_at: '2026-10-02T00:00:00Z',
+    closed_at: null,
+    html_url: 'https://untrusted.test/ignored',
+  };
+}
