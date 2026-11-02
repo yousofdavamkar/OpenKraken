@@ -6,6 +6,7 @@ import type {
   CommitOptions,
   CommitComparisonOptions,
   WorkingFileOptions,
+  WorkingComparisonOptions,
   SaveWorkingFile,
   FileHistoryOptions,
   BlameOptions,
@@ -783,6 +784,14 @@ export class RepositoryService {
     return this.queue(work.repo.commonDir).run(
       true,
       () => work.files(action, paths, signal),
+      signal,
+    );
+  }
+  workingComparison(id: string, options: WorkingComparisonOptions, signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(
+      false,
+      () => work.workingComparison(options, signal),
       signal,
     );
   }

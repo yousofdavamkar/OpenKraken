@@ -18,6 +18,7 @@ import {
   workingFileOptionsSchema,
   saveWorkingFileSchema,
   type WorkingFileOptions,
+  type WorkingComparisonOptions,
   type SaveWorkingFile,
   oidSchema,
   referenceOptionsSchema,
@@ -45,6 +46,7 @@ import {
   type PatchOptions,
   type Repository,
 } from '@openkraken/ipc-contract';
+import { workingComparison } from './working-comparison.js';
 import { readWorkingFile, encodeWorkingFile } from './working-file.js';
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { StashStore } from './stash.js';
@@ -1378,6 +1380,56 @@ export class WorkingTree {
       signal,
       [options.pathBytes],
     );
+  }
+  async workingComparison(options: WorkingComparisonOptions, signal?: AbortSignal) {
+    await this.paths([options.pathBytes], signal);
+    const state = await this.state(signal),
+      before = await this.fingerprint();
+    const entry = state.status.entries.find((entry) => entry.pathBytes === options.pathBytes);
+    if (!entry)
+      throw new GitError('STALE_STATUS', 'Refresh the working tree before comparing this file');
+    let temporary: string | undefined;
+    try {
+      if (entry.kind === 'untracked' && options.side === 'worktree') {
+        await mkdir(this.directory, { recursive: true, mode: 0o700 });
+        temporary = join(this.directory, `comparison-${randomUUID()}`);
+        try {
+          await copyIndex(join(this.repo.gitDir, 'index'), temporary);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          await this.run(['read-tree', '--empty'], {
+            indexFile: temporary,
+            readOnly: false,
+            signal,
+          });
+        }
+        await this.run(
+          ['add', '--intent-to-add', '--pathspec-from-file=-', '--pathspec-file-nul'],
+          {
+            indexFile: temporary,
+            readOnly: false,
+            signal,
+            stdin: Buffer.concat([Buffer.from(options.pathBytes, 'base64'), Buffer.from([0])]),
+          },
+        );
+      }
+      const result = await workingComparison(
+        (args, settings) => this.run(args, { ...settings, indexFile: temporary }),
+        this.backups,
+        options,
+        entry,
+        before.head.oid,
+        signal,
+      );
+      if (this.revision(before) !== this.revision(await this.fingerprint()))
+        throw new GitError('FILE_CHANGED', 'Git state changed while reading this comparison');
+      return result;
+    } finally {
+      if (temporary) {
+        await rm(temporary, { force: true });
+        await rm(`${temporary}.lock`, { force: true });
+      }
+    }
   }
   async diff(
     pathBytes: string,

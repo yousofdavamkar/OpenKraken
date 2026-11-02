@@ -472,6 +472,11 @@ export const commitComparisonOptionsSchema = z
     allowLarge: z.boolean().optional(),
   })
   .strict();
+export const workingComparisonOptionsSchema = commitComparisonOptionsSchema
+  .omit({ commit: true, parent: true })
+  .extend({ side: diffSideSchema })
+  .strict();
+export type WorkingComparisonOptions = z.infer<typeof workingComparisonOptionsSchema>;
 export const fileVersionSchema = z
   .object({
     kind: z.enum(['missing', 'text', 'binary', 'submodule', 'large', 'image']),

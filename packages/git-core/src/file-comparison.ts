@@ -6,6 +6,7 @@ import {
   fileComparisonSchema,
   type CommitComparisonOptions,
   type FileVersion,
+  type ChangedFile,
 } from '@openkraken/ipc-contract';
 import { rasterPreview } from './raster-preview.js';
 import { decodeText } from './text-encoding.js';
@@ -17,7 +18,7 @@ const SOFT_BYTES = 2 * 1024 * 1024;
 const HARD_BYTES = 20 * 1024 * 1024;
 const SOFT_LINES = 10000;
 const HARD_LINES = 250000;
-async function version(
+export async function readBlobVersion(
   run: Run,
   oid: string | undefined,
   mode: string,
@@ -34,6 +35,17 @@ async function version(
     throw new GitError('INVALID_OBJECT', 'Git returned an invalid blob size');
   if (bytes > (allowLarge ? HARD_BYTES : SOFT_BYTES)) return { kind: 'large', oid, mode, bytes };
   const content = (await run(['cat-file', 'blob', oid], { signal, maxBytes: HARD_BYTES })).stdout;
+  return contentVersion(content, oid, mode, allowLarge, encoding);
+}
+export function contentVersion(
+  content: Buffer,
+  oid: string | undefined,
+  mode: string,
+  allowLarge: boolean,
+  encoding?: CommitComparisonOptions['encoding'],
+): FileVersion {
+  const bytes = content.length;
+  if (bytes > (allowLarge ? HARD_BYTES : SOFT_BYTES)) return { kind: 'large', oid, mode, bytes };
   const image = rasterPreview(content);
   if (image) return { kind: 'image', oid, mode, bytes, image };
   const decoded = decodeText(content, encoding);
@@ -55,9 +67,19 @@ export async function commitComparison(
   const file = changed.files.find((file) => file.pathBytes === options.pathBytes);
   if (!file) throw new GitError('UNKNOWN_FILE', 'Select a file changed by this commit');
   const [oldVersion, newVersion] = await Promise.all([
-    version(run, file.oldOid, file.oldMode, !!options.allowLarge, options.encoding, signal),
-    version(run, file.newOid, file.newMode, !!options.allowLarge, options.encoding, signal),
+    readBlobVersion(run, file.oldOid, file.oldMode, !!options.allowLarge, options.encoding, signal),
+    readBlobVersion(run, file.newOid, file.newMode, !!options.allowLarge, options.encoding, signal),
   ]);
+  return compareVersions(run, file, oldVersion, newVersion, options, signal);
+}
+export async function compareVersions(
+  run: Run,
+  file: ChangedFile,
+  oldVersion: FileVersion,
+  newVersion: FileVersion,
+  options: Pick<CommitComparisonOptions, 'whitespace' | 'allowLarge' | 'encoding'>,
+  signal?: AbortSignal,
+) {
   const whitespace = options.whitespace ?? 'exact';
   const large = [oldVersion, newVersion].filter((version) => version.kind === 'large');
   if (large.length) {
@@ -102,6 +124,8 @@ export async function commitComparison(
     };
     const output = await run(
       [
+        '-c',
+        'diff.suppressBlankEmpty=false',
         'diff',
         '--no-index',
         '--no-ext-diff',
@@ -109,6 +133,9 @@ export async function commitComparison(
         '--no-color',
         '--text',
         '--unified=3',
+        '--output-indicator-new=+',
+        '--output-indicator-old=-',
+        '--output-indicator-context= ',
         ...flags[whitespace],
         '--',
         oldPath,
