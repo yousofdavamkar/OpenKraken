@@ -125,4 +125,6 @@ In **Clone**, choose **Browse provider repositories**, select an account and loa
 
 In **Manage remotes**, **Fetch authentication** lets you choose a saved account for foreground HTTPS fetches. It defaults to Git credential helpers / SSH agent. Reload remotes if their settings or tracking refs change; the app checks the reviewed target again before contacting the server. Automatic fetch retains its existing noninteractive authentication.
 
-PR workflows, repository creation/forking, other providers and saved-account authentication for pull/push remain in development. A real OAuth application registration and live sign-in still require environment-specific verification. Existing Git credential helpers and SSH agents remain available for manual clone/fetch/push. See [M6 progress](docs/verification/m6-progress.md).
+**Push authentication** also offers saved accounts. Review shows the configured push destination and tips, then locks the account choice. A rejected push can be retried with explicit force-with-lease; a changed remote tip requires a new review. **Review again** reloads remote metadata.
+
+PR workflows, repository creation/forking, other providers and saved-account authentication for pull remain in development. A real OAuth application registration and live sign-in still require environment-specific verification. Existing Git credential helpers and SSH agents remain available for manual clone/fetch/push. See [M6 progress](docs/verification/m6-progress.md).
