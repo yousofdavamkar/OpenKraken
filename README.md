@@ -131,6 +131,8 @@ In **Manage remotes**, **Fetch authentication** lets you choose a saved account 
 
 **Delete branch or tag** in Manage remotes also offers saved-account authentication. Review resolves the push URL and exact server tip; deletion needs a separate confirmation and refuses a tip changed since review. Closing the review leaves the server ref intact.
 
+**Issues** opens a repository's open, closed or all-state issue list. Search loaded titles, authors, labels and assignees, use the keyboard to open details, and read paged comments. Pull requests are excluded from this list. Refresh and retry are available; changing repositories or closing the panel cancels reads. Issue creation, posting comments and changing issue state remain in development.
+
 **Pull requests** opens a repository picker and paged PR list. Filter by state, search loaded PRs, use the keyboard to open details, and refresh or retry results. Descriptions display as text; changing repositories or closing the panel cancels pending requests.
 
 **Files** shows paged changed files, rename metadata and read-only provider patches; missing or truncated patches are labeled. **Reviews** lists submitted reviews. **Write review** previews a comment, approval or request for changes before sending, checks the displayed commits again and preserves the draft on errors. If the outcome is uncertain, check the submitted reviews before trying again. Review drafts are not saved across app restarts.
