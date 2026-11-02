@@ -398,6 +398,7 @@ export const fileHistoryEntrySchema = z
 export const fileHistoryPageSchema = z
   .object({
     entries: z.array(fileHistoryEntrySchema).max(200),
+    truncated: z.boolean().optional(),
     nextOffset: z.number().int().nonnegative().optional(),
   })
   .strict();
@@ -725,6 +726,14 @@ const workingRequests = [
   z
     .object({
       id: requestId,
+      method: z.literal('fileHistory'),
+      repoId: repoIdSchema,
+      options: fileHistoryOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('commitComparison'),
       repoId: repoIdSchema,
       options: commitComparisonOptionsSchema,
@@ -1043,6 +1052,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('diff'), diff: workingDiffSchema }),
   z.object({ kind: z.literal('commitFiles'), files: commitFilesSchema }),
   z.object({ kind: z.literal('fileComparison'), comparison: fileComparisonSchema }),
+  z.object({ kind: z.literal('fileHistory'), page: fileHistoryPageSchema }),
   z.object({ kind: z.literal('workingState'), state: workingStateSchema }),
   z.object({ kind: z.literal('conflictPreview'), preview: conflictPreviewSchema }),
   z.object({ kind: z.literal('mergePrediction'), prediction: mergePredictionSchema }),

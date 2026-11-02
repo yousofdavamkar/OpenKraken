@@ -107,6 +107,7 @@ export async function fileHistory(run: Run, input: FileHistoryOptions, signal?: 
   const entries = parser.finish();
   return {
     entries: entries.slice(0, limit),
-    nextOffset: entries.length > limit ? offset + limit : undefined,
+    nextOffset: entries.length > limit && offset + limit <= 10000 ? offset + limit : undefined,
+    truncated: entries.length > limit && offset + limit > 10000,
   };
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { FileHistoryPanel } from './file-history.js';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { EditorState, type Text } from '@codemirror/state';
 import { EditorView, lineNumbers } from '@codemirror/view';
@@ -233,6 +234,8 @@ export function FileComparisonDialog({
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const [selection, setSelection] = useState(options);
+  const [history, setHistory] = useState(false);
   const [data, setData] = useState<FileComparison>();
   const [error, setError] = useState('');
   const [mode, setMode] = useState<ViewMode>('hunks');
@@ -244,7 +247,7 @@ export function FileComparisonDialog({
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
-  const { commit, parent, pathBytes } = options;
+  const { commit, parent, pathBytes } = selection;
   useEffect(() => {
     const id = crypto.randomUUID();
     let alive = true;
@@ -292,6 +295,9 @@ export function FileComparisonDialog({
         </button>
       </header>
       <div className="comparison-toolbar">
+        <button aria-pressed={history} onClick={() => setHistory(!history)}>
+          File history
+        </button>
         <label>
           Diff view{' '}
           <select
@@ -347,13 +353,24 @@ export function FileComparisonDialog({
           </label>
         )}
       </div>
+      {history && (
+        <FileHistoryPanel
+          repoId={repoId}
+          commit={options.commit}
+          pathBytes={options.pathBytes}
+          onSelect={(entry) => {
+            setSelection({ commit: entry.oid, pathBytes: entry.pathBytes });
+            setAllowLarge(false);
+          }}
+        />
+      )}
       {error && <p role="alert">{error}</p>}
       {!data && !error && <p role="status">Loading comparison…</p>}
       {data && (
         <>
           <p className="comparison-metadata">
-            Before: {data.oldVersion.encoding ?? data.oldVersion.kind} ·{' '}
-            {data.oldVersion.bytes.toLocaleString()} bytes · {data.file.oldMode} → After:{' '}
+            Commit {commit.slice(0, 8)} · Before: {data.oldVersion.encoding ?? data.oldVersion.kind}{' '}
+            · {data.oldVersion.bytes.toLocaleString()} bytes · {data.file.oldMode} → After:{' '}
             {data.newVersion.encoding ?? data.newVersion.kind} ·{' '}
             {data.newVersion.bytes.toLocaleString()} bytes · {data.file.newMode}
           </p>

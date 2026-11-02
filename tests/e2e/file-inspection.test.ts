@@ -178,3 +178,52 @@ test('raster comparison renders both versions and adjusts their overlay', async 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('file history appends older revisions and opens the original name before a rename', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-file-history-ui-'));
+  const path = createFixture(join(root, 'repository'));
+  writeFileSync(join(path, 'old.txt'), 'original line\n');
+  fixtureGit(path, ['add', '.']);
+  fixtureGit(path, ['commit', '-m', 'Create historical file']);
+  for (let index = 1; index <= 51; index++) {
+    writeFileSync(join(path, 'old.txt'), `revision ${index}\n`);
+    fixtureGit(path, ['commit', '-am', `Revision ${index}`]);
+  }
+  fixtureGit(path, ['mv', 'old.txt', 'new.txt']);
+  fixtureGit(path, ['commit', '-m', 'Rename historical file']);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    await grid.press('Home');
+    await grid.press('Enter');
+    await page.getByRole('button', { name: 'Compare new.txt', exact: true }).click();
+    const viewer = page.getByRole('dialog', { name: 'File comparison' });
+    await viewer.getByRole('button', { name: 'File history', exact: true }).click();
+    const history = viewer.getByRole('region', { name: 'File history' });
+    await expect(
+      history.getByRole('heading', { name: 'File history · 50', exact: true }),
+    ).toBeVisible();
+    await history.getByRole('button', { name: 'Load older file revisions' }).click();
+    await expect(
+      history.getByRole('heading', { name: 'File history · 53', exact: true }),
+    ).toBeVisible();
+    await history.locator('.file-history-scroll').evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await history.getByRole('button', { name: /^Create historical file/ }).click();
+    await expect(viewer.getByRole('heading', { name: 'old.txt', exact: true })).toBeVisible();
+    await expect(viewer.getByText('original line', { exact: true })).toBeVisible();
+    await expect(history.getByText('End of file history.', { exact: true })).toBeVisible();
+    expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

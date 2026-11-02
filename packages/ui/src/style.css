@@ -1093,3 +1093,29 @@ footer {
   grid-area: 1 / 1;
   margin: 0;
 }
+
+.file-history-panel {
+  flex-shrink: 0;
+  border: 1px solid #304358;
+  padding: 8px;
+}
+.file-history-panel h3,
+.file-history-panel p {
+  margin: 0 0 6px;
+}
+.file-history-scroll {
+  height: 160px;
+  overflow: auto;
+}
+.file-history-scroll button {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  width: 100%;
+  height: 48px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.file-history-scroll small {
+  color: #94a3b8;
+}

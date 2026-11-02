@@ -120,6 +120,11 @@ async function executeGit(
       kind: 'fileComparison',
       comparison: await git.commitComparison(request.repoId, request.options, signal),
     };
+  if (request.method === 'fileHistory')
+    return {
+      kind: 'fileHistory',
+      page: await git.fileHistory(request.repoId, request.options, signal),
+    };
   if (request.method === 'commitFiles')
     return {
       kind: 'commitFiles',
