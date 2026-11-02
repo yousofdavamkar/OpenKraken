@@ -339,6 +339,78 @@ export const providerMergeRequestDetailsSchema = providerPullSummarySchema
   })
   .strict();
 export type ProviderMergeRequestDetails = z.infer<typeof providerMergeRequestDetailsSchema>;
+const providerCiIdSchema = providerProjectIdSchema.refine((value) =>
+  Number.isSafeInteger(Number(value)),
+);
+export const providerMergePipelinesOptionsSchema = providerPullOptionsSchema
+  .extend({ head: providerCommitSchema, page: z.number().int().min(1).max(10) })
+  .strict();
+export const providerMergePipelineSchema = z
+  .object({
+    id: providerCiIdSchema,
+    projectId: providerCiIdSchema.nullable(),
+    sha: providerCommitSchema,
+    ref: z.string().min(1).max(1024),
+    status: z.string().min(1).max(128),
+    name: z.string().max(1024).nullable(),
+    source: z.string().min(1).max(128).nullable(),
+    createdAt: providerDateSchema.nullable(),
+    updatedAt: providerDateSchema.nullable(),
+  })
+  .strict();
+export const providerMergePipelinesPageSchema = z
+  .object({
+    pipelines: z.array(providerMergePipelineSchema).max(100),
+    nextPage: z.number().int().min(2).max(10).nullable(),
+    limited: z.boolean(),
+  })
+  .strict();
+export const providerMergePipelineJobsOptionsSchema = providerMergePipelinesOptionsSchema
+  .extend({
+    pipelineId: providerCiIdSchema,
+    pipelineSha: providerCommitSchema,
+    pipelinePage: z.number().int().min(1).max(10),
+  })
+  .strict();
+export const providerMergePipelineDetailsSchema = providerMergePipelineSchema
+  .extend({
+    projectId: providerCiIdSchema,
+    url: z.string().url().max(4096),
+    duration: z.number().finite().nonnegative().nullable(),
+    queuedDuration: z.number().finite().nonnegative().nullable(),
+  })
+  .strict();
+export const providerMergePipelineJobSchema = z
+  .object({
+    id: providerCiIdSchema,
+    name: z.string().min(1).max(1024),
+    stage: z.string().min(1).max(1024),
+    status: z.string().min(1).max(128),
+    allowFailure: z.boolean(),
+    createdAt: providerDateSchema,
+    startedAt: providerDateSchema.nullable(),
+    finishedAt: providerDateSchema.nullable(),
+    duration: z.number().finite().nonnegative().nullable(),
+    queuedDuration: z.number().finite().nonnegative().nullable(),
+    failureReason: z.string().max(1024).nullable(),
+    url: z.string().url().max(4096),
+  })
+  .strict();
+export const providerMergePipelineJobsPageSchema = z
+  .object({
+    pipeline: providerMergePipelineDetailsSchema,
+    jobs: z.array(providerMergePipelineJobSchema).max(100),
+    nextPage: z.number().int().min(2).max(10).nullable(),
+    limited: z.boolean(),
+  })
+  .strict();
+export type ProviderMergePipelinesOptions = z.infer<typeof providerMergePipelinesOptionsSchema>;
+export type ProviderMergePipeline = z.infer<typeof providerMergePipelineSchema>;
+export type ProviderMergePipelineJobsOptions = z.infer<
+  typeof providerMergePipelineJobsOptionsSchema
+>;
+export type ProviderMergePipelineDetails = z.infer<typeof providerMergePipelineDetailsSchema>;
+export type ProviderMergePipelineJob = z.infer<typeof providerMergePipelineJobSchema>;
 export const providerMergeRequestFilesOptionsSchema = providerPullOptionsSchema
   .extend({
     revision: providerMergeRequestRevisionSchema,

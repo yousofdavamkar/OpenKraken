@@ -279,6 +279,8 @@ else {
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
           request.method === 'providerMergeRequest' ||
+          request.method === 'providerMergeRequestPipelines' ||
+          request.method === 'providerMergeRequestPipelineJobs' ||
           request.method === 'providerMergeRequestFiles' ||
           request.method === 'providerMergeRequestDiscussions' ||
           request.method === 'providerMergeRequestMergeState' ||
@@ -485,6 +487,24 @@ else {
             return resultSchema.parse({
               kind: 'providerMergeRequest',
               mergeRequest: await providers.mergeRequest(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerMergeRequestPipelines')
+            return resultSchema.parse({
+              kind: 'providerMergeRequestPipelines',
+              page: await providers.mergeRequestPipelines(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerMergeRequestPipelineJobs')
+            return resultSchema.parse({
+              kind: 'providerMergeRequestPipelineJobs',
+              page: await providers.mergeRequestPipelineJobs(
                 request.accountId,
                 request.options,
                 controller.signal,
@@ -752,6 +772,8 @@ else {
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
           request.method === 'providerMergeRequest' ||
+          request.method === 'providerMergeRequestPipelines' ||
+          request.method === 'providerMergeRequestPipelineJobs' ||
           request.method === 'providerMergeRequestFiles' ||
           request.method === 'providerMergeRequestDiscussions' ||
           request.method === 'providerMergeRequestMergeState' ||

@@ -1,4 +1,10 @@
 import {
+  providerMergePipelinesOptionsSchema,
+  providerMergePipelineJobsOptionsSchema,
+  type ProviderMergePipelinesOptions,
+  type ProviderMergePipelineJobsOptions,
+} from '@openkraken/ipc-contract';
+import {
   providerMergeRequestMergeIntentSchema,
   providerMergeMergeRequestSchema,
   type ProviderMergeRequestMergeIntent,
@@ -419,6 +425,34 @@ export class ProviderService {
           'Choose a GitLab account to read merge requests.',
         );
       return this.gitlab.mergeRequestDiscussions(account.origin, token, options, signal);
+    });
+  }
+  mergeRequestPipelines(id: string, input: ProviderMergePipelinesOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerMergePipelinesOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to read pipelines.',
+        );
+      return this.gitlab.mergeRequestPipelines(account.origin, token, options, signal);
+    });
+  }
+  mergeRequestPipelineJobs(
+    id: string,
+    input: ProviderMergePipelineJobsOptions,
+    signal?: AbortSignal,
+  ) {
+    return this.run(async () => {
+      const options = providerMergePipelineJobsOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to read pipelines.',
+        );
+      return this.gitlab.mergeRequestPipelineJobs(account.origin, token, options, signal);
     });
   }
   mergeRequestMergeState(id: string, input: ProviderPullOptions, signal?: AbortSignal) {

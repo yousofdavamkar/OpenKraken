@@ -59,6 +59,10 @@ import {
   providerMergeRequestDetailsSchema,
   providerMergeRequestDiscussionsOptionsSchema,
   providerMergeRequestDiscussionsPageSchema,
+  providerMergePipelinesOptionsSchema,
+  providerMergePipelinesPageSchema,
+  providerMergePipelineJobsOptionsSchema,
+  providerMergePipelineJobsPageSchema,
   providerMergeRequestFilesOptionsSchema,
   providerMergeRequestFilesPageSchema,
   providerAccountsSchema,
@@ -1432,6 +1436,22 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerMergeRequestPipelines'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerMergePipelinesOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerMergeRequestPipelineJobs'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerMergePipelineJobsOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerMergeRequestFiles'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerMergeRequestFilesOptionsSchema,
@@ -1735,6 +1755,18 @@ export const resultSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.literal('providerMergeDiscussionWritten'),
       result: providerMergeDiscussionWrittenSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerMergeRequestPipelines'),
+      page: providerMergePipelinesPageSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerMergeRequestPipelineJobs'),
+      page: providerMergePipelineJobsPageSchema,
     })
     .strict(),
   z

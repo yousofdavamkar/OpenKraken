@@ -979,3 +979,51 @@ test('GitLab merge IPC requires reviewed intent and rejects queues, unsupported 
     }).success,
   ).toBe(true);
 });
+
+test('GitLab pipelines and jobs require bounded pages and pinned commits outside the Git service', () => {
+  const base = {
+    id: '00000000-0000-4000-8000-000000000000',
+    accountId: 'a'.repeat(64),
+    options: {
+      repository: { owner: 'group/subgroup', name: 'project' },
+      number: 7,
+      head: '1'.repeat(40),
+      page: 1,
+    },
+  };
+  for (const request of [
+    { ...base, method: 'providerMergeRequestPipelines' },
+    {
+      ...base,
+      method: 'providerMergeRequestPipelineJobs',
+      options: { ...base.options, pipelineId: '9', pipelineSha: '2'.repeat(40), pipelinePage: 1 },
+    },
+  ]) {
+    expect(requestSchema.safeParse(request).success).toBe(true);
+    expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+    for (const extra of [
+      { page: 0 },
+      { page: 11 },
+      { head: 'bad' },
+      { endpoint: 'https://attacker.test' },
+    ])
+      expect(
+        requestSchema.safeParse({ ...request, options: { ...request.options, ...extra } }).success,
+      ).toBe(false);
+    expect(requestSchema.safeParse({ ...request, token: 'secret' }).success).toBe(false);
+  }
+  const jobs = {
+    ...base,
+    method: 'providerMergeRequestPipelineJobs',
+    options: { ...base.options, pipelineId: '9', pipelineSha: '2'.repeat(40), pipelinePage: 1 },
+  };
+  for (const extra of [
+    { pipelineId: '9007199254740992' },
+    { pipelineId: '../9' },
+    { pipelinePage: 11 },
+    { pipelineSha: '' },
+  ])
+    expect(
+      requestSchema.safeParse({ ...jobs, options: { ...jobs.options, ...extra } }).success,
+    ).toBe(false);
+});

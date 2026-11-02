@@ -19,6 +19,8 @@ type ReadMethod =
   | 'providerPullRequest'
   | 'providerMergeApprovals'
   | 'providerMergeRequest'
+  | 'providerMergeRequestPipelines'
+  | 'providerMergeRequestPipelineJobs'
   | 'providerMergeRequestFiles'
   | 'providerMergeRequestDiscussions'
   | 'providerPullFiles'

@@ -1,3 +1,4 @@
+import { loadMergeRequestPipelines, loadMergeRequestPipelineJobs } from './gitlab-pipelines.js';
 import {
   loadMergeRequestMergeState,
   previewMergeRequestMerge,
@@ -29,6 +30,8 @@ import { loadMergeRequest, loadMergeRequests } from './gitlab-merges.js';
 import type {
   ProviderPullTemplatesOptions,
   ProviderMergeTemplateOptions,
+  ProviderMergePipelinesOptions,
+  ProviderMergePipelineJobsOptions,
   ProviderMergeRequestMergeIntent,
   ProviderMergeMergeRequest,
   ProviderMergeCreationIntent,
@@ -169,6 +172,30 @@ export class GitLabProvider {
     return loadMergeRequestDiscussions(
       (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
       providerOriginSchema.parse(origin),
+      input,
+    );
+  }
+  mergeRequestPipelines(
+    origin: string,
+    token: string,
+    input: ProviderMergePipelinesOptions,
+    signal?: AbortSignal,
+  ) {
+    return loadMergeRequestPipelines(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      origin,
+      input,
+    );
+  }
+  mergeRequestPipelineJobs(
+    origin: string,
+    token: string,
+    input: ProviderMergePipelineJobsOptions,
+    signal?: AbortSignal,
+  ) {
+    return loadMergeRequestPipelineJobs(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      origin,
       input,
     );
   }
@@ -425,6 +452,8 @@ export class GitLabProvider {
                   response.status === 401 || response.status === 403
                     ? 'The provider rejected this token. Check its validity and permissions.'
                     : 'The GitLab request failed. Check the connection and try again.',
+                  undefined,
+                  response.status,
                 );
               }
               if (

@@ -3,6 +3,7 @@ export class ProviderError extends Error {
     public readonly code: string,
     message: string,
     public retryAt?: number,
+    public readonly httpStatus?: number,
   ) {
     super(message);
   }
