@@ -475,7 +475,23 @@ const mergeDiscussionBodySchema = z
   .max(65536)
   .refine((body) => body.trim().length > 0);
 const mergeDiscussionIdSchema = z.string().regex(/^[0-9a-f]{40}$/);
+export const providerMergeInlinePositionSchema = discussionPositionBaseSchema
+  .extend({
+    oldLine: discussionLineSchema,
+    newLine: discussionLineSchema,
+  })
+  .strict()
+  .refine((position) => position.oldLine !== null || position.newLine !== null);
+export type ProviderMergeInlinePosition = z.infer<typeof providerMergeInlinePositionSchema>;
 export const providerMergeDiscussionActionSchema = z.discriminatedUnion('action', [
+  providerPullOptionsSchema
+    .extend({
+      action: z.literal('inline'),
+      body: mergeDiscussionBodySchema,
+      position: providerMergeInlinePositionSchema,
+      page: z.number().int().min(1).max(30),
+    })
+    .strict(),
   providerPullOptionsSchema
     .extend({ action: z.literal('comment'), body: mergeDiscussionBodySchema })
     .strict(),
@@ -504,6 +520,10 @@ export const providerMergeDiscussionPreviewSchema = z
   .object({
     mergeRequest: providerMergeRequestDetailsSchema,
     discussion: providerMergeRequestDiscussionSchema.nullable(),
+    inline: z
+      .object({ position: providerMergeInlinePositionSchema, text: z.string().max(262144) })
+      .strict()
+      .nullable(),
     revision: z.string().regex(/^[0-9a-f]{64}$/),
   })
   .strict();

@@ -58,6 +58,7 @@ import {
   deviceChallengeSchema,
 } from './providers.js';
 export * from './providers.js';
+export { providerPatchLines } from './provider-patch.js';
 
 export const oidSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 export const headSchema = z.discriminatedUnion('kind', [

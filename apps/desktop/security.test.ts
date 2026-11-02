@@ -822,3 +822,36 @@ test('GitLab reviewed discussion writes use strict public IPC and cannot enter t
     }).success,
   ).toBe(true);
 });
+
+test('GitLab inline discussion selectors require exact three-SHA locations and bounded file pages', () => {
+  const options = {
+    action: 'inline',
+    repository: { owner: 'group/subgroup', name: 'project' },
+    number: 7,
+    body: 'Comment',
+    page: 2,
+    position: {
+      revision: { base: '2'.repeat(40), head: '1'.repeat(40), start: '3'.repeat(40) },
+      oldPath: 'old.ts',
+      newPath: 'new.ts',
+      oldLine: null,
+      newLine: 21,
+    },
+  };
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    method: 'providerMergeDiscussionPreview',
+    accountId: 'a'.repeat(64),
+    options,
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  for (const invalid of [
+    { ...options, page: 31 },
+    { ...options, position: { ...options.position, newLine: null } },
+    { ...options, position: { ...options.position, oldLine: 0 } },
+    { ...options, position: { ...options.position, revision: { head: '1'.repeat(40) } } },
+    { ...options, position: { ...options.position, endpoint: 'https://attacker.test' } },
+  ])
+    expect(requestSchema.safeParse({ ...request, options: invalid }).success).toBe(false);
+});
