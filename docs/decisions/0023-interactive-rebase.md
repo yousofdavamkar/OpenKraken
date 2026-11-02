@@ -1,0 +1,5 @@
+# Reviewed interactive rebase sessions
+
+The bundled native helper has a separate editor mode. It sends the requested path to a per-invocation service socket authenticated by a random 256-bit capability. The service owns file validation and writes; the helper returns success only after the service acknowledges the edit. It writes no commit contents to stdout or stderr. Unix socket directories/files have 0700/0600 permissions; Windows uses the existing named-pipe transport. Closing or cancelling the invocation revokes the capability and aborts its pending edit. Message size, connection count and elapsed time are bounded.
+
+This is the transport slice; callers must constrain requested paths to their reviewed native Git session. Todo editing, commit-message selection, persistent plans and the interactive UI are subsequent slices. Native helper tests cover approved file writes, wrong/expired capabilities, rejected paths and pending-request cancellation. Authentication uses a separate protocol and remains covered by its existing native tests.

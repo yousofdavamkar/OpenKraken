@@ -22,6 +22,9 @@ type response struct {
 }
 
 func run() int {
+	if len(os.Args) == 3 && os.Args[1] == "--editor" {
+		return runEditor(os.Args[2])
+	}
 	if len(os.Args) != 2 || len(os.Args[1]) > 16384 || !utf8.ValidString(os.Args[1]) {
 		return 1
 	}
