@@ -1503,3 +1503,18 @@ footer {
 .pull-check-row p {
   margin: 4px 0;
 }
+
+.issue-comments {
+  max-height: 400px;
+  overflow: auto;
+  border: 1px solid var(--border);
+}
+.issue-comment {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.issue-comment pre {
+  white-space: pre-wrap;
+  font: inherit;
+}

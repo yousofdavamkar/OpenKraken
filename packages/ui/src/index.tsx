@@ -7,6 +7,7 @@ import { History } from './history.js';
 import { NewReferences, ReferenceActions } from './references.js';
 import { GitProgress } from './git-progress.js';
 import { Clone } from './clone.js';
+import { Issues } from './issues.js';
 import { PullRequests } from './pull-requests.js';
 import { ProviderAccountsControl } from './providers.js';
 import { Authentication } from './authentication.js';
@@ -56,6 +57,7 @@ function App() {
           <Clone />
           <ProviderAccountsControl />
           <PullRequests />
+          <Issues />
           <NewReferences />
           <ManageRemotes />
           <Pull />
