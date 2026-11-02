@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ConflictPreview, ResolveConflict } from '@openkraken/ipc-contract';
+import { useRepository } from './store.js';
 import MergeWorker from './merge-worker?worker';
 import { renderMerge, type MergePart, type MergeResult } from './merge-model.js';
 export function ConflictEditor({
@@ -260,7 +261,15 @@ export function ConflictEditor({
           {error}
         </p>
       )}
+      {document.externalTool && document.working.kind !== 'submodule' && (
+        <button disabled={busy} onClick={() => apply('external')}>
+          Open {document.externalTool} merge tool
+        </button>
+      )}
       <div className="dialog-actions">
+        {busy && (
+          <button onClick={() => void useRepository.getState().cancel()}>Cancel operation</button>
+        )}
         <button disabled={busy} onClick={() => apply('delete')}>
           Delete file and resolve
         </button>

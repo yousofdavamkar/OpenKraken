@@ -249,6 +249,7 @@ export const conflictPreviewSchema = z
       })
       .strict(),
     editable: z.boolean(),
+    externalTool: z.string().max(128).optional(),
     operation: operationStateSchema.shape.kind,
   })
   .strict();
@@ -266,7 +267,7 @@ export const resolveConflictSchema = z.discriminatedUnion('choice', [
     .object({
       pathBytes: pathBytesSchema,
       token: z.string().regex(/^[0-9a-f]{64}$/),
-      choice: z.enum(['ours', 'theirs', 'delete']),
+      choice: z.enum(['ours', 'theirs', 'delete', 'external']),
     })
     .strict(),
 ]);

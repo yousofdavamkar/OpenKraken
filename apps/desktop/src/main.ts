@@ -75,7 +75,7 @@ function callService(request: ServiceRequest): Promise<Result> {
           message: 'The Git service did not respond in time.',
         });
       },
-      request.method === 'clone'
+      request.method === 'clone' || request.method === 'resolveConflict'
         ? 1860000
         : request.method === 'pull'
           ? 390000
@@ -88,7 +88,6 @@ function callService(request: ServiceRequest): Promise<Result> {
                 'operationAction',
                 'startOperation',
                 'reset',
-                'resolveConflict',
               ].includes(request.method)
             ? 210000
             : request.method === 'commit' || request.method === 'reference'

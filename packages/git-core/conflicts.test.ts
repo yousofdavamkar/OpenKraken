@@ -174,3 +174,89 @@ test('submodule conflict resolves only the gitlink and preserves submodule worki
     await service.dispose();
   }
 });
+test('configured external merge tool stages its result and remains undoable', async () => {
+  const { path, service, repo } = await conflict('external-tool');
+  try {
+    fixtureGit(path, ['config', 'merge.tool', 'fixture']);
+    fixtureGit(path, [
+      'config',
+      'mergetool.fixture.cmd',
+      'printf "external resolution\\n" > "$MERGED"',
+    ]);
+    fixtureGit(path, ['config', 'mergetool.fixture.trustExitCode', 'true']);
+    fixtureGit(path, ['config', 'mergetool.keepBackup', 'false']);
+    const pathBytes = Buffer.from('tracked.txt').toString('base64');
+    const preview = await service.conflictPreview(repo.id, pathBytes);
+    expect(preview.externalTool).toBe('fixture');
+    const original = await readFile(join(path, 'tracked.txt'));
+    await service.resolveConflict(repo.id, { pathBytes, token: preview.token, choice: 'external' });
+    expect(fixtureGit(path, ['show', ':tracked.txt'])).toBe('external resolution');
+    expect(fixtureGit(path, ['ls-files', '--unmerged'])).toBe('');
+    await service.undo(repo.id);
+    expect(await readFile(join(path, 'tracked.txt'))).toEqual(original);
+    expect(fixtureGit(path, ['ls-files', '--unmerged'])).not.toBe('');
+  } finally {
+    await service.dispose();
+  }
+});
+test('whole-side selection retains the selected executable mode even when core.filemode is disabled', async () => {
+  const { path, service, repo } = await conflict('mode');
+  try {
+    const theirs = fixtureGit(path, ['rev-parse', ':3:tracked.txt']);
+    fixtureGit(path, ['update-index', '--index-info'], `100755 ${theirs} 3\ttracked.txt\n`);
+    fixtureGit(path, ['config', 'core.filemode', 'false']);
+    const pathBytes = Buffer.from('tracked.txt').toString('base64');
+    const preview = await service.conflictPreview(repo.id, pathBytes);
+    await service.resolveConflict(repo.id, { pathBytes, token: preview.token, choice: 'theirs' });
+    expect(fixtureGit(path, ['ls-files', '--stage', 'tracked.txt'])).toBe(
+      `100755 ${theirs} 0\ttracked.txt`,
+    );
+  } finally {
+    await service.dispose();
+  }
+});
+test('cancelling an external merge tool preserves partial edits for Undo', async () => {
+  const { path, service, repo } = await conflict('cancel-external');
+  try {
+    fixtureGit(path, ['config', 'merge.tool', 'fixture']);
+    fixtureGit(path, [
+      'config',
+      'mergetool.fixture.cmd',
+      'printf "partial external edit\\n" > "$MERGED"; sleep 30',
+    ]);
+    fixtureGit(path, ['config', 'mergetool.fixture.trustExitCode', 'true']);
+    const pathBytes = Buffer.from('tracked.txt').toString('base64');
+    const preview = await service.conflictPreview(repo.id, pathBytes);
+    const original = await readFile(join(path, 'tracked.txt'));
+    const abort = new AbortController();
+    const result = service
+      .resolveConflict(
+        repo.id,
+        { pathBytes, token: preview.token, choice: 'external' },
+        abort.signal,
+      )
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    let wrote = false;
+    try {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if ((await readFile(join(path, 'tracked.txt'), 'utf8')) === 'partial external edit\n') {
+          wrote = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    } finally {
+      abort.abort();
+    }
+    expect(wrote).toBe(true);
+    expect(await result).toMatchObject({ code: 'CANCELLED' });
+    await service.undo(repo.id);
+    expect(await readFile(join(path, 'tracked.txt'))).toEqual(original);
+    expect(fixtureGit(path, ['ls-files', '--unmerged'])).not.toBe('');
+  } finally {
+    await service.dispose();
+  }
+});

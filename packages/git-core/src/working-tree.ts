@@ -415,14 +415,31 @@ export class WorkingTree {
   private async conflictContext(pathBytes: string, signal?: AbortSignal, indexFile?: string) {
     const metadata = await inspectOperation(this.repo.gitDir);
     const revision = hash(this.revision(await this.fingerprint(indexFile)) + metadata.fingerprint);
-    return new Conflicts((args, options) => this.run(args, options), this.backups).inspect(
-      pathBytes,
-      revision,
-      metadata.details.kind,
-      signal,
-      indexFile,
+    const configured = await this.run(
+      ['config', '--null', '--get-regexp', '^(merge\\.(gui)?tool|mergetool\\..*)$'],
+      { signal, allowedExitCodes: [0, 1], maxBytes: 65536 },
     );
+    const settings = new Map<string, string>();
+    const parser = new NulDecoder((field) => {
+      const newline = field.indexOf(10);
+      if (newline >= 0)
+        settings.set(
+          field.subarray(0, newline).toString().toLowerCase(),
+          field.subarray(newline + 1).toString(),
+        );
+    });
+    parser.push(configured.stdout);
+    parser.finish();
+    const name = settings.get('merge.guitool') ?? settings.get('merge.tool');
+    const result = await new Conflicts(
+      (args, options) => this.run(args, options),
+      this.backups,
+    ).inspect(pathBytes, revision, metadata.details.kind, signal, indexFile);
+    result.preview.externalTool = name && /^[a-zA-Z0-9_-]{1,128}$/.test(name) ? name : undefined;
+    result.preview.token = hash(result.preview.token + configured.stdout.toString('base64'));
+    return result;
   }
+
   async conflictPreview(pathBytes: string, signal?: AbortSignal) {
     return (await this.conflictContext(pathBytes, signal)).preview;
   }
@@ -441,10 +458,34 @@ export class WorkingTree {
         )
           throw new GitError('STALE_CONFLICT', 'The conflict changed. Reopen it before resolving.');
         const stdin = Buffer.concat([Buffer.from(options.pathBytes, 'base64'), Buffer.from([0])]);
+        if (options.choice === 'external') {
+          const tool = current.preview.externalTool;
+          if (!tool)
+            throw new GitError(
+              'MERGETOOL_NOT_CONFIGURED',
+              'Configure Git merge.tool or merge.guitool before opening an external merge tool.',
+            );
+          if (current.preview.working.kind === 'submodule')
+            throw new GitError(
+              'SUBMODULE_OPERATION',
+              'Choose a submodule commit pointer here or resolve it inside the submodule.',
+            );
+          const path = Buffer.from(options.pathBytes, 'base64');
+          if (!Buffer.from(path.toString('utf8')).equals(path))
+            throw new GitError(
+              'EXTERNAL_TOOL_PATH',
+              'External merge tools require a UTF-8 filename. Use a whole-side choice instead.',
+            );
+          await this.run(
+            ['mergetool', '--no-prompt', `--tool=${tool}`, '--', path.toString('utf8')],
+            { indexFile, signal, readOnly: false, timeoutMs: 1800000 },
+          );
+          return;
+        }
+
         if (options.choice !== 'output') {
           const chosen = options.choice === 'delete' ? undefined : current.preview[options.choice];
-          if (!chosen || chosen.mode === '160000') {
-            if (!chosen && current.image) await this.backups.trash(current.image, signal);
+          const stageChoice = async () => {
             const clear = Buffer.concat([
               Buffer.from(
                 `0 ${'0'.repeat((current.preview.ours ?? current.preview.theirs ?? current.preview.base)!.oid.length)}\t`,
@@ -460,6 +501,10 @@ export class WorkingTree {
               readOnly: false,
               stdin: Buffer.concat([clear, selected]),
             });
+          };
+          if (!chosen || chosen.mode === '160000') {
+            if (!chosen && current.image) await this.backups.trash(current.image, signal);
+            await stageChoice();
             return;
           }
           if (current.preview.working.kind === 'submodule')
@@ -479,6 +524,8 @@ export class WorkingTree {
             ],
             { indexFile, signal, readOnly: false, stdin },
           );
+          await stageChoice();
+          return;
         } else {
           if (!current.preview.editable)
             throw new GitError(
