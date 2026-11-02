@@ -39,3 +39,44 @@ test('file history follows renames across stable pages and treats pathspec chara
     await service.dispose();
   }
 });
+
+test('file history handles a merge resolution and agrees with native follow traversal', async () => {
+  const path = createFixture(join(root, 'merge-history'));
+  await writeFile(join(path, 'shared.txt'), 'base\n');
+  fixtureGit(path, ['add', '.']);
+  fixtureGit(path, ['commit', '-m', 'Shared base']);
+  fixtureGit(path, ['switch', '-c', 'other']);
+  await writeFile(join(path, 'shared.txt'), 'other\n');
+  fixtureGit(path, ['commit', '-am', 'Other edit']);
+  fixtureGit(path, ['switch', 'main']);
+  await writeFile(join(path, 'shared.txt'), 'main\n');
+  fixtureGit(path, ['commit', '-am', 'Main edit']);
+  try {
+    fixtureGit(path, ['merge', '--no-edit', 'other']);
+  } catch {
+    /* Expected content conflict. */
+  }
+  await writeFile(join(path, 'shared.txt'), 'combined\n');
+  fixtureGit(path, ['add', '.']);
+  fixtureGit(path, ['commit', '-m', 'Combined resolution']);
+  const commit = fixtureGit(path, ['rev-parse', 'HEAD']);
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const result = await service.fileHistory(repo.id, {
+      commit,
+      pathBytes: Buffer.from('shared.txt').toString('base64'),
+    });
+    const native = fixtureGit(path, [
+      'log',
+      '--follow',
+      '--format=%s',
+      commit,
+      '--',
+      'shared.txt',
+    ]).split('\n');
+    expect(result.entries.map((entry) => entry.summary)).toEqual(native);
+  } finally {
+    await service.dispose();
+  }
+});
