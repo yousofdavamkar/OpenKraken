@@ -66,6 +66,7 @@ import {
   type ProviderPullDetails,
   providerOriginSchema,
   providerRepositoryPageSchema,
+  providerRepositoryNameSchema,
   providerRepositoryPageNumberSchema,
   type ProviderRepositoryPage,
 } from '@openkraken/ipc-contract';
@@ -314,7 +315,13 @@ export class GitHubProvider implements ProviderDriver {
       if (
         !Array.isArray(data) ||
         data.length > 100 ||
-        data.some((repo) => !Number.isSafeInteger(repo?.id) || repo.id <= 0)
+        data.some(
+          (repo) =>
+            !Number.isSafeInteger(repo?.id) ||
+            repo.id <= 0 ||
+            !providerRepositoryNameSchema.safeParse(repo.owner?.login).success ||
+            !providerRepositoryNameSchema.safeParse(repo.name).success,
+        )
       )
         throw new ProviderError(
           'PROVIDER_RESPONSE',

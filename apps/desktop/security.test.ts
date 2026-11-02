@@ -147,6 +147,50 @@ test('repository browsing accepts bounded page numbers without renderer-supplied
     expect(requestSchema.safeParse({ ...request, ...fields }).success).toBe(false);
 });
 
+test('nested provider clone paths retain every namespace component and reject noncanonical credential targets', () => {
+  const id = '00000000-0000-4000-8000-000000000000';
+  const url = 'https://gitlab.example.test/company/division/team/project.git';
+  const request = {
+    id,
+    method: 'clone',
+    path: '/chosen/folder',
+    options: { url },
+    credential: { url, username: 'oauth2', password: 'fixture-secret' },
+  };
+  expect(serviceRequestSchema.safeParse(request).success).toBe(true);
+  for (const path of [
+    'company//team/project.git',
+    'company/../team/project.git',
+    'company/%2e%2e/team/project.git',
+    'company/team%2fproject.git',
+    'company/team/project.git/',
+    'company/team/project.git?token=secret',
+    'company/team/project.git#secret',
+    'company/team\\project.git',
+  ]) {
+    const target = `https://gitlab.example.test/${path}`;
+    expect(
+      serviceRequestSchema.safeParse({
+        ...request,
+        options: { url: target },
+        credential: { ...request.credential, url: target },
+      }).success,
+    ).toBe(false);
+  }
+  expect(
+    requestSchema.safeParse({
+      id,
+      method: 'providerPullRequests',
+      accountId: 'a'.repeat(64),
+      options: {
+        repository: { owner: 'company/division/team', name: 'project' },
+        state: 'open',
+        page: 1,
+      },
+    }).success,
+  ).toBe(true);
+});
+
 test('saved clone tokens are accepted only by the private utility contract for the exact requested URL', () => {
   const request = {
     id: '00000000-0000-4000-8000-000000000000',

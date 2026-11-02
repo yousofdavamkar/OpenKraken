@@ -120,21 +120,31 @@ export const gitlabChallengeSchema = z
 export type GitLabStart = z.infer<typeof gitlabStartSchema>;
 export type GitLabChallenge = z.infer<typeof gitlabChallengeSchema>;
 
-// GitHub/GHES repository components are literal path segments, never URLs.
-export const providerRepositoryNameSchema = z
+// Repository paths contain literal ASCII segments, never encoded URLs or dot segments.
+export const providerRepositoryPathComponentSchema = z
   .string()
   .min(1)
-  .max(100)
+  .max(255)
   .regex(/^[A-Za-z0-9_.-]+$/)
   .refine((value) => value !== '.' && value !== '..');
+// GitHub/GHES retain their existing single-component, 100-character selector bound.
+export const providerRepositoryNameSchema = providerRepositoryPathComponentSchema.max(100);
+export const providerNamespaceSchema = z
+  .string()
+  .min(1)
+  .max(2048)
+  .refine((value) =>
+    value.split('/').every((part) => providerRepositoryPathComponentSchema.safeParse(part).success),
+  );
 export const providerRepositoryPageNumberSchema = z.number().int().min(1).max(100);
 export const providerRepositorySchema = z
   .object({
     id: z.string().regex(/^[1-9][0-9]{0,19}$/),
-    owner: providerRepositoryNameSchema,
-    name: providerRepositoryNameSchema,
-    description: z.string().max(1000),
+    owner: providerNamespaceSchema,
+    name: providerRepositoryPathComponentSchema,
+    description: z.string().max(4096),
     private: z.boolean(),
+    visibility: z.enum(['public', 'internal', 'private']).optional(),
     archived: z.boolean(),
     cloneUrl: z.string().max(4096),
   })
@@ -144,6 +154,7 @@ export const providerRepositorySchema = z
       const url = new URL(repo.cloneUrl);
       return (
         providerOriginSchema.safeParse(url.origin).success &&
+        (repo.visibility === undefined || repo.private === (repo.visibility !== 'public')) &&
         repo.cloneUrl === `${url.origin}/${repo.owner}/${repo.name}.git`
       );
     } catch {
@@ -170,10 +181,10 @@ export const providerCloneUrlSchema = z
       return (
         providerOriginSchema.safeParse(url.origin).success &&
         value === `${url.origin}${url.pathname}` &&
-        parts.length === 3 &&
-        providerRepositoryNameSchema.safeParse(parts[1]).success &&
-        parts[2]!.endsWith('.git') &&
-        providerRepositoryNameSchema.safeParse(parts[2]!.slice(0, -4)).success
+        parts.length >= 3 &&
+        providerNamespaceSchema.safeParse(parts.slice(1, -1).join('/')).success &&
+        parts.at(-1)!.endsWith('.git') &&
+        providerRepositoryPathComponentSchema.safeParse(parts.at(-1)!.slice(0, -4)).success
       );
     } catch {
       return false;
@@ -183,7 +194,7 @@ export const providerCloneUrlSchema = z
 export const providerGitCredentialSchema = z
   .object({
     url: providerCloneUrlSchema,
-    username: providerRepositoryNameSchema,
+    username: providerRepositoryPathComponentSchema,
     password: providerConnectSchema.shape.token,
   })
   .strict();
@@ -197,7 +208,7 @@ export type ProviderRemoteTarget = z.infer<typeof providerRemoteTargetSchema>;
 export type ProviderRemoteAuthorization = ProviderRemoteTarget & { username: string };
 
 export const providerRepositoryTargetSchema = z
-  .object({ owner: providerRepositoryNameSchema, name: providerRepositoryNameSchema })
+  .object({ owner: providerNamespaceSchema, name: providerRepositoryPathComponentSchema })
   .strict();
 export const providerPullNumberSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 export const providerPullListOptionsSchema = z

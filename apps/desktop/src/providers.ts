@@ -111,10 +111,7 @@ export class ProviderService {
   }
   private collaborationDriver(account: ProviderAccount) {
     if (account.provider !== 'github')
-      throw new ProviderError(
-        'PROVIDER_UNSUPPORTED',
-        'GitLab repository browsing and collaboration are not available yet.',
-      );
+      throw new ProviderError('PROVIDER_UNSUPPORTED', 'GitLab collaboration is not available yet.');
     return this.github;
   }
   private run<T>(work: () => Promise<T>) {
@@ -287,7 +284,12 @@ export class ProviderService {
     return this.run(async () => {
       providerRepositoryPageNumberSchema.parse(page);
       const { account, token } = await this.authorize(id, signal);
-      return this.collaborationDriver(account).repositories(account.origin, token, page, signal);
+      return this.identityDriver(account.provider).repositories(
+        account.origin,
+        token,
+        page,
+        signal,
+      );
     });
   }
   pullTemplates(id: string, input: ProviderPullTemplatesOptions, signal?: AbortSignal) {
@@ -453,6 +455,11 @@ export class ProviderService {
           'Choose a canonical HTTPS repository URL for this provider account.',
         );
       const { account, token } = await this.authorize(id, signal, new URL(parsed.data).origin);
+      if (account.provider === 'github' && new URL(parsed.data).pathname.split('/').length !== 3)
+        throw new ProviderError(
+          'PROVIDER_CLONE_URL',
+          'Choose a GitHub repository URL with one owner and repository name.',
+        );
       const credential = providerGitCredentialSchema.safeParse({
         url: parsed.data,
         username: account.authentication === 'pkce' ? 'oauth2' : account.login,
