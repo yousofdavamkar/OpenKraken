@@ -490,3 +490,32 @@ test('PR merge IPC requires explicit method and reviewed branch identities witho
       false,
     );
 });
+
+test('PR check IPC permits bounded selectors but no caller-supplied GraphQL or credentials', () => {
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    accountId: 'a'.repeat(64),
+    method: 'providerPullChecks',
+    options: {
+      repository: { owner: 'team', name: 'project' },
+      number: 1,
+      head: '1'.repeat(40),
+      after: null,
+    },
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  for (const extra of [
+    { head: undefined },
+    { head: 'main' },
+    { after: '' },
+    { after: 'x'.repeat(2049) },
+    { after: 'a\nb' },
+    { query: 'mutation {}' },
+    { url: 'https://other.test/graphql' },
+    { token: 'secret' },
+  ])
+    expect(
+      requestSchema.safeParse({ ...request, options: { ...request.options, ...extra } }).success,
+    ).toBe(false);
+});

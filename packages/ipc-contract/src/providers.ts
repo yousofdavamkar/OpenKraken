@@ -481,3 +481,70 @@ export type ProviderMergeMethod = z.infer<typeof providerMergeMethodSchema>;
 export type ProviderMergePreview = z.infer<typeof providerMergePreviewSchema>;
 export type ProviderMergePull = z.infer<typeof providerMergePullSchema>;
 export type ProviderMergeResult = z.infer<typeof providerMergeResultSchema>;
+
+const providerCheckCursorSchema = z
+  .string()
+  .min(1)
+  .max(2048)
+  .regex(/^[\x21-\x7e]+$/);
+export const providerPullChecksOptionsSchema = providerPullOptionsSchema
+  .extend({
+    head: providerCommitSchema,
+    after: providerCheckCursorSchema.nullable(),
+  })
+  .strict();
+export const providerCheckStateSchema = z.enum([
+  'ERROR',
+  'EXPECTED',
+  'FAILURE',
+  'PENDING',
+  'SUCCESS',
+]);
+export const providerCheckRunStatusSchema = z.enum([
+  'COMPLETED',
+  'IN_PROGRESS',
+  'PENDING',
+  'QUEUED',
+  'REQUESTED',
+  'WAITING',
+]);
+export const providerCheckConclusionSchema = z.enum([
+  'ACTION_REQUIRED',
+  'CANCELLED',
+  'FAILURE',
+  'NEUTRAL',
+  'SKIPPED',
+  'STALE',
+  'STARTUP_FAILURE',
+  'SUCCESS',
+  'TIMED_OUT',
+]);
+const providerCheckCommon = z.object({
+  id: z.string().min(1).max(512),
+  name: z.string().min(1).max(1024),
+  description: z.string().max(4096),
+});
+export const providerCheckSchema = z.discriminatedUnion('kind', [
+  providerCheckCommon
+    .extend({
+      kind: z.literal('check'),
+      status: providerCheckRunStatusSchema,
+      conclusion: providerCheckConclusionSchema.nullable(),
+    })
+    .strict(),
+  providerCheckCommon
+    .extend({ kind: z.literal('status'), status: providerCheckStateSchema, conclusion: z.null() })
+    .strict(),
+]);
+export const providerPullChecksPageSchema = z
+  .object({
+    head: providerCommitSchema,
+    state: providerCheckStateSchema.nullable(),
+    total: providerCountSchema,
+    checks: z.array(providerCheckSchema).max(100),
+    nextCursor: providerCheckCursorSchema.nullable(),
+  })
+  .strict();
+export type ProviderPullChecksOptions = z.infer<typeof providerPullChecksOptionsSchema>;
+export type ProviderPullChecksPage = z.infer<typeof providerPullChecksPageSchema>;
+export type ProviderCheck = z.infer<typeof providerCheckSchema>;

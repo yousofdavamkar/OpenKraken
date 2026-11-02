@@ -1,6 +1,9 @@
 import { Octokit } from '@octokit/rest';
 import {
   providerMergePreviewSchema,
+  providerPullChecksOptionsSchema,
+  type ProviderPullChecksOptions,
+  type ProviderPullChecksPage,
   providerMergePullSchema,
   providerMergeResultSchema,
   type ProviderMergePreview,
@@ -53,10 +56,17 @@ import {
   type ProviderRepositoryPage,
 } from '@openkraken/ipc-contract';
 
+import { loadPullChecks } from './github-checks.js';
 import { ProviderError } from './provider-error.js';
 export { ProviderError } from './provider-error.js';
 import { loadPullTemplates, loadPullTemplate } from './github-templates.js';
 export interface ProviderDriver {
+  pullChecks(
+    origin: string,
+    token: string,
+    options: ProviderPullChecksOptions,
+    signal?: AbortSignal,
+  ): Promise<ProviderPullChecksPage>;
   previewMerge(
     origin: string,
     token: string,
@@ -149,6 +159,18 @@ export interface ProviderDriver {
 }
 export class GitHubProvider implements ProviderDriver {
   constructor(private fetcher: typeof fetch = (...args) => fetch(...args)) {}
+  async pullChecks(
+    origin: string,
+    token: string,
+    input: ProviderPullChecksOptions,
+    signal?: AbortSignal,
+  ) {
+    const options = providerPullChecksOptionsSchema.parse(input);
+    const host = providerOriginSchema.parse(origin);
+    return this.request(host, token, signal, (client, headers) =>
+      loadPullChecks(client, headers, host, options),
+    );
+  }
   async identity(origin: string, token: string, signal?: AbortSignal) {
     return this.request(origin, token, signal, async (client, headers) => {
       const { data } = await client.users.getAuthenticated({ headers });

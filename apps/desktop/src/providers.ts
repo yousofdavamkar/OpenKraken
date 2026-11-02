@@ -3,6 +3,8 @@ import { mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import {
+  providerPullChecksOptionsSchema,
+  type ProviderPullChecksOptions,
   providerMergePullSchema,
   type ProviderMergePull,
   providerPullTemplatesOptionsSchema,
@@ -267,6 +269,13 @@ export class ProviderService {
       const options = providerPullOptionsSchema.parse(input);
       const { account, token } = await this.authorize(id, signal);
       return this.github.pullRequest(account.origin, token, options, signal);
+    });
+  }
+  pullChecks(id: string, input: ProviderPullChecksOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerPullChecksOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      return this.github.pullChecks(account.origin, token, options, signal);
     });
   }
   pullFiles(id: string, input: ProviderPullFilesOptions, signal?: AbortSignal) {

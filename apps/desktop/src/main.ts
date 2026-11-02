@@ -252,6 +252,7 @@ else {
           request.method === 'providerPullTemplate' ||
           request.method === 'providerPullComments' ||
           request.method === 'providerCreateComment' ||
+          request.method === 'providerPullChecks' ||
           request.method === 'providerPullFiles' ||
           request.method === 'providerPullReviews' ||
           request.method === 'providerSubmitReview' ||
@@ -338,6 +339,15 @@ else {
             return resultSchema.parse({
               kind: 'providerCommentCreated',
               comment: await providers.createComment(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerPullChecks')
+            return resultSchema.parse({
+              kind: 'providerPullChecks',
+              page: await providers.pullChecks(
                 request.accountId,
                 request.options,
                 controller.signal,
@@ -495,6 +505,7 @@ else {
           request.method === 'providerPullTemplate' ||
           request.method === 'providerPullComments' ||
           request.method === 'providerCreateComment' ||
+          request.method === 'providerPullChecks' ||
           request.method === 'providerPullFiles' ||
           request.method === 'providerPullReviews' ||
           request.method === 'providerSubmitReview' ||

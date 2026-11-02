@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import {
+  providerPullChecksOptionsSchema,
+  providerPullChecksPageSchema,
   providerMergePullSchema,
   providerMergePreviewSchema,
   providerMergeResultSchema,
@@ -1200,6 +1202,14 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerPullChecks'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerPullChecksOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerPullFiles'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerPullFilesOptionsSchema,
@@ -1416,6 +1426,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z
     .object({ kind: z.literal('providerCommentCreated'), comment: providerPullCommentSchema })
     .strict(),
+  z.object({ kind: z.literal('providerPullChecks'), page: providerPullChecksPageSchema }).strict(),
   z.object({ kind: z.literal('providerPullFiles'), page: providerPullFilesPageSchema }).strict(),
   z
     .object({ kind: z.literal('providerPullReviews'), page: providerPullReviewsPageSchema })
