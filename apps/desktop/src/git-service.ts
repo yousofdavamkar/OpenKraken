@@ -174,6 +174,16 @@ async function executeGit(
       kind: 'workingState',
       state: await git.commit(request.repoId, request.options, signal),
     };
+  if (request.method === 'resetPreview')
+    return {
+      kind: 'resetPreview',
+      preview: await git.resetPreview(request.repoId, request.selection, signal),
+    };
+  if (request.method === 'reset')
+    return {
+      kind: 'workingState',
+      state: await git.reset(request.repoId, request.selection, request.token, signal),
+    };
   if (request.method === 'startOperation')
     return {
       kind: 'workingState',
@@ -257,6 +267,7 @@ parent.on('message', (event) => {
     'pull',
     'operationAction',
     'startOperation',
+    'reset',
     'stashPush',
     'stashAction',
   ].includes(request.method);

@@ -1,0 +1,9 @@
+# Reviewed reset with recoverable working files
+
+Reset is a separate two-step review and apply operation. The target is an exact commit ID and the mode is soft, mixed, or hard. Native Git implements each mode. The review token covers the selection, HEAD, the semantic index, and (for hard reset) raw working-file images. It is checked again under the index lock before mutation. An active sequencer or bisect blocks reset.
+
+Soft and mixed reset preserve working files; their journal entries restore HEAD and the index. Hard reset snapshots the union of current index paths and target tree paths before mutation, including untracked target collisions and edits hidden by assume-unchanged flags. Undo/Redo uses verified raw backups and rejects newer edits. Backups and recovery records remain outside Git. General Undo now writes a pending record before changing repository state, preserving both sides if interrupted.
+
+The initial hard-reset implementation uses the existing backup limits: 64 MiB per file, 128 MiB per side, 10,000 paths, and a 512 MiB retained journal. It checks target blob sizes before running Git. Directory/file transitions, symlink parents and submodule worktrees are refused before mutation because the file backup layer cannot safely represent them yet. Arbitrary configured smudge filters can expand target blobs beyond their object sizes; an unexpected post-write backup failure retains the pending recovery record. Filesystem edits racing final Git writes remain possible; these checks are not an editor-wide lock.
+
+Validation: native Git comparisons for all three modes, binary working bytes, staging distinct from working contents, hidden edits, untracked collisions, stale review and stale Undo, plus desktop review/reset/Undo. Public semantics: [git-reset](https://git-scm.com/docs/git-reset).

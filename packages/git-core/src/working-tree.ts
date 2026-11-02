@@ -27,6 +27,8 @@ import {
   operationActionSchema,
   startOperationSchema,
   type StartOperation,
+  type ResetSelection,
+  resetSelectionSchema,
   type StashPushOptions,
   type ReferenceOptions,
   type WorkingState,
@@ -42,7 +44,7 @@ import { RepositoryQueue } from './queue.js';
 import { FileBackups, fileImageSchema, sameImages, type FileImage } from './file-backups.js';
 import { BranchConfiguration } from './branch-config.js';
 import { parsePatch, selectPatch } from './patch.js';
-import { StatusParser } from './parsers.js';
+import { StatusParser, NulDecoder } from './parsers.js';
 const MAX_INDEX = 32 * 1024 * 1024;
 const savedSchema = z.object({
   head: headSchema,
@@ -406,6 +408,110 @@ export class WorkingTree {
       conflicts,
       token: hash(metadata.fingerprint + JSON.stringify(fingerprint) + JSON.stringify(images)),
     };
+  }
+  private async resetContext(input: ResetSelection, signal?: AbortSignal, indexFile?: string) {
+    const selection = resetSelectionSchema.parse(input);
+    if (this.repo.isBare)
+      throw new GitError('BARE_REPOSITORY', 'This repository has no working tree');
+    await this.noOperation();
+    await this.run(['cat-file', '-e', `${selection.target}^{commit}`], { signal });
+    const fingerprint = await this.fingerprint(indexFile);
+    if (!fingerprint.head.oid)
+      throw new GitError('UNBORN_HEAD', 'Create an initial commit before resetting.');
+    const paths = new Set<string>();
+    if (selection.mode === 'hard') {
+      const collect = async (args: string[]) => {
+        const parser = new NulDecoder((path) => {
+          paths.add(path.toString('base64'));
+          if (paths.size > 10000)
+            throw new GitError('UNDO_LIMIT', 'Hard reset backups are limited to 10,000 paths.');
+        });
+        await this.run(args, { signal, indexFile, onStdout: (chunk) => parser.push(chunk) });
+        parser.finish();
+      };
+      // Capture all tracked paths, including edits hidden by assume-unchanged flags.
+      await collect(['ls-files', '--cached', '-z']);
+      await collect(['ls-tree', '-r', '--name-only', '-z', selection.target]);
+      let targetBytes = 0;
+      const targetSizes = new NulDecoder((record) => {
+        const header = record.subarray(0, record.indexOf(9)).toString().trim().split(/\s+/);
+        if (header[1] === 'commit')
+          throw new GitError(
+            'SUBMODULE_OPERATION',
+            'Hard reset with submodule paths is not supported yet.',
+          );
+        const size = Number(header[3]);
+        targetBytes += size;
+        if (
+          !Number.isSafeInteger(size) ||
+          size > 64 * 1024 * 1024 ||
+          targetBytes > 128 * 1024 * 1024
+        )
+          throw new GitError(
+            'UNDO_LIMIT',
+            'The target tree exceeds hard reset backup limits (64 MiB per file, 128 MiB total).',
+          );
+      });
+      await this.run(['ls-tree', '-r', '--long', '-z', selection.target], {
+        signal,
+        onStdout: (chunk) => targetSizes.push(chunk),
+      });
+      targetSizes.finish();
+      const trackedModes = new NulDecoder((record) => {
+        if (record.subarray(0, 6).toString() === '160000')
+          throw new GitError(
+            'SUBMODULE_OPERATION',
+            'Hard reset with submodule paths is not supported yet.',
+          );
+      });
+      await this.run(['ls-files', '--stage', '-z'], {
+        indexFile,
+        signal,
+        onStdout: (chunk) => trackedModes.push(chunk),
+      });
+      trackedModes.finish();
+    }
+    const files =
+      selection.mode === 'hard'
+        ? await this.backups.capture([...paths].sort(), false, signal)
+        : undefined;
+    return {
+      selection,
+      fingerprint,
+      files,
+      token: hash(JSON.stringify({ selection, ...fingerprint, files })),
+    };
+  }
+  async resetPreview(selection: ResetSelection, signal?: AbortSignal) {
+    const context = await this.resetContext(selection, signal);
+    return {
+      token: context.token,
+      head: context.fingerprint.head,
+      files: context.files?.length ?? 0,
+      bytes: context.files?.reduce((sum, file) => sum + (file.bytes ?? 0), 0) ?? 0,
+    };
+  }
+  async reset(selection: ResetSelection, token: string, signal?: AbortSignal) {
+    const reviewed = await this.resetContext(selection, signal);
+    if (reviewed.token !== token)
+      throw new GitError('STALE_RESET', 'Repository contents changed. Review the reset again.');
+    return this.transaction(
+      `Reset (${selection.mode})`,
+      async (indexFile, before) => {
+        const current = await this.resetContext(selection, signal, indexFile);
+        if (current.token !== token || !sameImages(before.files, current.files))
+          throw new GitError('STALE_RESET', 'Repository contents changed. Review the reset again.');
+        await this.run(['reset', `--${selection.mode}`, selection.target, '--'], {
+          indexFile,
+          signal,
+          readOnly: false,
+          timeoutMs: 180000,
+        });
+      },
+      signal,
+      reviewed.files?.map((file) => file.pathBytes),
+      true,
+    );
   }
   async startOperation(
     input: StartOperation,
@@ -1638,6 +1744,15 @@ export class WorkingTree {
         }
         await writeFile(index, Buffer.from(target.index, 'base64'));
         await this.verifyIndex(index);
+        const pending = join(this.directory, `pending-${randomUUID()}.json`);
+        await atomic(
+          pending,
+          JSON.stringify({
+            label: `${redo ? 'Redo' : 'Undo'} ${entry.label}`,
+            before: expected,
+            target,
+          }),
+        );
         if (!sameHead(target.head, expected.head)) {
           if (
             target.head.kind !== expected.head.kind ||
@@ -1678,6 +1793,7 @@ export class WorkingTree {
         source.pop();
         (redo ? journal.undo : journal.redo).push(entry);
         await this.saveJournal(journal);
+        await rm(pending, { force: true });
         await this.pruneFiles(journal);
       },
       signal,

@@ -99,6 +99,19 @@ export const operationActionSchema = z
   })
   .strict();
 export type OperationAction = z.infer<typeof operationActionSchema>;
+export const resetSelectionSchema = z
+  .object({ mode: z.enum(['soft', 'mixed', 'hard']), target: oidSchema })
+  .strict();
+export type ResetSelection = z.infer<typeof resetSelectionSchema>;
+export const resetPreviewSchema = z
+  .object({
+    token: z.string().regex(/^[0-9a-f]{64}$/),
+    head: headSchema,
+    files: z.number().int().nonnegative(),
+    bytes: z.number().int().nonnegative(),
+  })
+  .strict();
+export type ResetPreview = z.infer<typeof resetPreviewSchema>;
 export const startOperationSchema = z.discriminatedUnion('kind', [
   z
     .object({
@@ -606,6 +619,23 @@ const workingRequests = [
   z
     .object({
       id: requestId,
+      method: z.literal('resetPreview'),
+      repoId: repoIdSchema,
+      selection: resetSelectionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('reset'),
+      repoId: repoIdSchema,
+      selection: resetSelectionSchema,
+      token: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('startOperation'),
       repoId: repoIdSchema,
       options: startOperationSchema,
@@ -719,6 +749,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('discardPreview'), preview: discardPreviewSchema }),
   z.object({ kind: z.literal('diff'), diff: workingDiffSchema }),
   z.object({ kind: z.literal('workingState'), state: workingStateSchema }),
+  z.object({ kind: z.literal('resetPreview'), preview: resetPreviewSchema }),
   z.object({ kind: z.literal('appearance'), remoteAvatars: z.boolean() }),
   z.object({
     kind: z.literal('avatars'),

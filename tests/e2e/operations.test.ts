@@ -97,3 +97,42 @@ test('reviewed merge and mainline revert update native history', async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+test('hard reset requires a content review and Undo restores discarded edits', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-reset-e2e-'));
+  const path = createFixture(join(root, 'repository'));
+  fixtureGit(path, ['branch', 'before-reset']);
+  writeFileSync(join(path, 'tracked.txt'), 'latest commit\n');
+  fixtureGit(path, ['commit', '-am', 'Latest commit']);
+  const original = fixtureGit(path, ['rev-parse', 'HEAD']);
+  writeFileSync(join(path, 'tracked.txt'), 'uncommitted work\n');
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('button', { name: 'Reset', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Reset current branch' });
+    await dialog
+      .getByRole('combobox', { name: 'Target commit' })
+      .selectOption({ label: 'before-reset' });
+    await dialog.getByRole('combobox', { name: 'Reset mode' }).selectOption('hard');
+    await expect(dialog.getByRole('button', { name: 'Reset reviewed state' })).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Review reset' }).click();
+    await expect(dialog.getByText(original, { exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Reset reviewed state' }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(fixtureGit(path, ['show', ':tracked.txt'])).toBe('base');
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect.poll(() => fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(original);
+    expect((await import('node:fs')).readFileSync(join(path, 'tracked.txt'), 'utf8')).toBe(
+      'uncommitted work\n',
+    );
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -87,6 +87,7 @@ function callService(request: ServiceRequest): Promise<Result> {
                 'deleteRemotePreview',
                 'operationAction',
                 'startOperation',
+                'reset',
               ].includes(request.method)
             ? 210000
             : request.method === 'commit' || request.method === 'reference'

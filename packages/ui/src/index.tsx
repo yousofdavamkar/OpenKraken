@@ -10,6 +10,7 @@ import { Clone } from './clone.js';
 import { Authentication } from './authentication.js';
 import { Stashes } from './stashes.js';
 import { Push } from './push.js';
+import { Reset } from './reset.js';
 import { Integration } from './integration.js';
 import { Pull } from './pull.js';
 import { ManageRemotes } from './remotes.js';
@@ -51,6 +52,7 @@ function App() {
           <ManageRemotes />
           <Pull />
           <Integration />
+          <Reset />
           <Push />
           <Stashes />
           <button onClick={open} disabled={!!busy}>
