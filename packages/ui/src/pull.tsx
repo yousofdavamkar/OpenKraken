@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { PullOptions } from '@openkraken/ipc-contract';
+import type { PullOptions, Result } from '@openkraken/ipc-contract';
+import { ProviderGitAccount } from './provider-git-account.js';
 import { GitProgress } from './git-progress.js';
 import { useRepository, waitForBackground } from './store.js';
 function PullDialog({ repoId, close }: { repoId: string; close: () => void }) {
@@ -12,6 +13,11 @@ function PullDialog({ repoId, close }: { repoId: string; close: () => void }) {
     } catch {}
     return 'ff-only';
   });
+  const [accountId, setAccountId] = useState('');
+  const [review, setReview] = useState<
+    Extract<Result, { kind: 'providerPullPreview' }> & { options: PullOptions; branch: string }
+  >();
+  const [complete, setComplete] = useState(false);
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -24,6 +30,7 @@ function PullDialog({ repoId, close }: { repoId: string; close: () => void }) {
     setNotice('');
     setError('');
     let id: string | undefined;
+    let integrating = false;
     try {
       if (useRepository.getState().syncing) await waitForBackground();
       if (useRepository.getState().snapshot?.repository.id !== repoId) return;
@@ -31,18 +38,45 @@ function PullDialog({ repoId, close }: { repoId: string; close: () => void }) {
         throw new Error('Wait for the current operation to finish');
       id = crypto.randomUUID();
       useRepository.setState({ busy: id });
-      const current = await window.openkraken.request({ id, method: 'workingState', repoId });
-      if (current.kind === 'error') throw new Error(current.message);
-      if (current.kind !== 'workingState') return;
-      id = crypto.randomUUID();
-      useRepository.setState({ busy: id });
-      const result = await window.openkraken.request({
-        id,
-        method: 'pull',
-        repoId,
-        options: { mode, revision: current.state.revision },
-      });
+      let options = review?.options;
+      if (!options) {
+        const current = await window.openkraken.request({ id, method: 'workingState', repoId });
+        if (current.kind === 'error') throw new Error(current.message);
+        if (current.kind !== 'workingState') return;
+        options = { mode, revision: current.state.revision };
+        id = crypto.randomUUID();
+        useRepository.setState({ busy: id });
+        if (accountId) {
+          const preview = await window.openkraken.request({
+            id,
+            method: 'providerPullPreview',
+            repoId,
+            options,
+          });
+          if (preview.kind === 'error') throw new Error(preview.message);
+          if (preview.kind === 'providerPullPreview') {
+            setReview({
+              ...preview,
+              options,
+              branch: current.state.head.kind === 'branch' ? current.state.head.ref : '',
+            });
+          } else if (preview.kind === 'cancelled') setNotice('Review cancelled');
+          return;
+        }
+      }
+      integrating = true;
+      const result = await window.openkraken.request(
+        accountId && review
+          ? {
+              id,
+              method: 'providerGit',
+              accountId,
+              operation: { method: 'pull', repoId, options, revision: review.target.token },
+            }
+          : { id, method: 'pull', repoId, options },
+      );
       if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'workingState' && review) setComplete(true);
       setNotice(
         result.kind === 'cancelled'
           ? 'Pull cancelled. Review the refreshed branch and any active operation before retrying.'
@@ -52,7 +86,7 @@ function PullDialog({ repoId, close }: { repoId: string; close: () => void }) {
       setError(error instanceof Error ? error.message : String(error));
     } finally {
       if (id && useRepository.getState().busy === id) useRepository.setState({ busy: undefined });
-      if (id && useRepository.getState().snapshot?.repository.id === repoId)
+      if (integrating && id && useRepository.getState().snapshot?.repository.id === repoId)
         await useRepository.getState().run({ id: crypto.randomUUID(), method: 'refresh', repoId });
       setPending(false);
     }
@@ -75,15 +109,23 @@ function PullDialog({ repoId, close }: { repoId: string; close: () => void }) {
       >
         <h2>Pull upstream</h2>
         <p>
-          {upstream
-            ? `Fetch and integrate ${upstream} into the current branch.`
-            : 'Set an upstream for the current branch before pulling.'}
+          {accountId
+            ? 'Review the current branch, upstream and HTTPS remote before fetching.'
+            : upstream
+              ? `Fetch and integrate ${upstream} into the current branch.`
+              : 'Set an upstream for the current branch before pulling.'}
         </p>
+        <ProviderGitAccount
+          label="Pull authentication"
+          value={accountId}
+          onChange={setAccountId}
+          disabled={pending || !!review}
+        />
         <label>
           Pull policy
           <select
             value={mode}
-            disabled={pending}
+            disabled={pending || !!review}
             onChange={(event) => {
               const value = event.target.value;
               if (value !== 'ff-only' && value !== 'merge' && value !== 'rebase') return;
@@ -112,6 +154,15 @@ function PullDialog({ repoId, close }: { repoId: string; close: () => void }) {
           Commit or stash tracked edits first. Conflicts remain available to resolve or abort with
           Git.
         </p>
+        {review && (
+          <section aria-label="Reviewed pull">
+            <p>
+              Fetch {review.upstream} into {review.branch}.
+            </p>
+            <p>{review.target.url}</p>
+            <p>Policy: {review.options.mode}</p>
+          </section>
+        )}
         <GitProgress />
         {notice && <p role="status">{notice}</p>}
         {error && (
@@ -128,7 +179,29 @@ function PullDialog({ repoId, close }: { repoId: string; close: () => void }) {
           <button type="button" disabled={pending} onClick={close}>
             Close
           </button>
-          <button disabled={pending || !upstream}>Fetch and integrate</button>
+          {review && (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                setReview(undefined);
+                setComplete(false);
+                setNotice('');
+                setError('');
+              }}
+            >
+              Review again
+            </button>
+          )}
+          {!complete && (
+            <button disabled={pending || (!accountId && !upstream)}>
+              {accountId
+                ? review
+                  ? 'Fetch reviewed upstream'
+                  : 'Review pull'
+                : 'Fetch and integrate'}
+            </button>
+          )}
         </div>
       </form>
     </dialog>
