@@ -67,6 +67,10 @@ test('reviewed merge and mainline revert update native history', async () => {
       .selectOption({ label: 'incoming' });
     await dialog.getByRole('combobox', { name: 'Merge mode', exact: true }).selectOption('no-ff');
     await expect(dialog.getByText(target, { exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Check merge conflicts' }).click();
+    await expect(
+      dialog.getByText('No conflicts predicted between these committed trees.'),
+    ).toBeVisible();
     await dialog.getByRole('button', { name: 'Start merge', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     const parents = fixtureGit(path, ['rev-list', '--parents', '-1', 'HEAD']).split(' ');

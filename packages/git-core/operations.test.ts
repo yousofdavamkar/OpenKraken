@@ -261,3 +261,32 @@ for (const kind of ['cherry-pick', 'revert'] as const)
         await service.dispose();
       }
     });
+test('merge prediction reports native conflicts without touching HEAD, index or working files', async () => {
+  const { path, service, repo, original } = await divergent('prediction');
+  try {
+    const { readFile } = await import('node:fs/promises');
+    await writeFile(join(path, 'tracked.txt'), 'unstaged edits must survive\n');
+    const index = await readFile(join(path, '.git/index'));
+    const target = fixtureGit(path, ['rev-parse', 'incoming']);
+    const prediction = await service.mergePrediction(repo.id, original, target);
+    expect(prediction).toMatchObject({
+      head: original,
+      target,
+      clean: false,
+      paths: [{ path: 'tracked.txt', pathBytes: Buffer.from('tracked.txt').toString('base64') }],
+    });
+    expect(fixtureGit(path, ['cat-file', '-t', prediction.tree])).toBe('tree');
+    expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(original);
+    expect(await readFile(join(path, '.git/index'))).toEqual(index);
+    expect(await readFile(join(path, 'tracked.txt'), 'utf8')).toBe('unstaged edits must survive\n');
+    const clean = await service.mergePrediction(
+      repo.id,
+      original,
+      fixtureGit(path, ['rev-parse', 'HEAD~1']),
+    );
+    expect(clean).toMatchObject({ clean: true, paths: [] });
+    expect(clean.tree).toBe(fixtureGit(path, ['rev-parse', 'HEAD^{tree}']));
+  } finally {
+    await service.dispose();
+  }
+});

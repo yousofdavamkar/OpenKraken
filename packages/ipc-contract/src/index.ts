@@ -99,6 +99,16 @@ export const operationActionSchema = z
   })
   .strict();
 export type OperationAction = z.infer<typeof operationActionSchema>;
+export const mergePredictionSchema = z
+  .object({
+    head: oidSchema,
+    target: oidSchema,
+    tree: oidSchema,
+    clean: z.boolean(),
+    paths: z.array(z.object({ path: z.string(), pathBytes: z.string() })).max(10000),
+  })
+  .strict();
+export type MergePrediction = z.infer<typeof mergePredictionSchema>;
 export const resetSelectionSchema = z
   .object({ mode: z.enum(['soft', 'mixed', 'hard']), target: oidSchema })
   .strict();
@@ -619,6 +629,15 @@ const workingRequests = [
   z
     .object({
       id: requestId,
+      method: z.literal('mergePrediction'),
+      repoId: repoIdSchema,
+      head: oidSchema,
+      target: oidSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('resetPreview'),
       repoId: repoIdSchema,
       selection: resetSelectionSchema,
@@ -749,6 +768,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('discardPreview'), preview: discardPreviewSchema }),
   z.object({ kind: z.literal('diff'), diff: workingDiffSchema }),
   z.object({ kind: z.literal('workingState'), state: workingStateSchema }),
+  z.object({ kind: z.literal('mergePrediction'), prediction: mergePredictionSchema }),
   z.object({ kind: z.literal('resetPreview'), preview: resetPreviewSchema }),
   z.object({ kind: z.literal('appearance'), remoteAvatars: z.boolean() }),
   z.object({

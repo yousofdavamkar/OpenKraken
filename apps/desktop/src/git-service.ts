@@ -174,6 +174,11 @@ async function executeGit(
       kind: 'workingState',
       state: await git.commit(request.repoId, request.options, signal),
     };
+  if (request.method === 'mergePrediction')
+    return {
+      kind: 'mergePrediction',
+      prediction: await git.mergePrediction(request.repoId, request.head, request.target, signal),
+    };
   if (request.method === 'resetPreview')
     return {
       kind: 'resetPreview',

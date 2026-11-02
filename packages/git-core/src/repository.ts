@@ -28,6 +28,7 @@ import { HistoryCache } from './history-cache.js';
 import { RepositoryPreferences } from './preferences.js';
 import { HistoryCursor } from './history.js';
 import { Remotes } from './remotes.js';
+import { predictMerge } from './merge-prediction.js';
 import { WorkingTree } from './working-tree.js';
 import { RepositoryQueue } from './queue.js';
 
@@ -536,6 +537,21 @@ export class RepositoryService {
   ) {
     const { repo, manager } = this.remoteManager(id, onProgress, authentication);
     return this.queue(repo.commonDir).run(true, () => manager.push(options, signal), signal);
+  }
+  mergePrediction(id: string, head: string, target: string, signal?: AbortSignal) {
+    const repo = this.repositories.get(id);
+    if (!repo) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
+    return this.queue(repo.commonDir).run(
+      false,
+      () =>
+        predictMerge(
+          (args, options) => this.run(args, { cwd: repo.path, ...options }),
+          head,
+          target,
+          signal,
+        ),
+      signal,
+    );
   }
   resetPreview(id: string, selection: ResetSelection, signal?: AbortSignal) {
     const work = this.working(id);

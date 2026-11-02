@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Snapshot, StartOperation, WorkingState } from '@openkraken/ipc-contract';
+import type {
+  Snapshot,
+  StartOperation,
+  WorkingState,
+  MergePrediction,
+} from '@openkraken/ipc-contract';
 import { useRepository, waitForBackground } from './store.js';
 import { GitProgress } from './git-progress.js';
 function IntegrationDialog({
@@ -23,9 +28,40 @@ function IntegrationDialog({
   const [target, setTarget] = useState(selected ?? choices[0]?.peeled ?? choices[0]?.target ?? '');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
+  const [prediction, setPrediction] = useState<MergePrediction>();
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
+  const predict = async () => {
+    const repoId = snapshot.repository.id;
+    if (!state.head.oid) return;
+    setPending(true);
+    setError('');
+    setPrediction(undefined);
+    let id: string | undefined;
+    try {
+      if (useRepository.getState().syncing) await waitForBackground();
+      if (useRepository.getState().snapshot?.repository.id !== repoId) return;
+      if (useRepository.getState().busy)
+        throw new Error('Wait for the current operation to finish');
+      id = crypto.randomUUID();
+      useRepository.setState({ busy: id });
+      const result = await window.openkraken.request({
+        id,
+        method: 'mergePrediction',
+        repoId,
+        head: state.head.oid,
+        target,
+      });
+      if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'mergePrediction') setPrediction(result.prediction);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (id && useRepository.getState().busy === id) useRepository.setState({ busy: undefined });
+      setPending(false);
+    }
+  };
   const submit = async () => {
     const repoId = snapshot.repository.id;
     setPending(true);
@@ -118,7 +154,10 @@ function IntegrationDialog({
           <select
             disabled={pending}
             value={target}
-            onChange={(event) => setTarget(event.target.value)}
+            onChange={(event) => {
+              setTarget(event.target.value);
+              setPrediction(undefined);
+            }}
           >
             {selected && <option value={selected}>Selected commit {selected.slice(0, 12)}</option>}
             {choices.map((ref) => (
@@ -176,6 +215,30 @@ function IntegrationDialog({
           Commit or stash tracked edits first. If conflicts occur, close this dialog to resolve them
           or abort the operation.
         </p>
+        {kind === 'merge' && (
+          <section aria-label="Merge prediction">
+            <button type="button" disabled={pending || !target} onClick={() => void predict()}>
+              Check merge conflicts
+            </button>
+            {prediction && (
+              <>
+                <p>
+                  {prediction.clean
+                    ? 'No conflicts predicted between these committed trees.'
+                    : 'Git predicts conflicts between these committed trees.'}
+                </p>
+                {!!prediction.paths.length && (
+                  <ul>
+                    {prediction.paths.map((file) => (
+                      <li key={file.pathBytes}>{file.path}</li>
+                    ))}
+                  </ul>
+                )}
+                <p>Working edits are not part of this prediction.</p>
+              </>
+            )}
+          </section>
+        )}
         <GitProgress />
         {error && (
           <p role="alert" className="error">
