@@ -5,6 +5,8 @@ import type {
   Commit,
   CommitOptions,
   CommitComparisonOptions,
+  WorkingFileOptions,
+  SaveWorkingFile,
   FileHistoryOptions,
   BlameOptions,
   BlameLine,
@@ -781,6 +783,22 @@ export class RepositoryService {
     return this.queue(work.repo.commonDir).run(
       true,
       () => work.files(action, paths, signal),
+      signal,
+    );
+  }
+  workingFile(id: string, options: WorkingFileOptions, signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(
+      false,
+      () => work.workingFile(options, signal),
+      signal,
+    );
+  }
+  saveWorkingFile(id: string, options: SaveWorkingFile, signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(
+      true,
+      () => work.saveWorkingFile(options, signal),
       signal,
     );
   }

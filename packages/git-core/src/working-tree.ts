@@ -15,6 +15,10 @@ import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
 import {
   headSchema,
+  workingFileOptionsSchema,
+  saveWorkingFileSchema,
+  type WorkingFileOptions,
+  type SaveWorkingFile,
   oidSchema,
   referenceOptionsSchema,
   stashPushOptionsSchema,
@@ -41,6 +45,7 @@ import {
   type PatchOptions,
   type Repository,
 } from '@openkraken/ipc-contract';
+import { readWorkingFile, encodeWorkingFile } from './working-file.js';
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { StashStore } from './stash.js';
 import { Conflicts } from './conflicts.js';
@@ -1334,6 +1339,44 @@ export class WorkingTree {
         });
       },
       signal,
+    );
+  }
+  private async editorContext(input: WorkingFileOptions, signal?: AbortSignal, indexFile?: string) {
+    const options = workingFileOptionsSchema.parse(input);
+    await this.noOperation();
+    await this.paths([options.pathBytes], signal);
+    return readWorkingFile(
+      this.backups,
+      (args, settings) => this.run(args, { ...settings, indexFile }),
+      options.pathBytes,
+      this.revision(await this.fingerprint(indexFile)),
+      signal,
+    );
+  }
+  async workingFile(options: WorkingFileOptions, signal?: AbortSignal) {
+    return (await this.editorContext(options, signal)).preview;
+  }
+  async saveWorkingFile(input: SaveWorkingFile, signal?: AbortSignal) {
+    const options = saveWorkingFileSchema.parse(input);
+    return this.transaction(
+      'Save working file',
+      async (indexFile) => {
+        const current = await this.editorContext(
+          { pathBytes: options.pathBytes },
+          signal,
+          indexFile,
+        );
+        if (current.preview.token !== options.token)
+          throw new GitError(
+            'STALE_FILE',
+            'The file or Git state changed. Reload it before saving; newer edits were left untouched.',
+          );
+        const bytes = encodeWorkingFile(options.text, current.preview);
+        await this.backups.assertCurrent([current.image], 'STALE_FILE');
+        await this.backups.write(options.pathBytes, bytes, current.image.mode!, signal);
+      },
+      signal,
+      [options.pathBytes],
     );
   }
   async diff(

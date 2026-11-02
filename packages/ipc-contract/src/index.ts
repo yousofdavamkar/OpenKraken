@@ -437,6 +437,31 @@ export const textEncodingSchema = z.enum([
 ]);
 export type TextEncoding = z.infer<typeof textEncodingSchema>;
 export const whitespaceSchema = z.enum(['exact', 'all', 'changes', 'eol']);
+export const workingFileOptionsSchema = z.object({ pathBytes: pathBytesSchema }).strict();
+export const workingFileSchema = z
+  .object({
+    path: z.string(),
+    pathBytes: pathBytesSchema,
+    text: z.string().max(2097152),
+    encoding: textEncodingSchema,
+    bom: z.boolean(),
+    newline: z.enum(['lf', 'crlf', 'mixed']),
+    token: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .strict();
+export const saveWorkingFileSchema = z
+  .object({
+    pathBytes: pathBytesSchema,
+    token: z.string().regex(/^[0-9a-f]{64}$/),
+    text: z
+      .string()
+      .max(2097152)
+      .refine((value) => !value.includes('\0')),
+  })
+  .strict();
+export type WorkingFileOptions = z.infer<typeof workingFileOptionsSchema>;
+export type WorkingFile = z.infer<typeof workingFileSchema>;
+export type SaveWorkingFile = z.infer<typeof saveWorkingFileSchema>;
 export const commitComparisonOptionsSchema = z
   .object({
     commit: oidSchema,
