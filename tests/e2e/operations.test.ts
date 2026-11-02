@@ -78,9 +78,12 @@ test('reviewed merge and mainline revert update native history', async () => {
     expect(parents[2]).toBe(target);
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
     await expect.poll(() => fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(parents[1]);
+    await expect(page.getByRole('button', { name: 'Redo', exact: true })).toBeEnabled();
     expect(fixtureGit(path, ['ls-files', 'incoming.txt'])).toBe('');
     await page.getByRole('button', { name: 'Redo', exact: true }).click();
     await expect.poll(() => fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(parents[0]);
+    // HEAD can move before the private index is published; the UI completes after both.
+    await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeEnabled();
     expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
     await page.getByRole('button', { name: 'Integrate commits', exact: true }).click();
     await expect(dialog.getByText(parents[0]!, { exact: true })).toBeVisible();
