@@ -121,3 +121,33 @@ test('closing the application reviews an unsaved working-file draft', async () =
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('filename-based syntax highlighting loads for Python in the isolated editor', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-syntax-ui-'));
+  const path = createFixture(join(root, 'repository'));
+  writeFileSync(join(path, 'greeting.py'), 'def greeting():\n    return "hello"\n');
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('button', { name: 'Edit greeting.py', exact: true }).click();
+    const editor = page.getByRole('dialog', { name: 'Working file editor' });
+    await expect(editor.getByText('def', { exact: true })).toHaveCSS('color', 'rgb(199, 146, 234)');
+    await expect(editor.getByText('"hello"', { exact: true })).toHaveCSS(
+      'color',
+      'rgb(195, 232, 141)',
+    );
+    await editor.getByRole('button', { name: 'Close editor', exact: true }).click();
+    expect(readFileSync(join(path, 'greeting.py'), 'utf8')).toBe(
+      'def greeting():\n    return "hello"\n',
+    );
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

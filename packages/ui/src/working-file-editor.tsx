@@ -2,8 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import { javascript } from '@codemirror/lang-javascript';
+import { codeHighlighting, languageForPath } from './syntax.js';
 import type { SaveWorkingFile, WorkingFile } from '@openkraken/ipc-contract';
 const normalize = (text: string) => text.replace(/\r\n?|\n/g, '\n');
 function CodeEditor({
@@ -22,6 +21,8 @@ function CodeEditor({
   const editable = useRef(new Compartment());
   useEffect(() => {
     if (!host.current) return;
+    let alive = true;
+    const language = new Compartment();
     const editor = new EditorView({
       parent: host.current,
       state: EditorState.create({
@@ -37,10 +38,8 @@ function CodeEditor({
             'aria-multiline': 'true',
             spellcheck: 'false',
           }),
-          syntaxHighlighting(defaultHighlightStyle),
-          /\.[cm]?[jt]sx?$/.test(path)
-            ? javascript({ typescript: /\.[cm]?tsx?$/.test(path), jsx: /x$/.test(path) })
-            : [],
+          codeHighlighting,
+          language.of([]),
           EditorView.theme(
             {
               '&': { height: '100%', backgroundColor: '#121b27', color: '#dae5f3' },
@@ -55,9 +54,15 @@ function CodeEditor({
         ],
       }),
     });
+    void languageForPath(path)
+      .then((support) => {
+        if (alive) editor.dispatch({ effects: language.reconfigure(support) });
+      })
+      .catch(() => {});
     view.current = editor;
     editor.focus();
     return () => {
+      alive = false;
       editor.destroy();
       view.current = null;
     };

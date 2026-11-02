@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { BlamePanel } from './blame.js';
 import { FileHistoryPanel } from './file-history.js';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { EditorState, type Text } from '@codemirror/state';
-import { EditorView, lineNumbers } from '@codemirror/view';
-import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import { javascript } from '@codemirror/lang-javascript';
+import { Compartment, EditorState, type Text } from '@codemirror/state';
+import { EditorView, lineNumbers, keymap } from '@codemirror/view';
+import { defaultKeymap } from '@codemirror/commands';
+import { codeHighlighting, languageForPath } from './syntax.js';
 import { Change, MergeView, presentableDiff, unifiedMergeView } from '@codemirror/merge';
 import { textEncodingSchema, type TextEncoding } from '@openkraken/ipc-contract';
 import type {
@@ -76,18 +76,16 @@ function TextComparison({
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!host.current) return;
+    let alive = true;
+    const language = new Compartment();
     const extensions = [
       EditorState.readOnly.of(true),
+      keymap.of(defaultKeymap),
       EditorView.editable.of(false),
       lineNumbers(),
       theme,
-      syntaxHighlighting(defaultHighlightStyle),
-      /\.[cm]?[jt]sx?$/.test(data.file.path)
-        ? javascript({
-            typescript: /\.[cm]?tsx?$/.test(data.file.path),
-            jsx: /x$/.test(data.file.path),
-          })
-        : [],
+      codeHighlighting,
+      language.of([]),
     ];
     const a = EditorState.create({ doc: data.oldVersion.text ?? '' }).doc;
     const b = EditorState.create({ doc: data.newVersion.text ?? '' }).doc;
@@ -97,8 +95,30 @@ function TextComparison({
       mode === 'split'
         ? new MergeView({
             parent: host.current,
-            a: { doc: a, extensions },
-            b: { doc: b, extensions },
+            a: {
+              doc: a,
+              extensions: [
+                ...extensions,
+                EditorView.contentAttributes.of({
+                  role: 'textbox',
+                  'aria-label': 'Before revision',
+                  'aria-readonly': 'true',
+                  tabindex: '0',
+                }),
+              ],
+            },
+            b: {
+              doc: b,
+              extensions: [
+                ...extensions,
+                EditorView.contentAttributes.of({
+                  role: 'textbox',
+                  'aria-label': 'After revision',
+                  'aria-readonly': 'true',
+                  tabindex: '0',
+                }),
+              ],
+            },
             diffConfig,
             highlightChanges: words,
           })
@@ -107,6 +127,12 @@ function TextComparison({
             doc: b,
             extensions: [
               ...extensions,
+              EditorView.contentAttributes.of({
+                role: 'textbox',
+                'aria-label': 'Inline revision comparison',
+                'aria-readonly': 'true',
+                tabindex: '0',
+              }),
               unifiedMergeView({
                 original: a,
                 diffConfig,
@@ -115,7 +141,17 @@ function TextComparison({
               }),
             ],
           });
-    return () => view.destroy();
+    void languageForPath(data.file.path)
+      .then((support) => {
+        if (!alive) return;
+        for (const editor of view instanceof MergeView ? [view.a, view.b] : [view])
+          editor.dispatch({ effects: language.reconfigure(support) });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+      view.destroy();
+    };
   }, [data, mode, words]);
   return (
     <div
