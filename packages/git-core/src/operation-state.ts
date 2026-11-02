@@ -44,6 +44,7 @@ export async function inspectOperation(gitDir: string) {
       'git-rebase-todo',
       'done',
       'interactive',
+      'amend',
     ],
     'rebase-apply': [
       'applying',
@@ -152,6 +153,7 @@ export async function inspectOperation(gitDir: string) {
     ...(kind === 'rebase'
       ? {
           currentCommit: oid(`${backend}/stopped-sha`, `${backend}/original-commit`),
+          ...(oid('rebase-merge/amend') ? { editStopped: true } : {}),
           ...(branch?.startsWith('refs/heads/') ? { branchRef: branch } : {}),
           ...(Number.isSafeInteger(current) &&
           Number.isSafeInteger(total) &&

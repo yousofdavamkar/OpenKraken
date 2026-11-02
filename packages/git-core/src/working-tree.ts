@@ -27,6 +27,9 @@ import {
   operationActionSchema,
   startOperationSchema,
   type StartOperation,
+  type InteractiveRebase,
+  interactiveRebaseSchema,
+  interactiveRebasePreviewSchema,
   type ResetSelection,
   type ResolveConflict,
   resolveConflictSchema,
@@ -42,6 +45,8 @@ import { GitError, runGit, type RunOptions } from './runner.js';
 import { StashStore } from './stash.js';
 import { Conflicts } from './conflicts.js';
 import { inspectOperation } from './operation-state.js';
+import { openGitEditor } from './editor.js';
+import { editRebaseFile } from './rebase-editor.js';
 import { GitProgressLines, redactGitMessage } from './progress.js';
 import { RepositoryQueue } from './queue.js';
 import { FileBackups, fileImageSchema, sameImages, type FileImage } from './file-backups.js';
@@ -75,6 +80,7 @@ const operationOriginSchema = z.object({
   beforeTree: oidSchema,
   undoIds: z.array(z.string().uuid()).max(20),
   identity: z.string(),
+  plan: interactiveRebaseSchema.optional(),
 });
 type OperationOrigin = z.infer<typeof operationOriginSchema>;
 type Saved = z.infer<typeof savedSchema>;
@@ -108,6 +114,7 @@ export class WorkingTree {
     private git: string,
     readonly repo: Repository,
     dataDir: string,
+    private editorHelper?: string,
   ) {
     if (!/^[0-9a-f]{64}$/.test(repo.id)) throw new Error('Invalid repository');
     this.directory = join(dataDir, 'undo', repo.id);
@@ -748,6 +755,125 @@ export class WorkingTree {
     }, signal);
     return this.state();
   }
+  async interactiveRebasePreview(input: string, signal?: AbortSignal) {
+    const base = oidSchema.parse(input);
+    await this.noOperation();
+    const state = await this.state(signal);
+    if (!state.head.oid) throw new GitError('UNBORN_HEAD', 'Create a commit before rebasing');
+    if (state.status.entries.some((entry) => !['untracked', 'ignored'].includes(entry.kind)))
+      throw new GitError('REBASE_DIRTY', 'Commit or stash tracked changes before rebasing');
+    const ancestor = await this.run(['merge-base', '--is-ancestor', base, state.head.oid], {
+      signal,
+      allowedExitCodes: [0, 1],
+    });
+    if (ancestor.exitCode)
+      throw new GitError('REBASE_BASE', 'Choose an ancestor of HEAD as the rebase base');
+    const range = `${base}..${state.head.oid}`;
+    const ancestry = (
+      await this.run(['rev-list', '--parents', '--max-count=501', range], {
+        signal,
+        maxBytes: 131072,
+      })
+    ).stdout
+      .toString()
+      .trim()
+      .split('\n')
+      .filter(Boolean);
+    if (!ancestry.length || ancestry.length > 500)
+      throw new GitError('REBASE_LIMIT', 'Review between 1 and 500 commits');
+    if (ancestry.some((line) => line.split(' ').length > 2))
+      throw new GitError('REBASE_MERGES', 'This editor currently requires a linear commit range');
+    const output = await this.run(
+      [
+        '-c',
+        'i18n.logOutputEncoding=UTF-8',
+        'log',
+        '--reverse',
+        '--topo-order',
+        '--no-show-signature',
+        '--format=%H%x00%B%x00',
+        range,
+      ],
+      { signal, maxBytes: 2 * 1024 * 1024 },
+    );
+    let fields: string[];
+    try {
+      fields = new TextDecoder('utf-8', { fatal: true }).decode(output.stdout).split('\0');
+    } catch {
+      throw new GitError('REBASE_ENCODING', 'Commit messages must decode as UTF-8 for this editor');
+    }
+    const commits: { oid: string; message: string }[] = [];
+    for (let i = 0; i + 1 < fields.length; i += 2)
+      commits.push({ oid: oidSchema.parse(fields[i]!.trim()), message: fields[i + 1]! });
+    if (commits.length !== ancestry.length)
+      throw new GitError('REBASE_CHANGED', 'Commit history changed during review');
+    return interactiveRebasePreviewSchema.parse({
+      base,
+      head: state.head,
+      commits,
+      token: hash(JSON.stringify({ base, revision: state.revision, commits })),
+    });
+  }
+  async interactiveRebase(
+    input: InteractiveRebase,
+    signal?: AbortSignal,
+    onProgress?: (text: string) => void,
+  ) {
+    const plan = interactiveRebaseSchema.parse(input);
+    if (!this.editorHelper)
+      throw new GitError('EDITOR_UNAVAILABLE', 'The native Git editor helper is unavailable');
+    await this.locked(async (indexFile, publish) => {
+      const preview = await this.interactiveRebasePreview(plan.base, signal);
+      if (preview.token !== plan.token)
+        throw new GitError(
+          'STALE_REBASE',
+          'History or staged files changed. Review the rebase again',
+        );
+      const ids = new Set(preview.commits.map((commit) => commit.oid));
+      if (
+        plan.steps.length !== ids.size ||
+        new Set(plan.steps.map((step) => step.oid)).size !== ids.size ||
+        plan.steps.some((step) => !ids.has(step.oid))
+      )
+        throw new GitError('INVALID_REBASE_PLAN', 'Every reviewed commit must appear exactly once');
+      let picked = false;
+      for (const step of plan.steps) {
+        if (['squash', 'fixup'].includes(step.action) && !picked)
+          throw new GitError(
+            'INVALID_REBASE_PLAN',
+            'Squash and fixup need an earlier retained commit',
+          );
+        if (step.action !== 'drop') picked = true;
+      }
+      if (Buffer.byteLength(JSON.stringify(plan)) > 2 * 1024 * 1024)
+        throw new GitError('REBASE_LIMIT', 'The reviewed plan exceeds 2 MiB');
+      await this.runOperation(
+        [
+          '-c',
+          'rebase.instructionFormat=%s',
+          'rebase',
+          '--interactive',
+          '--no-autosquash',
+          '--no-autostash',
+          '--no-update-refs',
+          '--no-rebase-merges',
+          '--reapply-cherry-picks',
+          '--keep-empty',
+          '--empty=keep',
+          plan.base,
+        ],
+        'Interactive rebase',
+        indexFile,
+        publish,
+        signal,
+        onProgress,
+        true,
+        false,
+        plan,
+      );
+    }, signal);
+    return this.state();
+  }
   private async runOperation(
     args: string[],
     label: string,
@@ -757,6 +883,7 @@ export class WorkingTree {
     onProgress?: (text: string) => void,
     recordUndo: boolean | OperationOrigin = false,
     discardUndo = false,
+    plan?: InteractiveRebase,
   ) {
     const before = await this.saved(indexFile);
     const id = randomUUID();
@@ -769,6 +896,7 @@ export class WorkingTree {
             beforeTree: await this.indexTree(indexFile, signal),
             undoIds: (await this.journal()).undo.map((entry) => entry.id),
             identity: '',
+            plan,
           }
         : recordUndo || undefined;
     const pending = join(this.directory, `pending-${id}.json`);
@@ -776,14 +904,24 @@ export class WorkingTree {
     await atomic(pending, JSON.stringify(record));
     const progress = onProgress ? new GitProgressLines(onProgress) : undefined;
     let failure: unknown;
+    let editor: Awaited<ReturnType<typeof openGitEditor>> | undefined;
     try {
+      if (origin?.plan) {
+        if (!this.editorHelper)
+          throw new GitError('EDITOR_UNAVAILABLE', 'The native Git editor helper is unavailable');
+        editor = await openGitEditor(
+          this.editorHelper,
+          (path, editorSignal) => editRebaseFile(this.repo, origin.plan!, path, editorSignal),
+          signal,
+        );
+      }
       const result = await this.run(args, {
         indexFile,
         signal,
         readOnly: false,
         allowedExitCodes: [0, 1],
         timeoutMs: 180000,
-        env: { GIT_EDITOR: 'true' },
+        env: editor?.environment ?? { GIT_EDITOR: 'true' },
         onStderr: progress ? (chunk) => progress.push(chunk) : undefined,
       });
       if (result.exitCode)
@@ -795,6 +933,7 @@ export class WorkingTree {
       failure = error;
     } finally {
       progress?.end();
+      await editor?.close();
     }
     const after = await this.saved(indexFile);
     await atomic(pending, JSON.stringify({ ...record, after }));
@@ -1834,7 +1973,15 @@ export class WorkingTree {
         if (options.amend && !before.head.oid)
           throw new GitError('UNBORN_HEAD', 'There is no commit to amend');
         const markers = await readdir(this.repo.gitDir);
+        const operation = await this.operationState(signal, indexFile);
+        const editingRebase =
+          options.amend &&
+          operation.kind === 'rebase' &&
+          operation.editStopped &&
+          !operation.conflicts &&
+          before.head.kind === 'detached';
         if (
+          !editingRebase &&
           markers.some((p) =>
             [
               'MERGE_HEAD',

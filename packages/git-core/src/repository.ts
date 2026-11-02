@@ -15,6 +15,7 @@ import type {
   PullOptions,
   OperationAction,
   StartOperation,
+  InteractiveRebase,
   ResetSelection,
   ResolveConflict,
   StashPushOptions,
@@ -48,13 +49,15 @@ export class RepositoryService {
   private processPool = new RepositoryQueue(3);
   private preferences: RepositoryPreferences;
   private dataDir?: string;
+  private editorHelper?: string;
   private cache?: HistoryCache;
   constructor(
     private git: string,
-    options: { dataDir?: string } = {},
+    options: { dataDir?: string; editorHelper?: string } = {},
   ) {
     this.preferences = new RepositoryPreferences(options.dataDir);
     this.dataDir = options.dataDir;
+    this.editorHelper = options.editorHelper;
   }
   private run(args: string[], options: RunOptions) {
     return this.processPool.run(
@@ -466,7 +469,7 @@ export class RepositoryService {
       );
     let work = this.workingTrees.get(id);
     if (!work) {
-      work = new WorkingTree(this.git, repo, this.dataDir);
+      work = new WorkingTree(this.git, repo, this.dataDir, this.editorHelper);
       this.workingTrees.set(id, work);
     }
     return work;
@@ -596,6 +599,27 @@ export class RepositoryService {
     return this.queue(work.repo.commonDir).run(
       true,
       () => work.startOperation(options, signal, onProgress),
+      signal,
+    );
+  }
+  interactiveRebasePreview(id: string, base: string, signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(
+      false,
+      () => work.interactiveRebasePreview(base, signal),
+      signal,
+    );
+  }
+  interactiveRebase(
+    id: string,
+    options: InteractiveRebase,
+    signal?: AbortSignal,
+    onProgress?: (text: string) => void,
+  ) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(
+      true,
+      () => work.interactiveRebase(options, signal, onProgress),
       signal,
     );
   }

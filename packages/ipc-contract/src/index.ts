@@ -85,6 +85,7 @@ export const operationStateSchema = z
     message: z.string().max(65536),
     originalHead: oidSchema.optional(),
     currentCommit: oidSchema.optional(),
+    editStopped: z.boolean().optional(),
     branchRef: z.string().optional(),
     progress: z
       .object({ current: z.number().int().nonnegative(), total: z.number().int().positive() })
@@ -148,6 +149,41 @@ export const startOperationSchema = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 export type StartOperation = z.infer<typeof startOperationSchema>;
+const rebaseMessageSchema = z
+  .string()
+  .max(65536)
+  .refine((value) => !value.includes('\0') && new TextEncoder().encode(value).length <= 65536);
+export const rebaseStepSchema = z
+  .object({
+    action: z.enum(['pick', 'reword', 'edit', 'squash', 'fixup', 'drop']),
+    oid: oidSchema,
+    newMessage: rebaseMessageSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (step) => !['reword', 'squash'].includes(step.action) || !!step.newMessage?.trim(),
+    'Reword and squash require a reviewed commit message',
+  );
+export const interactiveRebaseSchema = z
+  .object({
+    base: oidSchema,
+    token: z.string().regex(/^[0-9a-f]{64}$/),
+    steps: z.array(rebaseStepSchema).min(1).max(500),
+  })
+  .strict();
+export const interactiveRebasePreviewSchema = z
+  .object({
+    base: oidSchema,
+    head: headSchema,
+    token: z.string().regex(/^[0-9a-f]{64}$/),
+    commits: z
+      .array(z.object({ oid: oidSchema, message: rebaseMessageSchema }).strict())
+      .min(1)
+      .max(500),
+  })
+  .strict();
+export type InteractiveRebase = z.infer<typeof interactiveRebaseSchema>;
+export type InteractiveRebasePreview = z.infer<typeof interactiveRebasePreviewSchema>;
 
 export const graphViewSchema = z
   .object({
