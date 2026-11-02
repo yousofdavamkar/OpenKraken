@@ -36,7 +36,8 @@ test('author photos are opt-in, cached, and available offline after restart', as
     const setting = page.getByRole('checkbox', { name: 'Author photos' });
     await expect(setting).not.toBeChecked();
     await expect(page.locator('img.author-avatar')).toHaveCount(0);
-    await setting.check();
+    await setting.click();
+    await expect(setting).toBeChecked();
     await expect(page.locator('img.author-avatar')).toHaveCount(4);
     expect(
       await page
@@ -57,7 +58,8 @@ test('author photos are opt-in, cached, and available offline after restart', as
     page = await open();
     await expect(page.getByRole('checkbox', { name: 'Author photos' })).toBeChecked();
     await expect(page.locator('img.author-avatar')).toHaveCount(4);
-    await page.getByRole('checkbox', { name: 'Author photos' }).uncheck();
+    await page.getByRole('checkbox', { name: 'Author photos' }).click();
+    await expect(page.getByRole('checkbox', { name: 'Author photos' })).not.toBeChecked();
     await expect(page.locator('img.author-avatar')).toHaveCount(0);
     await expect(page.locator('.author-avatar.initials')).toHaveCount(4);
   } finally {
