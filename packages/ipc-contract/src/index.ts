@@ -376,6 +376,34 @@ export const workingDiffSchema = z.object({
   ),
 });
 export type WorkingDiff = z.infer<typeof workingDiffSchema>;
+export const fileHistoryOptionsSchema = z
+  .object({
+    commit: oidSchema,
+    pathBytes: pathBytesSchema,
+    offset: z.number().int().min(0).max(10000).optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+  })
+  .strict();
+export const fileHistoryEntrySchema = z
+  .object({
+    oid: oidSchema,
+    author: z.string(),
+    time: z.number().int(),
+    summary: z.string(),
+    path: z.string(),
+    pathBytes: pathBytesSchema,
+    status: z.enum(['A', 'M', 'D', 'R', 'C', 'T']),
+  })
+  .strict();
+export const fileHistoryPageSchema = z
+  .object({
+    entries: z.array(fileHistoryEntrySchema).max(200),
+    nextOffset: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+export type FileHistoryOptions = z.infer<typeof fileHistoryOptionsSchema>;
+export type FileHistoryEntry = z.infer<typeof fileHistoryEntrySchema>;
+export type FileHistoryPage = z.infer<typeof fileHistoryPageSchema>;
 export const textEncodingSchema = z.enum([
   'UTF-8',
   'UTF-16LE',
