@@ -392,6 +392,76 @@ export const providerBitbucketPullDetailsSchema = providerPullSummarySchema
   })
   .strict();
 export type ProviderBitbucketPullDetails = z.infer<typeof providerBitbucketPullDetailsSchema>;
+export const providerBitbucketCommentsOptionsSchema = providerPullOptionsSchema
+  .extend({
+    repositoryId: providerBitbucketIdSchema,
+    page: providerRepositoryPageNumberSchema,
+  })
+  .strict();
+const providerBitbucketLineSchema = z
+  .number()
+  .int()
+  .positive()
+  .max(Number.MAX_SAFE_INTEGER)
+  .nullable();
+export const providerBitbucketCommentPositionSchema = z
+  .object({
+    path: z.string().min(1).max(4096),
+    oldLine: providerBitbucketLineSchema,
+    newLine: providerBitbucketLineSchema,
+    oldStart: providerBitbucketLineSchema,
+    newStart: providerBitbucketLineSchema,
+    outdated: z.boolean().nullable(),
+  })
+  .strict()
+  .refine(
+    (position) =>
+      (position.oldStart === null ||
+        (position.oldLine !== null && position.oldStart <= position.oldLine)) &&
+      (position.newStart === null ||
+        (position.newLine !== null && position.newStart <= position.newLine)),
+  );
+export const providerBitbucketCommentSchema = z
+  .object({
+    id: providerPullNumberSchema,
+    author: providerBitbucketPersonSchema.nullable(),
+    body: z.string().max(262144).nullable(),
+    deleted: z.boolean(),
+    pending: z.boolean().nullable(),
+    createdAt: providerDateSchema.nullable(),
+    updatedAt: providerDateSchema.nullable(),
+    parentId: providerPullNumberSchema.nullable(),
+    inline: providerBitbucketCommentPositionSchema.nullable(),
+    resolution: z.discriminatedUnion('status', [
+      z.object({ status: z.literal('unknown') }).strict(),
+      z.object({ status: z.literal('unresolved') }).strict(),
+      z
+        .object({
+          status: z.literal('resolved'),
+          author: providerBitbucketPersonSchema.nullable(),
+          createdAt: providerDateSchema.nullable(),
+        })
+        .strict(),
+    ]),
+  })
+  .strict()
+  .refine(
+    (comment) =>
+      comment.parentId !== comment.id &&
+      (comment.deleted ? comment.body === null : comment.body !== null),
+  );
+export const providerBitbucketCommentsPageSchema = z
+  .object({
+    comments: z.array(providerBitbucketCommentSchema).max(100),
+    nextPage: providerRepositoryPageNumberSchema.nullable(),
+    limited: z.boolean(),
+  })
+  .strict();
+export type ProviderBitbucketCommentsOptions = z.infer<
+  typeof providerBitbucketCommentsOptionsSchema
+>;
+export type ProviderBitbucketComment = z.infer<typeof providerBitbucketCommentSchema>;
+export type ProviderBitbucketCommentsPage = z.infer<typeof providerBitbucketCommentsPageSchema>;
 export const providerBitbucketRevisionSchema = z
   .object({
     repositoryId: providerBitbucketIdSchema,

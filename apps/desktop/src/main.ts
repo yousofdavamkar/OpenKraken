@@ -283,6 +283,7 @@ else {
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
           request.method === 'providerBitbucketPullRequest' ||
+          request.method === 'providerBitbucketPullComments' ||
           request.method === 'providerBitbucketPullFiles' ||
           request.method === 'providerBitbucketPullDiff' ||
           request.method === 'providerMergeRequest' ||
@@ -523,6 +524,15 @@ else {
             return resultSchema.parse({
               kind: 'providerBitbucketPullDiff',
               diff: await providers.bitbucketPullDiff(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerBitbucketPullComments')
+            return resultSchema.parse({
+              kind: 'providerBitbucketPullComments',
+              page: await providers.bitbucketPullComments(
                 request.accountId,
                 request.options,
                 controller.signal,
@@ -846,6 +856,7 @@ else {
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
           request.method === 'providerBitbucketPullRequest' ||
+          request.method === 'providerBitbucketPullComments' ||
           request.method === 'providerBitbucketPullFiles' ||
           request.method === 'providerBitbucketPullDiff' ||
           request.method === 'providerMergeRequest' ||

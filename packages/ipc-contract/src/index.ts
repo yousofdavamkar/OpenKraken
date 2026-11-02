@@ -1,4 +1,8 @@
 import {
+  providerBitbucketCommentsOptionsSchema,
+  providerBitbucketCommentsPageSchema,
+} from './providers.js';
+import {
   providerBitbucketFilesOptionsSchema,
   providerBitbucketFilesPageSchema,
   providerBitbucketDiffOptionsSchema,
@@ -1472,6 +1476,14 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerBitbucketPullComments'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerBitbucketCommentsOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerBitbucketPullRequest'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerPullOptionsSchema,
@@ -1864,6 +1876,12 @@ export const resultSchema = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({ kind: z.literal('providerBitbucketPullDiff'), diff: providerBitbucketDiffSchema })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerBitbucketPullComments'),
+      page: providerBitbucketCommentsPageSchema,
+    })
     .strict(),
   z
     .object({

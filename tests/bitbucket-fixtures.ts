@@ -46,3 +46,20 @@ export function bitbucketPullFixture(id = 1) {
     links: { html: { href: 'https://attacker.test/ignored' } },
   };
 }
+
+export function bitbucketCommentFixture(id = 1) {
+  return {
+    type: 'pullrequest_comment',
+    id,
+    created_on: '2026-10-01T12:00:00+00:00',
+    updated_on: '2026-10-02T12:00:00+00:00',
+    content: { raw: `Comment ${id}`, html: '<script>Ignored HTML</script>' },
+    user: bitbucketUserFixture,
+    deleted: false,
+    pending: false,
+    parent: null,
+    inline: null,
+    resolution: null,
+    pullrequest: { id: 1, destination: { repository: bitbucketRepositoryFixture } },
+  };
+}

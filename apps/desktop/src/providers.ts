@@ -1,4 +1,8 @@
 import {
+  providerBitbucketCommentsOptionsSchema,
+  type ProviderBitbucketCommentsOptions,
+} from '@openkraken/ipc-contract';
+import {
   providerBitbucketDiffOptionsSchema,
   type ProviderBitbucketDiffOptions,
 } from '@openkraken/ipc-contract';
@@ -444,6 +448,15 @@ export class ProviderService {
       if (account.provider !== 'bitbucket')
         throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
       return this.bitbucket.pullDiff(account.origin, token, options, signal);
+    });
+  }
+  bitbucketPullComments(id: string, input: ProviderBitbucketCommentsOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerBitbucketCommentsOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'bitbucket')
+        throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
+      return this.bitbucket.pullComments(account.origin, token, options, signal);
     });
   }
   bitbucketPullFiles(id: string, input: ProviderBitbucketFilesOptions, signal?: AbortSignal) {

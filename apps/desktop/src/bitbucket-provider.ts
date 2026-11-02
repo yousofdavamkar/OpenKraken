@@ -1,3 +1,5 @@
+import { loadBitbucketComments } from './bitbucket-comments.js';
+import type { ProviderBitbucketCommentsOptions } from '@openkraken/ipc-contract';
 import { loadBitbucketFiles, loadBitbucketDiff } from './bitbucket-files.js';
 import type {
   ProviderBitbucketFilesOptions,
@@ -134,6 +136,17 @@ export class BitbucketProvider {
   }
   pullRequest(origin: string, token: string, input: ProviderPullOptions, signal?: AbortSignal) {
     return loadBitbucketPull(
+      (endpoint, parse) => this.request(origin, token, endpoint, signal, parse),
+      input,
+    );
+  }
+  pullComments(
+    origin: string,
+    token: string,
+    input: ProviderBitbucketCommentsOptions,
+    signal?: AbortSignal,
+  ) {
+    return loadBitbucketComments(
       (endpoint, parse) => this.request(origin, token, endpoint, signal, parse),
       input,
     );

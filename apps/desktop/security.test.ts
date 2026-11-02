@@ -1146,3 +1146,39 @@ test('Bitbucket file and diff reads require pinned revisions and stay in the mai
       expect(requestSchema.safeParse({ ...request, options: invalid }).success).toBe(false);
   }
 });
+
+test('Bitbucket comment pages require a repository UUID and keep all credentials and URLs out of their main-only IPC contract', () => {
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    accountId: 'a'.repeat(64),
+    method: 'providerBitbucketPullComments',
+    options: {
+      repository: { owner: 'team', name: 'project' },
+      number: 1,
+      repositoryId: '{20000000-0000-4000-8000-000000000001}',
+      page: 1,
+    },
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  for (const options of [
+    { ...request.options, page: 101 },
+    { ...request.options, repositoryId: '1' },
+    { ...request.options, token: 'secret' },
+    { ...request.options, url: 'https://attacker.test' },
+  ])
+    expect(requestSchema.safeParse({ ...request, options }).success).toBe(false);
+  expect(
+    resultSchema.safeParse({
+      kind: 'providerBitbucketPullComments',
+      page: { comments: [], nextPage: null, limited: false },
+    }).success,
+  ).toBe(true);
+  expect(
+    resultSchema.safeParse({
+      kind: 'providerBitbucketPullComments',
+      token: 'secret',
+      page: { comments: [], nextPage: null, limited: false },
+    }).success,
+  ).toBe(false);
+});
