@@ -209,7 +209,7 @@ test('provider clones refuse Git URL rewrites and authenticated redirects even w
         url: credential.url,
         username: credential.username,
       }),
-    ).rejects.toMatchObject({ code: 'PROVIDER_CLONE_REWRITE' });
+    ).rejects.toMatchObject({ code: 'PROVIDER_TRANSPORT_REWRITE' });
     expect(destination.requests()).toBe(0);
     expect(await stat(join(rewritten, '.git')).catch(() => undefined)).toBeUndefined();
   } finally {
@@ -217,6 +217,76 @@ test('provider clones refuse Git URL rewrites and authenticated redirects even w
     await service.dispose();
     await redirect.close();
     await destination.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('saved-account fetch validates the current remote before updating tracking refs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-provider-fetch-'));
+  const source = createFixture(join(root, 'source'));
+  fixtureGit(source, ['commit', '--allow-empty', '-m', 'Provider fetch tip']);
+  const bare = join(root, 'remote.git');
+  fixtureGit(source, ['clone', '--bare', '.', bare]);
+  const remote = await authenticatedRemote(bare, {
+    basePath: '/team/project.git',
+    password: 'fixture-provider-token',
+  });
+  const local = createFixture(join(root, 'local'));
+  fixtureGit(local, ['remote', 'set-url', 'origin', remote.url]);
+  const broker = new AskpassBroker(
+    resolve(
+      'apps/desktop/dist/helpers',
+      process.platform === 'win32' ? 'openkraken-askpass.exe' : 'openkraken-askpass',
+    ),
+    () => {
+      throw new Error('Saved-account fetch must not prompt the renderer');
+    },
+  );
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(local);
+    const target = await service.providerRemoteTarget(repo.id, 'origin', 'fetch');
+    expect(target.url).toBe(remote.url);
+    const credential = {
+      url: target.url,
+      username: remote.credentials.username,
+      password: remote.credentials.password,
+    };
+    const scope = await broker.open(randomUUID(), 'Fetch origin', undefined, credential);
+    const environment = {
+      ...scope.environment,
+      GIT_SSL_CAINFO: remote.certificate,
+      GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1',
+    };
+    await service.fetch(repo.id, 'origin', undefined, false, undefined, environment, {
+      ...target,
+      username: credential.username,
+    });
+    expect(fixtureGit(local, ['rev-parse', 'refs/remotes/origin/main'])).toBe(
+      fixtureGit(source, ['rev-parse', 'HEAD']),
+    );
+    expect(remote.authenticated()).toBeGreaterThan(1);
+    const changed = await service.providerRemoteTarget(repo.id, 'origin', 'fetch');
+    fixtureGit(local, [
+      'remote',
+      'set-url',
+      'origin',
+      remote.url.replace('/team/', '/another-team/'),
+    ]);
+    const requests = remote.requests();
+    await expect(
+      service.fetch(repo.id, 'origin', undefined, false, undefined, environment, {
+        ...changed,
+        username: credential.username,
+      }),
+    ).rejects.toMatchObject({ code: 'STALE_PROVIDER_REMOTE' });
+    expect(remote.requests()).toBe(requests);
+    scope.close();
+  } finally {
+    await broker.close();
+    await service.dispose();
+    await remote.close();
     await rm(root, { recursive: true, force: true });
   }
 });

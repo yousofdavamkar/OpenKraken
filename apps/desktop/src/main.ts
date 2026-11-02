@@ -96,9 +96,12 @@ function startService() {
   });
   return child;
 }
-function callService(request: ServiceRequest): Promise<Result> {
+function callService(request: ServiceRequest, signal?: AbortSignal): Promise<Result> {
+  if (signal?.aborted) return Promise.resolve({ kind: 'cancelled' });
   const child = service ?? startService();
-  return new Promise((resolve) => {
+  const cancel = () => child.postMessage({ id: request.id });
+  signal?.addEventListener('abort', cancel, { once: true });
+  return new Promise<Result>((resolve) => {
     const timer = setTimeout(
       () => {
         child.postMessage({ id: request.id });
@@ -131,7 +134,7 @@ function callService(request: ServiceRequest): Promise<Result> {
     );
     pending.set(request.id, { resolve, timer });
     child.postMessage(request);
-  });
+  }).finally(() => signal?.removeEventListener('abort', cancel));
 }
 function validateSender(event: IpcMainInvokeEvent) {
   if (
@@ -201,6 +204,38 @@ else {
         return { kind: 'error', code: 'BUSY', message: 'Too many pending operations' };
       inFlight.add(request.id);
       try {
+        if (request.method === 'providerGit') {
+          const controller = new AbortController();
+          providerRequests.set(request.id, controller);
+          const target = await callService(
+            { id: crypto.randomUUID(), method: 'providerGitTarget', operation: request.operation },
+            controller.signal,
+          );
+          if (target.kind === 'error' || target.kind === 'cancelled') return target;
+          if (target.kind !== 'providerGitTarget')
+            throw new ProviderError('PROVIDER_REMOTE', 'The remote could not be resolved.');
+          if (target.target.token !== request.operation.revision)
+            throw new ProviderError(
+              'STALE_PROVIDER_REMOTE',
+              'The remote configuration or tracking refs changed. Reload remotes before retrying.',
+            );
+          const credential = await getProviders().gitCredential(
+            request.accountId,
+            target.target.url,
+            controller.signal,
+          );
+          controller.signal.throwIfAborted();
+          return await callService(
+            {
+              id: request.id,
+              method: 'providerGit',
+              operation: request.operation,
+              token: target.target.token,
+              credential,
+            },
+            controller.signal,
+          );
+        }
         if (
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
@@ -290,7 +325,7 @@ else {
           const controller = new AbortController();
           providerRequests.set(request.id, controller);
           const credential = request.providerAccountId
-            ? await getProviders().cloneCredential(
+            ? await getProviders().gitCredential(
                 request.providerAccountId,
                 request.options.url,
                 controller.signal,
@@ -312,6 +347,7 @@ else {
         );
       } catch (error) {
         if (
+          request.method === 'providerGit' ||
           (request.method === 'clone' && !!request.providerAccountId) ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||

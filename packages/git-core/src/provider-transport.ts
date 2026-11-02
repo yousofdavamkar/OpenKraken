@@ -2,7 +2,7 @@ import { providerGitCredentialSchema, type ProviderGitTarget } from '@openkraken
 import { GitError, type runGit, type RunOptions } from './runner.js';
 
 /** Keep provider tokens in askpass only, scoped to a canonical URL with no transport redirects. */
-export async function providerCloneSettings(
+export async function providerTransportSettings(
   run: (args: string[], options?: RunOptions) => ReturnType<typeof runGit>,
   target: ProviderGitTarget,
   signal?: AbortSignal,
@@ -10,7 +10,7 @@ export async function providerCloneSettings(
 ) {
   const parsed = providerGitCredentialSchema.omit({ password: true }).safeParse(target);
   if (!parsed.success)
-    throw new GitError('PROVIDER_CLONE_URL', 'Choose a valid provider repository.');
+    throw new GitError('PROVIDER_TRANSPORT_URL', 'Choose a valid provider repository.');
   const env = { ...environment };
   for (const key of Object.keys({ ...process.env, ...env }))
     if (key.startsWith('GIT_TRACE') || key === 'GIT_CURL_VERBOSE') env[key] = undefined;
@@ -22,8 +22,8 @@ export async function providerCloneSettings(
   });
   if (expanded.stdout.toString().trimEnd() !== target.url)
     throw new GitError(
-      'PROVIDER_CLONE_REWRITE',
-      'This URL is rewritten by Git settings. Disable the rewrite or use Git credential helpers for this clone.',
+      'PROVIDER_TRANSPORT_REWRITE',
+      'This URL is rewritten by Git settings. Disable the rewrite or use Git credential helpers for this operation.',
     );
   const settings = await run(
     ['config', '--null', '--name-only', '--get-regexp', '^(http|credential)\\.'],

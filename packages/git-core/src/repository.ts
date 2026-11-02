@@ -1,4 +1,4 @@
-import type { ProviderGitTarget } from '@openkraken/ipc-contract';
+import type { ProviderGitTarget, ProviderRemoteAuthorization } from '@openkraken/ipc-contract';
 import { createHash } from 'node:crypto';
 import { access, readdir, realpath, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -492,6 +492,7 @@ export class RepositoryService {
     id: string,
     onProgress?: (text: string) => void,
     authentication?: NodeJS.ProcessEnv,
+    provider?: ProviderRemoteAuthorization,
   ) {
     const repo = this.repositories.get(id);
     if (!repo) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
@@ -501,12 +502,26 @@ export class RepositoryService {
         (args, options) => this.run(args, { ...options, cwd: repo.path }),
         onProgress,
         authentication,
+        provider,
       ),
     };
   }
   remotes(id: string, signal?: AbortSignal) {
     const { repo, manager } = this.remoteManager(id);
     return this.queue(repo.commonDir).run(false, () => manager.state(signal), signal);
+  }
+  providerRemoteTarget(
+    id: string,
+    name: string,
+    direction: 'fetch' | 'push',
+    signal?: AbortSignal,
+  ) {
+    const { repo, manager } = this.remoteManager(id);
+    return this.queue(repo.commonDir).run(
+      false,
+      () => manager.providerTarget(name, direction, signal),
+      signal,
+    );
   }
   deleteRemotePreview(
     id: string,
@@ -745,8 +760,9 @@ export class RepositoryService {
     background = false,
     onProgress?: (text: string) => void,
     authentication?: NodeJS.ProcessEnv,
+    provider?: ProviderRemoteAuthorization,
   ) {
-    const { repo, manager } = this.remoteManager(id, onProgress, authentication);
+    const { repo, manager } = this.remoteManager(id, onProgress, authentication, provider);
     return this.queue(repo.commonDir).run(
       true,
       () => manager.fetch(name, signal, background),

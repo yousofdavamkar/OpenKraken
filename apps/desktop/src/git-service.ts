@@ -78,6 +78,7 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
       accepted: authentication.answer(request.requestId, request.promptId, request.answer),
     };
   const interactive =
+    request.method === 'providerGit' ||
     request.method === 'clone' ||
     request.method === 'push' ||
     request.method === 'pull' ||
@@ -86,21 +87,25 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
     request.method === 'pushPreview' ||
     (request.method === 'fetch' && !request.background);
   const context =
-    request.method === 'clone'
-      ? `Clone ${request.options.url}`
-      : request.method === 'fetch'
-        ? `Fetch ${request.name}`
-        : request.method === 'pull'
-          ? 'Pull upstream'
-          : request.method === 'deleteRemote' || request.method === 'deleteRemotePreview'
-            ? 'Delete remote ref'
-            : 'Push repository';
+    request.method === 'providerGit'
+      ? `Fetch ${request.operation.name}`
+      : request.method === 'clone'
+        ? `Clone ${request.options.url}`
+        : request.method === 'fetch'
+          ? `Fetch ${request.name}`
+          : request.method === 'pull'
+            ? 'Pull upstream'
+            : request.method === 'deleteRemote' || request.method === 'deleteRemotePreview'
+              ? 'Delete remote ref'
+              : 'Push repository';
   const scope = interactive
     ? await authentication.open(
         request.id,
         context,
         signal,
-        request.method === 'clone' ? request.credential : undefined,
+        request.method === 'clone' || request.method === 'providerGit'
+          ? request.credential
+          : undefined,
       )
     : undefined;
   try {
@@ -120,7 +125,7 @@ async function executeGit(
     const now = Date.now();
     if (now - lastProgress < 100) return;
     lastProgress = now;
-    if (request.method === 'clone' && request.credential) {
+    if ((request.method === 'clone' && request.credential) || request.method === 'providerGit') {
       // Remote diagnostics are untrusted and may echo authentication material.
       const progress =
         /^(Receiving objects|Resolving deltas|Updating files|Checking out files):\s+(\d{1,3})%/.exec(
@@ -128,10 +133,39 @@ async function executeGit(
         );
       text = progress
         ? `${progress[1]}: ${Math.min(100, Number(progress[2]))}%`
-        : 'Cloning provider repository…';
+        : request.method === 'clone'
+          ? 'Cloning provider repository…'
+          : 'Fetching provider repository…';
     }
     parent!.postMessage({ type: 'gitProgress', id: request.id, text });
   };
+  if (request.method === 'providerGitTarget')
+    return {
+      kind: 'providerGitTarget',
+      target: await git.providerRemoteTarget(
+        request.operation.repoId,
+        request.operation.name,
+        'fetch',
+        signal,
+      ),
+    };
+  if (request.method === 'providerGit')
+    return {
+      kind: 'remotes',
+      state: await git.fetch(
+        request.operation.repoId,
+        request.operation.name,
+        signal,
+        false,
+        progress,
+        auth,
+        {
+          url: request.credential.url,
+          username: request.credential.username,
+          token: request.token,
+        },
+      ),
+    };
   if (request.method === 'commitComparison')
     return {
       kind: 'fileComparison',
@@ -392,6 +426,7 @@ parent.on('message', (event) => {
     'reference',
     'remote',
     'fetch',
+    'providerGit',
     'push',
     'deleteRemote',
     'pull',
@@ -421,6 +456,7 @@ parent.on('message', (event) => {
         error instanceof GitError &&
         error.code === 'SSH_HOST_KEY_CHANGED' &&
         !(request.method === 'clone' && request.credential) &&
+        request.method !== 'providerGit' &&
         !(request.method === 'fetch' && request.background)
       )
         parent.postMessage({
@@ -436,14 +472,17 @@ parent.on('message', (event) => {
               kind: 'error',
               code: error instanceof GitError ? error.code : 'SERVICE_ERROR',
               message:
-                request.method === 'clone' && request.credential
-                  ? error instanceof GitError && error.code === 'PROVIDER_CLONE_REWRITE'
-                    ? 'Git rewrites this URL. Disable the rewrite or use Git credential helpers for this clone.'
-                    : error instanceof GitError && error.code === 'CLONE_DESTINATION_NOT_EMPTY'
-                      ? 'Choose an empty folder for this clone.'
-                      : error instanceof GitError && error.code === 'TLS_CERTIFICATE_INVALID'
-                        ? 'The HTTPS certificate could not be verified.'
-                        : 'Provider clone failed. Check repository access, the destination folder and HTTPS settings, or use Git credential helpers.'
+                (request.method === 'clone' && request.credential) ||
+                request.method === 'providerGit'
+                  ? error instanceof GitError && error.code === 'PROVIDER_TRANSPORT_REWRITE'
+                    ? 'Git rewrites this URL. Disable the rewrite or use Git credential helpers.'
+                    : error instanceof GitError && error.code === 'STALE_PROVIDER_REMOTE'
+                      ? 'The remote configuration or tracking refs changed. Review the remote and retry.'
+                      : error instanceof GitError && error.code === 'CLONE_DESTINATION_NOT_EMPTY'
+                        ? 'Choose an empty folder for this clone.'
+                        : error instanceof GitError && error.code === 'TLS_CERTIFICATE_INVALID'
+                          ? 'The HTTPS certificate could not be verified.'
+                          : 'Provider Git operation failed. Check repository access and HTTPS settings, or use Git credential helpers.'
                   : error instanceof Error
                     ? error.message
                     : String(error),

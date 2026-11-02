@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   providerAccountsSchema,
   providerGitCredentialSchema,
+  providerRemoteTargetSchema,
   providerRepositoryPageNumberSchema,
   providerRepositoryPageSchema,
   providerConnectSchema,
@@ -779,6 +780,14 @@ const editorAnswer = z
     text: editorTextSchema.nullable(),
   })
   .strict();
+export const providerGitOperationSchema = z
+  .object({
+    method: z.literal('fetch'),
+    repoId: repoIdSchema,
+    name: remoteNameSchema,
+    revision: remoteTokenSchema,
+  })
+  .strict();
 const workingRequests = [
   z
     .object({
@@ -1059,6 +1068,14 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerGit'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      operation: providerGitOperationSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerRepositories'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       page: providerRepositoryPageNumberSchema,
@@ -1151,6 +1168,22 @@ export const requestSchema = z.discriminatedUnion('method', [
 ]);
 const repositoryPath = z.string().min(1).max(32768);
 export const serviceRequestSchema = z.discriminatedUnion('method', [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerGitTarget'),
+      operation: providerGitOperationSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerGit'),
+      operation: providerGitOperationSchema,
+      credential: providerGitCredentialSchema,
+      token: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict(),
   authenticationAnswer,
   editorAnswer,
   z
@@ -1186,6 +1219,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('providerGitTarget'), target: providerRemoteTargetSchema }).strict(),
   z.object({ kind: z.literal('providerDevice'), challenge: deviceChallengeSchema }),
   z.object({ kind: z.literal('providerDeviceOpened') }).strict(),
   z.object({ kind: z.literal('providerAccounts'), state: providerAccountsSchema }),

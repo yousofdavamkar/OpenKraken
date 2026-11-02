@@ -141,3 +141,42 @@ test('saved clone tokens are accepted only by the private utility contract for t
     }).success,
   ).toBe(false);
 });
+
+test('provider Git requests expose account selection but keep resolved targets and credentials private', () => {
+  const id = '00000000-0000-4000-8000-000000000000';
+  const operation = {
+    method: 'fetch',
+    repoId: 'a'.repeat(64),
+    name: 'origin',
+    revision: 'c'.repeat(64),
+  };
+  const request = { id, method: 'providerGit', accountId: 'b'.repeat(64), operation };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  const credential = {
+    url: 'https://github.com/team/project.git',
+    username: 'fixture-user',
+    password: 'fixture-secret',
+  };
+  expect(requestSchema.safeParse({ ...request, credential }).success).toBe(false);
+  const target = { id, method: 'providerGitTarget', operation };
+  expect(requestSchema.safeParse(target).success).toBe(false);
+  expect(serviceRequestSchema.safeParse(target).success).toBe(true);
+  expect(
+    serviceRequestSchema.safeParse({
+      id,
+      method: 'providerGit',
+      operation,
+      credential,
+      token: 'c'.repeat(64),
+    }).success,
+  ).toBe(true);
+  for (const extra of [
+    { background: true },
+    { url: 'https://other.test/team/project.git' },
+    { credential },
+  ])
+    expect(
+      requestSchema.safeParse({ ...request, operation: { ...operation, ...extra } }).success,
+    ).toBe(false);
+});

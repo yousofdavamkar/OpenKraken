@@ -192,7 +192,7 @@ export class ProviderService {
     });
   }
   /** Internal main-process API; the result must never be returned to the renderer. */
-  cloneCredential(id: string, url: string, signal?: AbortSignal) {
+  gitCredential(id: string, url: string, signal?: AbortSignal) {
     return this.run(async () => {
       const parsed = providerCloneUrlSchema.safeParse(url);
       if (!parsed.success)

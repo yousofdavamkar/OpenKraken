@@ -1,5 +1,9 @@
-import { providerCloneSettings } from './provider-transport.js';
-import type { ProviderGitTarget } from '@openkraken/ipc-contract';
+import { providerTransportSettings } from './provider-transport.js';
+import {
+  providerCloneUrlSchema,
+  type ProviderRemoteAuthorization,
+  type ProviderGitTarget,
+} from '@openkraken/ipc-contract';
 import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -86,6 +90,7 @@ export class Remotes {
     private run: (args: string[], options?: RunOptions) => ReturnType<typeof runGit>,
     private onProgress?: (text: string) => void,
     private authentication?: NodeJS.ProcessEnv,
+    private provider?: ProviderRemoteAuthorization,
   ) {}
   async state(signal?: AbortSignal): Promise<RemoteState> {
     const config = await this.run(['config', '--null', '--list'], {
@@ -118,7 +123,7 @@ export class Remotes {
   async clone(input: CloneOptions, signal?: AbortSignal, provider?: ProviderGitTarget) {
     if (provider && input.url !== provider.url)
       throw new GitError(
-        'PROVIDER_CLONE_URL',
+        'PROVIDER_TRANSPORT_URL',
         'The provider authorization does not match this clone URL.',
       );
     const options = cloneOptionsSchema.parse(input);
@@ -166,8 +171,40 @@ export class Remotes {
         provider,
       });
   }
+  async providerTarget(input: string, direction: 'fetch' | 'push', signal?: AbortSignal) {
+    const name = remoteNameSchema.parse(input);
+    const state = await this.state(signal);
+    const remote = state.remotes.find((entry) => entry.name === name);
+    if (!remote) throw new GitError('UNKNOWN_REMOTE', 'Choose an existing remote.');
+    const urls = direction === 'push' && remote.pushUrls.length ? remote.pushUrls : remote.urls;
+    if (urls.length !== 1 || !providerCloneUrlSchema.safeParse(urls[0]).success)
+      throw new GitError(
+        'PROVIDER_REMOTE_URL',
+        'Saved-account authentication requires one canonical HTTPS repository URL for this remote.',
+      );
+    const expanded = await this.run(
+      ['remote', 'get-url', ...(direction === 'push' ? ['--push'] : []), '--all', '--', name],
+      { signal, maxBytes: 8192 },
+    );
+    if (expanded.stdout.toString().trimEnd() !== urls[0])
+      throw new GitError(
+        'PROVIDER_TRANSPORT_REWRITE',
+        'Git rewrites this remote URL. Disable the rewrite or use Git credential helpers.',
+      );
+    return { url: urls[0]!, token: state.token };
+  }
+  private async checkProvider(name: string, direction: 'fetch' | 'push', signal?: AbortSignal) {
+    if (!this.provider) return;
+    const target = await this.providerTarget(name, direction, signal);
+    if (target.url !== this.provider.url || target.token !== this.provider.token)
+      throw new GitError(
+        'STALE_PROVIDER_REMOTE',
+        'The remote configuration or tracking refs changed. Review the remote and retry.',
+      );
+  }
   async fetch(input: string, signal?: AbortSignal, background = false) {
     const name = remoteNameSchema.parse(input);
+    await this.checkProvider(name, 'fetch', signal);
     const state = await this.state(signal);
     if (!state.remotes.some((remote) => remote.name === name))
       throw new GitError('UNKNOWN_REMOTE', 'Choose an existing remote');
@@ -193,8 +230,14 @@ export class Remotes {
     background = false,
     options: { stdin?: string; timeoutMs?: number; provider?: ProviderGitTarget } = {},
   ) {
-    const protectedTransport = options.provider
-      ? await providerCloneSettings(this.run, options.provider, signal, this.authentication)
+    const provider = options.provider ?? this.provider;
+    const protectedTransport = provider
+      ? await providerTransportSettings(
+          this.run,
+          { url: provider.url, username: provider.username },
+          signal,
+          this.authentication,
+        )
       : undefined;
     const progress = this.onProgress ? new GitProgressLines(this.onProgress) : undefined;
     // URL-specific settings can outrank the global TLS setting, even in local config.
@@ -225,7 +268,7 @@ export class Remotes {
           env: {
             ...this.authentication,
             ...protectedTransport?.env,
-            GIT_ALLOW_PROTOCOL: options.provider ? 'https' : 'file:https:http:ssh:git',
+            GIT_ALLOW_PROTOCOL: provider ? 'https' : 'file:https:http:ssh:git',
             ...(background
               ? {
                   GIT_ASKPASS: '',

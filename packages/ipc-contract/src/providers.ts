@@ -149,3 +149,9 @@ export const providerGitCredentialSchema = z
   .strict();
 export type ProviderGitCredential = z.infer<typeof providerGitCredentialSchema>;
 export type ProviderGitTarget = Pick<ProviderGitCredential, 'url' | 'username'>;
+
+export const providerRemoteTargetSchema = z
+  .object({ url: providerCloneUrlSchema, token: z.string().regex(/^[0-9a-f]{64}$/) })
+  .strict();
+export type ProviderRemoteTarget = z.infer<typeof providerRemoteTargetSchema>;
+export type ProviderRemoteAuthorization = ProviderRemoteTarget & { username: string };

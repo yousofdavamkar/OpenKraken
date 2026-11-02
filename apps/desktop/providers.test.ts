@@ -398,9 +398,7 @@ test('native clone credentials are bound to the connected provider origin and a 
       token: 'fixture-clone-token',
     })
   ).accounts[0]!;
-  expect(
-    await providers.cloneCredential(account.id, 'https://github.com/team/project.git'),
-  ).toEqual({
+  expect(await providers.gitCredential(account.id, 'https://github.com/team/project.git')).toEqual({
     url: 'https://github.com/team/project.git',
     username: 'fixture-user',
     password: 'fixture-clone-token',
@@ -414,13 +412,13 @@ test('native clone credentials are bound to the connected provider origin and a 
     'https://github.com/team/project.git?token=x',
     'https://github.com/team/project',
   ])
-    await expect(providers.cloneCredential(account.id, url)).rejects.toMatchObject({
+    await expect(providers.gitCredential(account.id, url)).rejects.toMatchObject({
       code: 'PROVIDER_CLONE_URL',
     });
   expect(validations).toBe(checked);
   const controller = new AbortController();
   controller.abort();
   await expect(
-    providers.cloneCredential(account.id, 'https://github.com/team/project.git', controller.signal),
+    providers.gitCredential(account.id, 'https://github.com/team/project.git', controller.signal),
   ).rejects.toThrow();
 });
