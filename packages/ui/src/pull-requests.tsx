@@ -6,6 +6,7 @@ import type {
   ProviderPullSummary,
 } from '@openkraken/ipc-contract';
 import { CommentDiscussion, PullFiles, PullReviews, WriteReview } from './pull-review.js';
+import { PullChecks } from './pull-checks.js';
 import { MergePullRequest } from './pull-merge.js';
 import { CreatePullRequest } from './pull-create.js';
 import { ProviderRepositoryPicker } from './provider-repositories.js';
@@ -24,7 +25,9 @@ function PullDetails({
   number: number;
   refreshList: () => void;
 }) {
-  const [tab, setTab] = useState<'details' | 'files' | 'reviews' | 'comments'>('details');
+  const [tab, setTab] = useState<'details' | 'files' | 'reviews' | 'comments' | 'checks'>(
+    'details',
+  );
   const [reviewsVersion, setReviewsVersion] = useState(0);
   const [detail, setDetail] = useState<ProviderPullDetails>();
   const [error, setError] = useState('');
@@ -113,6 +116,9 @@ function PullDetails({
             <button aria-pressed={tab === 'comments'} onClick={() => setTab('comments')}>
               Comments
             </button>
+            <button aria-pressed={tab === 'checks'} onClick={() => setTab('checks')}>
+              Checks
+            </button>
             <MergePullRequest
               target={target}
               detail={detail}
@@ -126,6 +132,7 @@ function PullDetails({
               submitted={() => setReviewsVersion((value) => value + 1)}
             />
           </div>
+          {tab === 'checks' && <PullChecks key={detail.head.sha} context={{ ...target, detail }} />}
           {tab === 'comments' && <CommentDiscussion context={{ ...target, detail }} />}
           {tab === 'files' && <PullFiles context={{ ...target, detail }} />}
           {tab === 'reviews' && (

@@ -1489,3 +1489,17 @@ footer {
   overflow: auto;
   font: inherit;
 }
+
+.pull-check-list {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--border);
+}
+.pull-check-row {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.pull-check-row p {
+  margin: 4px 0;
+}
