@@ -647,13 +647,12 @@ function IssueDialog({ close }: { close: () => void }) {
         </>
       ) : (
         <ProviderRepositoryPicker
-          onSelect={(url, accountId) => {
-            const [, owner, name] = new URL(url).pathname.split('/');
+          onSelect={(url, accountId, repository) => {
             setState('open');
             setTarget({
               accountId,
               origin: new URL(url).origin,
-              repository: { owner: owner!, name: name!.slice(0, -4) },
+              repository: { owner: repository.owner, name: repository.name },
             });
           }}
         />

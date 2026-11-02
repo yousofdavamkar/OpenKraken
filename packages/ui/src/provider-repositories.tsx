@@ -7,7 +7,7 @@ function RepositoryPages({
   onSelect,
 }: {
   accountId: string;
-  onSelect: (url: string) => void;
+  onSelect: (repository: ProviderRepository) => void;
 }) {
   const [repositories, setRepositories] = useState<ProviderRepository[]>([]);
   const [page, setPage] = useState(1);
@@ -105,7 +105,7 @@ function RepositoryPages({
           else if (event.key === 'Home') activate(0);
           else if (event.key === 'End') activate(visible.length - 1);
           else if (event.key === 'Enter' || event.key === ' ') {
-            if (visible[active]) onSelect(visible[active].cloneUrl);
+            if (visible[active]) onSelect(visible[active]);
           } else return;
           event.preventDefault();
         }}
@@ -124,13 +124,17 @@ function RepositoryPages({
                 aria-label={`Select ${repo.owner}/${repo.name}`}
                 className="provider-repository"
                 style={{ position: 'absolute', top: item.start, height: item.size, width: '100%' }}
-                onClick={() => onSelect(repo.cloneUrl)}
+                onClick={() => onSelect(repo)}
               >
                 <strong>
                   {repo.owner}/{repo.name}
                 </strong>
                 <span>
-                  {repo.private ? 'Private' : 'Public'}
+                  {repo.visibility === 'internal'
+                    ? 'Internal'
+                    : repo.private
+                      ? 'Private'
+                      : 'Public'}
                   {repo.archived ? ' · Archived' : ''}
                   {repo.description ? ` · ${repo.description}` : ''}
                 </span>
@@ -181,7 +185,7 @@ function RepositoryPages({
 export function ProviderRepositoryPicker({
   onSelect,
 }: {
-  onSelect: (url: string, accountId: string) => void;
+  onSelect: (url: string, accountId: string, repository: ProviderRepository) => void;
 }) {
   const [state, setState] = useState<ProviderAccounts>();
   const [accountId, setAccountId] = useState('');
@@ -246,7 +250,7 @@ export function ProviderRepositoryPicker({
         <RepositoryPages
           key={accountId}
           accountId={accountId}
-          onSelect={(url) => onSelect(url, accountId)}
+          onSelect={(repository) => onSelect(repository.cloneUrl, accountId, repository)}
         />
       )}
     </section>

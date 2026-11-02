@@ -102,54 +102,62 @@ test('SSH host-key confirmation without a hint is explicit and replies cannot cr
   }
 });
 
-test('saved HTTPS credentials answer only their exact repository and account without renderer prompts', async () => {
-  const events: unknown[] = [];
-  const broker = new AskpassBroker(helper, (event) => {
-    events.push(event);
-    if (event.type === 'authenticationPrompt') broker.answer(event.id, event.promptId, null);
-  });
-  const credential = {
-    url: 'https://github.com/team/project.git',
-    username: 'fixture-user',
-    password: 'fixture-provider-token',
-  };
-  try {
-    const scope = await broker.open(
-      randomUUID(),
-      'Clone provider repository',
-      undefined,
-      credential,
-    );
-    expect(
-      (
-        await runProcess(helper, ["Username for 'https://github.com/team/project.git': "], {
-          env: scope.environment,
-        })
-      ).stdout.toString(),
-    ).toBe('fixture-user\n');
-    for (const prompt of [
-      "Password for 'https://fixture-user@other.test/team/project.git': ",
-      "Password for 'https://fixture-user@github.com/team/other.git': ",
-      "Password for 'https://fixture-user@github.com/team/hidden/../project.git': ",
-      "Password for 'https://fixture-user@github.com:443/team/project.git': ",
-      "Password for 'http://fixture-user@github.com/team/project.git': ",
-      "Password for 'https://someone-else@github.com/team/project.git': ",
-      "Password for 'https://fixture-user@github.com/team/project.git?secret': ",
-      'Enter passphrase for SSH key: ',
-    ])
+test.each([
+  'https://github.com/team/project.git',
+  'https://gitlab.example.test/company/subgroup/team/project.git',
+])(
+  'saved HTTPS credentials answer only their exact repository and account without renderer prompts: %s',
+  async (url) => {
+    const events: unknown[] = [];
+    const broker = new AskpassBroker(helper, (event) => {
+      events.push(event);
+      if (event.type === 'authenticationPrompt') broker.answer(event.id, event.promptId, null);
+    });
+    const credential = {
+      url,
+      username: 'fixture-user',
+      password: 'fixture-provider-token',
+    };
+    const { host, pathname } = new URL(url);
+    try {
+      const scope = await broker.open(
+        randomUUID(),
+        'Clone provider repository',
+        undefined,
+        credential,
+      );
+      expect(
+        (
+          await runProcess(helper, [`Username for '${url}': `], {
+            env: scope.environment,
+          })
+        ).stdout.toString(),
+      ).toBe('fixture-user\n');
+      for (const prompt of [
+        `Password for 'https://fixture-user@other.test${pathname}': `,
+        `Password for 'https://fixture-user@${host}${pathname.replace('/project.git', '/other.git')}': `,
+        `Password for 'https://fixture-user@${host}${pathname.replace('/project.git', '/sibling/project.git')}': `,
+        `Password for 'https://fixture-user@${host}${pathname.replace('/project.git', '/hidden/../project.git')}': `,
+        `Password for 'https://fixture-user@${host}:443${pathname}': `,
+        `Password for 'http://fixture-user@${host}${pathname}': `,
+        `Password for 'https://someone-else@${host}${pathname}': `,
+        `Password for 'https://fixture-user@${host}${pathname}?secret': `,
+        'Enter passphrase for SSH key: ',
+      ])
+        await expect(runProcess(helper, [prompt], { env: scope.environment })).rejects.toThrow();
+      const prompt = `Password for 'https://fixture-user@${host}${pathname}': `;
+      expect(
+        (await runProcess(helper, [prompt], { env: scope.environment })).stdout.toString(),
+      ).toBe('fixture-provider-token\n');
+      expect(
+        (await runProcess(helper, [prompt], { env: scope.environment })).stdout.toString(),
+      ).toBe('fixture-provider-token\n');
+      expect(events).toEqual([]);
+      expect(JSON.stringify(scope.environment)).not.toContain('fixture-provider-token');
+      scope.close();
       await expect(runProcess(helper, [prompt], { env: scope.environment })).rejects.toThrow();
-    const prompt = "Password for 'https://fixture-user@github.com/team/project.git': ";
-    expect((await runProcess(helper, [prompt], { env: scope.environment })).stdout.toString()).toBe(
-      'fixture-provider-token\n',
-    );
-    expect((await runProcess(helper, [prompt], { env: scope.environment })).stdout.toString()).toBe(
-      'fixture-provider-token\n',
-    );
-    expect(events).toEqual([]);
-    expect(JSON.stringify(scope.environment)).not.toContain('fixture-provider-token');
-    scope.close();
-    await expect(runProcess(helper, [prompt], { env: scope.environment })).rejects.toThrow();
-  } finally {
-    await broker.close();
-  }
-});
+    } finally {
+      await broker.close();
+    }
+  },
+);
