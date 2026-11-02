@@ -1592,3 +1592,17 @@ footer {
 .command-results span {
   font-size: 12px;
 }
+.command-dialog textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: monospace;
+}
+.command-dialog table {
+  width: 100%;
+  text-align: left;
+  margin-top: 16px;
+}
+.command-dialog td {
+  padding: 4px;
+}

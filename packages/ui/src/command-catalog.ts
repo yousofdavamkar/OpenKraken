@@ -4,6 +4,11 @@ export const commandCatalog = {
     category: 'Settings',
     keywords: 'commands actions fuzzy search',
   },
+  'app.keybindings': {
+    label: 'Keyboard shortcuts',
+    category: 'Settings',
+    keywords: 'keymap keybindings customize JSON settings',
+  },
   'repository.open': {
     label: 'Open repository',
     category: 'Repository',

@@ -11,10 +11,12 @@ import {
 } from 'react';
 import fuzzysort from 'fuzzysort';
 import { commandCatalog, commandIds, isCommandId, type CommandId } from './command-catalog.js';
+import { bindingFor, emptyKeymap, loadKeymap, matchesShortcut, saveKeymap } from './keymap.js';
 const usageKey = 'openkraken.commandUsage.v1';
 const halfLife = 14 * 24 * 60 * 60 * 1000;
 type Usage = { weight: number; time: number };
 class CommandRegistry {
+  keymap = loadKeymap();
   buttons = new Map<CommandId, HTMLButtonElement>();
   listeners = new Set<() => void>();
   version = 0;
@@ -64,6 +66,13 @@ class CommandRegistry {
       }
     };
   }
+  shortcut(id: CommandId) {
+    return bindingFor(this.keymap.bindings, id);
+  }
+  saveBindings(raw: string) {
+    this.keymap = saveKeymap(raw);
+    this.changed();
+  }
   available(id: CommandId) {
     const button = this.buttons.get(id);
     return !!button?.isConnected && !button.disabled;
@@ -104,6 +113,7 @@ export function CommandButton({
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { command: CommandId }) {
   const registry = useCommands();
+  useSyncExternalStore(registry.subscribe, registry.snapshot);
   const button = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => {
     if (button.current) return registry.register(command, button.current);
@@ -113,6 +123,7 @@ export function CommandButton({
       {...props}
       ref={button}
       disabled={disabled}
+      title={props.title ?? registry.shortcut(command) ?? undefined}
       onClick={(event) => {
         registry.record(command);
         onClick?.(event);
@@ -252,6 +263,7 @@ function Palette({ close }: { close: () => void }) {
             <strong>{command.label}</strong>
             <span>
               {command.category}
+              {registry.shortcut(command.id) ? ` · ${registry.shortcut(command.id)}` : ''}
               {!registry.available(command.id) ? ' · Unavailable' : ''}
             </span>
           </div>
@@ -267,8 +279,114 @@ function Palette({ close }: { close: () => void }) {
     </dialog>
   );
 }
+function KeymapEditor({ close }: { close: () => void }) {
+  const registry = useCommands();
+  useSyncExternalStore(registry.subscribe, registry.snapshot);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
+  const previous = useRef(document.activeElement);
+  const [draft, setDraft] = useState(registry.keymap.raw);
+  const [error, setError] = useState(registry.keymap.error);
+  const [notice, setNotice] = useState('');
+  useEffect(() => {
+    dialog.current?.showModal();
+    input.current?.focus();
+    return () => {
+      if (previous.current instanceof HTMLElement && previous.current.isConnected)
+        previous.current.focus();
+    };
+  }, []);
+  return (
+    <dialog
+      ref={dialog}
+      className="command-dialog"
+      aria-label="Keyboard shortcuts"
+      onCancel={(event) => {
+        event.preventDefault();
+        close();
+      }}
+    >
+      <h2>Keyboard shortcuts</h2>
+      <p>
+        Map command IDs to shortcuts. Mod means Command on macOS and Control elsewhere. Missing
+        entries inherit defaults; null disables a shortcut. Conflicts are checked on both platforms.
+      </p>
+      <p>
+        Use physical keys: letters A–Z, digits, F1–F24, or named punctuation (for example Comma).
+        Shortcuts pause in dialogs. Action shortcuts also pause while editing text.
+      </p>
+      <label>
+        Keymap JSON
+        <textarea
+          ref={input}
+          value={draft}
+          maxLength={32768}
+          rows={12}
+          spellCheck={false}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            setError('');
+            setNotice('');
+          }}
+        />
+      </label>
+      {error && <p role="alert">{error}</p>}
+      {notice && <p role="status">{notice}</p>}
+      <button
+        onClick={() => {
+          try {
+            registry.saveBindings(draft);
+            setDraft(registry.keymap.raw);
+            setError('');
+            setNotice('Keyboard shortcuts saved.');
+          } catch (reason) {
+            setError(
+              reason instanceof Error ? reason.message : 'Keyboard shortcuts could not be saved.',
+            );
+            setNotice('');
+          }
+        }}
+      >
+        Apply
+      </button>
+      <button
+        onClick={() => {
+          setDraft(emptyKeymap);
+          setError('');
+          setNotice('Apply to restore the default shortcuts.');
+        }}
+      >
+        Restore defaults
+      </button>
+      <button onClick={close}>Close</button>
+      <table>
+        <caption>Active shortcuts</caption>
+        <thead>
+          <tr>
+            <th>Command</th>
+            <th>ID</th>
+            <th>Shortcut</th>
+          </tr>
+        </thead>
+        <tbody>
+          {commandIds.map((id) => (
+            <tr key={id}>
+              <td>{commandCatalog[id].label}</td>
+              <td>
+                <code>{id}</code>
+              </td>
+              <td>{registry.shortcut(id) ?? 'Unbound'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </dialog>
+  );
+}
 export function CommandControls() {
+  const registry = useCommands();
   const [opened, setOpened] = useState(false);
+  const [editing, setEditing] = useState(false);
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (
@@ -279,25 +397,33 @@ export function CommandControls() {
         document.querySelector('dialog[open]')
       )
         return;
-      if (
-        event.code === 'KeyP' &&
-        !event.shiftKey &&
-        !event.altKey &&
-        event.ctrlKey !== event.metaKey
-      ) {
-        event.preventDefault();
-        setOpened(true);
+      const target = event.target;
+      const typing =
+        target instanceof Element &&
+        !!target.closest(
+          'input, textarea, select, [contenteditable]:not([contenteditable="false"]), .cm-editor, .xterm',
+        );
+      for (const id of commandIds) {
+        const shortcut = registry.shortcut(id);
+        if (!shortcut || (typing && id !== 'app.commands') || !matchesShortcut(event, shortcut))
+          continue;
+        if (registry.execute(id)) event.preventDefault();
+        return;
       }
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, []);
+  }, [registry]);
   return (
     <>
       <CommandButton command="app.commands" onClick={() => setOpened(true)}>
         Commands
       </CommandButton>
+      <CommandButton command="app.keybindings" onClick={() => setEditing(true)}>
+        Keybindings
+      </CommandButton>
       {opened && <Palette close={() => setOpened(false)} />}
+      {editing && <KeymapEditor close={() => setEditing(false)} />}
     </>
   );
 }
