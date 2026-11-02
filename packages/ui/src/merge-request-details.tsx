@@ -163,6 +163,7 @@ export function MergeRequestDetails({
           ) : (
             detail.diffRefs && (
               <MergeRequestFiles
+                origin={new URL(detail.url).origin}
                 key={`${detail.diffRefs.base}/${detail.diffRefs.head}/${detail.diffRefs.start}/${detail.source.sha}`}
                 accountId={target.accountId}
                 repository={target.repository}

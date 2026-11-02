@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import {
   providerMergeDiscussionActionSchema,
+  type ProviderMergeInlinePosition,
   type ProviderMergeDiscussionPreview,
   type ProviderWriteMergeDiscussion,
   type ProviderMergeDiscussionWritten,
@@ -10,6 +11,7 @@ import {
 } from '@openkraken/ipc-contract';
 
 export type MergeDiscussionIntent =
+  | { action: 'inline'; position: ProviderMergeInlinePosition; page: number }
   | { action: 'comment' }
   | { action: 'reply'; discussionId: string }
   | { action: 'resolve'; discussionId: string; resolved: boolean };
@@ -52,13 +54,15 @@ export function MergeDiscussionActionDialog({
     };
   }, []);
   const label =
-    intent.action === 'comment'
-      ? 'New discussion'
-      : intent.action === 'reply'
-        ? 'Reply to discussion'
-        : intent.resolved
-          ? 'Resolve discussion'
-          : 'Reopen discussion';
+    intent.action === 'inline'
+      ? 'Inline discussion'
+      : intent.action === 'comment'
+        ? 'New discussion'
+        : intent.action === 'reply'
+          ? 'Reply to discussion'
+          : intent.resolved
+            ? 'Resolve discussion'
+            : 'Reopen discussion';
   const draft = providerMergeDiscussionActionSchema.safeParse({
     repository,
     number,
@@ -147,7 +151,7 @@ export function MergeDiscussionActionDialog({
         setInspection(response.page);
         setInspectionPage(page);
         setInspectedId(
-          intent.action !== 'comment' &&
+          'discussionId' in intent &&
             response.page.discussions.some((discussion) => discussion.id === intent.discussionId)
             ? intent.discussionId
             : response.page.discussions[0]?.id,
@@ -182,6 +186,9 @@ export function MergeDiscussionActionDialog({
       <p>
         {origin}/{repository.owner}/{repository.name} · !{number}
       </p>
+      {intent.action === 'inline' && (
+        <InlineLocation position={intent.position} label="Selected inline location" />
+      )}
       <fieldset disabled={busy || !!prepared || !!result || uncertain}>
         <legend>{intent.action === 'resolve' ? 'Resolution change' : 'Draft'}</legend>
         {intent.action === 'resolve' ? (
@@ -211,6 +218,13 @@ export function MergeDiscussionActionDialog({
           </p>
           <p>Updated {new Date(preview.mergeRequest.updatedAt).toLocaleString()}</p>
           {preview.discussion && renderDiscussion(preview.discussion)}
+          {preview.inline && (
+            <InlineLocation
+              position={preview.inline.position}
+              text={preview.inline.text}
+              label="Reviewed inline location"
+            />
+          )}
           {prepared.intent.action === 'resolve' ? (
             <p>New state: {prepared.intent.resolved ? 'Resolved' : 'Unresolved'}</p>
           ) : (
@@ -350,5 +364,45 @@ export function MergeDiscussionActionDialog({
         </div>
       )}
     </dialog>
+  );
+}
+
+function InlineLocation({
+  position,
+  text,
+  label,
+}: {
+  position: ProviderMergeInlinePosition;
+  text?: string;
+  label: string;
+}) {
+  return (
+    <section aria-label={label}>
+      <p>
+        {position.oldPath} → {position.newPath}
+      </p>
+      <p>
+        {position.oldLine !== null && `Old line ${position.oldLine}`}
+        {position.oldLine !== null && position.newLine !== null && ' · '}
+        {position.newLine !== null && `New line ${position.newLine}`}
+      </p>
+      {text !== undefined && (
+        <>
+          <pre>{text}</pre>
+          <details>
+            <summary>Reviewed diff revisions</summary>
+            <p>
+              Merge base: <code>{position.revision.base}</code>
+            </p>
+            <p>
+              Source tip: <code>{position.revision.head}</code>
+            </p>
+            <p>
+              Target tip: <code>{position.revision.start}</code>
+            </p>
+          </details>
+        </>
+      )}
+    </section>
   );
 }

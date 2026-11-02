@@ -78,7 +78,7 @@ function DiffContext({
     </div>
   );
 }
-function DiscussionNotes({
+export function DiscussionNotes({
   discussion,
   revision,
 }: {

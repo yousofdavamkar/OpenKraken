@@ -3,16 +3,34 @@ import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import { EditorState } from '@codemirror/state';
 import { Decoration, EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap } from '@codemirror/commands';
+import { providerPatchLines } from '@openkraken/ipc-contract';
+import { DiscussionNotes } from './merge-request-discussions.js';
+import {
+  MergeDiscussionActionDialog,
+  type MergeDiscussionIntent,
+} from './merge-discussion-actions.js';
 import type {
   ProviderMergeRequestFile,
   ProviderMergeRequestFilesOptions,
 } from '@openkraken/ipc-contract';
 import { pollNumberedPages, useProviderPoll } from './provider-polling.js';
 
-function MergePatch({ text }: { text: string }) {
+type PatchLine = { oldLine: number | null; newLine: number | null };
+function MergePatch({
+  text,
+  commentable,
+  onComment,
+}: {
+  text: string;
+  commentable: boolean;
+  onComment: (line: PatchLine) => void;
+}) {
+  const [anchor, setAnchor] = useState<PatchLine>();
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!host.current) return;
+    setAnchor(undefined);
+    const anchors = providerPatchLines(text);
     const document = EditorState.create({ doc: text });
     const decorations = [];
     for (let i = 1; i <= document.doc.lines; i++) {
@@ -31,6 +49,12 @@ function MergePatch({ text }: { text: string }) {
       state: EditorState.create({
         doc: text,
         extensions: [
+          EditorView.updateListener.of((update) => {
+            if (update.selectionSet)
+              setAnchor(
+                anchors.get(update.state.doc.lineAt(update.state.selection.main.head).number),
+              );
+          }),
           EditorState.readOnly.of(true),
           EditorView.editable.of(false),
           EditorView.contentAttributes.of({ 'aria-label': 'Provider patch', tabindex: '0' }),
@@ -50,7 +74,24 @@ function MergePatch({ text }: { text: string }) {
     });
     return () => view.destroy();
   }, [text]);
-  return <div ref={host} className="pr-patch" />;
+  return (
+    <>
+      <div ref={host} className="pr-patch" />
+      {commentable &&
+        (anchor ? (
+          <>
+            <p>
+              Selected {anchor.oldLine !== null && `old line ${anchor.oldLine}`}
+              {anchor.oldLine !== null && anchor.newLine !== null && ' · '}
+              {anchor.newLine !== null && `new line ${anchor.newLine}`}
+            </p>
+            <button onClick={() => onComment(anchor)}>Comment on selected line</button>
+          </>
+        ) : (
+          <p>Select a line in a complete text hunk to comment.</p>
+        ))}
+    </>
+  );
 }
 
 export function MergeRequestFiles({
@@ -58,7 +99,10 @@ export function MergeRequestFiles({
   repository,
   number,
   revision,
-}: Omit<ProviderMergeRequestFilesOptions, 'page'> & { accountId: string }) {
+  origin,
+}: Omit<ProviderMergeRequestFilesOptions, 'page'> & { accountId: string; origin: string }) {
+  const [action, setAction] = useState<MergeDiscussionIntent>();
+  const filePages = useRef(new Map<string, number>());
   const [files, setFiles] = useState<ProviderMergeRequestFile[]>([]);
   const [page, setPage] = useState(1);
   const [attempt, setAttempt] = useState(0);
@@ -99,6 +143,8 @@ export function MergeRequestFiles({
             setNext(null);
           }
         } else if (result.kind === 'providerMergeRequestFiles') {
+          if (page === 1) filePages.current.clear();
+          for (const file of result.page.files) filePages.current.set(file.path, page);
           setFiles((current) => {
             const unique = new Map((page === 1 ? [] : current).map((file) => [file.path, file]));
             for (const file of result.page.files) unique.set(file.path, file);
@@ -120,13 +166,14 @@ export function MergeRequestFiles({
     };
   }, [accountId, repository, number, base, head, start, page, attempt]);
   useProviderPoll(
-    pending,
+    pending || !!action,
     `${number}/${base}/${head}/${start}/${page}/${attempt}`,
     async (read) => {
       const currentPath = files[active]?.path;
       const top = Math.floor((scroll.current?.scrollTop ?? 0) / 42);
       const anchor = files[top]?.path;
       const offset = (scroll.current?.scrollTop ?? 0) % 42;
+      const refreshedPages = new Map<string, number>();
       const result = await pollNumberedPages(
         page,
         async (page) => {
@@ -137,12 +184,14 @@ export function MergeRequestFiles({
           });
           if (result.kind !== 'providerMergeRequestFiles')
             throw new Error('Changed files could not be refreshed.');
+          for (const file of result.page.files) refreshedPages.set(file.path, page);
           return { ...result.page, items: result.page.files };
         },
         (file) => file.path,
       );
       return {
         commit: () => {
+          filePages.current = refreshedPages;
           const index = result.items.findIndex((file) => file.path === currentPath);
           const anchorIndex = result.items.findIndex((file) => file.path === anchor);
           restoreScroll.current =
@@ -264,10 +313,40 @@ export function MergeRequestFiles({
           {file.patch === null ? (
             <p>No text diff was supplied. Binary or mode-only changes may have no text patch.</p>
           ) : (
-            <MergePatch text={file.patch} />
+            <MergePatch
+              key={file.path}
+              text={file.patch}
+              commentable={!file.patchTruncated && !file.collapsed && !file.tooLarge}
+              onComment={(line) =>
+                setAction({
+                  action: 'inline',
+                  page: filePages.current.get(file.path) ?? 1,
+                  position: {
+                    revision,
+                    oldPath: file.previousPath ?? file.path,
+                    newPath: file.path,
+                    oldLine: line.oldLine,
+                    newLine: line.newLine,
+                  },
+                })
+              }
+            />
           )}
           {file.patchTruncated && <p>This patch exceeds the display limit and is truncated.</p>}
         </section>
+      )}
+      {action && (
+        <MergeDiscussionActionDialog
+          accountId={accountId}
+          repository={repository}
+          number={number}
+          origin={origin}
+          intent={action}
+          renderDiscussion={(discussion) => (
+            <DiscussionNotes key={discussion.id} discussion={discussion} revision={revision} />
+          )}
+          close={() => setAction(undefined)}
+        />
       )}
     </section>
   );

@@ -16,7 +16,7 @@ The existing discussion composer provides preview/confirmation, draft retention 
 
 ## Verification and remaining scope
 
-ProviderService/MSW fixtures assert exact multipart fields for removed, added, context and later-hunk lines; source-page lookup; rename paths; fresh SHA/patch guards; complete-hunk validation; ambiguity refusal; and uncertain misplaced acknowledgments. Strict IPC keeps these writes out of the Git utility service.
+ProviderService/MSW fixtures assert exact multipart fields for removed, added, context and later-hunk lines; source-page lookup; rename paths; fresh SHA/patch guards; complete-hunk validation; ambiguity refusal; and uncertain misplaced acknowledgments. Strict IPC keeps these writes out of the Git utility service. Electron acceptance selects removed, added, context and later-hunk rows, reviews a first-page file after loading page two, checks the exact multipart write, preserves a draft when the target SHA changes, refuses no-newline markers as targets and inspects an uncertain posted comment without a duplicate write.
 
 Multiline, file-level and image-position creation, suggestions, editing/deletion, historical-version selection, approval reviews and durable drafts remain separate work. Live GitLab posting is unverified.
 
