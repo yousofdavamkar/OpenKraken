@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import type {
+  ProviderAccount,
   ProviderIssueDetails,
   ProviderIssueListOptions,
   ProviderIssueSummary,
@@ -11,11 +12,19 @@ import { ProviderRepositoryPicker } from './provider-repositories.js';
 import { ProviderPolling, pollNumberedPages, useProviderPoll } from './provider-polling.js';
 
 type RepositorySelection = {
+  provider: ProviderAccount['provider'];
   accountId: string;
   origin: string;
   repository: ProviderIssueListOptions['repository'];
 };
+function issueContext(issue: ProviderIssueDetails | undefined) {
+  return issue && 'provider' in issue
+    ? `${issue.id}/${issue.projectId}/${issue.confidential}`
+    : 'github';
+}
 function IssueComments({ target, number }: { target: RepositorySelection; number: number }) {
+  const noun = target.provider === 'gitlab' ? 'notes' : 'comments';
+  const title = target.provider === 'gitlab' ? 'Notes' : 'Comments';
   const [comments, setComments] = useState<ProviderIssueComment[]>([]);
   const [page, setPage] = useState(1),
     [next, setNext] = useState<number | null>(null);
@@ -49,11 +58,24 @@ function IssueComments({ target, number }: { target: RepositorySelection; number
           ]);
           setNext(result.page.nextPage);
           setLimited(result.page.limited || (page === 10 && result.page.nextPage !== null));
-        } else if (result.kind === 'error') setError(result.message);
-        else if (result.kind === 'cancelled') setError('Comment loading cancelled.');
+        } else if (result.kind === 'error' || result.kind === 'cancelled') {
+          setError(result.kind === 'error' ? result.message : 'Comment loading cancelled.');
+          if (target.provider === 'gitlab') {
+            setComments([]);
+            setNext(null);
+            setLimited(false);
+          }
+        }
       })
       .catch(() => {
-        if (alive) setError('Issue comments could not be loaded.');
+        if (alive) {
+          setError('Issue comments could not be loaded.');
+          if (target.provider === 'gitlab') {
+            setComments([]);
+            setNext(null);
+            setLimited(false);
+          }
+        }
       })
       .finally(() => {
         if (alive) setPending(false);
@@ -99,22 +121,22 @@ function IssueComments({ target, number }: { target: RepositorySelection; number
     getItemKey: (index) => comments[index]!.id,
   });
   return (
-    <section aria-label="Issue comments">
+    <section aria-label={`Issue ${noun}`}>
       <p role="status">
-        {comments.length} comments loaded{pending ? ' · Loading…' : ''}
+        {comments.length} {noun} loaded{pending ? ' · Loading…' : ''}
       </p>
       {error && (
         <p role="alert">
           {error}{' '}
           <button disabled={pending} onClick={() => setAttempt((value) => value + 1)}>
-            Retry comments
+            Retry {noun}
           </button>
         </p>
       )}
       <div
         className="issue-comments"
         role="list"
-        aria-label="Comments"
+        aria-label={title}
         tabIndex={0}
         ref={scroll}
         onKeyDown={(event) => {
@@ -153,22 +175,34 @@ function IssueComments({ target, number }: { target: RepositorySelection; number
                   </time>
                   {comment.updatedAt !== comment.createdAt ? ' · Edited' : ''}
                 </p>
+                {'provider' in comment && (
+                  <p>
+                    {comment.system ? 'System activity' : 'User note'}
+                    {comment.internal === true
+                      ? ' · Internal note'
+                      : comment.confidential === true
+                        ? ' · Confidential note'
+                        : ''}
+                    {comment.noteType === 'DiscussionNote' ? ' · Thread note' : ''}
+                  </p>
+                )}
                 <pre>{comment.body || 'Empty comment'}</pre>
               </article>
             );
           })}
         </div>
       </div>
-      {!pending && !error && !comments.length && <p>No issue comments.</p>}
+      {!pending && !error && !comments.length && <p>No issue {noun}.</p>}
       {limited && (
         <p>
-          The comment display limit was reached. Additional comments are available on the provider.
+          The {target.provider === 'gitlab' ? 'note' : 'comment'} display limit was reached.
+          Additional {noun} are available on the provider.
         </p>
       )}
       <div className="dialog-actions">
         {next !== null && page < 10 && !error && (
           <button disabled={pending} onClick={() => setPage(next)}>
-            Load more comments
+            Load more {noun}
           </button>
         )}
         <button
@@ -182,7 +216,7 @@ function IssueComments({ target, number }: { target: RepositorySelection; number
             scroll.current?.scrollTo(0, 0);
           }}
         >
-          Refresh comments
+          Refresh {noun}
         </button>
       </div>
     </section>
@@ -243,6 +277,7 @@ function IssueDetails({
       });
       if (result.kind !== 'providerIssue') throw new Error('Issue details could not be refreshed.');
       return {
+        resetChildren: issueContext(detail) !== issueContext(result.issue),
         commit: () => {
           setDetail(result.issue);
           setError('');
@@ -269,6 +304,17 @@ function IssueDetails({
             Updated{' '}
             <time dateTime={detail.updatedAt}>{new Date(detail.updatedAt).toLocaleString()}</time>
           </p>
+          {'provider' in detail && (
+            <>
+              <p>
+                {detail.confidential ? 'Confidential issue' : 'Non-confidential issue'} ·{' '}
+                {detail.issueType}
+              </p>
+              {detail.locked === null && <p>Conversation lock not reported</p>}
+              {detail.dueDate && <p>Due: {detail.dueDate}</p>}
+              {detail.weight !== null && <p>Weight: {detail.weight}</p>}
+            </>
+          )}
           <p>Labels: {detail.labels.join(', ') || 'None'}</p>
           <p>Assignees: {detail.assignees.join(', ') || 'Unassigned'}</p>
           <p>
@@ -277,28 +323,32 @@ function IssueDetails({
             {detail.locked ? ' · Conversation locked' : ''}
           </p>
           <div className="dialog-actions">
-            <IssueAction
-              target={target}
-              intent={{ action: 'comment', number }}
-              finished={() => setAttempt((value) => value + 1)}
-            />
-            <IssueAction
-              target={target}
-              intent={{
-                action: 'state',
-                number,
-                state: detail.state === 'open' ? 'closed' : 'open',
-              }}
-              finished={(changed) => {
-                if (changed) refreshList();
-                else setAttempt((value) => value + 1);
-              }}
-            />
+            {target.provider === 'github' && (
+              <>
+                <IssueAction
+                  target={target}
+                  intent={{ action: 'comment', number }}
+                  finished={() => setAttempt((value) => value + 1)}
+                />
+                <IssueAction
+                  target={target}
+                  intent={{
+                    action: 'state',
+                    number,
+                    state: detail.state === 'open' ? 'closed' : 'open',
+                  }}
+                  finished={(changed) => {
+                    if (changed) refreshList();
+                    else setAttempt((value) => value + 1);
+                  }}
+                />
+              </>
+            )}
             <button aria-pressed={tab === 'details'} onClick={() => setTab('details')}>
               Details
             </button>
             <button aria-pressed={tab === 'comments'} onClick={() => setTab('comments')}>
-              Comments
+              {target.provider === 'gitlab' ? 'Notes' : 'Comments'}
             </button>
           </div>
           {tab === 'details' ? (
@@ -307,7 +357,7 @@ function IssueDetails({
               <pre className="pull-body">{detail.body || 'No description provided.'}</pre>
             </>
           ) : (
-            <IssueComments target={target} number={number} />
+            <IssueComments key={issueContext(detail)} target={target} number={number} />
           )}
         </>
       )}
@@ -610,16 +660,19 @@ function IssueDialog({ close }: { close: () => void }) {
             {target.origin}/{target.repository.owner}/{target.repository.name}
           </p>
           <div className="dialog-actions">
-            <IssueAction
-              target={target}
-              intent={{ action: 'create' }}
-              finished={(changed) => {
-                if (changed) {
-                  setState('open');
-                  setVersion((value) => value + 1);
-                }
-              }}
-            />
+            {target.provider === 'github' && (
+              <IssueAction
+                target={target}
+                intent={{ action: 'create' }}
+                finished={(changed) => {
+                  if (changed) {
+                    setState('open');
+                    setVersion((value) => value + 1);
+                  }
+                }}
+              />
+            )}
+            {target.provider === 'gitlab' && <span>Read-only GitLab issues</span>}
             <button onClick={() => setTarget(undefined)}>Choose repository</button>
             <label>
               Issue state{' '}
@@ -647,9 +700,10 @@ function IssueDialog({ close }: { close: () => void }) {
         </>
       ) : (
         <ProviderRepositoryPicker
-          onSelect={(url, accountId, repository) => {
+          onSelect={(url, accountId, repository, provider) => {
             setState('open');
             setTarget({
+              provider,
               accountId,
               origin: new URL(url).origin,
               repository: { owner: repository.owner, name: repository.name },
