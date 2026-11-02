@@ -303,6 +303,13 @@ export type ProviderPullDetails = z.infer<typeof providerPullDetailsSchema>;
 
 const providerCommitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 const providerProjectIdSchema = z.string().regex(/^[1-9][0-9]{0,19}$/);
+export const providerMergeRequestRevisionSchema = z
+  .object({
+    base: providerCommitSchema,
+    head: providerCommitSchema,
+    start: providerCommitSchema,
+  })
+  .strict();
 export const providerMergeRequestDetailsSchema = providerPullSummarySchema
   .extend({
     provider: z.literal('gitlab'),
@@ -320,14 +327,7 @@ export const providerMergeRequestDetailsSchema = providerPullSummarySchema
         branch: z.string().min(1).max(1024),
       })
       .strict(),
-    diffRefs: z
-      .object({
-        base: providerCommitSchema,
-        head: providerCommitSchema,
-        start: providerCommitSchema,
-      })
-      .strict()
-      .nullable(),
+    diffRefs: providerMergeRequestRevisionSchema.nullable(),
     changesCount: z
       .object({ count: providerCountSchema, limited: z.boolean() })
       .strict()
@@ -338,6 +338,37 @@ export const providerMergeRequestDetailsSchema = providerPullSummarySchema
   })
   .strict();
 export type ProviderMergeRequestDetails = z.infer<typeof providerMergeRequestDetailsSchema>;
+export const providerMergeRequestFilesOptionsSchema = providerPullOptionsSchema
+  .extend({
+    revision: providerMergeRequestRevisionSchema,
+    page: z.number().int().min(1).max(30),
+  })
+  .strict();
+export const providerMergeRequestFileSchema = z
+  .object({
+    path: z.string().min(1).max(4096),
+    previousPath: z.string().min(1).max(4096).nullable(),
+    status: z.enum(['added', 'removed', 'modified', 'renamed']),
+    oldMode: z.string().regex(/^(?:0|[0-7]{6})$/),
+    newMode: z.string().regex(/^(?:0|[0-7]{6})$/),
+    generated: z.boolean().nullable(),
+    collapsed: z.boolean().nullable(),
+    tooLarge: z.boolean().nullable(),
+    patch: z.string().max(262144).nullable(),
+    patchTruncated: z.boolean(),
+  })
+  .strict();
+export const providerMergeRequestFilesPageSchema = z
+  .object({
+    files: z.array(providerMergeRequestFileSchema).max(100),
+    nextPage: z.number().int().min(1).max(30).nullable(),
+    limited: z.boolean(),
+  })
+  .strict();
+export type ProviderMergeRequestFilesOptions = z.infer<
+  typeof providerMergeRequestFilesOptionsSchema
+>;
+export type ProviderMergeRequestFile = z.infer<typeof providerMergeRequestFileSchema>;
 export const providerPullRevisionSchema = z
   .object({ head: providerCommitSchema, base: providerCommitSchema })
   .strict();

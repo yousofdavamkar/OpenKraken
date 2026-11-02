@@ -10,8 +10,13 @@ import {
 } from '@openkraken/ipc-contract';
 import { ProviderError } from './provider-error.js';
 import { ProviderPollingPolicy } from './provider-polling-policy.js';
+import { loadMergeRequestFiles } from './gitlab-files.js';
 import { loadMergeRequest, loadMergeRequests } from './gitlab-merges.js';
-import type { ProviderPullListOptions, ProviderPullOptions } from '@openkraken/ipc-contract';
+import type {
+  ProviderMergeRequestFilesOptions,
+  ProviderPullListOptions,
+  ProviderPullOptions,
+} from '@openkraken/ipc-contract';
 import { ProviderReadCache } from './provider-read-cache.js';
 
 const projectSchema = z.object({
@@ -113,6 +118,18 @@ export class GitLabProvider {
   }
   mergeRequest(origin: string, token: string, input: ProviderPullOptions, signal?: AbortSignal) {
     return loadMergeRequest(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      providerOriginSchema.parse(origin),
+      input,
+    );
+  }
+  mergeRequestFiles(
+    origin: string,
+    token: string,
+    input: ProviderMergeRequestFilesOptions,
+    signal?: AbortSignal,
+  ) {
+    return loadMergeRequestFiles(
       (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
       providerOriginSchema.parse(origin),
       input,

@@ -736,3 +736,35 @@ test('GitLab detail IPC accepts nested selectors but never passes provider reads
     ).toBe(false);
   expect(requestSchema.safeParse({ ...request, token: 'secret' }).success).toBe(false);
 });
+
+test('GitLab file reads require all three diff revisions and bounded manual pages', () => {
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    method: 'providerMergeRequestFiles',
+    accountId: 'a'.repeat(64),
+    options: {
+      repository: { owner: 'group/subgroup', name: 'project' },
+      number: 7,
+      revision: { head: '1'.repeat(40), base: '2'.repeat(40), start: '3'.repeat(40) },
+      page: 1,
+    },
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  for (const page of [0, 31, 1.5])
+    expect(
+      requestSchema.safeParse({ ...request, options: { ...request.options, page } }).success,
+    ).toBe(false);
+  expect(
+    requestSchema.safeParse({
+      ...request,
+      options: { ...request.options, revision: { head: '1'.repeat(40), base: '2'.repeat(40) } },
+    }).success,
+  ).toBe(false);
+  expect(
+    requestSchema.safeParse({
+      ...request,
+      options: { ...request.options, endpoint: 'https://attacker.test' },
+    }).success,
+  ).toBe(false);
+});

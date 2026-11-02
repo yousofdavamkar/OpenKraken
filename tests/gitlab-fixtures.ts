@@ -24,3 +24,19 @@ export function gitlabMergeFixture(iid = 1) {
     web_url: 'https://attacker.test/ignored',
   };
 }
+
+export function gitlabFileFixture(path = 'src/new.ts') {
+  return {
+    old_path: 'src/old.ts',
+    new_path: path,
+    a_mode: '100644',
+    b_mode: '100755',
+    new_file: false,
+    renamed_file: true,
+    deleted_file: false,
+    generated_file: false,
+    collapsed: false,
+    too_large: false,
+    diff: '@@ -1 +1 @@\n-old\n+<script>new</script>\n',
+  };
+}

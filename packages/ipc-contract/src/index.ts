@@ -38,6 +38,8 @@ import {
   providerPullPageSchema,
   providerPullDetailsSchema,
   providerMergeRequestDetailsSchema,
+  providerMergeRequestFilesOptionsSchema,
+  providerMergeRequestFilesPageSchema,
   providerAccountsSchema,
   providerGitCredentialSchema,
   providerRemoteTargetSchema,
@@ -1312,6 +1314,14 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerMergeRequestFiles'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerMergeRequestFilesOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerGit'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       operation: providerGitOperationSchema,
@@ -1540,6 +1550,12 @@ export const resultSchema = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({ kind: z.literal('providerReviewSubmitted'), review: providerPullReviewSchema })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerMergeRequestFiles'),
+      page: providerMergeRequestFilesPageSchema,
+    })
     .strict(),
   z.object({ kind: z.literal('providerPullRequests'), page: providerPullPageSchema }).strict(),
   z

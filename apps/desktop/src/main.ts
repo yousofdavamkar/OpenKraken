@@ -279,6 +279,7 @@ else {
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
           request.method === 'providerMergeRequest' ||
+          request.method === 'providerMergeRequestFiles' ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerPollingPolicy' ||
@@ -476,6 +477,15 @@ else {
                 controller.signal,
               ),
             });
+          if (request.method === 'providerMergeRequestFiles')
+            return resultSchema.parse({
+              kind: 'providerMergeRequestFiles',
+              page: await providers.mergeRequestFiles(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerRepositories')
             return resultSchema.parse({
               kind: 'providerRepositories',
@@ -612,6 +622,7 @@ else {
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
           request.method === 'providerMergeRequest' ||
+          request.method === 'providerMergeRequestFiles' ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerPollingPolicy' ||

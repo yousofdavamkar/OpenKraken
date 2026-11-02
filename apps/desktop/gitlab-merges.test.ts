@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { protection } from '../../tests/provider-protection.js';
-import { gitlabMergeFixture } from '../../tests/gitlab-fixtures.js';
+import { gitlabFileFixture, gitlabMergeFixture } from '../../tests/gitlab-fixtures.js';
 import { ProviderService } from './src/providers.js';
 import { ProviderVault } from './src/provider-vault.js';
 
@@ -226,4 +226,155 @@ test('Cancelling GitLab detail reads aborts transport and never returns late met
   controller.abort();
   await rejected;
   await aborted;
+});
+
+test('GitLab file pages preserve rename/mode metadata and patch availability within the selected diff revisions', async () => {
+  const { service, account, origin } = await setup('files');
+  const revision = { base: '2'.repeat(40), head: '1'.repeat(40), start: '3'.repeat(40) };
+  const pages: string[] = [];
+  server.use(
+    http.get(`${origin}/api/v4/projects/77/merge_requests/7`, () =>
+      HttpResponse.json(gitlabMergeFixture(7)),
+    ),
+    http.get(`${origin}/api/v4/projects/77/merge_requests/7/diffs`, ({ request }) => {
+      const url = new URL(request.url);
+      expect(url.searchParams.get('per_page')).toBe('100');
+      pages.push(url.searchParams.get('page')!);
+      return HttpResponse.json(
+        pages.at(-1) === '1'
+          ? Array.from({ length: 100 }, (_, i) => gitlabFileFixture(`file-${i}`))
+          : [{ ...gitlabFileFixture(), diff: '', collapsed: true, generated_file: true }],
+        { headers: { Link: '<https://attacker.test/steal>; rel="next"' } },
+      );
+    }),
+  );
+  const first = await service.mergeRequestFiles(account.id, {
+    repository,
+    number: 7,
+    revision,
+    page: 1,
+  });
+  expect(first).toMatchObject({ nextPage: 2, limited: false });
+  expect(first.files[0]).toEqual({
+    path: 'file-0',
+    previousPath: 'src/old.ts',
+    status: 'renamed',
+    oldMode: '100644',
+    newMode: '100755',
+    generated: false,
+    collapsed: false,
+    tooLarge: false,
+    patch: '@@ -1 +1 @@\n-old\n+<script>new</script>\n',
+    patchTruncated: false,
+  });
+  const second = await service.mergeRequestFiles(account.id, {
+    repository,
+    number: 7,
+    revision,
+    page: 2,
+  });
+  expect(second).toMatchObject({
+    nextPage: null,
+    limited: false,
+    files: [{ patch: null, collapsed: true, generated: true }],
+  });
+  expect(second.files[0]).not.toHaveProperty('sha');
+  expect(second.files[0]).not.toHaveProperty('additions');
+  expect(pages).toEqual(['1', '2']);
+});
+
+test('GitLab file reads refuse stale source/base/target revisions before dispatch and detect changes during a page', async () => {
+  const { service, account, origin } = await setup('stale-files');
+  const revision = { base: '2'.repeat(40), head: '1'.repeat(40), start: '3'.repeat(40) };
+  let detail = gitlabMergeFixture(7);
+  let fileReads = 0;
+  let changeDuringRead = false;
+  server.use(
+    http.get(`${origin}/api/v4/projects/77/merge_requests/7`, () => HttpResponse.json(detail)),
+    http.get(`${origin}/api/v4/projects/77/merge_requests/7/diffs`, () => {
+      fileReads++;
+      if (changeDuringRead)
+        detail = { ...detail, diff_refs: { ...detail.diff_refs, start_sha: '4'.repeat(40) } };
+      return HttpResponse.json([gitlabFileFixture()]);
+    }),
+  );
+  for (const field of ['base_sha', 'head_sha', 'start_sha'] as const) {
+    detail = {
+      ...gitlabMergeFixture(7),
+      diff_refs: { ...gitlabMergeFixture(7).diff_refs, [field]: '4'.repeat(40) },
+    };
+    await expect(
+      service.mergeRequestFiles(account.id, { repository, number: 7, revision, page: 1 }),
+    ).rejects.toMatchObject({ code: 'STALE_PROVIDER_MERGE' });
+  }
+  detail = { ...gitlabMergeFixture(7), sha: '5'.repeat(40) };
+  await expect(
+    service.mergeRequestFiles(account.id, { repository, number: 7, revision, page: 1 }),
+  ).rejects.toMatchObject({ code: 'STALE_PROVIDER_MERGE' });
+  expect(fileReads).toBe(0);
+  detail = gitlabMergeFixture(7);
+  changeDuringRead = true;
+  await expect(
+    service.mergeRequestFiles(account.id, { repository, number: 7, revision, page: 1 }),
+  ).rejects.toMatchObject({ code: 'STALE_PROVIDER_MERGE' });
+  expect(fileReads).toBe(1);
+});
+
+test('GitLab file pages bound patches, flag provider omissions and reject malformed metadata', async () => {
+  const { service, account, origin } = await setup('file-bounds');
+  const revision = { base: '2'.repeat(40), head: '1'.repeat(40), start: '3'.repeat(40) };
+  let entries: unknown[] = [
+    { ...gitlabFileFixture('huge'), diff: 'x'.repeat(262145) },
+    { ...gitlabFileFixture('omitted'), diff: null, too_large: true },
+    {
+      ...gitlabFileFixture('older-server'),
+      diff: undefined,
+      generated_file: undefined,
+      collapsed: undefined,
+      too_large: undefined,
+    },
+  ];
+  server.use(
+    http.get(`${origin}/api/v4/projects/77/merge_requests/7`, () =>
+      HttpResponse.json(gitlabMergeFixture(7)),
+    ),
+    http.get(`${origin}/api/v4/projects/77/merge_requests/7/diffs`, () =>
+      HttpResponse.json(entries),
+    ),
+  );
+  const first = await service.mergeRequestFiles(account.id, {
+    repository,
+    number: 7,
+    revision,
+    page: 1,
+  });
+  expect(first.files[0]!.patch).toHaveLength(262144);
+  expect(first.files[0]!.patchTruncated).toBe(true);
+  expect(first.files[1]).toMatchObject({ patch: null, tooLarge: true });
+  expect(first.files[2]).toMatchObject({
+    patch: null,
+    generated: null,
+    collapsed: null,
+    tooLarge: null,
+  });
+  entries = Array.from({ length: 100 }, (_, i) => gitlabFileFixture(`file-${i}`));
+  expect(
+    await service.mergeRequestFiles(account.id, { repository, number: 7, revision, page: 30 }),
+  ).toMatchObject({ nextPage: null, limited: true });
+  for (const value of [
+    { diff: 15 },
+    { a_mode: 'secret' },
+    { new_path: '' },
+    { new_file: true },
+    { too_large: 'true' },
+  ]) {
+    entries = [{ ...gitlabFileFixture(), ...value }];
+    await expect(
+      service.mergeRequestFiles(account.id, { repository, number: 7, revision, page: 1 }),
+    ).rejects.toMatchObject({ code: 'PROVIDER_RESPONSE' });
+  }
+  entries = Array.from({ length: 101 }, () => gitlabFileFixture());
+  await expect(
+    service.mergeRequestFiles(account.id, { repository, number: 7, revision, page: 1 }),
+  ).rejects.toMatchObject({ code: 'PROVIDER_RESPONSE' });
 });
