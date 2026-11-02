@@ -35,3 +35,23 @@ test('contract rejects arbitrary commands, paths, channels and malformed replies
     serviceResponseSchema.safeParse({ id, result: { kind: 'snapshot', snapshot: {} } }).success,
   ).toBe(false);
 });
+
+test('provider IPC rejects malformed hosts and keeps credential requests out of the Git service', () => {
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    method: 'providerConnect',
+    options: { provider: 'github', origin: 'https://github.com', token: 'fixture-pat' },
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  for (const origin of [
+    'not a URL',
+    '',
+    'https://',
+    'http://github.com',
+    'https://user:secret@github.com',
+  ])
+    expect(
+      requestSchema.safeParse({ ...request, options: { ...request.options, origin } }).success,
+    ).toBe(false);
+});

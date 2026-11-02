@@ -5,7 +5,12 @@ export const providerOriginSchema = z
   .max(2048)
   .url()
   .refine((value) => {
-    const url = new URL(value);
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      return false;
+    }
     return (
       value === value.trim() &&
       url.protocol === 'https:' &&
