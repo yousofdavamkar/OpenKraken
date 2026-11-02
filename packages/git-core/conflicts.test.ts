@@ -242,7 +242,14 @@ test('cancelling an external merge tool preserves partial edits for Undo', async
     let wrote = false;
     try {
       for (let attempt = 0; attempt < 100; attempt++) {
-        if ((await readFile(join(path, 'tracked.txt'), 'utf8')) === 'partial external edit\n') {
+        const contents = await readFile(join(path, 'tracked.txt'), 'utf8').catch(
+          (error: NodeJS.ErrnoException) => {
+            // Git temporarily moves the merged file while preparing the external tool.
+            if (error.code === 'ENOENT') return undefined;
+            throw error;
+          },
+        );
+        if (contents === 'partial external edit\n') {
           wrote = true;
           break;
         }
@@ -250,6 +257,7 @@ test('cancelling an external merge tool preserves partial edits for Undo', async
       }
     } finally {
       abort.abort();
+      await result;
     }
     expect(wrote).toBe(true);
     expect(await result).toMatchObject({ code: 'CANCELLED' });

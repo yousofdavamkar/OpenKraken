@@ -50,7 +50,11 @@ function Confirmation({
           Current commit: <code>{state.currentCommit}</code>
         </p>
       )}
-      <p>This action has no application Undo yet.</p>
+      <p>
+        {action === 'abort'
+          ? 'Abort has no application Undo.'
+          : 'Undo of a completed integration restores its original branch state, but does not recover skipped conflict-resolution edits.'}
+      </p>
       <div className="dialog-actions">
         <button disabled={pending} onClick={close}>
           Keep working

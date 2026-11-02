@@ -130,3 +130,176 @@ test('integration Undo verifies historical blob availability before changing ref
     await service.dispose();
   }
 });
+test.each(['merge', 'rebase', 'cherry-pick', 'revert'] as const)(
+  'a conflicted %s completed after restart undoes the entire integration',
+  async (kind) => {
+    const path = createFixture(join(root, `paused-${kind}`));
+    fixtureGit(path, ['switch', '-c', 'incoming']);
+    await writeFile(join(path, 'tracked.txt'), 'incoming version\n');
+    fixtureGit(path, ['commit', '-am', 'Incoming']);
+    const target = fixtureGit(path, ['rev-parse', 'HEAD']);
+    fixtureGit(path, ['switch', 'main']);
+    await writeFile(join(path, 'tracked.txt'), 'original local version\n');
+    fixtureGit(path, ['commit', '-am', 'Local']);
+    const original = fixtureGit(path, ['rev-parse', 'HEAD']);
+    const dataDir = join(root, `paused-${kind}-profile`);
+    let service = new RepositoryService('git', { dataDir });
+    try {
+      let repo = await service.open(path);
+      const state = await service.workingState(repo.id);
+      await expect(
+        service.startOperation(
+          repo.id,
+          kind === 'merge'
+            ? { kind, mode: 'no-ff', target, revision: state.revision }
+            : { kind, target, revision: state.revision },
+        ),
+      ).rejects.toMatchObject({ code: 'GIT_FAILED' });
+      await service.dispose();
+      service = new RepositoryService('git', { dataDir });
+      repo = await service.open(path);
+      const pathBytes = Buffer.from('tracked.txt').toString('base64');
+      const preview = await service.conflictPreview(repo.id, pathBytes);
+      await service.resolveConflict(repo.id, {
+        pathBytes,
+        token: preview.token,
+        choice: 'output',
+        text: 'combined resolution\n',
+      });
+      const operation = await service.operationState(repo.id);
+      const completed = await service.operationAction(repo.id, {
+        action: 'continue',
+        token: operation.token,
+      });
+      expect(completed.undo?.label).toBe(kind === 'merge' ? 'Merge (no-ff)' : kind);
+      const integrated = fixtureGit(path, ['rev-parse', 'HEAD']);
+      await service.undo(repo.id);
+      expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(original);
+      expect(await readFile(join(path, 'tracked.txt'), 'utf8')).toBe('original local version\n');
+      expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
+      expect((await service.workingState(repo.id)).undo).toBeUndefined();
+      await service.undo(repo.id, true);
+      expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(integrated);
+      expect(await readFile(join(path, 'tracked.txt'), 'utf8')).toBe('combined resolution\n');
+      expect((await service.operationState(repo.id)).kind).toBe('none');
+    } finally {
+      await service.dispose();
+    }
+  },
+);
+test.each(['abort', 'external-restart'] as const)(
+  'operation origin is retired on %s',
+  async (action) => {
+    const path = createFixture(join(root, action));
+    fixtureGit(path, ['switch', '-c', 'incoming']);
+    await writeFile(join(path, 'tracked.txt'), 'incoming\n');
+    fixtureGit(path, ['commit', '-am', 'Incoming']);
+    const target = fixtureGit(path, ['rev-parse', 'HEAD']);
+    fixtureGit(path, ['switch', 'main']);
+    await writeFile(join(path, 'tracked.txt'), 'local\n');
+    fixtureGit(path, ['commit', '-am', 'Local']);
+    const service = new RepositoryService('git', { dataDir: join(root, `${action}-profile`) });
+    try {
+      const repo = await service.open(path);
+      const state = await service.workingState(repo.id);
+      await expect(
+        service.startOperation(repo.id, {
+          kind: 'merge',
+          mode: 'no-ff',
+          target,
+          revision: state.revision,
+        }),
+      ).rejects.toThrow();
+      if (action === 'external-restart') {
+        fixtureGit(path, ['merge', '--abort']);
+        // Recreate the same conflict externally: same commits do not imply the same operation.
+        expect(() => fixtureGit(path, ['merge', '--no-ff', target])).toThrow();
+        await writeFile(join(path, 'tracked.txt'), 'external resolution\n');
+        fixtureGit(path, ['add', 'tracked.txt']);
+      } else {
+        const pathBytes = Buffer.from('tracked.txt').toString('base64');
+        const preview = await service.conflictPreview(repo.id, pathBytes);
+        await service.resolveConflict(repo.id, { pathBytes, token: preview.token, choice: 'ours' });
+      }
+      await service.operationAction(repo.id, {
+        action: action === 'abort' ? 'abort' : 'continue',
+        token: (await service.operationState(repo.id)).token,
+      });
+      expect((await service.operationState(repo.id)).kind).toBe('none');
+      expect((await service.workingState(repo.id)).undo).toBeUndefined();
+      expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
+    } finally {
+      await service.dispose();
+    }
+  },
+);
+test('rebase Skip retains its original checkpoint after an earlier commit was replayed', async () => {
+  const path = createFixture(join(root, 'rebase-skip'));
+  fixtureGit(path, ['switch', '-c', 'incoming']);
+  await writeFile(join(path, 'tracked.txt'), 'incoming\n');
+  fixtureGit(path, ['commit', '-am', 'Incoming']);
+  const target = fixtureGit(path, ['rev-parse', 'HEAD']);
+  fixtureGit(path, ['switch', 'main']);
+  await writeFile(join(path, 'local.txt'), 'keep local commit\n');
+  fixtureGit(path, ['add', '.']);
+  fixtureGit(path, ['commit', '-m', 'Clean local commit']);
+  await writeFile(join(path, 'tracked.txt'), 'original local content\n');
+  fixtureGit(path, ['commit', '-am', 'Conflicted local commit']);
+  const original = fixtureGit(path, ['rev-parse', 'HEAD']);
+  const service = new RepositoryService('git', { dataDir: join(root, 'skip-profile') });
+  try {
+    const repo = await service.open(path);
+    await expect(
+      service.startOperation(repo.id, {
+        kind: 'rebase',
+        target,
+        revision: (await service.workingState(repo.id)).revision,
+      }),
+    ).rejects.toMatchObject({ code: 'GIT_FAILED' });
+    const state = await service.operationState(repo.id);
+    expect(state.progress).toEqual({ current: 2, total: 2 });
+    await service.operationAction(repo.id, { action: 'skip', token: state.token });
+    const integrated = fixtureGit(path, ['rev-parse', 'HEAD']);
+    expect(await readFile(join(path, 'tracked.txt'), 'utf8')).toBe('incoming\n');
+    await service.undo(repo.id);
+    expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(original);
+    expect(await readFile(join(path, 'tracked.txt'), 'utf8')).toBe('original local content\n');
+    expect(await readFile(join(path, 'local.txt'), 'utf8')).toBe('keep local commit\n');
+    await service.undo(repo.id, true);
+    expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(integrated);
+    expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
+  } finally {
+    await service.dispose();
+  }
+});
+test('an already-up-to-date integration preserves the available Redo', async () => {
+  const path = createFixture(join(root, 'no-op'));
+  const original = fixtureGit(path, ['rev-parse', 'HEAD']);
+  fixtureGit(path, ['switch', '-c', 'incoming']);
+  await writeFile(join(path, 'tracked.txt'), 'incoming\n');
+  fixtureGit(path, ['commit', '-am', 'Incoming']);
+  const target = fixtureGit(path, ['rev-parse', 'HEAD']);
+  fixtureGit(path, ['switch', 'main']);
+  const service = new RepositoryService('git', { dataDir: join(root, 'no-op-profile') });
+  try {
+    const repo = await service.open(path);
+    await service.startOperation(repo.id, {
+      kind: 'merge',
+      mode: 'ff',
+      target,
+      revision: (await service.workingState(repo.id)).revision,
+    });
+    await service.undo(repo.id);
+    const unchanged = await service.startOperation(repo.id, {
+      kind: 'merge',
+      mode: 'ff',
+      target: original,
+      revision: (await service.workingState(repo.id)).revision,
+    });
+    expect(unchanged.redo?.label).toBe('Merge (ff)');
+    await service.undo(repo.id, true);
+    expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(target);
+  } finally {
+    await service.dispose();
+  }
+});

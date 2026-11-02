@@ -68,6 +68,15 @@ const journalSchema = z.object({
   undo: z.array(entrySchema).max(20),
   redo: z.array(entrySchema).max(20),
 });
+const operationOriginSchema = z.object({
+  id: z.string().uuid(),
+  label: z.string(),
+  before: savedSchema,
+  beforeTree: oidSchema,
+  undoIds: z.array(z.string().uuid()).max(20),
+  identity: z.string(),
+});
+type OperationOrigin = z.infer<typeof operationOriginSchema>;
 type Saved = z.infer<typeof savedSchema>;
 type Journal = z.infer<typeof journalSchema>;
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
@@ -746,13 +755,24 @@ export class WorkingTree {
     publish: () => Promise<void>,
     signal?: AbortSignal,
     onProgress?: (text: string) => void,
-    recordUndo = false,
+    recordUndo: boolean | OperationOrigin = false,
+    discardUndo = false,
   ) {
     const before = await this.saved(indexFile);
-    const beforeTree = recordUndo ? await this.indexTree(indexFile, signal) : undefined;
     const id = randomUUID();
+    const origin =
+      recordUndo === true
+        ? {
+            id,
+            label,
+            before,
+            beforeTree: await this.indexTree(indexFile, signal),
+            undoIds: (await this.journal()).undo.map((entry) => entry.id),
+            identity: '',
+          }
+        : recordUndo || undefined;
     const pending = join(this.directory, `pending-${id}.json`);
-    const record = { id, label, before, beforeTree };
+    const record = { id, label, before, origin };
     await atomic(pending, JSON.stringify(record));
     const progress = onProgress ? new GitProgressLines(onProgress) : undefined;
     let failure: unknown;
@@ -778,24 +798,39 @@ export class WorkingTree {
     }
     const after = await this.saved(indexFile);
     await atomic(pending, JSON.stringify({ ...record, after }));
+    const operation = await inspectOperation(this.repo.gitDir);
     if (
-      beforeTree &&
-      !failure &&
-      (await inspectOperation(this.repo.gitDir)).details.kind === 'none' &&
-      (!sameHead(before.head, after.head) || before.signature !== after.signature)
+      origin &&
+      operation.details.kind === 'none' &&
+      (origin.identity ||
+        !sameHead(origin.before.head, after.head) ||
+        origin.before.signature !== after.signature)
     ) {
       const journal = await this.journal();
-      journal.undo.push({
-        id,
-        label,
-        before,
-        after,
-        trees: { before: beforeTree, after: await this.indexTree(indexFile) },
-      });
+      // Resolution/staging entries belong to this operation, not to its finished history.
+      journal.undo = journal.undo.filter((entry) => origin.undoIds.includes(entry.id));
+      if (
+        !failure &&
+        !discardUndo &&
+        (!sameHead(origin.before.head, after.head) || origin.before.signature !== after.signature)
+      )
+        journal.undo.push({
+          id: origin.id,
+          label: origin.label,
+          before: origin.before,
+          after,
+          trees: { before: origin.beforeTree, after: await this.indexTree(indexFile) },
+        });
       journal.redo = [];
       await this.saveJournal(journal);
     }
     if (!sameHead(before.head, after.head) || before.signature !== after.signature) await publish();
+    if (origin) {
+      const path = join(this.directory, 'operation-origin.json');
+      if (operation.identity)
+        await atomic(path, JSON.stringify({ ...origin, identity: operation.identity }));
+      else await rm(path, { force: true });
+    }
     await rm(pending, { force: true });
     if (failure) throw failure;
   }
@@ -805,6 +840,27 @@ export class WorkingTree {
         .toString()
         .trim(),
     );
+  }
+  private async operationOrigin() {
+    const path = join(this.directory, 'operation-origin.json');
+    try {
+      if ((await stat(path)).size > 128 * 1024 * 1024)
+        throw new GitError(
+          'UNDO_UNAVAILABLE',
+          'The operation recovery record exceeds its size limit.',
+        );
+      const origin = operationOriginSchema.parse(JSON.parse(await readFile(path, 'utf8')));
+      if (
+        origin.identity &&
+        origin.identity === (await inspectOperation(this.repo.gitDir)).identity
+      )
+        return origin;
+      await rm(path, { force: true });
+      return undefined;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    }
   }
   async operationAction(
     input: OperationAction,
@@ -836,6 +892,8 @@ export class WorkingTree {
         publish,
         signal,
         onProgress,
+        await this.operationOrigin(),
+        options.action === 'abort',
       );
     }, signal);
     return this.state();

@@ -7,6 +7,9 @@ import { GitError } from './runner.js';
 /** Native operation metadata is data; no todo command or path is executed here. */
 export async function inspectOperation(gitDir: string) {
   const files = new Map<string, string>();
+  const identities = new Map<string, string>();
+  const identityOf = (info: { dev: number; ino: number; birthtimeMs: number }) =>
+    `${info.dev}:${info.ino}:${info.birthtimeMs}`;
   const directories = new Set<string>();
   for (const name of ['rebase-merge', 'rebase-apply', 'sequencer']) {
     try {
@@ -17,6 +20,7 @@ export async function inspectOperation(gitDir: string) {
           'Git operation metadata must be a real directory',
         );
       directories.add(name);
+      identities.set(name, identityOf(info));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
@@ -67,6 +71,7 @@ export async function inspectOperation(gitDir: string) {
       try {
         const limit = /(?:todo|done)$/.test(name) ? 1048576 : 65536;
         const info = await file.stat();
+        identities.set(name, identityOf(info));
         if (!info.isFile() || info.size > limit)
           throw new GitError(
             'OPERATION_STATE_LIMIT',
@@ -158,5 +163,32 @@ export async function inspectOperation(gitDir: string) {
         }
       : {}),
   };
-  return { details, fingerprint: fingerprint.digest('hex') };
+  const anchor =
+    kind === 'rebase' || kind === 'am'
+      ? backend
+      : kind === 'merge'
+        ? 'MERGE_HEAD'
+        : directories.has('sequencer')
+          ? 'sequencer'
+          : kind === 'cherry-pick'
+            ? 'CHERRY_PICK_HEAD'
+            : kind === 'revert'
+              ? 'REVERT_HEAD'
+              : undefined;
+  // Stable through resolution/continuation, but different for a newly created native operation.
+  const identity = anchor
+    ? createHash('sha256')
+        .update(
+          JSON.stringify([
+            kind,
+            anchor,
+            identities.get(anchor),
+            files.get(anchor),
+            details.originalHead,
+            details.branchRef,
+          ]),
+        )
+        .digest('hex')
+    : undefined;
+  return { details, fingerprint: fingerprint.digest('hex'), identity };
 }
