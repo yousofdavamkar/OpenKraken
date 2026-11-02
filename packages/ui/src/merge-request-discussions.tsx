@@ -129,6 +129,7 @@ function DiscussionNotes({
                 key={note.id}
                 ref={virtual.measureElement}
                 data-index={item.index}
+                data-active={active === item.index}
                 role="listitem"
                 className={item.index === 0 ? 'pr-comment-root' : 'pr-comment-reply'}
                 style={{

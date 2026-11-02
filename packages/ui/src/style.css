@@ -1406,7 +1406,9 @@ footer {
   background: #1a293b;
 }
 
-.pr-files:focus .pr-file[data-active='true'] {
+.pr-files:focus .pr-file[data-active='true'],
+.provider-repositories:focus .provider-repository[data-active='true'],
+.pr-comments:focus article[data-active='true'] {
   outline: 1px solid #80bfff;
   outline-offset: -2px;
 }
