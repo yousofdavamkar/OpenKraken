@@ -78,9 +78,11 @@ import {
 } from './github-issues.js';
 import { loadPullChecks } from './github-checks.js';
 import { ProviderError } from './provider-error.js';
+import { ProviderReadCache } from './provider-read-cache.js';
 export { ProviderError } from './provider-error.js';
 import { loadPullTemplates, loadPullTemplate } from './github-templates.js';
 export interface ProviderDriver {
+  clearReadCache(): void;
   previewIssueAction(
     origin: string,
     token: string,
@@ -208,6 +210,10 @@ export interface ProviderDriver {
   ): Promise<{ id: string; login: string }>;
 }
 export class GitHubProvider implements ProviderDriver {
+  private readCache = new ProviderReadCache();
+  clearReadCache() {
+    this.readCache.clear();
+  }
   constructor(private fetcher: typeof fetch = (...args) => fetch(...args)) {}
   async pullChecks(
     origin: string,
@@ -217,8 +223,12 @@ export class GitHubProvider implements ProviderDriver {
   ) {
     const options = providerPullChecksOptionsSchema.parse(input);
     const host = providerOriginSchema.parse(origin);
-    return this.request(host, token, signal, (client, headers) =>
-      loadPullChecks(client, headers, host, options),
+    return this.request(
+      host,
+      token,
+      signal,
+      (client, headers) => loadPullChecks(client, headers, host, options),
+      { readOnlyGraphQL: true },
     );
   }
   async issues(
@@ -933,6 +943,7 @@ export class GitHubProvider implements ProviderDriver {
     token: string,
     signal: AbortSignal | undefined,
     perform: (client: Octokit, headers: Record<string, string>) => Promise<T>,
+    options: { readOnlyGraphQL?: boolean } = {},
   ): Promise<T> {
     const host = providerOriginSchema.parse(origin);
     const baseUrl = host === 'https://github.com' ? 'https://api.github.com' : `${host}/api/v3`;
@@ -943,12 +954,38 @@ export class GitHubProvider implements ProviderDriver {
       const url = new URL(input instanceof Request ? input.url : String(input));
       if (url.origin !== new URL(baseUrl).origin || url.username || url.password)
         throw new ProviderError('PROVIDER_HOST', 'Provider request changed its configured host.');
+      const headers = new Headers(
+        init?.headers ?? (input instanceof Request ? input.headers : undefined),
+      );
+      const method = (
+        init?.method ?? (input instanceof Request ? input.method : 'GET')
+      ).toUpperCase();
+      // Only the fixed check-rollup query opts in; future GraphQL mutations invalidate reads.
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && !options.readOnlyGraphQL)
+        this.readCache.clear();
+      const key =
+        method === 'GET' && !headers.has('if-none-match') && !headers.has('if-modified-since')
+          ? this.readCache.key(host, token, url.href, headers)
+          : undefined;
+      const cached = key === undefined ? undefined : this.readCache.get(key);
+      if (cached) headers.set('if-none-match', cached.etag);
       const response = await this.fetcher(input, {
         ...init,
+        headers,
         signal: boundedSignal,
         redirect: 'error',
         credentials: 'omit',
       });
+      boundedSignal.throwIfAborted();
+      if ([401, 403, 404].includes(response.status)) this.readCache.clear();
+      if (response.status === 304 && cached) {
+        await response.body?.cancel();
+        if (!this.readCache.storageAllowed(response.headers)) this.readCache.discard(key!);
+        return new Response(cached.body, {
+          status: 200,
+          headers: cached.contentType ? { 'content-type': cached.contentType } : {},
+        });
+      }
       if (response.status >= 300 && response.status < 400)
         throw new ProviderError(
           'PROVIDER_REDIRECT',
@@ -973,7 +1010,11 @@ export class GitHubProvider implements ProviderDriver {
       } finally {
         await reader?.cancel().catch(() => {});
       }
-      return new Response(bytes ? Buffer.concat(chunks) : null, {
+      const body = Buffer.concat(chunks);
+      boundedSignal.throwIfAborted();
+      if (key !== undefined && response.status === 200)
+        this.readCache.set(key, response.headers, body);
+      return new Response(bytes ? body : null, {
         status: response.status,
         headers: response.headers,
       });

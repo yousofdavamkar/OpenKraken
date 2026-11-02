@@ -179,6 +179,7 @@ export class ProviderService {
         throw new ProviderCredentialError('KEYCHAIN_UNAVAILABLE');
       signal?.throwIfAborted();
       const accounts = await this.load();
+      this.github.clearReadCache();
       const identity = await this.github.identity(options.origin, options.token, signal);
       const fields = {
         provider: options.provider,
@@ -400,6 +401,7 @@ export class ProviderService {
     }
     let rotated = false;
     if (credential?.expiresAt !== undefined && credential.expiresAt <= this.now() + 60000) {
+      this.github.clearReadCache();
       credential = await this.oauth.refresh(credential, signal);
       rotated = true;
     }
@@ -433,6 +435,7 @@ export class ProviderService {
           'PROVIDER_ACCOUNT',
           'This provider account is no longer connected.',
         );
+      this.github.clearReadCache();
       await this.vault.remove(scope(account));
       const remaining = accounts.filter((item) => item.id !== id);
       await this.save(remaining);
