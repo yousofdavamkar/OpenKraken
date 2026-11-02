@@ -1,6 +1,6 @@
 # Provider polling policy and cooldowns
 
-Status: accepted for GitHub/GHES transport. Automatic polling controls and state-preserving UI refresh remain unfinished.
+Status: accepted for GitHub/GHES transport. Automatic polling controls and state-preserving UI refresh are implemented in [the refresh decision](0041-scheduled-provider-refresh.md).
 
 ## Context
 
@@ -22,4 +22,4 @@ The read-only `providerPollingPolicy` IPC returns only `{minimumIntervalMs, bloc
 
 ProviderService/MSW tests cover header forms, fallback delays and recovery, host/credential isolation, reconnect refusal, preflight exhaustion, uncertain writes, response limits, long delays and bounded policy retention. Contract tests constrain selectors and timestamps. Electron acceptance exercises real main/preload/UI routing, conditional issue-list refresh, sanitized errors, blocked requests and recovery after the deadline, replacing only OS encryption, HTTP and time boundaries.
 
-Policy is session-local, not persisted across application restart. It is scheduling guidance and client behavior, not a server-side quota authority. Future UI timers must respect both user intervals and provider minimums, recheck absolute deadlines, pause on hidden/inactive views or action dialogs, cancel obsolete work, and preserve loaded pages, selection and drafts. Use bounded timer segments for distant deadlines; never pass an arbitrarily large delay directly to `setTimeout`. Live-provider acceptance remains outstanding.
+Policy is session-local, not persisted across application restart. It is scheduling guidance and client behavior, not a server-side quota authority. UI timers respect both user intervals and provider minimums, recheck absolute deadlines, pause on hidden/inactive views or action dialogs, cancel obsolete work, and preserve loaded pages, selection and drafts. Use bounded timer segments for distant deadlines; never pass an arbitrarily large delay directly to `setTimeout`. Live-provider acceptance remains outstanding.

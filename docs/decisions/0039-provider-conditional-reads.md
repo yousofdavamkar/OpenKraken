@@ -1,6 +1,6 @@
 # Provider conditional reads
 
-Status: accepted for the GitHub/GHES driver; scheduled polling remains separate work.
+Status: accepted for the GitHub/GHES driver; scheduled polling is defined in [the refresh decision](0041-scheduled-provider-refresh.md).
 
 ## Context
 
@@ -18,4 +18,4 @@ Any mutative HTTP attempt clears the cache before dispatch, including attempts t
 
 ProviderService tests use real temporary profiles, protected vault storage and MSW at the HTTP boundary. They cover revalidation and replacement, account/host/page/filter isolation, storage prohibitions, access failures, uncertain writes without retry, GraphQL reads, credential replacement, expiry and both capacity limits. No test calls cache internals.
 
-This is a transport optimization, not an offline store or a transactional write guard. Existing preview and server-side write conditions still apply. Server-directed cooldowns are implemented in [the polling-policy decision](0040-provider-polling-policy.md). Scheduled polling and preserving loaded UI state during automatic refresh remain unfinished. Live-provider and real-keychain acceptance remain separate from fixtures.
+This is a transport optimization, not an offline store or a transactional write guard. Existing preview and server-side write conditions still apply. Server-directed cooldowns are implemented in [the polling-policy decision](0040-provider-polling-policy.md). Scheduled polling and UI state preservation are implemented in [the refresh decision](0041-scheduled-provider-refresh.md). Live-provider and real-keychain acceptance remain separate from fixtures.
