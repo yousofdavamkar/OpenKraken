@@ -38,14 +38,15 @@ export const providerAccountSchema = z
     origin: providerOriginSchema,
     providerUserId: z.string().regex(/^[1-9][0-9]{0,19}$/),
     login: z.string().min(1).max(255),
-    authentication: z.literal('device').optional(),
+    authentication: z.enum(['device', 'pkce']).optional(),
     expiresAt: z.number().int().positive().optional(),
   })
   .strict()
   .refine(
     (account) =>
-      account.authentication !== 'device' ||
-      (account.provider === 'github' && account.origin === 'https://github.com'),
+      (account.authentication !== 'device' ||
+        (account.provider === 'github' && account.origin === 'https://github.com')) &&
+      (account.authentication !== 'pkce' || account.provider === 'gitlab'),
   );
 export const providerAccountsSchema = z
   .object({
@@ -93,6 +94,31 @@ export const deviceChallengeSchema = z
   .strict();
 export type DeviceStart = z.infer<typeof deviceStartSchema>;
 export type DeviceChallenge = z.infer<typeof deviceChallengeSchema>;
+
+export const gitlabStartSchema = z
+  .object({
+    origin: providerOriginSchema,
+    clientId: deviceStartSchema.shape.clientId,
+    callbackPort: z.number().int().min(1024).max(65535),
+  })
+  .strict();
+export const gitlabRedirectSchema = z
+  .string()
+  .max(128)
+  .refine((value) => {
+    const match = /^http:\/\/127\.0\.0\.1:([1-9][0-9]*)\/callback$/.exec(value);
+    return !!match && gitlabStartSchema.shape.callbackPort.safeParse(Number(match[1])).success;
+  });
+export const gitlabChallengeSchema = z
+  .object({
+    id: z.string().uuid(),
+    origin: providerOriginSchema,
+    redirectUri: gitlabRedirectSchema,
+    expiresAt: z.number().int().positive(),
+  })
+  .strict();
+export type GitLabStart = z.infer<typeof gitlabStartSchema>;
+export type GitLabChallenge = z.infer<typeof gitlabChallengeSchema>;
 
 // GitHub/GHES repository components are literal path segments, never URLs.
 export const providerRepositoryNameSchema = z

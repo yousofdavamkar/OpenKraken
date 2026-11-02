@@ -45,8 +45,15 @@ import {
   type ProviderAccount,
   type ProviderConnect,
   type DeviceStart,
+  type GitLabStart,
 } from '@openkraken/ipc-contract';
 import { GitHubProvider, ProviderError, type ProviderDriver } from './github-provider.js';
+import {
+  GitLabOAuth,
+  GitLabFlow,
+  gitlabCredentialSchema,
+  type GitLabCredential,
+} from './gitlab-oauth.js';
 import { GitLabProvider } from './gitlab-provider.js';
 import { ProviderCredentialError, ProviderVault } from './provider-vault.js';
 import {
@@ -67,6 +74,7 @@ export class ProviderService {
   private queue: Promise<void> = Promise.resolve();
   private manifest: string;
   private device: GitHubDeviceFlow;
+  private gitlabFlow: GitLabFlow;
   constructor(
     private directory: string,
     private vault: ProviderVault,
@@ -74,8 +82,19 @@ export class ProviderService {
     private oauth = new GitHubOAuth(),
     private now = Date.now,
     private gitlab = new GitLabProvider(),
+    private gitlabOAuth = new GitLabOAuth(),
   ) {
     this.manifest = join(directory, 'provider-accounts.json');
+    this.gitlabFlow = new GitLabFlow(
+      (origin, credential, signal) =>
+        this.connectCredential(
+          { provider: 'gitlab', origin, token: credential.accessToken },
+          signal,
+          credential,
+        ),
+      gitlabOAuth,
+      now,
+    );
     this.device = new GitHubDeviceFlow(
       (credential, signal) =>
         this.connectCredential(
@@ -182,10 +201,23 @@ export class ProviderService {
   deviceVerificationUri(id: string) {
     return this.device.verificationUri(id);
   }
+  async gitlabStart(options: GitLabStart, signal?: AbortSignal) {
+    if (!(await this.vault.available())) throw new ProviderCredentialError('KEYCHAIN_UNAVAILABLE');
+    return this.gitlabFlow.start(options, signal);
+  }
+  gitlabPoll(id: string, signal?: AbortSignal) {
+    return this.gitlabFlow.poll(id, signal);
+  }
+  gitlabCancel(id?: string) {
+    this.gitlabFlow.cancel(id);
+  }
+  gitlabAuthorizationUri(id: string) {
+    return this.gitlabFlow.authorizationUri(id);
+  }
   private connectCredential(
     input: ProviderConnect,
     signal?: AbortSignal,
-    credential?: GitHubCredential,
+    credential?: GitHubCredential | GitLabCredential,
   ) {
     return this.run(async () => {
       const options = providerConnectSchema.parse(input);
@@ -205,7 +237,12 @@ export class ProviderService {
       const account = providerAccountSchema.parse({
         ...fields,
         id: idFor(fields),
-        ...(credential ? { authentication: 'device', expiresAt: credential.expiresAt } : {}),
+        ...(credential
+          ? {
+              authentication: options.provider === 'gitlab' ? 'pkce' : 'device',
+              expiresAt: credential.expiresAt,
+            }
+          : {}),
       });
       const existing = accounts.findIndex((item) => item.id === account.id);
       if (existing < 0 && accounts.length >= 50)
@@ -418,7 +455,7 @@ export class ProviderService {
       const { account, token } = await this.authorize(id, signal, new URL(parsed.data).origin);
       const credential = providerGitCredentialSchema.safeParse({
         url: parsed.data,
-        username: account.login,
+        username: account.authentication === 'pkce' ? 'oauth2' : account.login,
         password: token,
       });
       if (!credential.success) throw new ProviderCredentialError('CREDENTIAL_INVALID');
@@ -442,9 +479,16 @@ export class ProviderService {
     let credential = stored.credential;
     let rotated = false;
     if (credential?.expiresAt !== undefined && credential.expiresAt <= this.now() + 60000) {
-      this.github.clearReadCache();
-      credential = await this.oauth.refresh(credential, signal);
-      rotated = true;
+      this.identityDriver(account.provider).clearReadCache();
+      if ('redirectUri' in credential) {
+        credential = await this.gitlabOAuth.refresh(account.origin, credential, signal);
+        // GitLab invalidates the old refresh token immediately. Preserve the replacement
+        // before another network read so an interrupted identity check is recoverable.
+        await this.vault.write(scope(account), JSON.stringify(credential));
+      } else {
+        credential = await this.oauth.refresh(credential, signal);
+        rotated = true;
+      }
     }
     const identity = await this.identityDriver(account.provider).identity(
       account.origin,
@@ -470,10 +514,12 @@ export class ProviderService {
   private async storedCredential(account: ProviderAccount) {
     const saved = await this.vault.read(scope(account));
     if (!saved) throw new ProviderCredentialError('CREDENTIAL_INVALID');
-    let credential: GitHubCredential | undefined;
-    if (account.authentication === 'device') {
+    let credential: GitHubCredential | GitLabCredential | undefined;
+    if (account.authentication) {
       try {
-        credential = githubCredentialSchema.parse(JSON.parse(saved));
+        credential = (
+          account.authentication === 'pkce' ? gitlabCredentialSchema : githubCredentialSchema
+        ).parse(JSON.parse(saved));
       } catch {
         throw new ProviderCredentialError('CREDENTIAL_INVALID');
       }
