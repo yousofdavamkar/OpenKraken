@@ -719,7 +719,9 @@ test('saved-account fetch updates tracking refs and refuses a remote changed dur
       .getByLabel('Fetch authentication', { exact: true })
       .selectOption({ label: `fixture-user · ${origin}` });
     await dialog.getByRole('button', { name: 'Fetch origin', exact: true }).click();
-    await expect(dialog.getByRole('status')).toHaveText('Fetched origin');
+    await expect(dialog.getByRole('status').filter({ hasText: /^Fetched origin$/ })).toHaveText(
+      'Fetched origin',
+    );
     expect(fixtureGit(local, ['rev-parse', 'refs/remotes/origin/main'])).toBe(
       fixtureGit(source, ['rev-parse', 'HEAD']),
     );

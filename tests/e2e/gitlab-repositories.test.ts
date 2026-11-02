@@ -119,7 +119,9 @@ test('GitLab repository paging, subgroup search and keyboard selection feed prot
       .getByLabel('Fetch authentication', { exact: true })
       .selectOption({ label: `fixture-user · ${origin}` });
     await remotes.getByRole('button', { name: 'Fetch origin', exact: true }).click();
-    await expect(remotes.getByRole('status')).toHaveText('Fetched origin');
+    await expect(remotes.getByRole('status').filter({ hasText: /^Fetched origin$/ })).toHaveText(
+      'Fetched origin',
+    );
     expect(fixtureGit(target, ['rev-parse', 'refs/remotes/origin/main'])).toBe(
       fixtureGit(source, ['rev-parse', 'HEAD']),
     );
