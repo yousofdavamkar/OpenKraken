@@ -207,7 +207,7 @@ test('scheduled refresh honors provider intervals, keeps complete pages on failu
     const page = await app.firstWindow();
     await page.clock.install({ time: new Date('2026-11-01T00:00:00Z') });
     const advance = async (ms: number) => {
-      await app.evaluate((ms) => {
+      await app.evaluate((_electron, ms) => {
         (
           globalThis as typeof globalThis & { pollingControl: { now: number } }
         ).pollingControl.now += ms;
