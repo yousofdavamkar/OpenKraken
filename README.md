@@ -131,7 +131,7 @@ In **Manage remotes**, **Fetch authentication** lets you choose a saved account 
 
 **Delete branch or tag** in Manage remotes also offers saved-account authentication. Review resolves the push URL and exact server tip; deletion needs a separate confirmation and refuses a tip changed since review. Closing the review leaves the server ref intact.
 
-**Issues** opens a repository's open, closed or all-state issue list. Search loaded titles, authors, labels and assignees, use the keyboard to open details, and read paged comments. Pull requests are excluded from this list. Refresh and retry are available; changing repositories or closing the panel cancels reads. Issue creation, posting comments and changing issue state remain in development.
+**Issues** opens a repository's open, closed or all-state issue list. Search loaded titles, authors, labels and assignees, use the keyboard to open details, and read paged comments. Pull requests are excluded from this list. Refresh and retry are available; changing repositories or closing the panel cancels reads. **New issue**, **Write issue comment** and **Close/Reopen issue** provide a review and separate confirmation. Changed issues require a fresh review, drafts survive errors, and uncertain results can be inspected without automatic retries.
 
 **Pull requests** opens a repository picker and paged PR list. Filter by state, search loaded PRs, use the keyboard to open details, and refresh or retry results. Descriptions display as text; changing repositories or closing the panel cancels pending requests.
 

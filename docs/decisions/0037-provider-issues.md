@@ -1,6 +1,6 @@
 # Repository issue browsing
 
-The desktop Issues panel reuses the saved-account repository picker and calls GitHub/GHES directly through the existing protected provider service. It supports open, closed and all-state lists, details and paged comments. Issue creation, comment submission and issue-state changes remain separate work; this panel currently performs reads only.
+The desktop Issues panel reuses the saved-account repository picker and calls GitHub/GHES directly through the existing protected provider service. It supports open, closed and all-state lists, details and paged comments. The browsing endpoints perform reads only; [reviewed issue actions](0038-provider-issue-actions.md) add creation, comment submission and state changes.
 
 GitHub's REST issue-list endpoint includes pull requests. Entries carrying `pull_request` are excluded, while continuation is calculated from the raw response length. Consequently a page containing only PRs can be empty in the UI and still offer Load more. The panel does not claim the repository has no issues until there is no continuation. Lists request 100 entries ordered by creation date descending and stop after 100 provider pages with a display-limit notice. The provider's offset paging is not a stable snapshot; updates can shift entries between pages. Refresh clears the loaded pages, and append deduplicates by issue number, replacing metadata on repeated entries.
 
