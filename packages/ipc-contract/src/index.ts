@@ -1,3 +1,9 @@
+import {
+  providerBitbucketFilesOptionsSchema,
+  providerBitbucketFilesPageSchema,
+  providerBitbucketDiffOptionsSchema,
+  providerBitbucketDiffSchema,
+} from './providers.js';
 import { providerBitbucketPullDetailsSchema } from './providers.js';
 import { z } from 'zod';
 import {
@@ -1450,6 +1456,22 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerBitbucketPullFiles'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerBitbucketFilesOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerBitbucketPullDiff'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerBitbucketDiffOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerBitbucketPullRequest'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerPullOptionsSchema,
@@ -1834,6 +1856,15 @@ export const resultSchema = z.discriminatedUnion('kind', [
     })
     .strict(),
   z.object({ kind: z.literal('providerPullRequests'), page: providerPullPageSchema }).strict(),
+  z
+    .object({
+      kind: z.literal('providerBitbucketPullFiles'),
+      page: providerBitbucketFilesPageSchema,
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal('providerBitbucketPullDiff'), diff: providerBitbucketDiffSchema })
+    .strict(),
   z
     .object({
       kind: z.literal('providerBitbucketPullRequest'),

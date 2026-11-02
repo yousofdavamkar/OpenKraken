@@ -1,3 +1,8 @@
+import { loadBitbucketFiles, loadBitbucketDiff } from './bitbucket-files.js';
+import type {
+  ProviderBitbucketFilesOptions,
+  ProviderBitbucketDiffOptions,
+} from '@openkraken/ipc-contract';
 import { loadBitbucketPulls, loadBitbucketPull } from './bitbucket-pulls.js';
 import type { ProviderPullListOptions, ProviderPullOptions } from '@openkraken/ipc-contract';
 import { bitbucketPagination, bitbucketPageSchema, bitbucketUnique } from './bitbucket-response.js';
@@ -133,12 +138,55 @@ export class BitbucketProvider {
       input,
     );
   }
+  pullFiles(
+    origin: string,
+    token: string,
+    input: ProviderBitbucketFilesOptions,
+    signal?: AbortSignal,
+  ) {
+    return loadBitbucketFiles(
+      (endpoint, parse) => this.request(origin, token, endpoint, signal, parse),
+      (endpoint) =>
+        this.request(
+          origin,
+          token,
+          endpoint,
+          signal,
+          (value) => z.string().min(1).max(4096).parse(value),
+          'redirect',
+        ),
+      input,
+    );
+  }
+  pullDiff(
+    origin: string,
+    token: string,
+    input: ProviderBitbucketDiffOptions,
+    signal?: AbortSignal,
+  ) {
+    return loadBitbucketDiff(
+      (endpoint, parse) => this.request(origin, token, endpoint, signal, parse),
+      (endpoint) =>
+        this.request(
+          origin,
+          token,
+          endpoint,
+          signal,
+          (value) => z.string().min(1).max(4096).parse(value),
+          'redirect',
+        ),
+      (endpoint) =>
+        this.request(origin, token, endpoint, signal, (value) => z.string().parse(value), 'text'),
+      input,
+    );
+  }
   private async request<T>(
     origin: string,
     token: string,
     endpoint: string,
     signal: AbortSignal | undefined,
     parse: (data: unknown) => T,
+    mode: 'json' | 'redirect' | 'text' = 'json',
   ) {
     if (providerOriginSchema.parse(origin) !== 'https://bitbucket.org')
       throw new ProviderError('PROVIDER_ORIGIN', 'Bitbucket Cloud uses https://bitbucket.org.');
@@ -151,21 +199,33 @@ export class BitbucketProvider {
       const url = `https://api.bitbucket.org/2.0/${endpoint}`;
       const headers = new Headers({
         Authorization: `Bearer ${token}`,
-        Accept: 'application/json',
+        Accept: mode === 'text' ? 'text/plain' : 'application/json',
         'User-Agent': 'OpenKraken/0.1.0',
       });
       const key = this.cache.key(origin, token, url, headers);
-      const cached = this.cache.get(key);
+      const cached = mode !== 'redirect' ? this.cache.get(key) : undefined;
       if (cached) headers.set('If-None-Match', cached.etag);
       const response = await this.fetcher(url, {
         method: 'GET',
         headers,
         signal: combined,
         credentials: 'omit',
-        redirect: 'error',
+        redirect: mode === 'redirect' ? 'manual' : 'error',
       });
       this.policy.observe(origin, token, url, response.status, response.headers);
       if ([401, 403, 404].includes(response.status)) this.cache.clear();
+      if (mode === 'redirect') {
+        await response.body?.cancel().catch(() => {});
+        combined.throwIfAborted();
+        if (response.status !== 302) {
+          this.policy.assertAllowed(origin, token);
+          throw new ProviderError(
+            [401, 403].includes(response.status) ? 'PROVIDER_AUTH' : 'PROVIDER_RESPONSE',
+            'Bitbucket did not return a pull-request comparison redirect.',
+          );
+        }
+        return parse(response.headers.get('location'));
+      }
       const reader = response.body?.getReader();
       let body: Buffer<ArrayBuffer>;
       try {
@@ -196,7 +256,20 @@ export class BitbucketProvider {
         await reader?.cancel().catch(() => {});
       }
       combined.throwIfAborted();
-      const result = parse(JSON.parse(body.toString('utf8')));
+      if (
+        mode === 'text' &&
+        response.status === 200 &&
+        response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'text/plain'
+      )
+        throw new ProviderError(
+          'PROVIDER_RESPONSE',
+          'Bitbucket returned a non-text diff response.',
+        );
+      const result = parse(
+        mode === 'text'
+          ? new TextDecoder('utf-8', { fatal: true }).decode(body)
+          : JSON.parse(body.toString('utf8')),
+      );
       if (response.status === 200) this.cache.set(key, response.headers, body);
       return result;
     } catch (error) {

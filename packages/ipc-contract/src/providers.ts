@@ -392,6 +392,52 @@ export const providerBitbucketPullDetailsSchema = providerPullSummarySchema
   })
   .strict();
 export type ProviderBitbucketPullDetails = z.infer<typeof providerBitbucketPullDetailsSchema>;
+export const providerBitbucketRevisionSchema = z
+  .object({
+    repositoryId: providerBitbucketIdSchema,
+    sourceRepositoryId: providerBitbucketIdSchema,
+    sourceCommit: providerCommitSchema,
+    destinationCommit: providerCommitSchema,
+  })
+  .strict();
+export const providerBitbucketFilesOptionsSchema = providerPullOptionsSchema
+  .extend({
+    revision: providerBitbucketRevisionSchema,
+    page: providerRepositoryPageNumberSchema,
+  })
+  .strict();
+export const providerBitbucketFileSchema = z
+  .object({
+    path: z.string().min(1).max(4096),
+    previousPath: z.string().min(1).max(4096).nullable(),
+    status: z.enum(['added', 'removed', 'modified', 'renamed', 'copied', 'merge conflict']),
+    additions: providerCountSchema,
+    deletions: providerCountSchema,
+  })
+  .strict();
+export const providerBitbucketFilesPageSchema = z
+  .object({
+    files: z.array(providerBitbucketFileSchema).max(100),
+    nextPage: providerRepositoryPageNumberSchema.nullable(),
+    limited: z.boolean(),
+  })
+  .strict();
+export const providerBitbucketDiffOptionsSchema = providerBitbucketFilesOptionsSchema
+  .extend({
+    path: z.string().min(1).max(4096),
+  })
+  .strict();
+export const providerBitbucketDiffSchema = z
+  .object({
+    text: z.string().max(262144),
+    truncated: z.boolean(),
+  })
+  .strict();
+export type ProviderBitbucketDiffOptions = z.infer<typeof providerBitbucketDiffOptionsSchema>;
+export type ProviderBitbucketDiff = z.infer<typeof providerBitbucketDiffSchema>;
+export type ProviderBitbucketFilesOptions = z.infer<typeof providerBitbucketFilesOptionsSchema>;
+export type ProviderBitbucketFilesPage = z.infer<typeof providerBitbucketFilesPageSchema>;
+export type ProviderBitbucketFile = z.infer<typeof providerBitbucketFileSchema>;
 const providerProjectIdSchema = z.string().regex(/^[1-9][0-9]{0,19}$/);
 export const providerMergeRequestRevisionSchema = z
   .object({

@@ -283,6 +283,8 @@ else {
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
           request.method === 'providerBitbucketPullRequest' ||
+          request.method === 'providerBitbucketPullFiles' ||
+          request.method === 'providerBitbucketPullDiff' ||
           request.method === 'providerMergeRequest' ||
           request.method === 'providerMergeRequestPipelines' ||
           request.method === 'providerMergeRequestPipelineJobs' ||
@@ -503,6 +505,24 @@ else {
             return resultSchema.parse({
               kind: 'providerPullRequest',
               pullRequest: await providers.pullRequest(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerBitbucketPullFiles')
+            return resultSchema.parse({
+              kind: 'providerBitbucketPullFiles',
+              page: await providers.bitbucketPullFiles(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerBitbucketPullDiff')
+            return resultSchema.parse({
+              kind: 'providerBitbucketPullDiff',
+              diff: await providers.bitbucketPullDiff(
                 request.accountId,
                 request.options,
                 controller.signal,
@@ -826,6 +846,8 @@ else {
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
           request.method === 'providerBitbucketPullRequest' ||
+          request.method === 'providerBitbucketPullFiles' ||
+          request.method === 'providerBitbucketPullDiff' ||
           request.method === 'providerMergeRequest' ||
           request.method === 'providerMergeRequestPipelines' ||
           request.method === 'providerMergeRequestPipelineJobs' ||

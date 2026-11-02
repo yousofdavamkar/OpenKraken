@@ -1114,3 +1114,35 @@ test('GitLab issue action IPC binds explicit visibility and revision without Git
     }).success,
   ).toBe(false);
 });
+
+test('Bitbucket file and diff reads require pinned revisions and stay in the main process', () => {
+  const options = {
+    repository: { owner: 'team', name: 'project' },
+    number: 1,
+    page: 1,
+    revision: {
+      repositoryId: '{20000000-0000-4000-8000-000000000001}',
+      sourceRepositoryId: '{20000000-0000-4000-8000-000000000002}',
+      sourceCommit: '1'.repeat(40),
+      destinationCommit: '2'.repeat(40),
+    },
+  };
+  for (const method of ['providerBitbucketPullFiles', 'providerBitbucketPullDiff']) {
+    const input =
+      method === 'providerBitbucketPullDiff' ? { ...options, path: 'file.ts' } : options;
+    const request = {
+      id: '00000000-0000-4000-8000-000000000000',
+      accountId: 'a'.repeat(64),
+      method,
+      options: input,
+    };
+    expect(requestSchema.safeParse(request).success).toBe(true);
+    expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+    for (const invalid of [
+      { ...input, url: 'https://attacker.test' },
+      { ...input, page: 101 },
+      { ...input, revision: { ...options.revision, sourceCommit: '1234567' } },
+    ])
+      expect(requestSchema.safeParse({ ...request, options: invalid }).success).toBe(false);
+  }
+});

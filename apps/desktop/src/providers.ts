@@ -1,4 +1,12 @@
 import {
+  providerBitbucketDiffOptionsSchema,
+  type ProviderBitbucketDiffOptions,
+} from '@openkraken/ipc-contract';
+import {
+  providerBitbucketFilesOptionsSchema,
+  type ProviderBitbucketFilesOptions,
+} from '@openkraken/ipc-contract';
+import {
   providerBitbucketRepositoriesOptionsSchema,
   type ProviderBitbucketRepositoriesOptions,
 } from '@openkraken/ipc-contract';
@@ -427,6 +435,24 @@ export class ProviderService {
         options,
         signal,
       );
+    });
+  }
+  bitbucketPullDiff(id: string, input: ProviderBitbucketDiffOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerBitbucketDiffOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'bitbucket')
+        throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
+      return this.bitbucket.pullDiff(account.origin, token, options, signal);
+    });
+  }
+  bitbucketPullFiles(id: string, input: ProviderBitbucketFilesOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerBitbucketFilesOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'bitbucket')
+        throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
+      return this.bitbucket.pullFiles(account.origin, token, options, signal);
     });
   }
   bitbucketPullRequest(id: string, input: ProviderPullOptions, signal?: AbortSignal) {
