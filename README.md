@@ -129,4 +129,6 @@ In **Manage remotes**, **Fetch authentication** lets you choose a saved account 
 
 **Pull authentication** offers saved accounts with a separate review of the branch, upstream, HTTPS fetch URL and integration policy. Changes to the reviewed branch, index or remote settings require another review. The existing fast-forward-only, merge/rebase and Undo behavior remains available.
 
-PR workflows, repository creation/forking, other providers and saved-account authentication for remote deletion remain in development. A real OAuth application registration and live sign-in still require environment-specific verification. Existing Git credential helpers and SSH agents remain available for manual clone/fetch/push. See [M6 progress](docs/verification/m6-progress.md).
+**Delete branch or tag** in Manage remotes also offers saved-account authentication. Review resolves the push URL and exact server tip; deletion needs a separate confirmation and refuses a tip changed since review. Closing the review leaves the server ref intact.
+
+PR workflows, repository creation/forking and other providers remain in development. A real OAuth application registration and live sign-in still require environment-specific verification. Existing Git credential helpers and SSH agents remain available for manual clone/fetch/push. See [M6 progress](docs/verification/m6-progress.md).
