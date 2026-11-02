@@ -144,6 +144,7 @@ export async function loadMergeRequest(
     return providerMergeRequestDetailsSchema.parse({
       ...summary(data, projectId, origin, options.repository),
       provider: 'gitlab',
+      id: String(data.id),
       body: data.description ?? '',
       source: {
         projectId: data.source_project_id === null ? null : String(data.source_project_id),

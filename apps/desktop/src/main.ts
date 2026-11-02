@@ -280,6 +280,7 @@ else {
           request.method === 'providerPullRequest' ||
           request.method === 'providerMergeRequest' ||
           request.method === 'providerMergeRequestFiles' ||
+          request.method === 'providerMergeRequestDiscussions' ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerPollingPolicy' ||
@@ -486,6 +487,15 @@ else {
                 controller.signal,
               ),
             });
+          if (request.method === 'providerMergeRequestDiscussions')
+            return resultSchema.parse({
+              kind: 'providerMergeRequestDiscussions',
+              page: await providers.mergeRequestDiscussions(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerRepositories')
             return resultSchema.parse({
               kind: 'providerRepositories',
@@ -623,6 +633,7 @@ else {
           request.method === 'providerPullRequest' ||
           request.method === 'providerMergeRequest' ||
           request.method === 'providerMergeRequestFiles' ||
+          request.method === 'providerMergeRequestDiscussions' ||
           request.method === 'providerRepositories' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerPollingPolicy' ||

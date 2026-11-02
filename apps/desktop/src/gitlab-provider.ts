@@ -10,9 +10,11 @@ import {
 } from '@openkraken/ipc-contract';
 import { ProviderError } from './provider-error.js';
 import { ProviderPollingPolicy } from './provider-polling-policy.js';
+import { loadMergeRequestDiscussions } from './gitlab-discussions.js';
 import { loadMergeRequestFiles } from './gitlab-files.js';
 import { loadMergeRequest, loadMergeRequests } from './gitlab-merges.js';
 import type {
+  ProviderMergeRequestDiscussionsOptions,
   ProviderMergeRequestFilesOptions,
   ProviderPullListOptions,
   ProviderPullOptions,
@@ -135,6 +137,18 @@ export class GitLabProvider {
       input,
     );
   }
+  mergeRequestDiscussions(
+    origin: string,
+    token: string,
+    input: ProviderMergeRequestDiscussionsOptions,
+    signal?: AbortSignal,
+  ) {
+    return loadMergeRequestDiscussions(
+      (endpoint, perform) => this.request(origin, token, signal, perform, endpoint),
+      providerOriginSchema.parse(origin),
+      input,
+    );
+  }
   private async request<T>(
     origin: string,
     token: string,
@@ -157,10 +171,18 @@ export class GitLabProvider {
           (_, options) => Promise.resolve(options),
           async (endpoint, options) => {
             // Each public call owns one page. SDK pagination/retries cannot add hidden requests.
-            if (dispatched || endpoint !== expectedEndpoint || options?.method !== 'GET')
+            const target =
+              typeof options?.prefixUrl === 'string'
+                ? `${options.prefixUrl.replace(/\/$/, '')}/${endpoint}`
+                : '';
+            if (
+              dispatched ||
+              target !== `${host}/api/v4/${expectedEndpoint}` ||
+              options?.method !== 'GET'
+            )
               throw new Error('endpoint');
             dispatched = true;
-            const url = new URL(`${host}/api/v4/${endpoint}`);
+            const url = new URL(target);
             url.search = typeof options.searchParams === 'string' ? options.searchParams : '';
             const requestHeaders = new Headers(options.headers as Record<string, string>);
             requestHeaders.set('User-Agent', 'OpenKraken/0.1.0');

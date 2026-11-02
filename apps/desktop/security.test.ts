@@ -768,3 +768,24 @@ test('GitLab file reads require all three diff revisions and bounded manual page
     }).success,
   ).toBe(false);
 });
+
+test('GitLab discussions use bounded selectors and never enter the Git service', () => {
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    method: 'providerMergeRequestDiscussions',
+    accountId: 'a'.repeat(64),
+    options: { repository: { owner: 'group/subgroup', name: 'project' }, number: 7, page: 1 },
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  for (const page of [0, 11, 1.5])
+    expect(
+      requestSchema.safeParse({ ...request, options: { ...request.options, page } }).success,
+    ).toBe(false);
+  expect(
+    requestSchema.safeParse({
+      ...request,
+      options: { ...request.options, endpoint: 'https://attacker.test' },
+    }).success,
+  ).toBe(false);
+});

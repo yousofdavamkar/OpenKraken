@@ -313,6 +313,7 @@ export const providerMergeRequestRevisionSchema = z
 export const providerMergeRequestDetailsSchema = providerPullSummarySchema
   .extend({
     provider: z.literal('gitlab'),
+    id: providerProjectIdSchema,
     body: z.string().max(262144),
     source: z
       .object({
@@ -369,6 +370,105 @@ export type ProviderMergeRequestFilesOptions = z.infer<
   typeof providerMergeRequestFilesOptionsSchema
 >;
 export type ProviderMergeRequestFile = z.infer<typeof providerMergeRequestFileSchema>;
+export const providerMergeRequestDiscussionsOptionsSchema = providerPullOptionsSchema
+  .extend({
+    page: z.number().int().min(1).max(10),
+  })
+  .strict();
+const discussionLineSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable();
+const discussionRangeEndSchema = z
+  .object({
+    side: z.enum(['old', 'new']),
+    oldLine: discussionLineSchema,
+    newLine: discussionLineSchema,
+    lineCode: z.string().min(1).max(256).nullable(),
+  })
+  .strict()
+  .refine((end) => (end.side === 'old' ? end.oldLine : end.newLine) !== null);
+const discussionPositionBaseSchema = z.object({
+  revision: providerMergeRequestRevisionSchema,
+  oldPath: z.string().min(1).max(4096),
+  newPath: z.string().min(1).max(4096),
+});
+export const providerMergeRequestPositionSchema = z.discriminatedUnion('kind', [
+  discussionPositionBaseSchema
+    .extend({
+      kind: z.literal('text'),
+      oldLine: discussionLineSchema,
+      newLine: discussionLineSchema,
+      range: z
+        .object({ start: discussionRangeEndSchema, end: discussionRangeEndSchema })
+        .strict()
+        .refine(
+          ({ start, end }) =>
+            start.side !== end.side ||
+            (start.side === 'old'
+              ? end.oldLine! >= start.oldLine!
+              : end.newLine! >= start.newLine!),
+        )
+        .nullable(),
+    })
+    .strict(),
+  discussionPositionBaseSchema.extend({ kind: z.literal('file') }).strict(),
+  discussionPositionBaseSchema
+    .extend({
+      kind: z.literal('image'),
+      width: providerCountSchema.nullable(),
+      height: providerCountSchema.nullable(),
+      x: z.number().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
+      y: z.number().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
+    })
+    .strict(),
+]);
+export const providerMergeRequestNoteSchema = z
+  .object({
+    id: providerPullNumberSchema,
+    type: z.enum(['DiffNote', 'DiscussionNote']).nullable(),
+    body: z.string().max(262144),
+    author: z.string().min(1).max(255).nullable(),
+    createdAt: providerDateSchema,
+    updatedAt: providerDateSchema,
+    system: z.boolean(),
+    resolvable: z.boolean(),
+    resolved: z.boolean().nullable(),
+    resolvedBy: z.string().min(1).max(255).nullable(),
+    resolvedAt: providerDateSchema.nullable(),
+    position: providerMergeRequestPositionSchema.nullable(),
+  })
+  .strict();
+export const providerMergeRequestDiscussionSchema = z
+  .object({
+    id: z.string().regex(/^[0-9a-f]{40}$/),
+    individual: z.boolean(),
+    notes: z.array(providerMergeRequestNoteSchema).min(1).max(1000),
+  })
+  .strict()
+  .refine(
+    (discussion) =>
+      (!discussion.individual || discussion.notes.length === 1) &&
+      new Set(discussion.notes.map((note) => note.id)).size === discussion.notes.length,
+  );
+export const providerMergeRequestDiscussionsPageSchema = z
+  .object({
+    discussions: z.array(providerMergeRequestDiscussionSchema).max(100),
+    nextPage: z.number().int().min(1).max(10).nullable(),
+    limited: z.boolean(),
+  })
+  .strict()
+  .refine((page) => {
+    const notes = page.discussions.flatMap((discussion) => discussion.notes);
+    return (
+      notes.length <= 1000 &&
+      new Set(page.discussions.map((discussion) => discussion.id)).size ===
+        page.discussions.length &&
+      new Set(notes.map((note) => note.id)).size === notes.length
+    );
+  });
+export type ProviderMergeRequestDiscussionsOptions = z.infer<
+  typeof providerMergeRequestDiscussionsOptionsSchema
+>;
+export type ProviderMergeRequestDiscussion = z.infer<typeof providerMergeRequestDiscussionSchema>;
+export type ProviderMergeRequestPosition = z.infer<typeof providerMergeRequestPositionSchema>;
 export const providerPullRevisionSchema = z
   .object({ head: providerCommitSchema, base: providerCommitSchema })
   .strict();

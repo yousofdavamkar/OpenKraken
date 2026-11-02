@@ -40,3 +40,39 @@ export function gitlabFileFixture(path = 'src/new.ts') {
     diff: '@@ -1 +1 @@\n-old\n+<script>new</script>\n',
   };
 }
+
+export function gitlabDiscussionFixture(id = 1) {
+  return {
+    id: id.toString(16).padStart(40, '0'),
+    individual_note: false,
+    notes: [
+      {
+        id: id * 10,
+        type: 'DiffNote',
+        body: 'Literal <script>discussion</script>',
+        author: { username: 'reviewer' },
+        created_at: '2026-10-01T12:00:00Z',
+        updated_at: '2026-10-02T12:00:00Z',
+        system: false,
+        noteable_id: 1007,
+        noteable_type: 'MergeRequest',
+        project_id: 77,
+        noteable_iid: null,
+        resolvable: true,
+        resolved: false,
+        resolved_by: null,
+        resolved_at: null,
+        position: {
+          position_type: 'text',
+          base_sha: '2'.repeat(40),
+          head_sha: '1'.repeat(40),
+          start_sha: '3'.repeat(40),
+          old_path: 'old.ts',
+          new_path: 'new.ts',
+          old_line: null,
+          new_line: 12,
+        },
+      },
+    ],
+  };
+}

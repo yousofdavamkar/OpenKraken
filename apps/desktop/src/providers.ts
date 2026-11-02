@@ -3,6 +3,8 @@ import { mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import {
+  providerMergeRequestDiscussionsOptionsSchema,
+  type ProviderMergeRequestDiscussionsOptions,
   providerMergeRequestFilesOptionsSchema,
   type ProviderMergeRequestFilesOptions,
   providerPullChecksOptionsSchema,
@@ -377,6 +379,22 @@ export class ProviderService {
           'Choose a GitLab account to read merge requests.',
         );
       return this.gitlab.mergeRequestFiles(account.origin, token, options, signal);
+    });
+  }
+  mergeRequestDiscussions(
+    id: string,
+    input: ProviderMergeRequestDiscussionsOptions,
+    signal?: AbortSignal,
+  ) {
+    return this.run(async () => {
+      const options = providerMergeRequestDiscussionsOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'gitlab')
+        throw new ProviderError(
+          'PROVIDER_UNSUPPORTED',
+          'Choose a GitLab account to read merge requests.',
+        );
+      return this.gitlab.mergeRequestDiscussions(account.origin, token, options, signal);
     });
   }
   issues(id: string, input: ProviderIssueListOptions, signal?: AbortSignal) {
