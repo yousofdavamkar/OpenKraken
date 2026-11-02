@@ -89,7 +89,7 @@ M1 is implemented: Canvas graph, append-only paging, search, keyboard/selection 
 
 An uncached shallow repository can still exceed the 500 ms first-paint target. The profile cache accelerates subsequent opens without modifying repositories. Refresh reloads the initial 2,000-commit window. macOS/Windows execution remains to be verified on their runners.
 
-Watchers, staging, commits, credentials and an undo journal outside repositories belong to subsequent milestones. Diff viewing remains M5.
+Working-tree operations, watchers, a profile-based undo journal, branching, remotes and credentials are implemented through M3. Full commit/file diff viewing remains M5; M2 includes the staging diff.
 
 Public references: [Git status](https://git-scm.com/docs/git-status), [for-each-ref](https://git-scm.com/docs/git-for-each-ref), [rev-list](https://git-scm.com/docs/git-rev-list), [Electron security](https://www.electronjs.org/docs/latest/tutorial/security), [utilityProcess](https://www.electronjs.org/docs/latest/api/utility-process).
 
@@ -98,3 +98,13 @@ Public references: [Git status](https://git-scm.com/docs/git-status), [for-each-
 Use **Stage** or **Unstage** for an entire file, or **View** to select individual hunks and lines. Commit drafts remain available after a hook or signing failure. **Amend last commit** loads the existing message; signing uses your Git configuration or the explicit selection in the form. Native hooks and configured signing agents run normally.
 
 **Discard** first shows the affected file and backup size. Tracked files return to their staged version; untracked files move to recoverable application trash. **Undo** and **Redo** refuse to overwrite edits or index/HEAD changes made after the recorded action. Backups live in the application profile, not the repository. See the M2 report for limits and recovery details.
+
+## Branches and remotes
+
+Create, switch, rename and delete branches, configure upstreams, and create or delete local tags. Reference actions use guarded Undo. Stashes support selected paths, untracked files, staged-only creation, apply/pop, message editing and reviewed drop. Workspace Undo after stash creation retains the stash copy.
+
+Use **Manage remotes** for URLs, fetch, remote removal or reviewed server branch/tag deletion. Push first reviews the destination tip; replacing history requires an explicit force-with-lease selection. Server deletions also use an exact lease and have no Undo. **Pull** saves a per-repository fast-forward-only, merge or rebase preference. Commit or stash tracked edits before pulling; native conflicts remain available to resolve or abort with Git while M4's controls are developed.
+
+**Clone** supports shallow history, a selected branch/tag, sparse directories and on-demand blobs. Git credential helpers and SSH agents remain supported. Native authentication prompts use a private local socket; changed SSH host keys stop the connection and show a dedicated diagnostic. TLS verification stays enabled. Automatic fetch is opt-in, avoids foreground work and dialogs, and backs off failed attempts up to one hour.
+
+See the [M3 completion report](docs/verification/m3-completion.md) and [transport acceptance report](docs/verification/m3-gitea.md). To run its disposable Linux Gitea container fixture after building, use `OPENKRAKEN_GITEA_TEST=1 xvfb-run -a pnpm exec playwright test tests/e2e/gitea.test.ts`; Docker is the default engine, with `OPENKRAKEN_CONTAINER_ENGINE` available for Podman.
