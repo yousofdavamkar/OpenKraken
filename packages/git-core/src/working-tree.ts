@@ -28,6 +28,8 @@ import {
   startOperationSchema,
   type StartOperation,
   type ResetSelection,
+  type ResolveConflict,
+  resolveConflictSchema,
   resetSelectionSchema,
   type StashPushOptions,
   type ReferenceOptions,
@@ -38,6 +40,7 @@ import {
 } from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { StashStore } from './stash.js';
+import { Conflicts } from './conflicts.js';
 import { inspectOperation } from './operation-state.js';
 import { GitProgressLines, redactGitMessage } from './progress.js';
 import { RepositoryQueue } from './queue.js';
@@ -408,6 +411,107 @@ export class WorkingTree {
       conflicts,
       token: hash(metadata.fingerprint + JSON.stringify(fingerprint) + JSON.stringify(images)),
     };
+  }
+  private async conflictContext(pathBytes: string, signal?: AbortSignal, indexFile?: string) {
+    const metadata = await inspectOperation(this.repo.gitDir);
+    const revision = hash(this.revision(await this.fingerprint(indexFile)) + metadata.fingerprint);
+    return new Conflicts((args, options) => this.run(args, options), this.backups).inspect(
+      pathBytes,
+      revision,
+      metadata.details.kind,
+      signal,
+      indexFile,
+    );
+  }
+  async conflictPreview(pathBytes: string, signal?: AbortSignal) {
+    return (await this.conflictContext(pathBytes, signal)).preview;
+  }
+  async resolveConflict(input: ResolveConflict, signal?: AbortSignal) {
+    const options = resolveConflictSchema.parse(input);
+    const reviewed = await this.conflictContext(options.pathBytes, signal);
+    if (reviewed.preview.token !== options.token)
+      throw new GitError('STALE_CONFLICT', 'The conflict changed. Reopen it before resolving.');
+    return this.transaction(
+      'Resolve conflict',
+      async (indexFile, before) => {
+        const current = await this.conflictContext(options.pathBytes, signal, indexFile);
+        if (
+          current.preview.token !== options.token ||
+          !sameImages(before.files, current.image ? [current.image] : undefined)
+        )
+          throw new GitError('STALE_CONFLICT', 'The conflict changed. Reopen it before resolving.');
+        const stdin = Buffer.concat([Buffer.from(options.pathBytes, 'base64'), Buffer.from([0])]);
+        if (options.choice !== 'output') {
+          const chosen = options.choice === 'delete' ? undefined : current.preview[options.choice];
+          if (!chosen || chosen.mode === '160000') {
+            if (!chosen && current.image) await this.backups.trash(current.image, signal);
+            const clear = Buffer.concat([
+              Buffer.from(
+                `0 ${'0'.repeat((current.preview.ours ?? current.preview.theirs ?? current.preview.base)!.oid.length)}\t`,
+              ),
+              stdin,
+            ]);
+            const selected = chosen
+              ? Buffer.concat([Buffer.from(`${chosen.mode} ${chosen.oid} 0\t`), stdin])
+              : Buffer.alloc(0);
+            await this.run(['update-index', '-z', '--index-info'], {
+              indexFile,
+              signal,
+              readOnly: false,
+              stdin: Buffer.concat([clear, selected]),
+            });
+            return;
+          }
+          if (current.preview.working.kind === 'submodule')
+            throw new GitError(
+              'CONFLICT_TYPE_UNSUPPORTED',
+              'Resolve file/submodule type changes with Git. Submodule working files were left unchanged.',
+            );
+          if (chosen.bytes > 64 * 1024 * 1024)
+            throw new GitError('UNDO_LIMIT', 'This conflict side exceeds the 64 MiB backup limit.');
+          await this.run(
+            [
+              'checkout-index',
+              `--stage=${options.choice === 'ours' ? '2' : '3'}`,
+              '--force',
+              '-z',
+              '--stdin',
+            ],
+            { indexFile, signal, readOnly: false, stdin },
+          );
+        } else {
+          if (!current.preview.editable)
+            throw new GitError(
+              'CONFLICT_NOT_EDITABLE',
+              'This conflict cannot be saved as UTF-8 text. Choose a side or use an external tool.',
+            );
+          const bytes = Buffer.from(options.text, 'utf8');
+          if (
+            bytes.length > 2 * 1024 * 1024 ||
+            bytes.includes(0) ||
+            bytes.toString('utf8') !== options.text
+          )
+            throw new GitError(
+              'CONFLICT_OUTPUT_LIMIT',
+              'Conflict output must be UTF-8 text without NUL, at most 2 MiB.',
+            );
+          await this.backups.write(
+            options.pathBytes,
+            bytes,
+            current.image?.mode ?? (current.preview.ours?.mode === '100755' ? 0o755 : 0o644),
+            signal,
+          );
+        }
+        await this.run(['add', '--pathspec-from-file=-', '--pathspec-file-nul'], {
+          indexFile,
+          signal,
+          readOnly: false,
+          stdin,
+        });
+      },
+      signal,
+      reviewed.image ? [options.pathBytes] : undefined,
+    );
   }
   private async resetContext(input: ResetSelection, signal?: AbortSignal, indexFile?: string) {
     const selection = resetSelectionSchema.parse(input);

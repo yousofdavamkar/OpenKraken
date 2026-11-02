@@ -218,6 +218,59 @@ const pathBytesSchema = z
   .min(1)
   .max(65536)
   .regex(/^[A-Za-z0-9+/]+={0,2}$/);
+export const conflictVersionSchema = z
+  .object({
+    oid: oidSchema,
+    mode: z.enum(['100644', '100755', '120000', '160000']),
+    bytes: z.number().int().nonnegative(),
+    text: z
+      .string()
+      .max(2 * 1024 * 1024)
+      .optional(),
+    binary: z.boolean(),
+  })
+  .strict();
+export const conflictPreviewSchema = z
+  .object({
+    path: z.string(),
+    pathBytes: pathBytesSchema,
+    token: z.string().regex(/^[0-9a-f]{64}$/),
+    base: conflictVersionSchema.optional(),
+    ours: conflictVersionSchema.optional(),
+    theirs: conflictVersionSchema.optional(),
+    working: z
+      .object({
+        text: z
+          .string()
+          .max(2 * 1024 * 1024)
+          .optional(),
+        bytes: z.number().int().nonnegative(),
+        kind: z.enum(['file', 'symlink', 'missing', 'submodule']),
+      })
+      .strict(),
+    editable: z.boolean(),
+    operation: operationStateSchema.shape.kind,
+  })
+  .strict();
+export type ConflictPreview = z.infer<typeof conflictPreviewSchema>;
+export const resolveConflictSchema = z.discriminatedUnion('choice', [
+  z
+    .object({
+      pathBytes: pathBytesSchema,
+      token: z.string().regex(/^[0-9a-f]{64}$/),
+      choice: z.literal('output'),
+      text: z.string().max(2 * 1024 * 1024),
+    })
+    .strict(),
+  z
+    .object({
+      pathBytes: pathBytesSchema,
+      token: z.string().regex(/^[0-9a-f]{64}$/),
+      choice: z.enum(['ours', 'theirs', 'delete']),
+    })
+    .strict(),
+]);
+export type ResolveConflict = z.infer<typeof resolveConflictSchema>;
 export const diffSideSchema = z.enum(['worktree', 'index']);
 export const patchOptionsSchema = z
   .object({

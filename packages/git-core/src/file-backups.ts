@@ -154,6 +154,55 @@ export class FileBackups {
       if (persist) await rm(temporary, { force: true });
     }
   }
+  async read(pathBytes: string, limit: number, signal?: AbortSignal) {
+    const image = await this.one(pathBytes, false, signal);
+    if (image.kind === 'symlink') return { image, bytes: Buffer.from(image.target!, 'base64') };
+    if (image.kind !== 'file' || image.bytes! > limit) return { image };
+    const file = await open(
+      await this.path(pathBytes),
+      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+    );
+    try {
+      const buffer = Buffer.alloc(image.bytes! + 1);
+      let length = 0;
+      while (length < buffer.length) {
+        if (signal?.aborted) throw new GitError('CANCELLED', 'Operation cancelled');
+        const { bytesRead } = await file.read(buffer, length, buffer.length - length, null);
+        if (!bytesRead) break;
+        length += bytesRead;
+      }
+      const bytes = buffer.subarray(0, length);
+      if (
+        length !== image.bytes ||
+        createHash('sha256').update(bytes).digest('hex') !== image.digest
+      )
+        throw new GitError('FILE_CHANGED', 'The file changed while reading its preview');
+      await this.assertCurrent([image], 'FILE_CHANGED');
+      return { image, bytes };
+    } finally {
+      await file.close();
+    }
+  }
+  async write(pathBytes: string, bytes: Buffer, mode: number, signal?: AbortSignal) {
+    if (bytes.length > MAX_FILE)
+      throw new GitError('UNDO_LIMIT', 'The file exceeds the 64 MiB backup limit');
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    await mkdir(join(this.directory, 'files'), { recursive: true, mode: 0o700 });
+    const temporary = join(this.directory, 'files', `${randomUUID()}.tmp`);
+    try {
+      await writeFile(temporary, bytes, { flag: 'wx', mode: 0o600 });
+      const file = await open(temporary, 'r');
+      try {
+        await file.sync();
+      } finally {
+        await file.close();
+      }
+      await rename(temporary, this.blob(digest));
+      await this.restore([{ pathBytes, kind: 'file', bytes: bytes.length, digest, mode }], signal);
+    } finally {
+      await rm(temporary, { force: true });
+    }
+  }
   async capture(paths: string[], persist = false, signal?: AbortSignal) {
     const images: FileImage[] = [];
     let bytes = 0;

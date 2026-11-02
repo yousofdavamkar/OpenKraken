@@ -16,6 +16,7 @@ import type {
   OperationAction,
   StartOperation,
   ResetSelection,
+  ResolveConflict,
   StashPushOptions,
   StashActionOptions,
   GraphView,
@@ -537,6 +538,22 @@ export class RepositoryService {
   ) {
     const { repo, manager } = this.remoteManager(id, onProgress, authentication);
     return this.queue(repo.commonDir).run(true, () => manager.push(options, signal), signal);
+  }
+  conflictPreview(id: string, pathBytes: string, signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(
+      false,
+      () => work.conflictPreview(pathBytes, signal),
+      signal,
+    );
+  }
+  resolveConflict(id: string, options: ResolveConflict, signal?: AbortSignal) {
+    const work = this.working(id);
+    return this.queue(work.repo.commonDir).run(
+      true,
+      () => work.resolveConflict(options, signal),
+      signal,
+    );
   }
   mergePrediction(id: string, head: string, target: string, signal?: AbortSignal) {
     const repo = this.repositories.get(id);
