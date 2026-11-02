@@ -70,9 +70,11 @@ try {
       if (!frame.endsWith('\n')) return;
       try {
         const request = JSON.parse(frame);
-        if (request.token !== token || request.prompt !== 'Packaged helper test')
-          throw new Error('Invalid helper request');
-        socket.end(JSON.stringify({ ok: true, answer: 'packaged-helper-ok' }) + '\n');
+        if (request.token !== token) throw new Error('Invalid helper request');
+        if (request.prompt === 'Packaged helper test')
+          socket.end(JSON.stringify({ ok: true, answer: 'packaged-helper-ok' }) + '\n');
+        else if (request.path === 'Packaged editor test') socket.end('{"ok":true}\n');
+        else throw new Error('Invalid helper request');
       } catch {
         socket.destroy();
       }
@@ -102,13 +104,22 @@ try {
     });
     if (reply.stdout !== 'packaged-helper-ok\n' || reply.stderr)
       throw new Error('Packaged native helper failed');
+    const editor = await promisify(execFile)(helper, ['--editor', 'Packaged editor test'], {
+      timeout: 5000,
+      env: {
+        ...process.env,
+        OPENKRAKEN_EDITOR_SOCKET: socketPath,
+        OPENKRAKEN_EDITOR_TOKEN: token,
+      },
+    });
+    if (editor.stdout || editor.stderr) throw new Error('Packaged native editor helper failed');
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
   await mkdir('test-results', { recursive: true });
   await page.screenshot({ path: 'test-results/packaged-shell.png' });
   console.log(
-    'Packaged ASAR app starts with hardened fuses; renderer isolation and native askpass helper passed.',
+    'Packaged ASAR app starts with hardened fuses; renderer isolation and native askpass/editor helpers passed.',
   );
 } finally {
   await browser?.close();
