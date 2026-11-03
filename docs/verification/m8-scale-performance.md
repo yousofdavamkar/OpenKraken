@@ -32,6 +32,24 @@ The final increment passed **792 native/unit tests in 99 files** with Git LFS en
 
 Logs: `/tmp/openkraken-m8-scale-{unit,git238,final-lint,e2e}.log` and `/tmp/openkraken-m8-status-{bare-red,fingerprint-verified,fingerprint-build,fingerprint-build-verified}.log`. Package/installer artifacts, the complete desktop suite, Windows/macOS/ARM64 runtime checks and remote CI were not rerun. The synthetic passes do not close the outstanding release or other milestone scope.
 
+## Watcher-baseline follow-up
+
+After reusing snapshot refs for the initial watcher baseline ([ADR 0104](../decisions/0104-snapshot-reference-watcher-baseline.md)), the three-run graph cohort measured **492.3 / 436.4 / 700.1 ms** first paint. The first two passed; the third **failed the unchanged 500 ms gate**. Its snapshot, worker and paint phases were all longer than the other two runs. All nine pages and all scroll checks passed. The cause of the 700.1 ms result is **unexplained**; the earlier all-passing checkpoint is not a substitute for this failing sample.
+
+A predetermined follow-up alternated three pairs of old/new utility bundles while retaining identical main/preload/renderer/helper files, fresh profiles and the same fixture. The baseline utility was compiled from commit `d99d2cc`; the candidate includes the watcher change committed as `82dbde8`. Each build ran once per pair, baseline then candidate, with no builds or other suites during measurements. First paint was:
+
+| Pair | Baseline | Candidate |
+| ---- | -------: | --------: |
+| 1    | 455.7 ms |  451.1 ms |
+| 2    | 463.2 ms |  444.8 ms |
+| 3    | 472.1 ms |  491.6 ms |
+
+All six paired runs passed their existing first-paint, paging, scrolling and mounted-row gates. These comparisons do not show a consistent regression, establish a synthetic-fixture speedup, or explain away the 700.1 ms failure. No sample was replaced or threshold changed. The candidate utility bundle was restored and its bytes compared after the experiment. Bundle SHA-256 values and execution order/exit codes are retained under `m8-watcher-pair-manifest` in the raw JSON.
+
+All three watcher-warm status runs passed: **30 clean/dirty responses at 202.3–263.9 ms**, with external edit to visible staging controls at **904.1–916.1 ms**. The fixture was restored and checked clean after each run. Normal watcher fingerprints continue to read native refs; this change only reuses the initial snapshot's refs.
+
+Records are `m8-watcher-seed-scale`, `m8-watcher-seed-status` and `m8-watcher-pair-{1,2,3}-{baseline,candidate}`. Corresponding artifacts are under `test-results/`; logs are `/tmp/openkraken-m8-watcher-seed-{scale,status}.log` and `/tmp/openkraken-m8-watcher-pair-{1,2,3}-{baseline,candidate}.log`. OS caches were not cleared. The initial graph cohort exited 1; all status and paired commands exited 0. These are local Linux x64 development-build measurements, not cold-cache, packaged, cross-platform or release acceptance. M8 remains incomplete.
+
 ## Reproduce
 
 Generate a new, nonexisting directory. The generator refuses existing destinations and does not modify a real repository:

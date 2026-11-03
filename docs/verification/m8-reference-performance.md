@@ -99,6 +99,22 @@ Array.from({ length: 49999 }, (_, index) => {
 
 Keep the original `master` ref, pack refs and write the fixture's own commit graph as before. It borrows source objects but makes no reference changes to the source. The fixture manifest verifies **1,505,199 commits**, **50,000 refs** and the expected HEAD. Use `--repeat-each=3` for each final benchmark cohort.
 
+## Initial watcher reference baseline
+
+A temporary boundary trace on the distinct-target fixture measured **1,209.5 ms** first paint. Its phases included **125 ms** establishing the watcher baseline, **424 ms** reading the snapshot, **153 ms** transferring the utility result to main, **62 ms** validating it, and **53 ms** decoding JSON in the renderer. These wall-clock boundary timings are diagnostic, instrumented samples rather than acceptance results. The complete trace and benchmark are retained as `m8-startup-phase-traces` and `m8-startup-phases`.
+
+A [Node V8 serializer](https://nodejs.org/api/v8.html#serialization-api) probe preserved main's response validation but encoded the utility snapshot as bytes. It measured **1,201.3 ms** first paint; encoding/transfer took **75 ms** and main decoding **77 ms**, leaving essentially the same combined transfer cost. This did not establish an improvement. The probe was removed, and its record is retained as `m8-binary-probe`. Logs are `/tmp/openkraken-m8-{startup-phases,binary-probe}.log`. No binary transport or temporary timing instrumentation remains in the implementation.
+
+The retained change reuses the initial snapshot's complete ordered refs for the watcher's first reference fingerprint. All other baseline reads finish before snapshot capture; later checks still enumerate native refs and close the subscription race. Failed initial snapshots discard their watcher before retry. The regression initially observed two native ref enumerations and now observes one. See [ADR 0104](../decisions/0104-snapshot-reference-watcher-baseline.md).
+
+Three uninstrumented distinct-target runs measured **1,088.6 / 1,085.7 / 1,112.8 ms** first paint, compared with the preceding **1,142.1–1,208.3 ms** cohort. Service response time was **847.7–867.9 ms**, including **455.4–457.8 ms** snapshot reads. All nine pages passed at **191.6–258.6 ms**; scroll p95 was **16.7–16.8 ms**.
+
+Three shared-target runs were more variable: **918.2 / 1,117.0 / 1,224.5 ms**, compared with the prior **1,004.5–1,063.7 ms** cohort. Their snapshot times varied from **283.2 to 436.2 ms**. These samples do **not** establish an overall startup improvement for the shared-target fixture or explain its variation. All nine pages passed at **203.6–284.9 ms**; scroll p95 was **16.7–16.8 ms**. **All six final first-paint checks still failed the unchanged 500 ms gate.**
+
+Both cohorts used fresh profiles, uncleared OS caches and sequential runs without concurrent builds/tests. Raw records and artifacts are `m8-watcher-seed` and `m8-watcher-seed-shared`; logs are `/tmp/openkraken-m8-watcher-seed-{benchmark,shared}.log`. No failing or variable sample was discarded. These measurements do not establish cold-cache, packaged or cross-platform acceptance.
+
+Verification passed **799 native/unit tests** (14 existing platform/tool-dependent skips), **13 watcher tests on native Git 2.38.0**, **41 selected Electron tests** with six unchanged graph goldens, typechecking/build and full ESLint/Prettier. Native tests compare complete seeded/fresh fingerprints, tracking states, tags/stashes, checkout/bare/linked repositories and handoff/closure cases. Desktop coverage includes repair/retry after an initial missing-object failure and subsequent native changes. Evidence is `/tmp/openkraken-m8-watcher-seed-{red-final,green,coverage,build,unit,git238,types-final,lint,e2e}.log`. The duplicate-read regression initially failed; test setup/type-target errors were corrected and retained in the earlier logs. Other native-platform/package and full-suite acceptance was not run.
+
 ## Reproduce the isolated fixture
 
 Start with a local full-history bare Linux clone containing only `refs/heads/master` at the revision above. Run this from the repository root after setting `LINUX_SOURCE` to that clone's absolute path. The original must remain available because the fixture borrows its objects. All reference writes and commit-graph generation below target the new temporary clone.
