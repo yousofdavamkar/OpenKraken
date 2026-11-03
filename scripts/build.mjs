@@ -3,6 +3,7 @@ import { copyRuntimeDependencies } from './runtime-dependencies.mjs';
 import { build as esbuild } from 'esbuild';
 import { build as vite } from 'vite';
 import { resolve } from 'node:path';
+import { cp } from 'node:fs/promises';
 await buildAskpass();
 await esbuild({
   entryPoints: {
@@ -27,3 +28,6 @@ await vite({
 });
 
 await copyRuntimeDependencies(resolve('apps/desktop/dist/node_modules'));
+await cp('apps/desktop/shell-integration', 'apps/desktop/dist/shell-integration', {
+  recursive: true,
+});

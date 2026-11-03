@@ -3,7 +3,7 @@ import { spawn, execFile } from 'node:child_process';
 import { createServer } from 'node:net';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
-import { mkdtemp, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -14,6 +14,8 @@ const executable =
     : join(directory, process.platform === 'win32' ? 'openkraken.exe' : 'openkraken');
 const profile = await mkdtemp(join(tmpdir(), 'openkraken-package-'));
 const nativePicker = process.platform === 'linux' && !!process.env.OPENKRAKEN_XDOTOOL;
+if (nativePicker)
+  await writeFile(join(profile, '.bashrc'), 'HISTFILE=/dev/null\nPS1="packaged> "\n');
 const child = spawn(
   executable,
   [
@@ -25,9 +27,7 @@ const child = spawn(
     stdio: ['ignore', 'ignore', 'pipe'],
     env: {
       ...process.env,
-      ...(process.platform === 'linux' && process.env.OPENKRAKEN_XDOTOOL
-        ? { SHELL: '/bin/sh' }
-        : {}),
+      ...(nativePicker ? { SHELL: '/bin/bash', HOME: profile } : {}),
     },
   },
 );
@@ -154,6 +154,8 @@ try {
     await page.getByRole('button', { name: 'Terminal', exact: true }).click();
     const panel = page.getByRole('region', { name: 'Terminal', exact: true });
     await expect(panel.getByRole('status')).toContainText('Running');
+    const integration = panel.getByLabel('Shell integration', { exact: true });
+    await expect(integration).toHaveText('Ready for command');
     const input = panel.getByRole('textbox', { name: 'Terminal input', exact: true });
     await input.pressSequentially('echo packaged-pty-ok');
     await input.press('Enter');
@@ -181,12 +183,17 @@ try {
     await xdo('key', '--clearmodifiers', 'ctrl+p');
     await expect(page.getByRole('dialog', { name: 'Command palette' })).toHaveCount(0);
     await expect(panel.locator('.xterm-accessibility-tree')).toContainText('16');
+    await input.pressSequentially('false');
+    await input.press('Enter');
+    await expect(integration).toHaveText('Ready for command · last exit 1');
     await page.screenshot({ path: 'test-results/packaged-terminal.png' });
     await input.pressSequentially('exit 0');
     await input.press('Enter');
     await expect(panel.getByRole('status')).toHaveText('Exited with code 0');
     await panel.getByRole('button', { name: 'Close terminal', exact: true }).click();
-    console.log('Packaged native terminal opened the repository, echoed input and exited cleanly.');
+    console.log(
+      'Packaged native terminal opened the repository, tracked Bash commands, received native keyboard input and exited cleanly.',
+    );
   }
   await page.screenshot({ path: 'test-results/packaged-shell.png' });
   console.log(

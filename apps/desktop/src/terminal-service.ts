@@ -1,4 +1,4 @@
-import { basename, isAbsolute } from 'node:path';
+import { basename, isAbsolute, join } from 'node:path';
 import { userInfo } from 'node:os';
 import { accessSync, constants, statSync } from 'node:fs';
 import { spawn, type IPty } from 'node-pty';
@@ -51,7 +51,17 @@ parent.on('message', ({ data }) => {
     try {
       accessSync(shell, process.platform === 'win32' ? constants.F_OK : constants.X_OK);
       if (!statSync(shell).isFile()) throw new Error('Invalid shell');
-      terminal = spawn(shell, [], {
+      const args =
+        process.platform !== 'win32' && basename(shell) === 'bash'
+          ? [
+              '--rcfile',
+              join(
+                __dirname.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'),
+                'shell-integration/bash.bashrc',
+              ),
+            ]
+          : [];
+      terminal = spawn(shell, args, {
         name: 'xterm-256color',
         cols: parsed.data.cols,
         rows: parsed.data.rows,

@@ -203,6 +203,8 @@ Colors accept CSS hex notation (`#RGB`, `#RGBA`, `#RRGGBB`, or `#RRGGBBAA`). Inv
 
 Open a repository and choose **Terminal** from the toolbar or command palette. The panel starts your default shell in that repository. **Hide terminal** keeps the session and scrollback; **Terminal** shows and focuses it again. Press **F6** to move keyboard focus to the terminal controls. **Close terminal** asks before ending a live shell. Changing the graph's repository does not change an existing shell's directory.
 
-The terminal follows the selected application theme and provides screen-reader output. Its scrollback stays in memory; your shell still controls its own history files. Reloading or closing the app ends the session. OSC 133 shell integration and broader platform acceptance remain in progress.
+The terminal follows the selected application theme and provides screen-reader output. Its scrollback stays in memory; your shell still controls its own history files. Reloading or closing the app ends the session.
+
+OSC 133 shell integration shows prompt readiness, a running command, and its last reported exit code. Bash 5.1+ on POSIX is configured automatically after reading your normal `.bashrc`, preserving existing prompt hooks and command status. Older Bash versions, disabled prompt expansion or read-only prompt settings keep a regular terminal without injected markers. Other shells can emit standard OSC 133 markers themselves; automatic setup for zsh, fish and PowerShell remains open. Markers are display hints and never suppress confirmation when closing a live shell. Linux Bash and packaged terminal acceptance are covered; macOS/Windows runtime acceptance remains open.
 
 On Linux, install `xdotool` and run `OPENKRAKEN_XDOTOOL=xdotool xvfb-run -a pnpm smoke:package` after packaging to test the native folder picker and packaged terminal in addition to renderer isolation and authentication/editor helpers. Linux CI runs this check.
