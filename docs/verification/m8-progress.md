@@ -1,6 +1,16 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The current checkpoint adds unsigned Linux DEB/RPM generation and installer verification after main/PTY crash acceptance, interrupted native-prompt recovery, local commit drafts and native command supervision. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+M8 remains in progress. The current checkpoint adds unsigned Linux AppImage generation and runtime acceptance after DEB/RPM packaging, main/PTY crash acceptance, interrupted native-prompt recovery, local commit drafts and native command supervision. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+
+## AppImage pipeline
+
+The AppImage target wraps the hardened Linux bundle with an independently written launcher (`d6a577a`). It pins producer/runtime downloads by SHA-256, preserves all original payload bytes and permissions, includes explicit unsigned/test metadata and the upstream runtime notice, and records the complete AppDir manifest. The launcher preserves arguments, cwd and exit status and never adds sandbox-disabling flags. See [ADR 0076](../decisions/0076-appimage-launch-and-verification.md).
+
+The final Linux x64 AppImage built successfully and passed archive/payload/fuse checks plus desktop smoke through its actual runtime in both normal FUSE and extraction modes, with explicit `APPIMAGE_BUILD_EXIT=0`, `FUSE_SMOKE_EXIT=0` and `EXTRACT_SMOKE_EXIT=0`. Both modes exercised renderer isolation, native helpers, native folder selection, repository opening, Bash command tracking, keyboard delivery and terminal exit. The launcher contract test and rejection of altered archive/native-helper hashes passed. Full ESLint/Prettier and a DEB verifier/desktop regression smoke passed (`DEB_REGRESSION_EXIT=0`). No app TypeScript or dependency versions changed; the native/unit suite and full Electron suite were not rerun for this packaging-only increment.
+
+The initial command rejected the unimplemented target. Artifact verification then caught a writable icon mode; generation now sets it to 0644. Extraction-mode UI checks initially passed but test cleanup orphaned Electron by killing only its runtime supervisor. The smoke now identifies the actual browser PID through CDP and terminates it before waiting for the runtime. Its existing two-second shutdown bound now fails if forced cleanup is required. The first stalled smoke required manual cleanup and is not independent passing evidence. Later complete runs exited normally, and a process trace confirmed the runtime waited for Electron and exited. Runtime extraction files are isolated under disposable build/test directories, because this pinned runtime left files behind during local testing.
+
+Evidence: `/tmp/openkraken-appimage-red.log`, `/tmp/openkraken-appimage-launcher-{red,green}.log`, `/tmp/openkraken-appimage-final-build.log`, `/tmp/openkraken-appimage-final-{fuse,extract,guards,lint}.log`, `/tmp/openkraken-appimage-cleanup-trace.log` and `/tmp/openkraken-appimage-deb-regression.log`. The artifact and unsigned manifest are under `release/installers/linux-x64/test/AppImage/`. CI is configured for both launch modes and negative checks; remote CI execution remains unverified. AppImage does not install host dependencies or system launcher integration. ARM64 execution, restricted user-namespace environments, broader distribution acceptance, signing and update delivery remain open.
 
 ## Linux installer pipeline
 
@@ -62,7 +72,7 @@ Evidence: `/tmp/openkraken-supervisor-{red,green,native,hook,unit,e2e,types,buil
 
 - Native supervision runtime acceptance on Windows/macOS, further crash/write scenarios beyond the Linux fetch/PTY/prompt fixtures above, native lock handling and durable write recovery. POSIX processes that intentionally detach or daemonize beyond the active command's stream lifetime are not contained.
 - Durable drafts for working-file, conflict/native editors and provider composers; commit-form drafts are implemented within the bounds above. Opt-in crash reporting, signature-verified updates, signed installers/distribution, security review and beta evidence remain open.
-- AppImage/DMG/MSI, RPM distribution install/upgrade/remove acceptance, Linux arm64 and macOS/Windows installer runtime checks, and real release metadata. DEB/RPM artifacts in this checkpoint remain unsigned local test builds.
+- DMG/MSI, RPM distribution install/upgrade/remove acceptance, broader AppImage distribution acceptance, Linux arm64 and macOS/Windows installer runtime checks, and real release metadata. DEB/RPM/AppImage artifacts in this checkpoint remain unsigned local test builds.
 - Broader real-repository and cross-platform performance/regression gates, plus the unresolved intermittent command exit-143 investigation recorded in M7 progress.
 
 Interrupted operations retain an unknown activity outcome. Process cleanup does not prove that a remote write failed, reverse completed changes or authorize an automatic retry. Linux fixtures and an unsigned local bundle do not establish production release readiness.

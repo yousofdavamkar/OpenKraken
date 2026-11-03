@@ -22,7 +22,7 @@ jobs:
           cache: pnpm
       - if: runner.os == 'Linux'
         name: Native terminal build and picker automation
-        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool git-lfs rpm libarchive-tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool git-lfs rpm libarchive-tools fuse3
       - name: Verify native Git LFS prerequisite
         run: git lfs version
       - run: pnpm install --frozen-lockfile
@@ -49,8 +49,11 @@ jobs:
       - if: runner.os == 'Linux'
         name: Build unsigned Linux test installers
         run: |
+          node scripts/check-appimage-launcher.mjs
           pnpm installer --test-metadata --target deb
           pnpm installer --test-metadata --target rpm
+          pnpm installer --test-metadata --target AppImage
+          node scripts/check-installer-guards.mjs release/installers/linux-x64/test/AppImage/manifest.json
       - if: runner.os == 'Linux'
         name: Verify extracted installer payloads and desktop behavior
         env:
@@ -58,6 +61,8 @@ jobs:
         run: |
           xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/deb/manifest.json
           xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/rpm/manifest.json
+          xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/AppImage/manifest.json
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/AppImage/manifest.json
       - if: runner.os == 'Linux'
         name: Debian install and uninstall in a disposable container
         timeout-minutes: 15

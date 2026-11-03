@@ -34,7 +34,7 @@ See the [M0 report](docs/verification/m0.md), [M1 graph report](docs/verificatio
 
 On headless Linux, use `xvfb-run -a pnpm test:e2e`. No `--no-sandbox` flag is needed or configured. E2E uses the developer Electron executable for Playwright inspection, checks actual renderer isolation/CSP, opens a deterministic repository through the native picker, and measures a <500 ms first paint for 2,000 commits. The gate includes Git service IPC and rendering, excludes human time in the picker, and verifies fewer than 100 mounted history rows. The M1 suite also gates 5,000-commit pages at <300 ms, compares six Canvas goldens, and records scrolling frame intervals on a 12,000-commit fixture. Results and screenshots are saved under `test-results/`.
 
-`pnpm package` produces a local unsigned platform bundle under `release/`, enables ASAR integrity/ASAR-only loading, disables RunAsNode/Node options/Node CLI inspection, and reads the fuse bytes back to verify them. Native Linux builds can wrap this bundle in unsigned DEB/RPM installers without changing its payload. Signing, authenticated updates, AppImage/DMG/MSI and distribution acceptance remain M8 work. macOS/Windows bundle execution is configured in CI but requires those runners to establish platform-specific evidence.
+`pnpm package` produces a local unsigned platform bundle under `release/`, enables ASAR integrity/ASAR-only loading, disables RunAsNode/Node options/Node CLI inspection, and reads the fuse bytes back to verify them. Native Linux builds can wrap this bundle in unsigned DEB/RPM/AppImage installers without changing its payload. Signing, authenticated updates, DMG/MSI and distribution acceptance remain M8 work. macOS/Windows bundle execution is configured in CI but requires those runners to establish platform-specific evidence.
 
 Linux packaging additionally requires Docker, or Podman selected with `OPENKRAKEN_CONTAINER_ENGINE=/path/to/podman`. It builds a cached Debian compiler image and rebuilds the staged terminal module against that baseline, preventing a newer build host's libc requirements from leaking into installers. The first packaging run needs network access to construct that compiler image. See [ADR 0075](docs/decisions/0075-linux-native-build-baseline.md).
 
@@ -42,11 +42,15 @@ Linux packaging additionally requires Docker, or Podman selected with `OPENKRAKE
 pnpm package
 pnpm installer --test-metadata --target deb
 pnpm installer --test-metadata --target rpm
+pnpm installer --test-metadata --target AppImage
 OPENKRAKEN_XDOTOOL=xdotool xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/deb/manifest.json
 OPENKRAKEN_XDOTOOL=xdotool xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/rpm/manifest.json
+OPENKRAKEN_XDOTOOL=xdotool xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/AppImage/manifest.json
 ```
 
 Installer generation needs native Linux x64/arm64; RPM additionally needs `rpmbuild`. Verification needs `dpkg-deb` for DEB or `rpm` and `bsdtar` for RPM (Ubuntu packages `rpm` and `libarchive-tools`). Substitute `linux-arm64` on that architecture. Always rebuild with `pnpm package` after changing app code. Test metadata uses a reserved address and `UNLICENSED`; these artifacts are not for distribution. To supply actual metadata, replace `--test-metadata` with `--metadata /absolute/path/release-metadata.json`, containing only `name`, `email`, `homepage` (HTTPS) and `license`. That still produces unsigned artifacts. The repository currently has no project license or release maintainer configured.
+
+AppImage generation downloads checksum-pinned tools on its first run. Normal launch needs a working FUSE setup (`fusermount3`); `APPIMAGE_EXTRACT_AND_RUN=1` selects extraction mode when FUSE is unavailable. Both modes preserve the Chromium sandbox and require host support for it, system Git 2.38+, CA certificates and Electron's desktop libraries. The current native build baseline is Debian 13; older distributions and arm64 runtime compatibility are not certified. AppImage does not register a system launcher. See [ADR 0076](docs/decisions/0076-appimage-launch-and-verification.md).
 
 The installer smoke verifies archive hashes, every extracted payload file/mode/link, Electron fuses and desktop launching, then runs the packaged UI/helper tests. Only verify locally built or independently authenticated artifacts: the adjacent manifest is not a signature. CI also runs `scripts/check-deb-lifecycle.sh` inside a disposable Debian container to check dependency resolution, install/reinstall/remove behavior and user-data retention. Do not run that script on your workstation. See [ADR 0074](docs/decisions/0074-linux-installer-payload-verification.md) for the verification limits.
 
