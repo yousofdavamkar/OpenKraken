@@ -1,5 +1,10 @@
 import { z } from 'zod';
 export const commandCatalog = {
+  'app.activity': {
+    label: 'Activity',
+    category: 'Settings',
+    keywords: 'history operations outcomes errors log',
+  },
   'repository.lfs': {
     label: 'Git LFS',
     category: 'Repository',

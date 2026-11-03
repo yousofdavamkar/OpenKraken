@@ -1771,3 +1771,19 @@ input:not([type='checkbox']):not([type='radio']) {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+
+.activity-dialog {
+  width: min(44rem, 90vw);
+}
+.activity-entries {
+  list-style: none;
+  padding: 0;
+}
+.activity-entries li {
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.activity-entries p {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+}

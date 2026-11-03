@@ -1,3 +1,4 @@
+import { Activity } from './activity.js';
 import { themeReady } from './theme.js';
 import { CommandButton, CommandControls, CommandProvider } from './commands.js';
 import React, { lazy, Suspense, useRef, useState } from 'react';
@@ -66,6 +67,7 @@ function App() {
         <div className="toolbar">
           <CommandControls />
           <Appearance />
+          <Activity />
           <AvatarSettings />
           <Clone />
           <ProviderAccountsControl />
