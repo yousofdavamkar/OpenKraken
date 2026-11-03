@@ -17,4 +17,4 @@ These checks run against OpenKraken's own source and output. No proprietary appl
 
 ## Remaining review scope
 
-The application has no custom URI dispatcher or OS protocol registration yet. URI traversal acceptance is therefore open, not passed by absence. Rotating diagnostic log files are also not implemented; adding them requires redaction before persistence and bounded retention. Signed updates, native platform installers and broader release security acceptance remain separate unfinished work. This checkpoint is not a complete security assessment or M8 completion.
+This checkpoint preceded the URI implementation. Subsequent work in [ADR 0080](0080-local-repository-links.md) adds the allowlisted dispatcher and Linux acceptance; native Windows/macOS dispatch and OS handler selection remain open. Rotating diagnostic log files are still not implemented; adding them requires redaction before persistence and bounded retention. Signed updates, native platform installers and broader release security acceptance remain separate unfinished work. This checkpoint is not a complete security assessment or M8 completion.

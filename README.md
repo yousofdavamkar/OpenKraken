@@ -85,6 +85,12 @@ Results and a screenshot are attached under `test-results/benchmark/`. This benc
 | `packages/test-fixtures` | Independently authored deterministic Git repositories            |
 | `docs/decisions`         | Scope, protocol, graph and verification decisions                |
 
+## Open a repository link
+
+OpenKraken accepts `openkraken://repo?path=` followed by an encoded absolute local repository path. For example, `openkraken://repo?path=%2Fhome%2Fuser%2Fproject` proposes `/home/user/project`. An incoming link shows **Review repository link**; opening requires reviewing the path and choosing **Open repository**. Cancel leaves the current repository in place. A second link cannot replace a proposal already awaiting review.
+
+Only local repository opening is supported. Relative/traversal paths, network/device paths on Windows, credential commands and extra URI fields are rejected. Linux installers advertise the handler, macOS bundles declare it, and packaged Windows launches request registration. Development runs do not register handlers; a portable AppImage needs desktop integration to receive links from a browser. Native Windows/macOS dispatch and OS handler selection remain unverified. See [ADR 0080](docs/decisions/0080-local-repository-links.md).
+
 ## Use the graph
 
 The first page contains 2,000 commits. Scroll near the bottom or choose **Load more commits** to append up to 5,000 more from the same Git stream. Refresh starts a new history generation; cancellation closes the current stream, so refresh before resuming it.
