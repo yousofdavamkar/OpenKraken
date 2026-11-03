@@ -46,3 +46,45 @@ export const lfsRequests = [
     })
     .strict(),
 ] as const;
+
+export const lfsPullPreviewSchema = z
+  .object({
+    token: z.string().uuid(),
+    remote: z.string().min(1).max(1024),
+    endpoint: z.string().url().max(32768),
+    files: lfsStateSchema.shape.files,
+    filters: z.array(z.string().max(32768)).max(2),
+  })
+  .strict();
+export type LfsPullPreview = z.infer<typeof lfsPullPreviewSchema>;
+export const lfsTransferRequests = [
+  z
+    .object({
+      id: z.string().uuid(),
+      method: z.literal('lfsPullPreview'),
+      repoId: z.string().regex(/^[0-9a-f]{64}$/),
+      remote: z
+        .string()
+        .min(1)
+        .max(1024)
+        .refine(
+          (value) =>
+            !value.startsWith('-') &&
+            !Array.from(value).some(
+              (character) =>
+                /\s/.test(character) ||
+                character.charCodeAt(0) < 32 ||
+                character.charCodeAt(0) === 127,
+            ),
+        ),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      method: z.literal('lfsPull'),
+      repoId: z.string().regex(/^[0-9a-f]{64}$/),
+      token: z.string().uuid(),
+    })
+    .strict(),
+] as const;

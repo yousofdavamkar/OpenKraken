@@ -1,4 +1,4 @@
-import { lfsRequests, lfsStateSchema } from './lfs.js';
+import { lfsRequests, lfsStateSchema, lfsTransferRequests, lfsPullPreviewSchema } from './lfs.js';
 export * from './lfs.js';
 import { commandIdSchema, commandUsageSchema, commandPreferencesSchema } from './commands.js';
 import { terminalRequests, terminalEvents } from './terminal.js';
@@ -946,6 +946,7 @@ const workingRequests = [
   ...worktreeRequests,
   ...submoduleRequests,
   ...lfsRequests,
+  ...lfsTransferRequests,
   z
     .object({
       id: requestId,
@@ -1815,6 +1816,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z
     .object({ kind: z.literal('submoduleUpdatePreview'), preview: submoduleUpdatePreviewSchema })
     .strict(),
+  z.object({ kind: z.literal('lfsPullPreview'), preview: lfsPullPreviewSchema }).strict(),
   z.object({ kind: z.literal('lfsState'), state: lfsStateSchema }).strict(),
   z.object({ kind: z.literal('submodules'), state: submoduleStateSchema }).strict(),
   z

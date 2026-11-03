@@ -78,6 +78,7 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
       accepted: authentication.answer(request.requestId, request.promptId, request.answer),
     };
   const interactive =
+    request.method === 'lfsPull' ||
     request.method === 'updateSubmodules' ||
     request.method === 'providerGit' ||
     request.method === 'clone' ||
@@ -88,26 +89,28 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
     request.method === 'pushPreview' ||
     (request.method === 'fetch' && !request.background);
   const context =
-    request.method === 'updateSubmodules'
-      ? 'Update submodules'
-      : request.method === 'providerGit'
-        ? request.operation.method === 'fetch'
-          ? `Fetch ${request.operation.name}`
-          : request.operation.method === 'pull'
-            ? 'Pull upstream'
-            : request.operation.method === 'deleteRemote' ||
-                request.operation.method === 'deleteRemotePreview'
-              ? 'Delete remote ref'
-              : 'Push repository'
-        : request.method === 'clone'
-          ? `Clone ${request.options.url}`
-          : request.method === 'fetch'
-            ? `Fetch ${request.name}`
-            : request.method === 'pull'
+    request.method === 'lfsPull'
+      ? 'Download LFS objects'
+      : request.method === 'updateSubmodules'
+        ? 'Update submodules'
+        : request.method === 'providerGit'
+          ? request.operation.method === 'fetch'
+            ? `Fetch ${request.operation.name}`
+            : request.operation.method === 'pull'
               ? 'Pull upstream'
-              : request.method === 'deleteRemote' || request.method === 'deleteRemotePreview'
+              : request.operation.method === 'deleteRemote' ||
+                  request.operation.method === 'deleteRemotePreview'
                 ? 'Delete remote ref'
-                : 'Push repository';
+                : 'Push repository'
+          : request.method === 'clone'
+            ? `Clone ${request.options.url}`
+            : request.method === 'fetch'
+              ? `Fetch ${request.name}`
+              : request.method === 'pull'
+                ? 'Pull upstream'
+                : request.method === 'deleteRemote' || request.method === 'deleteRemotePreview'
+                  ? 'Delete remote ref'
+                  : 'Push repository';
   const scope = interactive
     ? await authentication.open(
         request.id,
@@ -340,6 +343,16 @@ async function executeGit(
     return { kind: 'stashes', state: await git.stashes(request.repoId, signal) };
   if (request.method === 'worktrees')
     return { kind: 'worktrees', state: await git.worktrees(request.repoId, signal) };
+  if (request.method === 'lfsPullPreview')
+    return {
+      kind: 'lfsPullPreview',
+      preview: await git.lfsPullPreview(request.repoId, request.remote, signal),
+    };
+  if (request.method === 'lfsPull')
+    return {
+      kind: 'lfsState',
+      state: await git.lfsPull(request.repoId, request.token, signal, progress, auth),
+    };
   if (request.method === 'lfsState')
     return { kind: 'lfsState', state: await git.lfsState(request.repoId, signal) };
   if (request.method === 'submodules')
@@ -572,6 +585,7 @@ parent.on('message', (event) => {
   const controller = new AbortController();
   active.set(request.id, controller);
   const writing = [
+    'lfsPull',
     'updateSubmodules',
     'addWorktree',
     'worktreeAction',

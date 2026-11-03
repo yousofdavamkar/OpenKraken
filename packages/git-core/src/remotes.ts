@@ -62,7 +62,7 @@ export function transportError(error: GitError) {
     if (/REMOTE HOST IDENTIFICATION HAS CHANGED|Host key for .+ has changed/i.test(message))
       code = 'SSH_HOST_KEY_CHANGED';
     else if (
-      /certificate.*(?:verif|invalid|expired|untrusted|self.signed|not trusted)|SSL certificate problem/i.test(
+      /certificate.*(?:verif|invalid|expired|untrusted|self.signed|not trusted)|SSL certificate problem|tls: failed to verify certificate|x509:/i.test(
         message,
       )
     )
