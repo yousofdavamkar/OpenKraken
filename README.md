@@ -205,6 +205,8 @@ Open **Activity** from the toolbar, command palette or native Commands menu to i
 
 The local profile's `activity.json` contains fixed operation names, times and outcomes. It excludes repository identities, paths, URLs, command/error output, file contents, messages and credentials. Background reads, automatic fetches and terminal commands are not recorded. History survives renderer reload and restart; **Clear completed activity** retains running entries. Storage failures leave operations usable and show a warning. Corrupt or externally changed history is preserved for manual inspection; close the app before moving the file and restarting. This summary is not a recovery journal. See [the activity decision](docs/decisions/0070-local-activity-log.md).
 
+Native command supervision stops active Git commands and ordinary descendants if their Git service crashes. Linux fixtures verify a stalled fetch and a commit hook that ignores termination. Interrupted operations still have unknown outcomes and can leave partial changes; inspect before retrying. Detached programs, broader write recovery and macOS/Windows runtime acceptance remain outside this verification. See [native supervision](docs/decisions/0071-native-process-supervision.md).
+
 ## Terminal (M7 in progress)
 
 Open a repository and choose **Terminal** from the toolbar or command palette. The panel starts your default shell in that repository. **Hide terminal** keeps the session and scrollback; **Terminal** shows and focuses it again. Press **F6** to move keyboard focus to the terminal controls. **Close terminal** asks before ending a live shell. Changing the graph's repository does not change an existing shell's directory.

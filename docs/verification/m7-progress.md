@@ -1,6 +1,6 @@
 # M7 progress — productivity and polish
 
-M7 is in progress as of 2026-11-02 at implementation checkpoint `ddcbd27`. M6 continues to have the gaps recorded in [M6 progress](m6-progress.md); M7 and M8 are not complete. React 19.3.1 and TypeScript 7.0.2 remain pinned.
+M7 is in progress as of 2026-11-02 at implementation checkpoint `d68c18b`. M6 continues to have the gaps recorded in [M6 progress](m6-progress.md); M7 and M8 are not complete. React 19.3.1 and TypeScript 7.0.2 remain pinned.
 
 ## Implemented
 
@@ -51,7 +51,7 @@ The activity increment (`ce51518`, `ddcbd27`) and shutdown correction (`48eca71`
 
 Activity acceptance verifies restart/reload persistence, action/outcome filtering, display paging, the 500-entry bound, clearing with a running operation retained, native failure/cancellation, interrupted and uncertain service outcomes, pending-merge state, background-request exclusion, duplicate admission, fixed-data privacy, POSIX file permissions and preservation of corrupt/external/symlinked files. IPC tests reject arbitrary renderer entries, free text and oversized inventories. Logging retains the main request-capacity slot until persistence finishes. Native Git reports a conflicted merge as an error; the fixture checks that failure separately from successful staging that still leaves the merge pending.
 
-The interruption fixture exposed an existing shutdown hang even with an idle utility and no Git operation. Event probes reached `will-quit` but no final quit. A deferred-quit probe passed; the permanent minimized test failed before the fix and passed afterward. Cleanup could finish in the initial quit microtask when no service remained; scheduling final quit on the next event-loop turn fixes this reentrancy case. Test probes were removed. Abrupt utility death can still leave native descendants running, so that remains an M8 cleanup requirement; the HTTP fixture releases its transport during teardown and does not prove descendant reaping.
+The interruption fixture exposed an existing shutdown hang even with an idle utility and no Git operation. Event probes reached `will-quit` but no final quit. A deferred-quit probe passed; the permanent minimized test failed before the fix and passed afterward. Cleanup could finish in the initial quit microtask when no service remained; scheduling final quit on the next event-loop turn fixes this reentrancy case. Test probes were removed. That HTTP fixture releases its transport during teardown and does not prove descendant reaping. Subsequent native supervision and separate crash tests address the observed leak; see [M8 progress](m8-progress.md) for evidence and limits.
 
 Activity red/green and final evidence is `/tmp/openkraken-activity-{red,green,guards,guards-green,admission-red,unit,admission-build,admission-lint,final-acceptance}.log`. Shutdown evidence is `/tmp/openkraken-service-shutdown-{red,green}.log` and `/tmp/openkraken-activity-exit-{probe,deferred,green}.log`. The first interruption fixture used an invalid fetch field, and the minimized shutdown test initially queried Playwright's process wrapper after it was disposed; both fixture errors were corrected. A background read erased failed-clear feedback, and duplicate admission initially logged a second operation; both product issues reproduced before correction. No timeout or performance budget was relaxed.
 
@@ -187,7 +187,7 @@ Logs for the preceding full-suite checkpoint are `/tmp/openkraken-terminal-final
 - Onboarding, toasts, a complete accessibility pass, and i18n scaffolding. Local operation activity is implemented; it is not a durable write-recovery journal or an audit of external changes.
 - Optional git-flow and consent-gated BYO-key AI remain optional, not implemented.
 
-Cross-platform keyboard execution and packaging remain unverified on macOS/Windows. M8 release requirements (signed updates/installers, opt-in crash reporting, security review, beta evidence, and broader regression gates) remain open. Native subprocess cleanup after abrupt Git-service death also remains open. Existing Linux security/package checks do not establish release completion.
+Cross-platform keyboard execution and packaging remain unverified on macOS/Windows. M8 release requirements (signed updates/installers, opt-in crash reporting, security review, beta evidence, and broader regression gates) remain open. Native command supervision has Linux crash-fixture coverage; cross-platform runtime acceptance and broader write recovery remain open. Existing Linux security/package checks do not establish release completion.
 
 ## Decisions
 
