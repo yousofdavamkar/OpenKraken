@@ -2,6 +2,10 @@
 
 M8 remains in progress. Watcher-warm status passes locally on Linux x64; the two-million-commit graph has passing paired checks but a new unexplained 700.1 ms first-paint failure. Latest 50,000-ref samples measure 1.086–1.113 seconds first paint with distinct targets and a variable 0.918–1.225 seconds with one shared target, still above the 500 ms gate; paging and scrolling pass. Native Git 2.38.0 passes the Linux x64 compatibility checks. AppImage recovery waits for delayed descendants before restoring the predecessor, while a still-running unconfirmed application remains an open recovery case. Native Windows/macOS acceptance, production release gates and the remaining [M6](m6-progress.md)/[M7](m7-progress.md) scope are still open.
 
+## M7 prerequisite: native fish prompt markers
+
+The [M7 checkpoint](m7-progress.md#native-fish-integration-acceptance) closes a reproduced native fish marker compatibility gap (`9c349f1`). The renderer now recognizes parameterized OSC 133 A/B/C markers as display hints and retains the last exit status at prompts without a B marker. Native fish defaults and opt-out preserve user hooks/configuration. **13 terminal Electron tests**, **51 IPC/security contract tests**, build/typecheck and lint passed on Linux; CI now includes fish. This does not complete the other M6/M7 features, cross-platform terminal acceptance or the open M8 release/performance work.
+
 ## Update security and build dependency audit
 
 The [Linux security checkpoint](m8-security-review.md) records the inspected renderer/IPC, URI, helper, diagnostic and update trust boundaries, executable evidence and remaining scope. The signed-update/recovery selection passed **43 tests in seven files in 130.54 seconds**, including both real 60-second supervision limits; native helper Go vet passed. No new update-path defect was reproduced. Hung unconfirmed applications, detached descendants and incompatible profile migrations remain unresolved recovery cases.
