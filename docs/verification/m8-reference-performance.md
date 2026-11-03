@@ -74,6 +74,31 @@ Three final uninstrumented runs on the unchanged distinct-target 50,000-ref fixt
 
 Raw records are `m8-renderer-index` and `m8-badge-index-profile`. Logs: `/tmp/openkraken-m8-renderer-index-benchmark.log`, `/tmp/openkraken-m8-renderer-profile.log` and `/tmp/openkraken-m8-badge-index-profile.json`. Fresh profiles, uncleared OS caches and sequential runs without concurrent builds/tests were retained. The temporary profiler test and isolated probe script were removed. Verification passed 793 native/unit tests (14 platform/tool-dependent skips), 23 selected desktop tests with six unchanged graph goldens, typechecking/build and full lint. The desktop regression also covers Unicode/ASCII filtering, whitespace reset, accessible positions and a focused rename dialog surviving offscreen scrolling. Full native-platform/installer acceptance and other scale/status cohorts were not rerun.
 
+## Bounded badges at a shared target
+
+A second isolated bare fixture points all **50,000 refs at the same commit**, retaining the same complete Linux history and HEAD. It exposed a separate rendering problem: the visible commit row constructed every badge. The baseline measured **15,290.5 ms** first paint, including **14,420.5 ms** after state publication. Paging still passed at **233.9–249.1 ms**, and scroll p95 was **16.7 ms**.
+
+Commit rows now show at most three badge previews and a total-ref button when overflow exists. Tooltips also contain at most three full names, including when thousands of remotes are grouped into one branch badge. The button opens a searchable, virtualized modal containing every full name in the current graph view. It preserves graph selection, updates on ref refresh, survives its originating row scrolling away, and restores focus on Close/Escape. See [ADR 0103](../decisions/0103-bounded-commit-reference-previews.md).
+
+Three final runs on that shared-target fixture measured **1,004.5 / 1,019.2 / 1,063.7 ms** first paint, with **145.2–169.6 ms** after publication. All nine pages passed at **202.9–280.0 ms**, and scrolling passed at **16.7–16.8 ms p95**. This removes the large unbounded-rendering cost; **all three first-paint checks still fail the unchanged 500 ms gate**.
+
+A separate three-run regression cohort on the original distinct-target fixture measured **1,142.1 / 1,208.3 / 1,170.6 ms** first paint, overlapping the previous **1,133.4–1,235.3 ms** range. Its nine pages passed at **208.1–268.9 ms**, and scroll p95 remained **16.7–16.8 ms**. All six final runs mounted 32 history rows and seven sidebar reference controls. No overall startup improvement is claimed for the distinct-target case.
+
+Both cohorts used fresh profiles and uncleared OS caches; they ran sequentially with no concurrent builds or test suites. Raw records are `m8-shared-ref-baseline`, `m8-shared-ref-bounded` and `m8-commit-refs-distinct` in the JSON, with the new fixture manifest under `m8-shared-ref-fixture`. Logs are `/tmp/openkraken-m8-shared-ref-{baseline,bounded}.log` and `/tmp/openkraken-m8-commit-refs-distinct.log`; corresponding directories under `test-results/` retain measurements, screenshots and failure traces. All failed gates are retained. These runs do not establish cold-cache, packaged or cross-platform performance.
+
+Verification passed **793 native/unit tests** (14 existing platform/tool-dependent skips), **24 selected desktop tests** with six unchanged graph goldens, typechecking/build and full ESLint/Prettier. The two new desktop cases cover canonical names, merged remotes, annotated tags, Unicode filtering, empty results, whitespace reset, native Home/End scrolling, external deletion and focus/lifecycle behavior. Their initial unbounded-rendering regression failed before the change. Logs are `/tmp/openkraken-m8-commit-refs-{red,green,keyboard,build,types,lint,unit,e2e}.log`. The dialog screenshot was visually inspected. Other platform, package, full-suite and synthetic/status acceptance was not rerun in this increment.
+
+The shared-target repository is `.test-fixtures/refs-50000-shared-wt5fwj3d/repository.git`. To reproduce it, use the isolated-clone recipe below, replacing the `commits.slice(1).map(...)` update-ref input with:
+
+```js
+Array.from({ length: 49999 }, (_, index) => {
+  const kind = index < 5000 ? 'heads' : index < 10000 ? 'remotes/fixture' : 'tags';
+  return `create refs/${kind}/shared-${String(index).padStart(5, '0')} 46fec1c3029b552ec63b2d01af9d43a386f043ea`;
+}).join('\n') + '\n';
+```
+
+Keep the original `master` ref, pack refs and write the fixture's own commit graph as before. It borrows source objects but makes no reference changes to the source. The fixture manifest verifies **1,505,199 commits**, **50,000 refs** and the expected HEAD. Use `--repeat-each=3` for each final benchmark cohort.
+
 ## Reproduce the isolated fixture
 
 Start with a local full-history bare Linux clone containing only `refs/heads/master` at the revision above. Run this from the repository root after setting `LINUX_SOURCE` to that clone's absolute path. The original must remain available because the fixture borrows its objects. All reference writes and commit-graph generation below target the new temporary clone.
