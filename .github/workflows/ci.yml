@@ -22,7 +22,7 @@ jobs:
           cache: pnpm
       - if: runner.os == 'Linux'
         name: Native terminal build and picker automation
-        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool git-lfs
+        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool git-lfs rpm libarchive-tools
       - name: Verify native Git LFS prerequisite
         run: git lfs version
       - run: pnpm install --frozen-lockfile
@@ -46,6 +46,29 @@ jobs:
         run: xvfb-run -a pnpm smoke:package
       - if: runner.os != 'Linux'
         run: pnpm smoke:package
+      - if: runner.os == 'Linux'
+        name: Build unsigned Linux test installers
+        run: |
+          pnpm installer --test-metadata --target deb
+          pnpm installer --test-metadata --target rpm
+      - if: runner.os == 'Linux'
+        name: Verify extracted installer payloads and desktop behavior
+        env:
+          OPENKRAKEN_XDOTOOL: xdotool
+        run: |
+          xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/deb/manifest.json
+          xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/rpm/manifest.json
+      - if: runner.os == 'Linux'
+        name: Debian install and uninstall in a disposable container
+        timeout-minutes: 15
+        run: |
+          artifact=$(node -p 'require("./release/installers/linux-x64/test/deb/manifest.json").artifact.file')
+          docker run --rm \
+            --env OPENKRAKEN_DISPOSABLE_INSTALL_TEST=1 \
+            --volume "$PWD/release/installers/linux-x64/test/deb:/artifacts:ro" \
+            --volume "$PWD/scripts/check-deb-lifecycle.sh:/check.sh:ro" \
+            docker.io/library/debian@sha256:1e1a22175fbf1b32157ddaf0219e1db4e5401fab2b94ed285add64d18587cd2d \
+            bash /check.sh "/artifacts/$artifact"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
