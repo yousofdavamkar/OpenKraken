@@ -1,6 +1,20 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The current checkpoint adds Windows payload ownership/access checks as a prerequisite for MSI packaging. Native Windows execution and the MSI producer/lifecycle remain pending. The DMG pipeline also awaits native macOS acceptance. Existing Linux packaging, Fedora upgrade acceptance, AppImage restart/recovery and opt-in automatic checks remain implemented. This does not close the remaining [M6](m6-progress.md), [M7](m7-progress.md) or release scope.
+M8 remains in progress. The current checkpoint implements the native Windows MSI producer, compiled-metadata/payload verifier and installer-owned protocol registration. Native Windows execution and install/upgrade/removal acceptance remain pending. The DMG pipeline also awaits native macOS acceptance. Existing Linux packaging, Fedora upgrade acceptance, AppImage restart/recovery and opt-in automatic checks remain implemented. This does not close the remaining [M6](m6-progress.md), [M7](m7-progress.md) or release scope.
+
+## Native MSI pipeline, awaiting Windows acceptance
+
+The MSI producer/verifier (`2b2d25b`) wraps the hardened Windows x64 bundle with the pinned builder, explicit unsigned/test metadata and a stable upgrade identity. It checks compiled MSI product, architecture, per-user/no-elevation, Start menu and registry-component metadata, then extracts an administrative image and checks payload bytes, native access control, fuses and desktop behavior. It rejects custom actions, explicit registry deletion, permanent protocol components and shortcuts detached from the application component. The existing icon is supplied for MSI/shortcut resources without rewriting the hardened executable. See [ADR 0091](../decisions/0091-native-msi-and-installer-owned-protocol.md).
+
+Windows protocol registration is now installer-owned (`3b08184`). Starting an unpacked desktop no longer registers its temporary executable path. The installer owns four quoted/current-user protocol values; packaged Windows smoke compares the complete protocol subtree before startup and after shutdown. CI adds native MSI creation, artifact/helper/version rejection and extraction/desktop checks. Neither normal installation nor automatic launching is performed by these checks.
+
+Verification passed **60 focused packaging tests** with **7 native-platform cases skipped** on Linux. Six XML-hook cases executed under PowerShell 7.6.9: the valid transformation and refusal of changed scope, executable, schema, custom actions and a DTD. Metadata tests use explicit table records and cover identity, versions, privileges, command quoting, registry ownership and uninstallability. Tests first reproduced missing hook support and acceptance of permanent components, explicit registry deletion and detached shortcuts; those guards now pass. All three PowerShell scripts also passed syntax parsing. This is not evidence of native Windows COM, WiX compilation, registry access or MSI execution.
+
+Typechecking/build and full ESLint/Prettier passed. **6 targeted Electron tests** passed repository-link review/cancellation/delivery and renderer/IPC/diagnostic security. A fresh Linux x64 bundle passed packaging/fuses and desktop smoke. Its rebuilt DEB passed payload/mode/link/fuse verification, desktop smoke and archive/helper corruption guards. Those smoke runs covered default-off settings, renderer isolation, native helpers, picker, Bash/PTY keyboard delivery, and cold/resident repository-link consent. All commands returned exit code 0.
+
+The full application unit/Electron suites, graph performance gates and native package-manager lifecycle suites were not rerun. RPM/AppImage artifacts were not regenerated in this increment. No MSI was produced on this Linux host; native Windows compilation/extraction/desktop execution, ordinary install/upgrade/uninstall, user-data retention, OS URI dispatch and signing remain **unverified or unimplemented**, as do the separate macOS/release gates. This does not close M8.
+
+Evidence: `/tmp/openkraken-msi-{project-red,permanent-red,removal-red,shortcut-red,tests,powershell,build,lint,e2e}.log` and `/tmp/openkraken-msi-linux-{package,smoke,deb,deb-smoke,guards}.log`. The current DEB is under `release/installers/linux-x64/test/deb/`.
 
 ## Windows payload access prerequisite
 
