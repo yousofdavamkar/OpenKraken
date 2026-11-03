@@ -67,10 +67,11 @@ try {
   );
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   assert.equal(manifest.version, version);
-  await writeFile(
-    join(root, 'release/installer-upgrade.json'),
-    JSON.stringify({ fixture, target, version, manifestPath }, null, 2) + '\n',
-  );
+  const pointer = JSON.stringify({ fixture, target, version, manifestPath }, null, 2) + '\n';
+  // Keep the last-built pointer for local callers; CI consumes per-format
+  // pointers so building an RPM cannot replace the Debian upgrade fixture.
+  await writeFile(join(root, `release/installer-upgrade-${target}.json`), pointer);
+  await writeFile(join(root, 'release/installer-upgrade.json'), pointer);
   console.log(`Verified upgrade fixture version ${version}: ${manifestPath}`);
 } catch (error) {
   console.error(`Retained upgrade fixture: ${fixture}`);

@@ -72,7 +72,7 @@ jobs:
         run: |
           node scripts/check-installer-upgrade.mjs msi
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $upgradeManifest = node -p 'require("./release/installer-upgrade.json").manifestPath'
+          $upgradeManifest = node -p 'require("./release/installer-upgrade-msi.json").manifestPath'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/check-msi-lifecycle.mjs release/installers/win32-x64/test/msi/manifest.json "$upgradeManifest"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -82,6 +82,7 @@ jobs:
           node scripts/check-appimage-launcher.mjs
           pnpm installer --test-metadata --target deb
           pnpm installer --test-metadata --target rpm
+          node scripts/check-installer-upgrade.mjs deb
           node scripts/check-installer-upgrade.mjs rpm
           pnpm installer --test-metadata --target AppImage
           node scripts/check-installer-guards.mjs release/installers/linux-x64/test/AppImage/manifest.json
@@ -102,28 +103,34 @@ jobs:
         run: |
           xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/deb/manifest.json
           xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/rpm/manifest.json
-          upgrade_manifest=$(node -p 'require("./release/installer-upgrade.json").manifestPath')
-          xvfb-run -a pnpm smoke:installer "$upgrade_manifest"
+          for target in deb rpm; do
+            upgrade_manifest=$(node -p 'require("./release/installer-upgrade-" + process.argv[1] + ".json").manifestPath' "$target")
+            xvfb-run -a pnpm smoke:installer "$upgrade_manifest"
+          done
           xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/AppImage/manifest.json
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/AppImage/manifest.json
       - if: runner.os == 'Linux'
-        name: Debian install and uninstall in a disposable container
+        name: Debian install, version upgrade and removal in a disposable container
         timeout-minutes: 15
         run: |
           artifact=$(node -p 'require("./release/installers/linux-x64/test/deb/manifest.json").artifact.file')
+          upgrade_dir=$(node -p 'require("node:path").dirname(require("./release/installer-upgrade-deb.json").manifestPath)')
+          upgrade_artifact=$(node -p 'require(require("./release/installer-upgrade-deb.json").manifestPath).artifact.file')
+          mkdir -p test-results
           docker run --rm \
             --env OPENKRAKEN_DISPOSABLE_INSTALL_TEST=1 \
             --volume "$PWD/release/installers/linux-x64/test/deb:/artifacts:ro" \
+            --volume "$upgrade_dir:/upgrade:ro" \
             --volume "$PWD/scripts/check-deb-lifecycle.sh:/check.sh:ro" \
             docker.io/library/debian@sha256:1e1a22175fbf1b32157ddaf0219e1db4e5401fab2b94ed285add64d18587cd2d \
-            bash /check.sh "/artifacts/$artifact"
+            timeout 12m bash /check.sh "/artifacts/$artifact" "/upgrade/$upgrade_artifact" 2>&1 | tee test-results/deb-lifecycle.log
       - if: runner.os == 'Linux'
         name: Fedora RPM install, upgrade and removal in a disposable container
         timeout-minutes: 15
         run: |
           artifact=$(node -p 'require("./release/installers/linux-x64/test/rpm/manifest.json").artifact.file')
-          upgrade_dir=$(node -p 'require("node:path").dirname(require("./release/installer-upgrade.json").manifestPath)')
-          upgrade_artifact=$(node -p 'require(require("./release/installer-upgrade.json").manifestPath).artifact.file')
+          upgrade_dir=$(node -p 'require("node:path").dirname(require("./release/installer-upgrade-rpm.json").manifestPath)')
+          upgrade_artifact=$(node -p 'require(require("./release/installer-upgrade-rpm.json").manifestPath).artifact.file')
           docker run --rm \
             --env OPENKRAKEN_DISPOSABLE_INSTALL_TEST=1 \
             --volume "$PWD/release/installers/linux-x64/test/rpm:/artifacts:ro" \
