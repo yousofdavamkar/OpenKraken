@@ -1,6 +1,20 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The current checkpoint implements the native Windows MSI producer, compiled-metadata/payload verifier and installer-owned protocol registration. Native Windows execution and install/upgrade/removal acceptance remain pending. The DMG pipeline also awaits native macOS acceptance. Existing Linux packaging, Fedora upgrade acceptance, AppImage restart/recovery and opt-in automatic checks remain implemented. This does not close the remaining [M6](m6-progress.md), [M7](m7-progress.md) or release scope.
+M8 remains in progress. The current checkpoint adds guarded MSI install/repair/upgrade/removal and OS URI acceptance to the existing producer/verifier. The lifecycle gate is implemented and configured in CI, but native Windows execution remains pending. The DMG pipeline also awaits native macOS acceptance. Existing Linux packaging, Fedora upgrade acceptance, AppImage restart/recovery and opt-in automatic checks remain implemented. This does not close the remaining [M6](m6-progress.md), [M7](m7-progress.md) or release scope.
+
+## Disposable MSI lifecycle gate, native execution pending
+
+Native state checks (`01a3266`) require explicit hosted Windows x64 opt-in and refuse existing product/installation/profile/shortcut/protocol or URL-association state. Read-only Windows Installer queries bind the installed executable and advertised shortcut to the expected product/component. Assertions check the installed version, exact current-user URI registration, absent machine integration, product replacement and removal with user data retained. See [ADR 0092](../decisions/0092-disposable-msi-lifecycle-acceptance.md).
+
+The lifecycle runner (`9b61398`) installs the current test MSI, verifies the actual payload/ASAR version/DACLs/fuses, exercises installed desktop behavior and resident OS URI delivery, removes a verified helper and shortcut to test repair, installs a genuinely newer build and then uninstalls it. It keeps a profile sentinel throughout and retains logs/inventories on failure without force-cleaning installer or registry state. The smoke path uses the native default profile and registered URI command. Start menu acceptance checks advertised ownership, not a simulated menu click. OS-owned URL preferences are recorded but not erased.
+
+Verification passed **95 focused packaging tests**, with **8 native-platform cases skipped** on Linux. This includes the new state/upgrade/profile policy cases and CLI host refusal before artifact access; the native inventory case awaits Windows. Six existing XML-hook cases ran under PowerShell 7.6.9, and the MSI PowerShell files passed syntax parsing. New positive state/profile tests first failed before implementation; these explicit records and parser checks do not establish Windows runtime behavior.
+
+Full ESLint/Prettier passed. The existing Linux platform bundle passed the modified desktop smoke. The generalized upgrade builder produced a real **0.2.0 DEB** from the unchanged application build output, verified its bundled version, and passed extracted payload/mode/link/fuse and desktop smoke checks, including native helpers, folder picker, Bash/PTY keyboard delivery and repository-link consent. All final verification commands returned exit code 0. No application TypeScript changed; the full application unit/Electron suites, graph performance, native package-manager lifecycle and RPM/AppImage regeneration were not repeated in this increment.
+
+No MSI was generated or installed locally. Native COM inventory, Windows compilation/extraction/install/repair/upgrade/removal, OS URI dispatch and retained-user-data acceptance remain unverified, as do macOS execution and production signing/distribution. CI configuration is not passing native evidence.
+
+Evidence: `/tmp/openkraken-msi-lifecycle-{state-red,profile-red,tests,lint,linux-smoke,linux-upgrade,linux-upgrade-smoke}.log`. The new DEB fixture is under `release/installer-upgrade-obTNJj/`; `release/installer-upgrade.json` now points to that DEB fixture.
 
 ## Native MSI pipeline, awaiting Windows acceptance
 
