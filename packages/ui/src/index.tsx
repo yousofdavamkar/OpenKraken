@@ -18,6 +18,7 @@ import { ProviderAccountsControl } from './providers.js';
 import { Authentication } from './authentication.js';
 import { GitEditors } from './git-editor.js';
 import { Stashes } from './stashes.js';
+import { WorktreesControl } from './worktrees.js';
 import { Push } from './push.js';
 import { Reset } from './reset.js';
 import { Integration } from './integration.js';
@@ -76,6 +77,7 @@ function App() {
           <Reset />
           <Push />
           <Stashes />
+          <WorktreesControl key={snapshot?.repository.id} />
           <CommandButton
             command="repository.terminal"
             disabled={!snapshot}

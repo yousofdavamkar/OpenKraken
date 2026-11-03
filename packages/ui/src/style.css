@@ -1685,3 +1685,28 @@ input:not([type='checkbox']):not([type='radio']) {
   overflow-wrap: anywhere;
   line-height: 1.6;
 }
+.worktrees-dialog ul {
+  list-style: none;
+  padding: 0;
+}
+.worktrees-dialog fieldset {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+.worktrees-dialog label {
+  display: grid;
+  gap: 6px;
+}
+.worktrees-dialog .dialog-actions {
+  display: flex;
+  gap: 8px;
+}
+.worktrees-dialog li {
+  border-bottom: 1px solid var(--border);
+  padding: 12px 0;
+}
+.worktree-path {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

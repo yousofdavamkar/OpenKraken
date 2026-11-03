@@ -207,4 +207,10 @@ The terminal follows the selected application theme and provides screen-reader o
 
 OSC 133 shell integration shows prompt readiness, a running command, and its last reported exit code. Bash 5.1+ on POSIX is configured automatically after reading your normal `.bashrc`, preserving existing prompt hooks and command status. Older Bash versions, disabled prompt expansion or read-only prompt settings keep a regular terminal without injected markers. Other shells can emit standard OSC 133 markers themselves; automatic setup for zsh, fish and PowerShell remains open. Markers are display hints and never suppress confirmation when closing a live shell. Linux Bash and packaged terminal acceptance are covered; macOS/Windows runtime acceptance remains open.
 
+## Worktrees (M7 in progress)
+
+Choose **Worktrees** from the toolbar or command palette to see registered checkouts, their branches or detached HEADs, changed-file counts, and lock/missing-folder information. **Open worktree** switches the application to that checkout. **Refresh worktrees** rereads changes made by another Git client.
+
+Create a worktree on a new branch, an existing unused local branch, or a detached commit. Review the starting commit and choose an empty folder through the native picker. Creation leaves your current checkout unchanged; open the new worktree explicitly when ready. Errors and picker cancellation retain your choices. Lock/unlock, removal, pruning and graph WIP rows remain in progress; creation and opening are currently verified on Linux.
+
 On Linux, install `xdotool` and run `OPENKRAKEN_XDOTOOL=xdotool xvfb-run -a pnpm smoke:package` after packaging to test the native folder picker and packaged terminal in addition to renderer isolation and authentication/editor helpers. Linux CI runs this check.

@@ -1,5 +1,10 @@
 import { z } from 'zod';
 export const commandCatalog = {
+  'repository.worktrees': {
+    label: 'Worktrees',
+    category: 'Repository',
+    keywords: 'linked checkout folders branches',
+  },
   'repository.terminal': {
     label: 'Terminal',
     category: 'Repository',
