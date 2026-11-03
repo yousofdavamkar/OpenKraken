@@ -1,6 +1,6 @@
 # M7 progress — productivity and polish
 
-M7 is in progress as of 2026-11-02 at implementation checkpoint `2f38300`. M6 continues to have the gaps recorded in [M6 progress](m6-progress.md); M7 and M8 are not complete. React 19.3.1 and TypeScript 7.0.2 remain pinned.
+M7 is in progress as of 2026-11-02 at implementation checkpoint `ddcbd27`. M6 continues to have the gaps recorded in [M6 progress](m6-progress.md); M7 and M8 are not complete. React 19.3.1 and TypeScript 7.0.2 remain pinned.
 
 ## Implemented
 
@@ -43,7 +43,17 @@ M7 is in progress as of 2026-11-02 at implementation checkpoint `2f38300`. M6 co
 
 - Reviewed recursive submodule URL synchronization replaces registered local URLs from `.gitmodules` through native Git resolution. Expiring single-use reviews bind inventory, branch context and configuration. The dialog shows existing overrides, explains shared configuration and partial failure, restores focus and supports fresh review/retry. Dirty files, staged content and checked-out commits are retained without network access.
 
+- A local activity history records admitted foreground Git/provider operations and selected settings changes with fixed action names, times and outcomes. It persists up to 500 entries outside repositories, excludes payloads and credentials, marks interrupted outcomes unknown, and retains running entries when completed history is cleared. The toolbar/palette/native-menu view filters and pages entries, restores focus and reports storage failures without hiding operation results. A separate shutdown fix defers final quit after cleanup when the Git utility has already exited.
+
 ## Verification
+
+The activity increment (`ce51518`, `ddcbd27`) and shutdown correction (`48eca71`) passed **587 unit tests across 76 files** with explicit `UNIT_EXIT=0`, **34 targeted desktop tests** with explicit `E2E_EXIT=0`, typechecking/build and full ESLint/Prettier. Desktop coverage includes eight activity flows, the minimized idle-service shutdown regression, native authentication, command/menu behavior, working-tree operations, serialized IPC, terminal IPC and nine graph checks including six unchanged visual goldens. Paging measured **144.6 ms** and scrolling frame p95 **16.8 ms**. The activity screenshot was visually inspected. Packaging, live providers, the complete desktop suite and cross-platform acceptance were not rerun.
+
+Activity acceptance verifies restart/reload persistence, action/outcome filtering, display paging, the 500-entry bound, clearing with a running operation retained, native failure/cancellation, interrupted and uncertain service outcomes, pending-merge state, background-request exclusion, duplicate admission, fixed-data privacy, POSIX file permissions and preservation of corrupt/external/symlinked files. IPC tests reject arbitrary renderer entries, free text and oversized inventories. Logging retains the main request-capacity slot until persistence finishes. Native Git reports a conflicted merge as an error; the fixture checks that failure separately from successful staging that still leaves the merge pending.
+
+The interruption fixture exposed an existing shutdown hang even with an idle utility and no Git operation. Event probes reached `will-quit` but no final quit. A deferred-quit probe passed; the permanent minimized test failed before the fix and passed afterward. Cleanup could finish in the initial quit microtask when no service remained; scheduling final quit on the next event-loop turn fixes this reentrancy case. Test probes were removed. Abrupt utility death can still leave native descendants running, so that remains an M8 cleanup requirement; the HTTP fixture releases its transport during teardown and does not prove descendant reaping.
+
+Activity red/green and final evidence is `/tmp/openkraken-activity-{red,green,guards,guards-green,admission-red,unit,admission-build,admission-lint,final-acceptance}.log`. Shutdown evidence is `/tmp/openkraken-service-shutdown-{red,green}.log` and `/tmp/openkraken-activity-exit-{probe,deferred,green}.log`. The first interruption fixture used an invalid fetch field, and the minimized shutdown test initially queried Playwright's process wrapper after it was disposed; both fixture errors were corrected. A background read erased failed-clear feedback, and duplicate admission initially logged a second operation; both product issues reproduced before correction. No timeout or performance budget was relaxed.
 
 The submodule URL synchronization increment (`fff9b47`, `2f38300`) passed **586 unit tests across 76 files** with explicit `UNIT_EXIT=0`, **six targeted desktop tests** with explicit `E2E_EXIT=0` (the new sync flow, three existing submodule flows and two native-menu checks), typechecking/build with `BUILD_EXIT=0`, and full ESLint/Prettier with `LINT_EXIT=0`. The review screenshot was visually inspected. Seven native tests cover recursive URL changes with staged/dirty work retained, relative resolution and branch-selected remotes, skipped unregistered modules, redaction, stale/foreign/replayed reviews, config-lock failure/retry and redirected configuration refusal. Strict IPC rejects caller paths/URLs/options. The desktop fixture verifies cancellation/focus, stale review, write failure/retry, unchanged HEAD/index/local edits and zero HTTP requests. Packaging, performance, live providers and the complete desktop suite were not rerun; these are Linux fixtures.
 
@@ -174,10 +184,10 @@ Logs for the preceding full-suite checkpoint are `/tmp/openkraken-terminal-final
 - Broader command coverage, including dynamic branch/file domains and contextual commands. Native accelerators are implemented; this is not an Atom selector keymap interpreter. Other older preferences (for example graph view settings) still need consolidation into the main settings store.
 - Automatic shell integration for zsh, fish and PowerShell, plus terminal runtime acceptance on macOS/Windows. Standard OSC 133 consumption and automatic Bash 5.1+ integration are implemented. The initial terminal supports one session; broader terminal workflows remain future work.
 - Worktree operations, graph rows and other-checkout observation are implemented for UTF-8 paths on Linux. Non-UTF-8 worktree paths, cross-platform runtime acceptance and broader filesystem/performance coverage remain open. Submodule discovery/status/opening, reviewed recursive initialization/update and URL synchronization are implemented. Add/remove controls, automatic dialog refresh, live authenticated transport acceptance and cross-platform runtime verification remain open. Local LFS awareness, cached-lock display, explicit server-lock snapshots and reviewed HTTP(S) LFS pulls are implemented. Ordinary Pull with installed native filters and reviewed Push with an installed pre-push hook have authenticated Linux fixture coverage. Reviewed local/worktree setup is implemented with custom integrations preserved for manual resolution. Reviewed SSH/file/custom transfers, saved-account LFS upload acceptance, fresh filter authentication during other operations, live-provider acceptance and packaged/cross-platform LFS verification remain open. Lock acquisition/release is not implemented; the server snapshot reports ownership at its displayed check time.
-- Onboarding, activity log, toasts, a complete accessibility pass, and i18n scaffolding.
+- Onboarding, toasts, a complete accessibility pass, and i18n scaffolding. Local operation activity is implemented; it is not a durable write-recovery journal or an audit of external changes.
 - Optional git-flow and consent-gated BYO-key AI remain optional, not implemented.
 
-Cross-platform keyboard execution and packaging remain unverified on macOS/Windows. M8 release requirements (signed updates/installers, opt-in crash reporting, security review, beta evidence, and broader regression gates) remain open. Existing Linux security/package checks do not establish release completion.
+Cross-platform keyboard execution and packaging remain unverified on macOS/Windows. M8 release requirements (signed updates/installers, opt-in crash reporting, security review, beta evidence, and broader regression gates) remain open. Native subprocess cleanup after abrupt Git-service death also remains open. Existing Linux security/package checks do not establish release completion.
 
 ## Decisions
 
@@ -194,3 +204,5 @@ Cross-platform keyboard execution and packaging remain unverified on macOS/Windo
 - [0068 — Submodule management](../decisions/0068-submodule-management.md)
 
 - [0069 — Git LFS awareness](../decisions/0069-lfs-awareness.md)
+
+- [0070 — Local operation activity](../decisions/0070-local-activity-log.md)

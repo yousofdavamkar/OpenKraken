@@ -199,6 +199,12 @@ Choose **Custom** to edit a JSON theme. Start with a light or dark base and over
 
 Colors accept CSS hex notation (`#RGB`, `#RGBA`, `#RRGGBB`, or `#RRGGBBAA`). Invalid themes leave the current appearance active. Switching to a built-in theme keeps your saved custom theme available. Appearance shares the atomic profile settings file with keyboard shortcuts.
 
+## Activity
+
+Open **Activity** from the toolbar, command palette or native Commands menu to inspect the latest 500 recorded operations. Filter by action or outcome; **Show more activity** adds another 100 visible entries. Running, succeeded, failed, cancelled, needs-attention and unknown outcomes are distinct. Failed or cancelled operations can leave partial changes; inspect the repository or provider before retrying an unknown result.
+
+The local profile's `activity.json` contains fixed operation names, times and outcomes. It excludes repository identities, paths, URLs, command/error output, file contents, messages and credentials. Background reads, automatic fetches and terminal commands are not recorded. History survives renderer reload and restart; **Clear completed activity** retains running entries. Storage failures leave operations usable and show a warning. Corrupt or externally changed history is preserved for manual inspection; close the app before moving the file and restarting. This summary is not a recovery journal. See [the activity decision](docs/decisions/0070-local-activity-log.md).
+
 ## Terminal (M7 in progress)
 
 Open a repository and choose **Terminal** from the toolbar or command palette. The panel starts your default shell in that repository. **Hide terminal** keeps the session and scrollback; **Terminal** shows and focuses it again. Press **F6** to move keyboard focus to the terminal controls. **Close terminal** asks before ending a live shell. Changing the graph's repository does not change an existing shell's directory.
