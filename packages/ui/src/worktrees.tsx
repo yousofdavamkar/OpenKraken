@@ -4,6 +4,7 @@ import type {
   WorktreeAction,
   WorktreeAdd,
   WorktreeState,
+  WorktreePrunePreview,
 } from '@openkraken/ipc-contract';
 import { CommandButton } from './commands.js';
 import { useRepository, waitForBackground } from './store.js';
@@ -14,6 +15,9 @@ function WorktreeDialog({ repoId, close }: { repoId: string; close: () => void }
   const actionCancel = useRef<HTMLButtonElement>(null);
   const lockReason = useRef<HTMLInputElement>(null);
   const refreshButton = useRef<HTMLButtonElement>(null);
+  const pruneButton = useRef<HTMLButtonElement>(null);
+  const pruneCancel = useRef<HTMLButtonElement>(null);
+  const [pruneReview, setPruneReview] = useState<WorktreePrunePreview>();
   const [state, setState] = useState<WorktreeState>();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -31,15 +35,17 @@ function WorktreeDialog({ repoId, close }: { repoId: string; close: () => void }
   const branches = snapshot?.refs.filter((ref) => ref.kind === 'local') ?? [];
   useEffect(() => {
     if (pending) return;
-    if (review?.action === 'lock') lockReason.current?.focus();
+    if (pruneReview) pruneCancel.current?.focus();
+    else if (review?.action === 'lock') lockReason.current?.focus();
     else if (review) actionCancel.current?.focus();
     else if (actionTrigger.current) {
       if (actionTrigger.current.isConnected) actionTrigger.current.focus();
       else refreshButton.current?.focus();
     }
-  }, [review, pending]);
+  }, [review, pruneReview, pending]);
   const load = async () => {
     setReview(undefined);
+    setPruneReview(undefined);
     setNotice('');
     setPending(true);
     setError('');
@@ -80,6 +86,7 @@ function WorktreeDialog({ repoId, close }: { repoId: string; close: () => void }
   };
   const create = async () => {
     if (!state) return;
+    setPruneReview(undefined);
     setPending(true);
     setError('');
     setNotice('');
@@ -108,6 +115,61 @@ function WorktreeDialog({ repoId, close }: { repoId: string; close: () => void }
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      if (id && useRepository.getState().busy === id) useRepository.setState({ busy: undefined });
+      if (id && useRepository.getState().snapshot?.repository.id === repoId)
+        await useRepository.getState().run({ id: crypto.randomUUID(), method: 'refresh', repoId });
+      setPending(false);
+    }
+  };
+  const reviewPrune = async () => {
+    setPending(true);
+    setError('');
+    setNotice('');
+    setReview(undefined);
+    setPruneReview(undefined);
+    actionTrigger.current = pruneButton.current;
+    try {
+      const result = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'worktreePrunePreview',
+        repoId,
+      });
+      if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'worktreePrunePreview') setPruneReview(result.preview);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPending(false);
+    }
+  };
+  const prune = async () => {
+    if (!pruneReview) return;
+    setPending(true);
+    setError('');
+    setNotice('');
+    let id: string | undefined;
+    try {
+      if (useRepository.getState().syncing) await waitForBackground();
+      if (useRepository.getState().snapshot?.repository.id !== repoId) return;
+      if (useRepository.getState().busy)
+        throw new Error('Wait for the current operation to finish');
+      id = crypto.randomUUID();
+      useRepository.setState({ busy: id });
+      const result = await window.openkraken.request({
+        id,
+        method: 'pruneWorktrees',
+        repoId,
+        token: pruneReview.token,
+      });
+      if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'worktrees') {
+        setState(result.state);
+        setPruneReview(undefined);
+        setNotice('Stale worktree registrations cleaned up');
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
     } finally {
       if (id && useRepository.getState().busy === id) useRepository.setState({ busy: undefined });
       if (id && useRepository.getState().snapshot?.repository.id === repoId)
@@ -169,6 +231,7 @@ function WorktreeDialog({ repoId, close }: { repoId: string; close: () => void }
     setError('');
     setNotice('');
     setReason('');
+    setPruneReview(undefined);
     actionTrigger.current = trigger;
     setReview({ entry, action, revision: state.revision });
   };
@@ -325,6 +388,49 @@ function WorktreeDialog({ repoId, close }: { repoId: string; close: () => void }
           </div>
         </fieldset>
       )}
+      {pruneReview && (
+        <fieldset disabled={pending} aria-label="Review worktree cleanup">
+          <legend>Clean up stale registrations?</legend>
+          <p>
+            Cleanup removes the stale registration records shown below, including their index and
+            reflog recovery data. Branches and checkout folders remain. Reconnect or lock offline
+            checkouts you still need before cleanup.
+          </p>
+          {pruneReview.candidates.length > 0 && (
+            <ul aria-label="Checkouts in cleanup">
+              {pruneReview.candidates.map((entry) => (
+                <li key={entry.id}>
+                  <p className="worktree-path">{entry.path}</p>
+                  <p>
+                    {entry.branch ?? 'Detached HEAD'} · <code>{entry.head}</code>
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+          {pruneReview.report ? (
+            <pre className="worktree-prune-report" aria-label="Git cleanup report">
+              {pruneReview.report}
+            </pre>
+          ) : (
+            <p>No stale worktree registrations need cleanup.</p>
+          )}
+          <div className="dialog-actions">
+            <button disabled={!pruneReview.report} onClick={() => void prune()}>
+              Confirm cleanup
+            </button>
+            <button
+              ref={pruneCancel}
+              onClick={() => {
+                setPruneReview(undefined);
+                setError('');
+              }}
+            >
+              Cancel cleanup
+            </button>
+          </div>
+        </fieldset>
+      )}
       <ul aria-label="Registered worktrees">
         {state?.entries.map((entry) => (
           <li key={entry.id}>
@@ -382,6 +488,9 @@ function WorktreeDialog({ repoId, close }: { repoId: string; close: () => void }
         ))}
       </ul>
       <div className="dialog-actions">
+        <button ref={pruneButton} disabled={pending || !state} onClick={() => void reviewPrune()}>
+          Review cleanup
+        </button>
         <button ref={refreshButton} disabled={pending} onClick={() => void load()}>
           Refresh worktrees
         </button>

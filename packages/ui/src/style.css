@@ -1689,6 +1689,12 @@ input:not([type='checkbox']):not([type='radio']) {
   list-style: none;
   padding: 0;
 }
+.worktree-prune-report {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .worktrees-dialog fieldset {
   display: grid;
   gap: 12px;

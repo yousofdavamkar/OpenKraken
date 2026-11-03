@@ -4,6 +4,68 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createFixture, fixtureGit } from '../../packages/test-fixtures/src/index.js';
 
+test('worktree cleanup is reviewed, cancellable and revalidated while locked registrations survive', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-worktrees-prune-ui-'));
+  const path = createFixture(join(root, 'source'), 'linear', 3);
+  const missing = join(root, 'missing-checkout');
+  const locked = join(root, 'locked-checkout');
+  fixtureGit(path, ['worktree', 'add', '-b', 'missing-topic', missing]);
+  fixtureGit(path, ['worktree', 'add', '-b', 'locked-topic', locked]);
+  fixtureGit(path, ['worktree', 'lock', '--reason', 'offline drive', locked]);
+  rmSync(missing, { recursive: true });
+  rmSync(locked, { recursive: true });
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('button', { name: 'Worktrees', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Worktrees', exact: true });
+    const reviewButton = dialog.getByRole('button', { name: 'Review cleanup', exact: true });
+    const entries = dialog.getByRole('list', { name: 'Registered worktrees', exact: true });
+    await reviewButton.click({ timeout: 1500 });
+    const review = dialog.getByRole('group', { name: 'Review worktree cleanup', exact: true });
+    await expect(review.getByLabel('Git cleanup report', { exact: true })).toContainText(
+      'missing-checkout',
+    );
+    await expect(review.getByRole('button', { name: 'Cancel cleanup', exact: true })).toBeFocused();
+    await review.getByRole('button', { name: 'Cancel cleanup', exact: true }).click();
+    await expect(reviewButton).toBeFocused();
+    await expect(entries.getByRole('listitem')).toHaveCount(3);
+    await reviewButton.click();
+    await expect(review).toBeVisible();
+    fixtureGit(path, ['worktree', 'lock', missing]);
+    await review.getByRole('button', { name: 'Confirm cleanup', exact: true }).click();
+    await expect(dialog.getByRole('alert')).toContainText('cleanup changed');
+    await expect(entries.getByRole('listitem')).toHaveCount(3);
+    fixtureGit(path, ['worktree', 'unlock', missing]);
+    await reviewButton.click();
+    await expect(review.getByLabel('Git cleanup report', { exact: true })).toContainText(
+      'missing-checkout',
+    );
+    await page.screenshot({ path: 'test-results/worktree-prune-review.png' });
+    await review.getByRole('button', { name: 'Confirm cleanup', exact: true }).click();
+    await expect(entries.getByRole('listitem')).toHaveCount(2);
+    await expect(entries.getByRole('listitem').filter({ hasText: locked })).toContainText('Locked');
+    await expect(reviewButton).toBeFocused();
+    expect(fixtureGit(path, ['branch', '--list', 'missing-topic'])).toContain('missing-topic');
+    await reviewButton.click();
+    await expect(review).toContainText('No stale worktree registrations need cleanup');
+    await expect(
+      review.getByRole('button', { name: 'Confirm cleanup', exact: true }),
+    ).toBeDisabled();
+    await review.getByRole('button', { name: 'Cancel cleanup', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('worktree lock and removal reviews preserve files and retain the branch after clean removal', async () => {
   const root = mkdtempSync(join(tmpdir(), 'openkraken-worktrees-manage-ui-'));
   const path = createFixture(join(root, 'source'), 'linear', 3);
