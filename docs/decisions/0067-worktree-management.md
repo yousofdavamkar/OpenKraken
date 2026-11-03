@@ -22,15 +22,23 @@ The fingerprint covers sorted metadata names and filesystem identities, sizes an
 
 `rev-parse` metadata normally uses the existing single-query fast path. When newline-containing paths make its multi-value output ambiguous, the repository service reads the two path values separately. Worktree inventory itself always uses the NUL-delimited format.
 
+History snapshots include worktree inventory and status when the shared registration directory exists. Ordinary repositories without linked registrations avoid the extra Git inventory/status commands. Other worktree HEADs seed the retained history traversal and its cache key, including detached commits with no branch or tag. Branch worktrees obey hidden/solo ref filters; detached worktrees are independent roots unless a solo ref is selected. Search uses those same roots.
+
+The renderer inserts a stable synthetic row for every other non-bare checkout immediately before its HEAD on the page containing that commit. Several checkouts at one HEAD get distinct rows and edges; unborn checkouts get parentless rows on the first page. The current checkout retains its existing dirty/conflict row. Synthetic rows show clean/changed/unavailable and lock state, branch/detached state and path; details include the full HEAD and metadata reasons. Status appears first so long paths do not obscure it. Rows participate in loaded search, selection and keyboard ancestry navigation, and use the existing Canvas synthetic-node style. They are not commit objects and do not enable commit-file actions. Pagination preserves earlier rows and lanes.
+
+These worktree summaries refresh with repository snapshots. Other-checkout file watching is still pending, so edits made in another checkout may require explicit Refresh; no live status guarantee is claimed. Snapshot inventory retains the same UTF-8 and size limits as the worktree dialog. As elsewhere, external Git changes during the reads are not an atomic multi-checkout snapshot.
+
 ## Scope and verification
 
-This checkpoint implements list, create, open, lock/unlock, guarded removal and reviewed pruning. Graph worktree WIP rows and other-checkout watch integration remain follow-up work; the worktree feature is not complete yet.
+This checkpoint implements list, create, open, lock/unlock, guarded removal, reviewed pruning and graph worktree rows. Other-checkout watch integration remains follow-up work; the worktree feature is not complete yet.
 
 Native Git tests cover locked, missing, dirty, detached, bare and unborn checkouts, Unicode/newline paths, unknown/stale selections, empty-directory requirements, branch-tip revalidation, refusal of duplicate branch checkouts, detached creation and cancellation. IPC tests reject renderer-supplied paths, force options, malformed IDs and arbitrary revision expressions. Electron acceptance covers stale selection recovery, checkout switching, all three creation modes, native picker cancellation and failed creation with retained form choices. The current platform is Linux; these results do not establish macOS/Windows runtime acceptance.
 
 Management tests cover lock reasons, stale reviews, offline locking/unlocking, refusal to remove main/current/locked checkouts, untracked and ignored content preservation, hidden tracked edits behind both index flags, unreferenced detached commits and clean-index pending merges. Successful removal retains the branch and its tip. Electron acceptance cancels a review, creates a file after review and verifies refusal with the bytes intact, then removes a clean checkout and verifies branch retention. It also checks review focus, focus restoration after cancellation and success, and native menu regression behavior.
 
 Prune tests cover preservation of live and locked checkouts and branches, consumed/foreign/expired tokens, metadata changes, restored folders, detached HEAD retention revalidation and malformed registrations absent from the normal list. Electron acceptance cancels cleanup, rejects a review after an external lock, successfully prunes the stale registration after a new review, and verifies retained branches, locked registrations, focus and empty-cleanup behavior. IPC tests reject caller-supplied paths, cutoff timestamps, reports, candidate lists and force flags.
+
+Native history tests verify detached worktree-only commits in traversal and search, checkout status in snapshots, and hidden/solo traversal behavior. Electron acceptance verifies two worktree rows at one detached HEAD, clean/dirty labels, details and ancestry navigation, creation followed by a visible graph row, and a worktree whose HEAD arrives on a later page without moving prior lanes. Existing graph visual goldens and paging performance checks remain regression gates.
 
 ## Reference
 
