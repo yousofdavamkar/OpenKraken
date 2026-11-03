@@ -64,6 +64,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm smoke:installer release/installers/win32-x64/test/msi/manifest.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - if: runner.os == 'Windows'
+        name: MSI install, repair, version upgrade, URI dispatch and removal
+        timeout-minutes: 20
+        env:
+          OPENKRAKEN_DISPOSABLE_INSTALL_TEST: '1'
+        run: |
+          node scripts/check-installer-upgrade.mjs msi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $upgradeManifest = node -p 'require("./release/installer-upgrade.json").manifestPath'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-msi-lifecycle.mjs release/installers/win32-x64/test/msi/manifest.json "$upgradeManifest"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - if: runner.os == 'Linux'
         name: Build unsigned Linux test installers
         run: |

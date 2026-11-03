@@ -3,10 +3,23 @@ import { spawn, execFile } from 'node:child_process';
 import { createServer } from 'node:net';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
-import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile, readFile, lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
+import { assertMsiSmokeProfile } from './msi-lifecycle.mjs';
+
+const msiProfile = process.env.OPENKRAKEN_MSI_PROFILE;
+if (msiProfile !== undefined) {
+  assertMsiSmokeProfile(msiProfile, process.env.OPENKRAKEN_MSI_RETENTION_TOKEN);
+  const marker = join(msiProfile, 'msi-lifecycle-retention.txt');
+  if (
+    !(await lstat(msiProfile)).isDirectory() ||
+    !(await lstat(marker)).isFile() ||
+    (await readFile(marker, 'utf8')) !== process.env.OPENKRAKEN_MSI_RETENTION_TOKEN
+  )
+    throw new Error('MSI smoke requires the lifecycle fixture profile and retention marker');
+}
 async function windowsProtocolSnapshot() {
   const { stdout } = await promisify(execFile)(
     join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'),
@@ -32,9 +45,9 @@ const executable =
   (process.platform === 'darwin'
     ? join(directory, 'OpenKraken.app/Contents/MacOS/openkraken')
     : join(directory, process.platform === 'win32' ? 'openkraken.exe' : 'openkraken'));
-const profile = await mkdtemp(join(tmpdir(), 'openkraken-package-'));
+const profile = msiProfile ?? (await mkdtemp(join(tmpdir(), 'openkraken-package-')));
 const linkedRepository = join(profile, 'linked repository');
-await mkdir(linkedRepository);
+await mkdir(linkedRepository, { recursive: !!msiProfile });
 await promisify(execFile)('git', ['init', '--initial-branch=main', linkedRepository]);
 const repositoryUri = `openkraken://repo?path=${encodeURIComponent(linkedRepository)}`;
 const nativePicker = process.platform === 'linux' && !!process.env.OPENKRAKEN_XDOTOOL;
@@ -44,7 +57,7 @@ const child = spawn(
   executable,
   [
     '--remote-debugging-port=0',
-    `--user-data-dir=${profile}`,
+    ...(msiProfile ? [] : [`--user-data-dir=${profile}`]),
     repositoryUri,
     ...(nativePicker ? ['--ozone-platform=x11', '--xdg-portal-required-version=999'] : []),
   ],
@@ -100,7 +113,9 @@ try {
   await session.detach();
   const context = browser.contexts()[0];
   const page = context.pages()[0] ?? (await context.waitForEvent('page'));
-  await page.getByRole('heading', { name: 'A clear view of your history.' }).waitFor();
+  if (msiProfile)
+    await page.getByRole('button', { name: 'Review repository link', exact: true }).waitFor();
+  else await page.getByRole('heading', { name: 'A clear view of your history.' }).waitFor();
   const isolated = await page.evaluate(
     () =>
       typeof Reflect.get(window, 'require') === 'undefined' &&
@@ -138,7 +153,10 @@ try {
   const linkDialog = page.getByRole('dialog', { name: 'Open linked repository', exact: true });
   await expect(linkDialog).toContainText(linkedRepository);
   await linkDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'A clear view of your history.' })).toBeVisible();
+  if (!msiProfile)
+    await expect(
+      page.getByRole('heading', { name: 'A clear view of your history.' }),
+    ).toBeVisible();
   const socketPath =
     process.platform === 'win32'
       ? `\\\\.\\pipe\\openkraken-${randomUUID()}`
@@ -269,10 +287,32 @@ try {
     );
   }
   if (process.platform !== 'darwin') {
-    await promisify(execFile)(executable, [`--user-data-dir=${profile}`, repositoryUri], {
-      timeout: 15000,
-      env: { ...process.env, TMPDIR: profile },
-    });
+    if (msiProfile) {
+      await expect(
+        page.getByRole('button', { name: 'Review repository link', exact: true }),
+      ).toHaveCount(0);
+      // Dispatch through Windows' registered URI handler, preserving the real
+      // default profile and single-instance lock. Never rewrite registration.
+      await promisify(execFile)(
+        join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          "$ErrorActionPreference = 'Stop'; Start-Process -FilePath $env:OPENKRAKEN_REPOSITORY_URI",
+        ],
+        {
+          timeout: 15000,
+          windowsHide: true,
+          env: { ...process.env, OPENKRAKEN_REPOSITORY_URI: repositoryUri },
+        },
+      );
+    } else {
+      await promisify(execFile)(executable, [`--user-data-dir=${profile}`, repositoryUri], {
+        timeout: 15000,
+        env: { ...process.env, TMPDIR: profile },
+      });
+    }
     await page.getByRole('button', { name: 'Review repository link', exact: true }).click();
     await expect(linkDialog).toContainText(linkedRepository);
     await linkDialog.getByRole('button', { name: 'Open repository', exact: true }).click();
@@ -280,7 +320,9 @@ try {
       page.getByRole('heading', { name: 'linked repository', exact: true }),
     ).toBeVisible();
     console.log(
-      'Packaged cold-start and second-process repository links require explicit consent.',
+      msiProfile
+        ? 'Installed repository link delivered through the Windows URI handler and explicitly accepted.'
+        : 'Packaged cold-start and second-process repository links require explicit consent.',
     );
   }
   await page.screenshot({ path: 'test-results/packaged-shell.png' });
@@ -317,7 +359,8 @@ try {
   });
   // The AppImage runtime can exit just before its FUSE mount is released.
   // Bound filesystem teardown retries separately from the unchanged app exit deadline.
-  await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  if (!msiProfile)
+    await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 }
 if (process.platform === 'win32') {
   expect(await windowsProtocolSnapshot()).toEqual(protocolBefore);
