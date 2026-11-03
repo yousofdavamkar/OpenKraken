@@ -3,8 +3,9 @@ import { StringDecoder } from 'node:string_decoder';
 export function redactGitMessage(value: string) {
   return value.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s<>"']+/gi, (url) =>
     url
-      .replace(/^(https?:\/\/)[^/@]*@/i, '$1[credentials]@')
-      .replace(/^([a-z][a-z0-9+.-]*:\/\/[^/:@]*):[^/@]*@/i, '$1:[redacted]@')
+      // Userinfo ends at the last @ in the authority, including unescaped @ in passwords.
+      .replace(/^(https?:\/\/)[^/?#]*@/i, '$1[credentials]@')
+      .replace(/^([a-z][a-z0-9+.-]*:\/\/[^/:@?#]*):[^/?#]*@/i, '$1:[redacted]@')
       .replace(/[?#].*$/, '[redacted parameters]'),
   );
 }

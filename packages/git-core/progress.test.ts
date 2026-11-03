@@ -30,3 +30,21 @@ test('stderr can stream progress while preserving bounded diagnostic output', as
   expect(Buffer.concat(chunks).toString()).toBe('Counting objects: 5\rDone\n');
   expect(result.stderr).toBe('Counting objects: 5\rDone\n');
 });
+
+test('progress masks complete URL userinfo when passwords contain literal at signs', () => {
+  const lines: string[] = [];
+  const progress = new GitProgressLines((text) => lines.push(text));
+  const bytes = Buffer.from(
+    'https://user:secret@password@example.test/repo?private\n' +
+      'ssh://git:secret@password@example.test/repo#private\n' +
+      'https://example.test/path@revision\nssh://git@example.test/repo\n',
+  );
+  for (const byte of bytes) progress.push(Buffer.from([byte]));
+  progress.end();
+  expect(lines).toEqual([
+    'https://[credentials]@example.test/repo[redacted parameters]',
+    'ssh://git:[redacted]@example.test/repo[redacted parameters]',
+    'https://example.test/path@revision',
+    'ssh://git@example.test/repo',
+  ]);
+});
