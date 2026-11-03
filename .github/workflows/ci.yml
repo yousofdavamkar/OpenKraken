@@ -59,7 +59,9 @@ jobs:
         name: Signed AppImage download, cancelled restart and new-version acknowledgement
         run: |
           xvfb-run -a node scripts/verify-update-restart.mjs
+          xvfb-run -a node scripts/verify-update-restart.mjs --failed-startup
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --failed-startup
       - if: runner.os == 'Linux'
         name: Verify extracted installer payloads and desktop behavior
         env:

@@ -81,7 +81,12 @@ function UpdatesDialog({
     }
   };
   const act = async (
-    method: 'updatesCheck' | 'updatesCancel' | 'updatesDownload' | 'updatesInstall',
+    method:
+      | 'updatesCheck'
+      | 'updatesCancel'
+      | 'updatesDownload'
+      | 'updatesInstall'
+      | 'updatesDismissRecovery',
     format?: UpdateState['selected'],
   ) => {
     setDispatching(true);
@@ -98,7 +103,10 @@ function UpdatesDialog({
             ? await window.openkraken.request({ id: crypto.randomUUID(), method, format })
             : await window.openkraken.request({
                 id: crypto.randomUUID(),
-                method: method === 'updatesCancel' ? method : 'updatesCheck',
+                method:
+                  method === 'updatesCancel' || method === 'updatesDismissRecovery'
+                    ? method
+                    : 'updatesCheck',
               });
       if (result.kind === 'error') {
         setError(result.message);
@@ -182,6 +190,14 @@ function UpdatesDialog({
         </div>
       )}
       <p role="status">{status}</p>
+      {state?.recovery === 'restored' && (
+        <div className="automatic-updates">
+          <p role="alert">An update failed to start and the previous version was restored.</p>
+          <button disabled={dispatching} onClick={() => void act('updatesDismissRecovery')}>
+            Dismiss recovery notice
+          </button>
+        </div>
+      )}
       {error && <p role="alert">{error}</p>}
       {state?.phase === 'downloading' && (
         <progress
@@ -263,10 +279,14 @@ export function UpdatesControl() {
     };
   }, [open, state?.automatic.enabled]);
   const available =
-    state?.version &&
-    ['available', 'downloading', 'verified', 'preparing', 'restart-ready'].includes(state.phase)
-      ? `OpenKraken ${state.version} is available`
-      : undefined;
+    state?.recovery === 'restored'
+      ? 'An update failed to start; the previous version was restored'
+      : state?.version &&
+          ['available', 'downloading', 'verified', 'preparing', 'restart-ready'].includes(
+            state.phase,
+          )
+        ? `OpenKraken ${state.version} is available`
+        : undefined;
   return (
     <>
       <button

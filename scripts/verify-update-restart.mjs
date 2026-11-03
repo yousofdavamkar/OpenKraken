@@ -21,6 +21,8 @@ let server, child, browser, mainPid;
 let completed = false;
 let launchOutput = '';
 const marker = join(root, 'started.json');
+const failStartup = process.argv.includes('--failed-startup');
+const failedMarker = join(root, 'failed-startup');
 async function waitForFile(path, timeout = 30000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
@@ -85,6 +87,16 @@ try {
     // Production has no TLS bypass, test key or runtime test switch.
     const banner = `
       const fixtureElectron = require('electron');
+      const fixtureBootsPath = ${JSON.stringify(join(root, 'boot.json'))};
+      const fixtureBoots = require('node:fs').existsSync(fixtureBootsPath) ? JSON.parse(require('node:fs').readFileSync(fixtureBootsPath, 'utf8')) : [];
+      fixtureBoots.push(${JSON.stringify(version)});
+      require('node:fs').writeFileSync(fixtureBootsPath, JSON.stringify(fixtureBoots));
+      const fixtureReturning = ${failStartup && version === '0.1.0'} && require('node:fs').existsSync(${JSON.stringify(failedMarker)});
+      if (fixtureReturning) fixtureElectron.app.commandLine.appendSwitch('remote-debugging-port', '0');
+      if (${failStartup && version === '0.2.0'}) {
+        require('node:fs').writeFileSync(${JSON.stringify(failedMarker)}, 'replacement reached main');
+        process.exit(23);
+      }
       require('node:fs').appendFileSync(${JSON.stringify(join(root, 'boot.log'))}, JSON.stringify({ version: ${JSON.stringify(version)}, pid: process.pid, executable: process.execPath, image: process.env.APPIMAGE, appdir: process.env.APPDIR }) + '\\n');
       const fixtureRelaunch = fixtureElectron.app.relaunch.bind(fixtureElectron.app);
       fixtureElectron.app.relaunch = (options) => { require('node:fs').writeFileSync(${JSON.stringify(join(root, 'relaunch.json'))}, JSON.stringify(options)); return fixtureRelaunch(options); };
@@ -96,9 +108,9 @@ try {
       const fixtureHandle = fixtureElectron.ipcMain.handle.bind(fixtureElectron.ipcMain);
       fixtureElectron.ipcMain.handle = (channel, listener) => fixtureHandle(channel, async (...args) => {
         const result = await listener(...args);
-        if (${JSON.stringify(version)} === '0.2.0' && args[1]?.method === 'updatesStarted') {
+        if ((${!failStartup && version === '0.2.0'} || fixtureReturning) && args[1]?.method === 'updatesStarted') {
           require('node:fs').writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ version: fixtureElectron.app.getVersion(), pid: process.pid, state: result }));
-          setTimeout(() => fixtureElectron.app.quit(), 100);
+          if (!fixtureReturning) setTimeout(() => fixtureElectron.app.quit(), 100);
         }
         return result;
       });
@@ -263,14 +275,41 @@ try {
   );
   await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
   const started = JSON.parse(await waitForFile(marker));
-  assert.equal(started.version, '0.2.0');
+  assert.equal(started.version, failStartup ? '0.1.0' : '0.2.0');
   assert.equal(started.state.kind, 'updates');
   assert.equal(started.state.state.error, null);
-  assert.equal(await sha256(target), await sha256(artifact));
+  assert.equal(await sha256(target), failStartup ? originalDigest : await sha256(artifact));
+  assert.deepEqual(
+    JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')),
+    failStartup ? ['0.1.0', '0.2.0', '0.1.0'] : ['0.1.0', '0.2.0'],
+  );
+  assert.equal(
+    JSON.parse(await readFile(join(profile, 'updates/trusted-release.json'), 'utf8')).sequence,
+    1,
+  );
   await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
+  if (failStartup) {
+    assert.equal(started.state.state.recovery, 'restored');
+    await browser.close().catch(() => {});
+    const port = (await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0];
+    assert.match(port, /^\d+$/);
+    browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+    const restoredPage = browser.contexts()[0].pages()[0];
+    await restoredPage.getByRole('button', { name: 'Updates', exact: true }).click();
+    const restoredDialog = restoredPage.getByRole('dialog', { name: 'App updates' });
+    await expect(restoredDialog.getByRole('alert')).toHaveText(
+      'An update failed to start and the previous version was restored.',
+    );
+    await restoredPage.screenshot({ path: 'test-results/appimage-recovery-notice.png' });
+    await restoredDialog.getByRole('button', { name: 'Dismiss recovery notice' }).click();
+    await expect(restoredDialog.getByRole('alert')).toHaveCount(0);
+    await assert.rejects(stat(join(profile, 'updates/rollback-notice.json')), { code: 'ENOENT' });
+  }
   await delay(500);
   console.log(
-    'Packaged AppImage: signed HTTPS download, cancelled unsaved-work restart, accepted install, new-version launch and recovery acknowledgement passed.',
+    failStartup
+      ? 'Packaged AppImage: failed replacement startup restored and launched the exact predecessor; startup cleanup and release watermark retention passed.'
+      : 'Packaged AppImage: signed HTTPS download, cancelled unsaved-work restart, accepted install, new-version launch and recovery acknowledgement passed.',
   );
   completed = true;
 } catch (error) {
