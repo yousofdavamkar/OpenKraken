@@ -12,9 +12,19 @@ Commit and working-file comparisons recognize canonical UTF-8 Git LFS pointer me
 
 Pointer comparisons show object identity and size instead of treating pointer text as the object’s content. They do not hydrate objects or offer text blame for pointer metadata. Existing explicit staging and editing workflows remain unchanged.
 
+## Reviewed object downloads
+
+**Review download** selects a configured remote, shows its native Git LFS endpoint, configured include/exclude filters and known file identities, then requires explicit confirmation. The service resolves the selected endpoint through bounded `git lfs env` output, including named remote entries, and binds the review to effective Git configuration, that environment, HEAD/index contents, effective filter attributes, bounded `.lfsconfig` content, inventory and working-file metadata. Only a service-owned token crosses back for confirmation; the renderer cannot supply an endpoint, file path or transport override. Tokens expire after ten minutes and are consumed before the native invocation, including failed or cancelled invocations.
+
+Confirmation repeats inspection under the repository’s write queue and runs native `git lfs pull` against the reviewed endpoint. Configured include/exclude filters still apply, so known files in the review are not a promise that every entry will be downloaded. Native checkout fills matching pointers and absent files while retaining modified content. The action does not move the parent HEAD or stage changes. It refreshes the repository afterward and reports that failures/cancellation may leave partial cache or checkout changes. There is no Undo for this action.
+
+This transport increment supports HTTP(S) endpoints and basic HTTP transfers. Remote autodetection/search fallback and object-URL rewriting are disabled for the invocation. Standalone transfer agents and configured LFS extensions are refused. The selected server may still provide separate object-download URLs, which is disclosed in the review. Existing native credential-helper/askpass integration is connected, but no provider account token is automatically forwarded to LFS hosts. SSH, file and custom transports remain follow-up work.
+
+TLS verification remains enabled, including overrides for URL-specific false settings. Git LFS’s X.509 errors are classified with other certificate failures. Native hash validation rejects corrupt content before replacing the pointer. Preflight refuses active operation markers, unmerged index stages, symlink/non-file checkout paths and redirected/oversized `.lfsconfig` files. File/config reads are bounded, cancellable and optimistic; they are not a transaction against external writers changing the repository after confirmation.
+
 ## Scope and remaining work
 
-This increment implements local awareness and cached lock display. Feature 1.9 is **not complete**: reviewed object downloads and verification that pull fetches objects, current server lock refresh, and authenticated transport acceptance remain required. LFS setup/install and push behavior also need explicit treatment under the blueprint. Do not treat cached lock display as live locking support. Non-UTF-8 paths, cross-platform runtime acceptance and packaged LFS integration remain unverified.
+Local awareness, cached locks and reviewed HTTP(S) LFS pulls are implemented. The explicit LFS pull fixture downloads missing objects and preserves local edits. Feature 1.9 is **not complete**: ordinary Git-pull/filter integration, current server lock refresh, the remaining transport modes and authenticated transport acceptance remain required. LFS setup/install and push behavior also need explicit treatment under the blueprint. Do not treat cached lock display as live locking support. Non-UTF-8 paths, cross-platform runtime acceptance and packaged LFS integration remain unverified.
 
 Git LFS is an external prerequisite, not a bundled binary. Native tests run when Git LFS is on PATH; setting `OPENKRAKEN_LFS_TEST=1` requires it and fails rather than silently skipping. CI enables that requirement, verifies `git lfs version`, and installs the package in its Linux dependency step. The local acceptance binary is Git LFS 3.8.1, downloaded to an isolated cache and checked against the release SHA-256 manifest; it did not install global filters or hooks.
 
@@ -22,9 +32,14 @@ Git LFS is an external prerequisite, not a bundled binary. Native tests run when
 
 Native service tests cover pointer/full-checkout/local-object states, Unicode/newline file names, missing CLI behavior, empty inventories and cached lock ownership without a second server request. Comparison tests cover valid and malformed pointers, ordered extension metadata, legacy v1 pointers and 64-bit sizes. Typed IPC rejects caller-selected paths, URLs and network options. Electron exercises pointer identity/size display and the local inventory, cached owners and refresh behavior. Broader milestone and release evidence is tracked in [M7 progress](../verification/m7-progress.md).
 
+Additional native tests cover successful downloads, unchanged parent HEAD/index, preserved edits, configured exclusions, derived and overridden endpoints, stale/replayed reviews, pending/conflicted indexes, custom-program refusal, symlink guards, enforced TLS and corrupt-content retry. Electron tests exercise review dismissal/focus, stale configuration rejection, actual object checkout and cancellation against a stalled local HTTP endpoint. These are local Linux fixtures, not live-provider or cross-platform proof.
+
 ## References
 
 - [Git LFS pointer specification](https://github.com/git-lfs/git-lfs/blob/main/docs/spec.md)
 - [Git LFS file inventory](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-ls-files.adoc)
 - [Git LFS cached and server locks](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-locks.adoc)
 - [Git LFS pull](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-pull.adoc)
+
+- [Git LFS checkout semantics](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-checkout.adoc)
+- [Git LFS transfer configuration](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-config.adoc)
