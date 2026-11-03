@@ -1,6 +1,20 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The current checkpoint adds opt-in process-crash summaries after Linux installer generation, main/PTY crash acceptance, interrupted native-prompt recovery, local commit drafts and native command supervision. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+M8 remains in progress. The current checkpoint extends opt-in reporting to interrupted main sessions and fixed-category JavaScript failures, following Linux installer generation, crash recovery and local commit drafts. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+
+## Interrupted sessions and JavaScript reports
+
+Session recovery (`c7d5773`) writes a small private marker only while reporting is enabled. A marker matching current consent can produce one next-launch `main/unclean-exit` summary with the previous app release; normal shutdown and opt-out clear the owned marker. Forced termination, power loss or interrupted cleanup can all leave a marker, so the summary has warning severity and does not claim a proven application crash. Corrupt or redirected marker files are preserved. Consent schema version 2 resets prior consent and adds a fresh local nonce, preventing a later opt-in from authorizing an old session. See [ADR 0078](../decisions/0078-interrupted-session-and-javascript-reports.md).
+
+JavaScript observation (`447363a`) uses main's exception monitor and renderer error/rejection events, plus the React error boundary. The renderer route accepts only two fixed reason strings and cannot choose process, destination, message or stack. Exception values are never read by the reporter, and default exception handling is preserved. A renewed consent generation cancels its predecessor's in-flight attempt and clears stale delivery status.
+
+Verification passed **609 native/unit tests in 80 files** with Git LFS enabled and explicit `UNIT_EXIT=0`, typechecking/build, full ESLint/Prettier, and **25 targeted Electron tests** with explicit `REGRESSION_EXIT=0`. The HTTPS fixture generated real main and renderer JavaScript exceptions, an unhandled renderer promise rejection, Git/renderer process crashes and main-process SIGKILL. Reports contained no private sentinel strings. Restart after the killed main produced one unclean-exit summary; restart after normal shutdown produced none. Default builds created neither reporting consent nor session-marker files. Marker tests also verify original-release recovery, ownership, consent migration and corrupt/symlinked-file preservation.
+
+Regression scope included graph, appearance, main/PTY death, native prompts, service shutdown and terminal UI. A 5,000-commit page measured **143.4 ms**, scrolling **16.8 ms p95**, and six graph goldens passed unchanged. The expanded consent dialog was visually inspected. No timeout or performance budget was relaxed.
+
+A fresh unsigned Linux x64 bundle passed fuse verification and packaged smoke with explicit `PACKAGE_EXIT=0` and `SMOKE_EXIT=0`. Smoke covered default-off reporting, renderer isolation, native helpers, folder selection, Bash integration, keyboard delivery and terminal exit. Installer artifacts were not regenerated; crash-recovery scenarios ran through the Electron acceptance fixture rather than the packaged executable.
+
+Evidence: `/tmp/openkraken-report-session-{red,green}.log`, `/tmp/openkraken-report-recovery-{red,green,types,unit,lint,final-build,e2e,regression,package,smoke}.log`. The full desktop suite, live Sentry delivery, non-Linux crash behavior and real-repository performance remain unverified for this increment. Native failures before reporting initialization, every worker/React failure path and exact cause attribution for an abrupt exit remain outside the established boundary.
 
 ## Opt-in crash summaries
 
@@ -12,7 +26,7 @@ Verification passed **603 native/unit tests in 79 files** with Git LFS enabled a
 
 A fresh unsigned Linux x64 bundle passed fuse verification and packaged smoke with explicit `PACKAGE_EXIT=0` and `PACKAGE_SMOKE_EXIT=0`, including default-off reporting, renderer isolation, native helpers, folder selection, Bash integration, keyboard input and terminal exit. Installer artifacts were not regenerated for this increment. The full desktop suite, live Sentry acceptance, Windows/macOS crash behavior and real-repository performance were not rerun or established.
 
-Evidence: `/tmp/openkraken-crash-reports-{red,privacy-red,privacy-green,privacy-final,all-unit,types,lint,final-build,regression-e2e,package,package-smoke}.log`. The test fixture compiles its own main entry point with a fixed local receiver; production code has no runtime test-destination override or TLS bypass. Main-process/native startup death and JavaScript exception reporting remain unimplemented. Actual release receiver configuration, live-service acceptance and broader platform coverage remain open; this is not completion of M8 crash reporting or release readiness.
+Evidence: `/tmp/openkraken-crash-reports-{red,privacy-red,privacy-green,privacy-final,all-unit,types,lint,final-build,regression-e2e,package,package-smoke}.log`. The test fixture compiles its own main entry point with a fixed local receiver; production code has no runtime test-destination override or TLS bypass. Main-process death and JavaScript reporting were absent from that initial increment; the subsequent work above extends those paths. Actual release receiver configuration, live-service acceptance, pre-initialization failure coverage and broader platform evidence remain open; this is not completion of M8 crash reporting or release readiness.
 
 ## AppImage pipeline
 
@@ -83,7 +97,7 @@ Evidence: `/tmp/openkraken-supervisor-{red,green,native,hook,unit,e2e,types,buil
 ## Remaining work
 
 - Native supervision runtime acceptance on Windows/macOS, further crash/write scenarios beyond the Linux fetch/PTY/prompt fixtures above, native lock handling and durable write recovery. POSIX processes that intentionally detach or daemonize beyond the active command's stream lifetime are not contained.
-- Durable drafts for working-file, conflict/native editors and provider composers; commit-form drafts are implemented within the bounds above. Crash-report coverage for main/startup death and JavaScript exceptions, live receiver configuration/acceptance, signature-verified updates, signed installers/distribution, security review and beta evidence remain open. Opt-in renderer/known utility/GPU failure summaries are implemented within the bounds above.
+- Durable drafts for working-file, conflict/native editors and provider composers; commit-form drafts are implemented within the bounds above. Crash-report coverage before reporting initialization, live receiver configuration/acceptance, signature-verified updates, signed installers/distribution, security review and beta evidence remain open. Opt-in process/JavaScript summaries and interrupted-session recovery are implemented within the bounds above.
 - DMG/MSI, RPM distribution install/upgrade/remove acceptance, broader AppImage distribution acceptance, Linux arm64 and macOS/Windows installer runtime checks, and real release metadata. DEB/RPM/AppImage artifacts in this checkpoint remain unsigned local test builds.
 - Broader real-repository and cross-platform performance/regression gates, plus the unresolved intermittent command exit-143 investigation recorded in M7 progress.
 
