@@ -64,6 +64,16 @@ A subsequent probe serialized the snapshot between the Git utility and main whil
 
 The additional two-million-commit/100,000-file synthetic graph and watcher-warm status gates are recorded separately in [m8-scale-performance.md](m8-scale-performance.md). They do not replace or relax this still-failing 50,000-ref first-paint gate.
 
+## Renderer reference indexes
+
+A 100 µs sampling profile around repository opening attributed about **56 ms** of renderer self time to sidebar construction/filtering and **26 ms** to badge grouping. The instrumented run measured **1,259.3 ms** first paint; it is diagnostic evidence, not an uninstrumented acceptance sample. The raw CPU profile is under `test-results/m8-renderer-profile/`, and its benchmark record is retained as `m8-renderer-profile`.
+
+The sidebar now groups refs in one pass, skips case normalization for empty queries and locates the focused row only when focus exists. Badge grouping now uses target-local label/kind indexes while preserving ordered output and all ref names. A separate regression exposed **8,438.9 ms** grouping 50,000 distinct badges at one target. Five post-change isolated samples took **18.7–54.1 ms** for a shared target and **17.7–21.2 ms** for distinct targets, with every full ref name/order compared. Those timings measure the helper only, not DOM rendering of 50,000 badges. See [ADR 0102](../decisions/0102-linear-reference-presentation-indexes.md).
+
+Three final uninstrumented runs on the unchanged distinct-target 50,000-ref fixture measured **1,235.3 / 1,133.4 / 1,180.5 ms** first paint. The post-publication paint interval was **132.9–144.1 ms**, compared with **159.5–169.7 ms** in the preceding direct-first samples. Service/snapshot variation left overall startup overlapping the previous range; these samples do not establish a clear total first-paint improvement. **All three still fail the unchanged 500 ms gate.** All nine pages passed at **183.5–262.1 ms**, scroll p95 was **16.7–16.8 ms**, and reference controls remained bounded.
+
+Raw records are `m8-renderer-index` and `m8-badge-index-profile`. Logs: `/tmp/openkraken-m8-renderer-index-benchmark.log`, `/tmp/openkraken-m8-renderer-profile.log` and `/tmp/openkraken-m8-badge-index-profile.json`. Fresh profiles, uncleared OS caches and sequential runs without concurrent builds/tests were retained. The temporary profiler test and isolated probe script were removed. Verification passed 793 native/unit tests (14 platform/tool-dependent skips), 23 selected desktop tests with six unchanged graph goldens, typechecking/build and full lint. The desktop regression also covers Unicode/ASCII filtering, whitespace reset, accessible positions and a focused rename dialog surviving offscreen scrolling. Full native-platform/installer acceptance and other scale/status cohorts were not rerun.
+
 ## Reproduce the isolated fixture
 
 Start with a local full-history bare Linux clone containing only `refs/heads/master` at the revision above. Run this from the repository root after setting `LINUX_SOURCE` to that clone's absolute path. The original must remain available because the fixture borrows its objects. All reference writes and commit-graph generation below target the new temporary clone.

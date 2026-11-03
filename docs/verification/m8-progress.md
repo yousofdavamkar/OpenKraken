@@ -1,6 +1,20 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The two-million-commit/100,000-file synthetic graph and watcher-warm status gates now pass locally on Linux x64. Direct-first reference enumeration and serialized snapshot responses improve large-reference first paint to 1.17–1.20 seconds, still above the 500 ms gate; paging and scrolling pass. Native Git 2.38.0 passes the Linux x64 compatibility checks. AppImage recovery waits for delayed descendants before restoring the predecessor, while a still-running unconfirmed application remains an open recovery case. Native Windows/macOS acceptance, production release gates and the remaining [M6](m6-progress.md)/[M7](m7-progress.md) scope are still open.
+M8 remains in progress. The two-million-commit/100,000-file synthetic graph and watcher-warm status gates now pass locally on Linux x64. Latest 50,000-ref samples measure 1.13–1.24 seconds first paint, still above the 500 ms gate; paging and scrolling pass. Native Git 2.38.0 passes the Linux x64 compatibility checks. AppImage recovery waits for delayed descendants before restoring the predecessor, while a still-running unconfirmed application remains an open recovery case. Native Windows/macOS acceptance, production release gates and the remaining [M6](m6-progress.md)/[M7](m7-progress.md) scope are still open.
+
+## Renderer reference indexing
+
+A renderer CPU profile identified work in sidebar row construction and badge grouping. The renderer change (`96e7306`) groups sidebar refs in one pass, skips name normalization for empty/whitespace-only queries and finds a focused row on demand. It preserves kind ordering, locale-aware filtering, accessible positions/counts and the existing offscreen focus/dialog behavior. Badge grouping uses per-target kind/label indexes while retaining ordered arrays and all full ref names. See [ADR 0102](../decisions/0102-linear-reference-presentation-indexes.md).
+
+A new 50,000-ref/single-target regression reproduced **8,438.9 ms** of quadratic badge grouping. The indexed helper passed the same name/order checks; five isolated samples measured **18.7–54.1 ms** for a shared target and **17.7–21.2 ms** for distinct targets. These are helper measurements, not proof that a desktop row containing 50,000 badges renders within budget.
+
+Three final uninstrumented runs on the existing distinct-target fixture measured **1,133.4–1,235.3 ms** first paint. The post-publication paint phase was **132.9–144.1 ms**, versus **159.5–169.7 ms** in the preceding direct-first samples. Service variation left overall startup overlapping the prior range, so this does not establish a clear total startup gain. **All three 500 ms gates still failed.** All nine pages passed at **183.5–262.1 ms**; scrolling passed at **16.7–16.8 ms p95**. All samples, the instrumented CPU profile and cache conditions are recorded in the [reference-performance report](m8-reference-performance.md).
+
+Verification passed **793 native/unit tests in 99 files**, with **14 platform/tool-dependent skips** and Git LFS enabled, plus **23 selected Electron tests** in **54.0 seconds**. The desktop test preserves Unicode/ASCII case-insensitive filtering, whitespace reset, accessible match positions/counts, distant-ref keyboard activation and an offscreen rename dialog; all six graph goldens passed unchanged. Typechecking/build and full ESLint/Prettier passed.
+
+Evidence: `/tmp/openkraken-m8-badges-{red,green}.log`, `/tmp/openkraken-m8-sidebar-index-baseline.log`, `/tmp/openkraken-m8-renderer-index-{build,benchmark,unit,lint,types,e2e}.log`, `/tmp/openkraken-m8-renderer-profile.log` and `/tmp/openkraken-m8-badge-index-profile.json`. Final correctness/build/type/lint/desktop commands exited 0; the initial quadratic regression and all three unchanged app first-paint gates exited 1. Desktop artifacts are under `test-results/m8-renderer-index-e2e/`.
+
+The temporary profiler test and isolated probe script were removed. Packaging, native platform/installer acceptance, the complete desktop suite, the large synthetic/status cohorts and release gates were not rerun in this renderer-only increment. The separately passing synthetic/status results remain those from the preceding checkpoint.
 
 ## Large-history scale and watcher-warm status
 
