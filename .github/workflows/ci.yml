@@ -1,6 +1,51 @@
 name: CI
 on: [push, pull_request]
 jobs:
+  scale-performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: sudo apt-get update && sudo apt-get install -y build-essential xvfb
+      - run: pnpm install --frozen-lockfile
+      - run: mkdir -p test-results/performance
+      - name: Build once before measuring
+        id: build
+        run: pnpm build > test-results/performance/build.log 2>&1
+      - name: Generate and verify isolated large-history checkout
+        id: fixture
+        run: |
+          node scripts/create-performance-fixture.mjs "$RUNNER_TEMP/openkraken-scale" > test-results/performance/fixture.log 2>&1
+          cp "$RUNNER_TEMP/openkraken-scale/fixture.json" test-results/performance/fixture.json
+      - name: Large synthetic history gates, three fresh profiles
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.fixture.outcome == 'success' }}
+        run: |
+          OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/openkraken-scale/repository" GIT_NO_LAZY_FETCH=1 \
+            xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --reporter=list \
+            --output=test-results/performance/graph > test-results/performance/graph.log 2>&1
+      - name: Watcher-warm status gates, three fresh profiles
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.fixture.outcome == 'success' }}
+        run: |
+          OPENKRAKEN_STATUS_BENCH_FIXTURE="$RUNNER_TEMP/openkraken-scale/fixture.json" \
+            xvfb-run -a pnpm exec playwright test tests/e2e/status-benchmark.test.ts --repeat-each=3 --reporter=list \
+            --output=test-results/performance/status > test-results/performance/status.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence-scale-performance-linux
+          path: test-results/performance/
   minimum-git:
     runs-on: ubuntu-latest
     timeout-minutes: 20
