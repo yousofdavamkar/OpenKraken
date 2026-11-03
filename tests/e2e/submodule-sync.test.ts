@@ -51,6 +51,10 @@ test('reviewed submodule URL synchronization preserves local work and recovers f
     await review.getByRole('button', { name: 'Cancel URL review' }).click();
     await expect(prepare).toBeFocused();
     expect(fixtureGit(parent, ['config', 'submodule.child.url'])).toBe(source);
+    const refresh = dialog.getByRole('button', { name: 'Refresh submodules', exact: true });
+    await refresh.click();
+    await expect(refresh).toBeEnabled();
+    await expect(refresh).toBeFocused();
     await prepare.click();
     await expect(review).toBeVisible();
     fixtureGit(parent, ['config', 'submodule.child.url', 'https://example.test/external.git']);

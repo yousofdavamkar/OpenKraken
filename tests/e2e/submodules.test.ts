@@ -106,6 +106,10 @@ test('submodule update requires review, refreshes stale plans and initializes re
     await expect(dialog.getByRole('list', { name: 'Registered submodules' })).toContainText(
       'Uninitialized',
     );
+    const refresh = dialog.getByRole('button', { name: 'Refresh submodules', exact: true });
+    await refresh.click();
+    await expect(refresh).toBeEnabled();
+    await expect(refresh).toBeFocused();
     await dialog.getByRole('button', { name: 'Review update', exact: true }).click();
     await expect(review).toBeVisible();
     fixtureGit(path, ['config', 'submodule.child.url', child]);

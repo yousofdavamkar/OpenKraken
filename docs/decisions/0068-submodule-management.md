@@ -24,7 +24,7 @@ Preflight refuses conflicted/unavailable modules, nonempty uninitialized destina
 
 Git configuration reads include effective native includes and URL rewrites for the transport review; `.gitmodules` discovery still disables includes. Allowed protocols are HTTPS, HTTP, SSH and Git, with local file transports disabled unless the user opts in for this recursive operation. External helpers remain blocked even through URL rewriting. The existing runner enforces TLS verification, and command configuration also overrides discovered URL-specific `sslVerify=false` settings. Existing askpass, transport error redaction, progress and cancellation support are reused. Provider account tokens are not automatically forwarded to recursively discovered hosts.
 
-The dialog focuses Cancel review, restores the update button on dismissal, disables conflicting controls during mutation, permits cancellation of a running update, and refreshes the repository snapshot afterward. Errors and cancellation explicitly tell the user to refresh before retrying because some modules may already have changed. The inventory itself is refreshed on successful completion or through **Refresh submodules**.
+The dialog focuses Cancel review, restores the update button on dismissal, disables conflicting controls during mutation, permits cancellation of a running update, and refreshes the repository snapshot afterward. Errors and cancellation explicitly tell the user to refresh before retrying because some modules may already have changed. The inventory itself is refreshed on successful completion or through **Refresh submodules**. Manual refresh clears earlier review focus intent and restores the Refresh button after loading.
 
 ## Reviewed recursive URL synchronization
 

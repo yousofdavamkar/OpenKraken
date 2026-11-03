@@ -27,6 +27,7 @@ function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void 
   const syncButton = useRef<HTMLButtonElement>(null);
   const cancelSync = useRef<HTMLButtonElement>(null);
   const syncReviewed = useRef(false);
+  const refreshFocus = useRef<HTMLButtonElement | null>(null);
   const [allowLocal, setAllowLocal] = useState(false);
   const [notice, setNotice] = useState('');
   const [progress, setProgress] = useState('');
@@ -51,7 +52,14 @@ function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void 
     if (syncReview) cancelSync.current?.focus();
     else syncButton.current?.focus();
   }, [syncReview, pending]);
+  useEffect(() => {
+    if (!pending && refreshFocus.current) {
+      refreshFocus.current.focus();
+      refreshFocus.current = null;
+    }
+  }, [pending]);
   const load = async () => {
+    reviewed.current = false;
     syncReviewed.current = false;
     setSyncReview(undefined);
     setReview(undefined);
@@ -413,7 +421,13 @@ function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void 
         >
           Review update
         </button>
-        <button disabled={pending || !!review || !!syncReview} onClick={() => void load()}>
+        <button
+          disabled={pending || !!review || !!syncReview}
+          onClick={(event) => {
+            refreshFocus.current = event.currentTarget;
+            void load();
+          }}
+        >
           Refresh submodules
         </button>
         <button disabled={pending} onClick={close}>
