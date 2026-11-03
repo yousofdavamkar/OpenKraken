@@ -30,6 +30,14 @@ Saved-account pulls retain the same protected transport settings during integrat
 
 Native Linux fixtures cover authenticated fast-forward, merge and rebase checkouts, pointer retention in Git, full working-file contents, clean status, retained divergent local work, and undo/redo using the downloaded cache. A separate-host fixture proves saved-account integration does not fall back to a configured credential store or send the account token to that host. An untrusted HTTPS fixture proves certificate rejection before any HTTP request. Desktop fixtures cover repeated native authentication prompts for batch/object requests, successful checkout and cancellation before object download.
 
+## LFS uploads during ordinary Push
+
+The existing reviewed **Push** flow runs the repository's installed native pre-push hook. With Git LFS installed locally, that hook uploads the objects reachable from the selected ref update before Git publishes the ref. Review itself does not invoke the hook or upload objects. The existing request authentication, progress and process-group cancellation also reach the hook. No additional upload command, automatic hook installation, hook bypass or application-managed object store is introduced.
+
+Native Linux fixtures verify authenticated batch/basic uploads, exact uploaded bytes, pointer blobs in the remote repository, and retention of full local content. A separate local branch's object and ref remain unpublished. Rejected uploads, missing local objects, cancellation during an upload and an untrusted TLS endpoint prevent the reviewed ref update in these fixtures. Certificate verification remains enforced even with a URL-specific false setting. Rejection tests configure one native retry with no backoff only in the fixture; production retry behavior is unchanged.
+
+Desktop fixtures exercise native credentials, the server's rejection message, cancellation messaging and a successful fresh review/retry after rejection or cancellation. A failed or canceled push can leave uploaded objects at the LFS server even if Git refs are unchanged; this operation does not offer Undo or promise rollback. Native hook configuration, including deliberate skip-push settings and custom hooks, remains user-owned. This acceptance covers local HTTP(S) basic LFS endpoints with native credentials; saved-provider-account LFS uploads, live providers, other transfer adapters and packaged/cross-platform execution remain unverified.
+
 ## Server lock snapshots
 
 **Refresh server locks** explicitly queries the selected configured remote's HTTP(S) LFS endpoint through the installed CLI. It uses the same bounded endpoint/configuration inspection and enforced TLS settings as downloads, along with the existing native authentication and cancellation session. It does not acquire or release locks. Calls are serialized with repository writes because native LFS refreshes local lock metadata.
@@ -42,7 +50,7 @@ Native tests cover pagination, changed owners, cache refresh without additional 
 
 ## Scope and remaining work
 
-Local awareness, cached locks, explicit server-lock snapshots, reviewed HTTP(S) LFS pulls and ordinary Pull with installed native filters are implemented. Feature 1.9's version detection, pointer/lock display and pull-object behavior are covered by Linux fixtures. The remaining reviewed-download transport modes and live-provider authenticated transport acceptance remain open. LFS setup/install and push behavior also need explicit treatment under the blueprint. Fresh authentication for checkout filters during other operations, including conflict continuation, remains unverified. Lock acquisition/release is not implemented. Non-UTF-8 paths, cross-platform runtime acceptance and packaged LFS integration remain unverified.
+Local awareness, cached locks, explicit server-lock snapshots, reviewed HTTP(S) LFS pulls and ordinary Pull with installed native filters are implemented. Ordinary reviewed Push with an installed LFS pre-push hook is covered by native and desktop Linux fixtures. Feature 1.9's version detection, pointer/lock display and pull-object behavior are covered by Linux fixtures. The remaining reviewed-download transport modes and live-provider authenticated transport acceptance remain open. LFS setup/install still needs explicit treatment under the blueprint. Fresh authentication for checkout filters during other operations, including conflict continuation, remains unverified. Lock acquisition/release is not implemented. Non-UTF-8 paths, cross-platform runtime acceptance and packaged LFS integration remain unverified.
 
 Git LFS is an external prerequisite, not a bundled binary. Native tests run when Git LFS is on PATH; setting `OPENKRAKEN_LFS_TEST=1` requires it and fails rather than silently skipping. CI enables that requirement, verifies `git lfs version`, and installs the package in its Linux dependency step. The local acceptance binary is Git LFS 3.8.1, downloaded to an isolated cache and checked against the release SHA-256 manifest; it did not install global filters or hooks.
 
@@ -62,4 +70,7 @@ Additional native tests cover successful downloads, unchanged parent HEAD/index,
 - [Git LFS checkout semantics](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-checkout.adoc)
 - [Git LFS transfer configuration](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-config.adoc)
 - [Git LFS filter installation](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-install.adoc)
+- [Git LFS pre-push hook](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-pre-push.adoc)
+- [Git LFS batch API](https://github.com/git-lfs/git-lfs/blob/main/docs/api/batch.md)
+- [Git LFS basic transfers](https://github.com/git-lfs/git-lfs/blob/main/docs/api/basic-transfers.md)
 - [Git LFS lock-command error and JSON paths](https://github.com/git-lfs/git-lfs/blob/main/commands/command_locks.go)
