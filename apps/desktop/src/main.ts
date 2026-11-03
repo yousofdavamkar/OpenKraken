@@ -1091,7 +1091,9 @@ else {
     void Promise.all([stopped, providers?.idle(), appSettings?.idle(), terminals.close()]).finally(
       () => {
         clearTimeout(deadline);
-        app.quit();
+        // With no live service, cleanup can finish in the original will-quit microtask.
+        // Electron ignores a reentrant quit there; resume on the next event-loop turn.
+        setImmediate(() => app.quit());
       },
     );
     child?.postMessage({ shutdown: true });
