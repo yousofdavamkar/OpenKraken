@@ -6,6 +6,28 @@ import {
   serviceResponseSchema,
   resultSchema,
 } from '../../packages/ipc-contract/src/index.js';
+test('appearance requests are strict main-only preferences with bounded revisions and known modes', () => {
+  const id = '00000000-0000-4000-8000-000000000000';
+  const save = { id, method: 'appearanceSave', revision: 0, mode: 'light' };
+  for (const request of [{ id, method: 'appearancePreferences' }, save]) {
+    expect(requestSchema.safeParse(request).success).toBe(true);
+    expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  }
+  for (const fields of [
+    { mode: 'neon' },
+    { revision: -1 },
+    { revision: 0.5 },
+    { revision: Number.MAX_SAFE_INTEGER + 1 },
+    { css: 'url(https://example.test)' },
+  ])
+    expect(requestSchema.safeParse({ ...save, ...fields }).success).toBe(false);
+  expect(
+    resultSchema.safeParse({
+      kind: 'appearancePreferences',
+      state: { revision: 0, mode: 'system', warning: null },
+    }).success,
+  ).toBe(true);
+});
 test('Bitbucket pull details have a separate strict main-process IPC request', () => {
   const request = {
     id: '00000000-0000-4000-8000-000000000000',

@@ -1,4 +1,6 @@
 import { commandIdSchema, commandUsageSchema, commandPreferencesSchema } from './commands.js';
+import { appearanceModeSchema, appearancePreferencesSchema } from './appearance.js';
+export * from './appearance.js';
 export * from './commands.js';
 import {
   providerBitbucketCommentsOptionsSchema,
@@ -1204,6 +1206,15 @@ export const requestSchema = z.discriminatedUnion('method', [
     })
     .strict(),
   z.object({ id: requestId, method: z.literal('commandPreferences') }).strict(),
+  z.object({ id: requestId, method: z.literal('appearancePreferences') }).strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('appearanceSave'),
+      revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      mode: appearanceModeSchema,
+    })
+    .strict(),
   z
     .object({
       id: requestId,
@@ -1762,6 +1773,9 @@ export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('commandContext') }).strict(),
   z.object({ kind: z.literal('commandPreferences'), state: commandPreferencesSchema }).strict(),
+  z
+    .object({ kind: z.literal('appearancePreferences'), state: appearancePreferencesSchema })
+    .strict(),
   z
     .object({ kind: z.literal('providerMergePreview'), preview: providerMergePreviewSchema })
     .strict(),

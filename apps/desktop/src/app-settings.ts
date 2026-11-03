@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import {
   commandUsageSchema,
+  appearanceSettingsSchema,
+  type AppearanceSettings,
   emptyKeymap,
   parseKeymap,
   type CommandId,
@@ -19,13 +21,16 @@ const diskSchema = z
         keymap: z.string().max(32768),
         usage: commandUsageSchema,
       })
-      .strict(),
+      .strict()
+      .optional(),
+    appearance: appearanceSettingsSchema.optional(),
   })
   .strict();
 const halfLife = 14 * 24 * 60 * 60 * 1000;
 // A legacy keymap may expand to six JSON bytes per UTF-16 code unit.
 const maxSettingsBytes = 256 * 1024;
-export class CommandSettings {
+export class AppSettings {
+  private appearance: AppearanceSettings = { revision: 0, mode: 'dark' };
   private file: string;
   private source: string | null = null;
   private state: CommandPreferences = {
@@ -59,9 +64,15 @@ export class CommandSettings {
       this.state.initialized = true;
       try {
         const disk = diskSchema.parse(JSON.parse(this.source));
-        for (const id of Object.keys(disk.commands.usage) as CommandId[])
-          if (disk.commands.usage[id]!.time > Date.now() + 300000) delete disk.commands.usage[id];
-        this.state = { ...disk.commands, initialized: true, warning: null };
+        for (const id of Object.keys(disk.commands?.usage ?? {}) as CommandId[])
+          if (disk.commands!.usage[id]!.time > Date.now() + 300000) delete disk.commands!.usage[id];
+        this.appearance = disk.appearance ?? this.appearance;
+        this.state = {
+          ...this.state,
+          ...disk.commands,
+          initialized: !!disk.commands,
+          warning: null,
+        };
       } catch {
         this.state.warning = 'corrupt';
       }
@@ -84,10 +95,27 @@ export class CommandSettings {
     await this.writes.catch(() => {});
     return structuredClone(this.state);
   }
+  async readAppearance() {
+    await this.read();
+    return { ...this.appearance, warning: this.state.warning };
+  }
+  saveAppearance(mode: AppearanceSettings['mode'], revision: number) {
+    return this.enqueue(async () => {
+      if (revision !== this.appearance.revision)
+        throw new Error('Appearance changed. Reopen the dialog before saving.');
+      const appearance = appearanceSettingsSchema.parse({ mode, revision: revision + 1 });
+      await this.persist(this.state, { appearance, repair: true, initializeCommands: false });
+      return { ...this.appearance, warning: this.state.warning };
+    });
+  }
   idle() {
     return this.writes.catch(() => {});
   }
-  private async persist(next: CommandPreferences, repair = false) {
+  private async persist(
+    next: CommandPreferences,
+    { repair = false, appearance = this.appearance, initializeCommands = true } = {},
+  ) {
+    const initialized = initializeCommands || next.initialized;
     if (this.state.warning === 'unreadable' || (this.state.warning === 'corrupt' && !repair))
       throw new Error('Settings could not be read. Repair the settings before saving changes.');
     if ((await this.readSource()) !== this.source)
@@ -95,7 +123,10 @@ export class CommandSettings {
     const raw = JSON.stringify(
       diskSchema.parse({
         version: 1,
-        commands: { revision: next.revision, keymap: next.keymap, usage: next.usage },
+        commands: initialized
+          ? { revision: next.revision, keymap: next.keymap, usage: next.usage }
+          : undefined,
+        appearance,
       }),
       null,
       2,
@@ -119,7 +150,8 @@ export class CommandSettings {
       }
       await rename(temporary, this.file);
       this.source = raw;
-      this.state = { ...next, initialized: true, warning: null };
+      this.state = { ...next, initialized, warning: null };
+      this.appearance = appearance;
     } finally {
       await rm(temporary, { force: true });
     }
@@ -146,7 +178,7 @@ export class CommandSettings {
           revision: revision + 1,
           keymap: JSON.stringify({ version: 1, bindings }, null, 2),
         },
-        true,
+        { repair: true },
       );
     });
   }

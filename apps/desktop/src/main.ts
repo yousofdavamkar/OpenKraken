@@ -1,5 +1,5 @@
 import { CommandMenu } from './command-menu.js';
-import { CommandSettings } from './command-settings.js';
+import { AppSettings } from './app-settings.js';
 import { BitbucketProvider } from './bitbucket-provider.js';
 import {
   app,
@@ -9,6 +9,7 @@ import {
   utilityProcess,
   session,
   safeStorage,
+  nativeTheme,
   shell,
 } from 'electron';
 import type { IpcMainInvokeEvent, UtilityProcess } from 'electron';
@@ -45,7 +46,7 @@ const documentUrl = pathToFileURL(htmlPath).href;
 let window: BrowserWindow | undefined;
 let service: UtilityProcess | undefined;
 let avatars: AvatarCache | undefined;
-let commandSettings: CommandSettings | undefined;
+let appSettings: AppSettings | undefined;
 let commandMenu: CommandMenu | undefined;
 let providers: ProviderService | undefined;
 const providerRequests = new Map<string, AbortController>();
@@ -209,7 +210,7 @@ else {
     if (window?.isMinimized()) window.restore();
     window?.focus();
   });
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) =>
       callback(false),
     );
@@ -237,7 +238,7 @@ else {
           request.method === 'commandPreferencesMigrate' ||
           request.method === 'commandInvoked'
         ) {
-          const settings = (commandSettings ??= new CommandSettings(app.getPath('userData')));
+          const settings = (appSettings ??= new AppSettings(app.getPath('userData')));
           try {
             const state =
               request.method === 'commandKeymapSave'
@@ -255,6 +256,24 @@ else {
               code: 'COMMAND_SETTINGS',
               message:
                 'Command settings could not be saved. Check the keymap and settings file, then reopen the dialog or restart.',
+            };
+          }
+        }
+        if (request.method === 'appearancePreferences' || request.method === 'appearanceSave') {
+          const settings = (appSettings ??= new AppSettings(app.getPath('userData')));
+          try {
+            const state =
+              request.method === 'appearanceSave'
+                ? await settings.saveAppearance(request.mode, request.revision)
+                : await settings.readAppearance();
+            nativeTheme.themeSource = state.mode;
+            return resultSchema.parse({ kind: 'appearancePreferences', state });
+          } catch {
+            return {
+              kind: 'error',
+              code: 'APPEARANCE_SETTINGS',
+              message:
+                'Appearance could not be saved. Reopen Appearance or check the settings file before retrying.',
             };
           }
         }
@@ -977,6 +996,8 @@ else {
         providerRequests.get(id)?.abort();
       }
     });
+    appSettings ??= new AppSettings(app.getPath('userData'));
+    nativeTheme.themeSource = (await appSettings.readAppearance()).mode;
     startService();
     createWindow();
     app.on('activate', () => {
@@ -993,7 +1014,7 @@ else {
     providers?.deviceCancel();
     providers?.gitlabCancel();
     for (const controller of providerRequests.values()) controller.abort();
-    if ((!service && !providers && !commandSettings) || quitting) return;
+    if ((!service && !providers && !appSettings) || quitting) return;
     event.preventDefault();
     quitting = true;
     const child = service;
@@ -1004,7 +1025,7 @@ else {
     const stopped = child
       ? new Promise<void>((resolve) => child.once('exit', () => resolve()))
       : Promise.resolve();
-    void Promise.all([stopped, providers?.idle(), commandSettings?.idle()]).finally(() => {
+    void Promise.all([stopped, providers?.idle(), appSettings?.idle()]).finally(() => {
       clearTimeout(deadline);
       app.quit();
     });
