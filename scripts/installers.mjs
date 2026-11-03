@@ -1,5 +1,6 @@
 import { build, Platform, Arch } from 'electron-builder';
 import { buildAppImage } from './appimage.mjs';
+import { buildDmg, verifyMacBundle } from './dmg.mjs';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
@@ -11,16 +12,18 @@ const run = promisify(execFile);
 process.umask(0o022);
 const { values } = parseArgs({
   options: {
-    target: { type: 'string', default: 'deb' },
+    target: { type: 'string', default: process.platform === 'darwin' ? 'dmg' : 'deb' },
     'test-metadata': { type: 'boolean', default: false },
     metadata: { type: 'string' },
   },
 });
 const target = values.target;
-if (process.platform !== 'linux' || !['x64', 'arm64'].includes(process.arch))
-  throw new Error('This installer pipeline currently supports native Linux x64/arm64 builds only');
-if (!['deb', 'rpm', 'AppImage'].includes(target))
-  throw new Error('Supported targets: deb, rpm, AppImage');
+if (!['linux', 'darwin'].includes(process.platform) || !['x64', 'arm64'].includes(process.arch))
+  throw new Error('This installer pipeline supports native Linux/macOS x64/arm64 builds only');
+if (!['deb', 'rpm', 'AppImage', 'dmg'].includes(target))
+  throw new Error('Supported targets: deb, rpm, AppImage, dmg');
+if (target === 'dmg' ? process.platform !== 'darwin' : process.platform !== 'linux')
+  throw new Error(`Target ${target} requires native ${target === 'dmg' ? 'macOS' : 'Linux'}`);
 if (values['test-metadata'] === Boolean(values.metadata))
   throw new Error('Choose --test-metadata for local validation or --metadata <JSON file>');
 const testMetadata = values['test-metadata'];
@@ -49,10 +52,15 @@ if (homepage.username || homepage.password || homepage.hash)
   throw new Error('Homepage must not contain credentials or a fragment');
 
 const root = resolve('.');
-const source = join(root, `release/OpenKraken-linux-${process.arch}`);
+const source = join(
+  root,
+  `release/OpenKraken-${process.platform}-${process.arch}`,
+  target === 'dmg' ? 'OpenKraken.app' : '',
+);
 const original = await payloadManifest(source);
-await verifyFuses(join(source, 'openkraken'));
+await verifyFuses(target === 'dmg' ? source : join(source, 'openkraken'));
 const { version } = JSON.parse(await readFile('package.json', 'utf8'));
+if (target === 'dmg') await verifyMacBundle(source, version);
 const staged = JSON.parse(await readFile('release/staging/package.json', 'utf8'));
 if (staged.version !== version || staged.desktopName !== 'openkraken.desktop')
   throw new Error('Rebuild the platform bundle with pnpm package before building installers');
@@ -60,19 +68,28 @@ const git = (await run('git', ['rev-parse', 'HEAD'])).stdout.trim();
 const dirty = Boolean((await run('git', ['status', '--porcelain'])).stdout.trim());
 const output = join(
   root,
-  `release/installers/linux-${process.arch}`,
+  `release/installers/${process.platform}-${process.arch}`,
   testMetadata ? 'test' : 'unsigned',
   target,
 );
 await mkdir(output, { recursive: true });
 const work = await mkdtemp(join(root, 'release/installer-work-'));
 try {
-  const prepackaged = join(work, 'app');
+  const prepackaged = join(work, target === 'dmg' ? 'OpenKraken.app' : 'app');
   await cp(source, prepackaged, { recursive: true, verbatimSymlinks: true });
   comparePayload(original, await payloadManifest(prepackaged));
   let artifacts;
   let appdir;
-  if (target === 'AppImage') {
+  if (target === 'dmg') {
+    artifacts = [
+      await buildDmg(
+        prepackaged,
+        work,
+        `OpenKraken-${version}-darwin-${process.arch}${testMetadata ? '-TEST-ONLY' : '-unsigned'}.dmg`,
+        version,
+      ),
+    ];
+  } else if (target === 'AppImage') {
     const built = await buildAppImage(
       prepackaged,
       work,
@@ -153,6 +170,8 @@ try {
   const payload = await payloadManifest(appdir ?? prepackaged);
   if (appdir) {
     comparePayload(original, await payloadManifest(join(appdir, 'usr/lib/openkraken')));
+  } else if (target === 'dmg') {
+    comparePayload(original, payload);
   } else {
     // FPM adds this profile for Ubuntu's user namespace policy. Nothing else may
     // change, particularly the ASAR, fuses, native modules or helper permissions.
@@ -162,7 +181,7 @@ try {
     comparePayload(original, unchanged);
   }
   comparePayload(original, await payloadManifest(source));
-  await verifyFuses(join(prepackaged, 'openkraken'));
+  await verifyFuses(target === 'dmg' ? prepackaged : join(prepackaged, 'openkraken'));
   if (artifacts.length !== 1 || !artifacts[0].endsWith(`.${target}`))
     throw new Error('Expected exactly one installer artifact');
   const artifact = artifacts[0];

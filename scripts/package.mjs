@@ -24,6 +24,7 @@ const outputs = await packager({
   dir: staging,
   out: 'release',
   name: 'OpenKraken',
+  appBundleId: 'org.openkraken.desktop',
   executableName: 'openkraken',
   electronVersion: '45.2.1',
   protocols: [{ name: 'OpenKraken repository links', schemes: ['openkraken'] }],
@@ -34,7 +35,7 @@ const outputs = await packager({
   overwrite: true,
 });
 for (const output of outputs) {
-  if (process.platform === 'linux') {
+  if (process.platform !== 'win32') {
     // Electron's ZIP permissions can be 0666/0777. Never ship an executable or
     // ASAR writable by other accounts, regardless of the builder's umask.
     async function normalizeModes(path) {
