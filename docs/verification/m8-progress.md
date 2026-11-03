@@ -1,6 +1,18 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. Bounded native reference paging now reduces the 50,000-ref fixture's first paint to 1.69–1.71 seconds; the 500 ms gate remains failing. Paging and scrolling meet their budgets. Native Debian 13 and Fedora 43 version upgrades are verified within their recorded scope. Native Windows/macOS acceptance and production release gates remain pending. This does not close the remaining [M6](m6-progress.md), [M7](m7-progress.md) or release scope.
+M8 remains in progress. AppImage recovery now waits for delayed descendants within the existing supervision window before restoring the predecessor. A still-running unconfirmed application remains an open recovery case. Large-reference first paint is 1.69–1.71 seconds, above the 500 ms gate, while paging and scrolling pass. Native Windows/macOS acceptance, production release gates and the remaining [M6](m6-progress.md)/[M7](m7-progress.md) scope are still open.
+
+## Delayed descendant exit during AppImage recovery
+
+The native restart helper (`6ac8498`) previously abandoned restoration two seconds after a launcher exited if another member of its process group was still running. It now keeps supervising until confirmation, all ordinary group members exit, or the existing 60-second deadline expires. The completed launcher channel is disabled so the wait remains event-driven. Verified restoration and retained-file checks are unchanged. See the updated [ADR 0086](../decisions/0086-appimage-startup-exit-recovery.md).
+
+A native three-second-child fixture first reproduced the missing restoration, then passed with the fix. Real 60-second tests cover both a still-running replacement and an exited launcher with a surviving child: the helper waits for its deadline, leaves the process alive and preserves the installed image/recovery files. This increment does **not** implement forced termination or automatic restoration of a process that remains hung, interrupted-recovery durability or predecessor-incompatible profile migration.
+
+Verification passed **770 native/unit tests in 98 files**, with **14 platform/tool-dependent skips** and Git LFS enabled, plus typechecking/build, full ESLint/Prettier, Go vet and Go formatting. The full desktop suite, graph performance, native Windows/macOS execution and DEB/RPM lifecycle gates were not repeated for this helper-only product change.
+
+The new `--delayed-descendant` packaged acceptance passed with **both FUSE and extract-and-run**, each using freshly built disposable 0.1.0/0.2.0 AppImages and a signed local HTTPS release fixture. It verifies that the exact predecessor starts only after the three-second child has stopped, the boot sequence is 0.1.0 → 0.2.0 → 0.1.0, the trusted release watermark remains intact, startup cleans the journal, and the recovery notice can be dismissed. Existing queued-quit/unsaved-work cancellation checks also passed within these runs. Both commands exited 0. CI now includes the new case in both modes; remote CI was not run. These local fixture signatures and same-source version changes do not establish production signing or profile-schema migration.
+
+Evidence: `/tmp/openkraken-m8-delayed-restart-{red,green,helper,unit,types,build,lint,vet,fuse,extract}.log`. The initial regression exited 1; all final verification commands exited 0. Disposable successful AppImage fixtures were cleaned by the acceptance runner. Production release artifacts were not regenerated or published.
 
 ## Bounded native reference paging
 

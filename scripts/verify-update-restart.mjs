@@ -21,10 +21,12 @@ let server, child, browser, mainPid;
 let completed = false;
 let launchOutput = '';
 const marker = join(root, 'started.json');
-const failStartup = process.argv.includes('--failed-startup');
+const delayedDescendant = process.argv.includes('--delayed-descendant');
+const failStartup = process.argv.includes('--failed-startup') || delayedDescendant;
 const helperUnavailable = process.argv.includes('--helper-unavailable');
 assert.ok(!(failStartup && helperUnavailable), 'Select one failure scenario');
 const failedMarker = join(root, 'failed-startup');
+const descendantMarker = join(root, 'delayed-descendant.json');
 async function waitForFile(path, timeout = 30000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
@@ -103,7 +105,21 @@ try {
       if (fixtureReturning) fixtureElectron.app.commandLine.appendSwitch('remote-debugging-port', '0');
       if (${failStartup && version === '0.2.0'}) {
         require('node:fs').writeFileSync(${JSON.stringify(failedMarker)}, 'replacement reached main');
+        if (${delayedDescendant}) {
+          const descendant = require('node:child_process').spawn('/bin/sleep', ['3'], { stdio: 'ignore' });
+          if (!descendant.pid) throw new Error('Delayed descendant did not start');
+          require('node:fs').writeFileSync(${JSON.stringify(descendantMarker)}, JSON.stringify({ pid: descendant.pid, started: Date.now() }));
+          descendant.unref();
+        }
         process.exit(23);
+      }
+      if (fixtureReturning && ${delayedDescendant}) {
+        const descendant = JSON.parse(require('node:fs').readFileSync(${JSON.stringify(descendantMarker)}, 'utf8'));
+        let stopped = false;
+        try { stopped = /\\) [ZXx] /.test(require('node:fs').readFileSync('/proc/' + descendant.pid + '/stat', 'utf8')); }
+        catch (error) { if (error.code !== 'ENOENT') throw error; stopped = true; }
+        if (!stopped || Date.now() - descendant.started < 2900) throw new Error('Predecessor launched before delayed descendant stopped');
+        require('node:fs').writeFileSync(${JSON.stringify(join(root, 'descendant-stopped'))}, 'verified before predecessor startup');
       }
       require('node:fs').appendFileSync(${JSON.stringify(join(root, 'boot.log'))}, JSON.stringify({ version: ${JSON.stringify(version)}, pid: process.pid, executable: process.execPath, image: process.env.APPIMAGE, appdir: process.env.APPDIR }) + '\\n');
       const fixtureRelaunch = fixtureElectron.app.relaunch.bind(fixtureElectron.app);
@@ -344,6 +360,11 @@ try {
     await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
     const started = JSON.parse(await waitForFile(marker));
     assert.equal(started.version, failStartup ? '0.1.0' : '0.2.0');
+    if (delayedDescendant)
+      assert.equal(
+        await readFile(join(root, 'descendant-stopped'), 'utf8'),
+        'verified before predecessor startup',
+      );
     assert.equal(started.state.kind, 'updates');
     assert.equal(started.state.state.error, null);
     assert.equal(await sha256(target), failStartup ? originalDigest : await sha256(artifact));
@@ -375,9 +396,11 @@ try {
     }
     await delay(500);
     console.log(
-      failStartup
-        ? 'Packaged AppImage: failed replacement startup restored and launched the exact predecessor; startup cleanup and release watermark retention passed.'
-        : 'Packaged AppImage: signed HTTPS download, cancelled unsaved-work restart, accepted install, new-version launch and recovery acknowledgement passed.',
+      delayedDescendant
+        ? 'Packaged AppImage: waited for the delayed descendant, restored the exact predecessor, and retained the release watermark.'
+        : failStartup
+          ? 'Packaged AppImage: failed replacement startup restored and launched the exact predecessor; startup cleanup and release watermark retention passed.'
+          : 'Packaged AppImage: signed HTTPS download, cancelled unsaved-work restart, accepted install, new-version launch and recovery acknowledgement passed.',
     );
   }
   completed = true;
