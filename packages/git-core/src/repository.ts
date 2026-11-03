@@ -1,5 +1,6 @@
 import { LfsTransfers, type LfsPullPlan } from './lfs-transfers.js';
 import { lfsState } from './lfs.js';
+import { LfsSetup, type LfsSetupPlan } from './lfs-setup.js';
 import type { ProviderGitTarget, ProviderRemoteAuthorization } from '@openkraken/ipc-contract';
 import { createHash } from 'node:crypto';
 import { access, readdir, realpath, readFile, stat } from 'node:fs/promises';
@@ -67,6 +68,7 @@ export class RepositoryService {
   private queues = new Map<string, RepositoryQueue>();
   private histories = new Map<string, HistoryCursor>();
   private lfsPullPlans = new Map<string, LfsPullPlan>();
+  private lfsSetupPlans = new Map<string, LfsSetupPlan>();
   private submoduleUpdates = new Map<string, SubmoduleUpdatePlan>();
   private worktreePrunes = new Map<string, WorktreePrunePlan>();
   private processPool = new RepositoryQueue(3);
@@ -894,6 +896,26 @@ export class RepositoryService {
       ),
     };
   }
+  private lfsInstaller(id: string) {
+    const repo = this.repositories.get(id);
+    if (!repo) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
+    return {
+      repo,
+      manager: new LfsSetup(
+        repo,
+        (args, options) => this.run(args, { ...options, cwd: repo.path }),
+        this.lfsSetupPlans,
+      ),
+    };
+  }
+  lfsSetupPreview(id: string, skipSmudge: boolean, signal?: AbortSignal) {
+    const { repo, manager } = this.lfsInstaller(id);
+    return this.queue(repo.commonDir).run(false, () => manager.preview(skipSmudge, signal), signal);
+  }
+  lfsSetup(id: string, token: string, signal?: AbortSignal) {
+    const { repo, manager } = this.lfsInstaller(id);
+    return this.queue(repo.commonDir).run(true, () => manager.install(token, signal), signal);
+  }
   lfsLocks(id: string, remote: string, signal?: AbortSignal, authentication?: NodeJS.ProcessEnv) {
     const { repo, manager } = this.lfsTransfers(id);
     // Serialize native LFS network commands and any local metadata they may write.
@@ -1086,6 +1108,7 @@ export class RepositoryService {
     this.worktreePrunes.clear();
     this.submoduleUpdates.clear();
     this.lfsPullPlans.clear();
+    this.lfsSetupPlans.clear();
     await Promise.all([...this.histories.values()].map((cursor) => cursor.close()));
     this.histories.clear();
     await this.cache?.flush();

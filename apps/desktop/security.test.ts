@@ -7,6 +7,28 @@ import {
   resultSchema,
   parseUserTheme,
 } from '../../packages/ipc-contract/src/index.js';
+test('LFS setup accepts a checkout mode for review and only a token for confirmation', () => {
+  const base = { id: '00000000-0000-4000-8000-000000000001', repoId: 'a'.repeat(64) };
+  const preview = { ...base, method: 'lfsSetupPreview', skipSmudge: true };
+  const install = { ...base, method: 'lfsSetup', token: base.id };
+  for (const schema of [requestSchema, serviceRequestSchema]) {
+    expect(schema.safeParse(preview).success).toBe(true);
+    expect(schema.safeParse(install).success).toBe(true);
+    expect(schema.safeParse({ ...preview, skipSmudge: 'true' }).success).toBe(false);
+    for (const fields of [
+      { configPath: '/outside' },
+      { hooksPath: '/outside' },
+      { force: true },
+      { global: true },
+      { args: ['--force'] },
+    ]) {
+      expect(schema.safeParse({ ...preview, ...fields }).success).toBe(false);
+      expect(schema.safeParse({ ...install, ...fields }).success).toBe(false);
+    }
+    expect(schema.safeParse({ ...install, skipSmudge: false }).success).toBe(false);
+    expect(schema.safeParse({ ...install, token: 'invalid' }).success).toBe(false);
+  }
+});
 test('LFS lock refresh accepts only a configured remote identity and no caller network controls', () => {
   const request = {
     id: '00000000-0000-4000-8000-000000000001',

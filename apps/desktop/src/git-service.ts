@@ -351,6 +351,15 @@ async function executeGit(
       kind: 'lfsPullPreview',
       preview: await git.lfsPullPreview(request.repoId, request.remote, signal),
     };
+  if (request.method === 'lfsSetupPreview')
+    return {
+      kind: 'lfsSetupPreview',
+      preview: await git.lfsSetupPreview(request.repoId, request.skipSmudge, signal),
+    };
+  if (request.method === 'lfsSetup') {
+    await git.lfsSetup(request.repoId, request.token, signal);
+    return { kind: 'lfsInstalled' };
+  }
   if (request.method === 'lfsPull')
     return {
       kind: 'lfsState',
@@ -593,6 +602,7 @@ parent.on('message', (event) => {
   const controller = new AbortController();
   active.set(request.id, controller);
   const writing = [
+    'lfsSetup',
     'lfsLocks',
     'lfsPull',
     'updateSubmodules',

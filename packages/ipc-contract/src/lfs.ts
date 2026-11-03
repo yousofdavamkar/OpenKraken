@@ -46,7 +46,33 @@ export const lfsLocksSchema = z
   })
   .strict();
 export type LfsLocks = z.infer<typeof lfsLocksSchema>;
+export const lfsSetupPreviewSchema = z
+  .object({
+    token: z.string().uuid(),
+    scope: z.enum(['repository', 'worktree']),
+    configPath: path,
+    hooksPath: path,
+    skipSmudge: z.boolean(),
+  })
+  .strict();
+export type LfsSetupPreview = z.infer<typeof lfsSetupPreviewSchema>;
 export const lfsRequests = [
+  z
+    .object({
+      id: z.string().uuid(),
+      method: z.literal('lfsSetupPreview'),
+      repoId: z.string().regex(/^[0-9a-f]{64}$/),
+      skipSmudge: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      method: z.literal('lfsSetup'),
+      repoId: z.string().regex(/^[0-9a-f]{64}$/),
+      token: z.string().uuid(),
+    })
+    .strict(),
   z
     .object({
       id: z.string().uuid(),

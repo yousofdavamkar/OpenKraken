@@ -4,6 +4,7 @@ import {
   lfsTransferRequests,
   lfsPullPreviewSchema,
   lfsLocksSchema,
+  lfsSetupPreviewSchema,
 } from './lfs.js';
 export * from './lfs.js';
 import { commandIdSchema, commandUsageSchema, commandPreferencesSchema } from './commands.js';
@@ -1825,6 +1826,8 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('lfsPullPreview'), preview: lfsPullPreviewSchema }).strict(),
   z.object({ kind: z.literal('lfsState'), state: lfsStateSchema }).strict(),
   z.object({ kind: z.literal('lfsLocks'), state: lfsLocksSchema }).strict(),
+  z.object({ kind: z.literal('lfsSetupPreview'), preview: lfsSetupPreviewSchema }).strict(),
+  z.object({ kind: z.literal('lfsInstalled') }).strict(),
   z.object({ kind: z.literal('submodules'), state: submoduleStateSchema }).strict(),
   z
     .object({
