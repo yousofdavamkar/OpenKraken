@@ -38,7 +38,8 @@ import type {
   Snapshot,
 } from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
-import { HistoryParser, RefsParser, StatusParser, HISTORY_FORMAT, REF_FORMAT } from './parsers.js';
+import { HistoryParser, StatusParser, HISTORY_FORMAT } from './parsers.js';
+import { ReferenceReader } from './reference-reader.js';
 import { HistoryCache } from './history-cache.js';
 import { RepositoryPreferences } from './preferences.js';
 import { HistoryCursor } from './history.js';
@@ -75,6 +76,7 @@ export class RepositoryService {
   private worktreePrunes = new Map<string, WorktreePrunePlan>();
   private processPool = new RepositoryQueue(3);
   private preferences: RepositoryPreferences;
+  private referenceReader = new ReferenceReader((args, options) => this.run(args, options));
   private dataDir?: string;
   private editorHelper?: string;
   private cache?: HistoryCache;
@@ -280,14 +282,9 @@ export class RepositoryService {
       async () => {
         const view = requestedView ?? (await this.preferences.load(id));
         const repository = refresh ? await this.open(known.path, signal) : known;
-        const refsParser = new RefsParser(),
-          statusParser = new StatusParser();
-        const [, , worktrees] = await Promise.all([
-          this.run(['for-each-ref', `--format=${REF_FORMAT}`], {
-            cwd: repository.path,
-            signal,
-            onStdout: (b) => refsParser.push(b),
-          }),
+        const statusParser = new StatusParser();
+        const [refs, , worktrees] = await Promise.all([
+          this.referenceReader.read(repository.path, signal),
           repository.isBare
             ? Promise.resolve()
             : this.run(
@@ -305,8 +302,7 @@ export class RepositoryService {
             present ? this.worktreeManager(id).manager.list(signal) : undefined,
           ),
         ]);
-        const refs = refsParser.finish(),
-          status = statusParser.finish();
+        const status = statusParser.finish();
         // Keep missing ref preferences: a deleted solo ref must not silently reveal all history.
         const visible = refs.filter((r) =>
           view.soloRef ? r.name === view.soloRef : !view.hiddenRefs.includes(r.name),
