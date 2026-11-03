@@ -1,5 +1,6 @@
 import { basename, isAbsolute } from 'node:path';
 import { userInfo } from 'node:os';
+import { accessSync, constants, statSync } from 'node:fs';
 import { spawn, type IPty } from 'node-pty';
 import { terminalRequestSchema, terminalStartSchema } from '@openkraken/ipc-contract';
 
@@ -48,6 +49,8 @@ parent.on('message', ({ data }) => {
       )
         delete env[name];
     try {
+      accessSync(shell, process.platform === 'win32' ? constants.F_OK : constants.X_OK);
+      if (!statSync(shell).isFile()) throw new Error('Invalid shell');
       terminal = spawn(shell, [], {
         name: 'xterm-256color',
         cols: parsed.data.cols,

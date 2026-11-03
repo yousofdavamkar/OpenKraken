@@ -72,3 +72,36 @@ test('the terminal panel preserves its session while hidden and keeps keyboard i
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a missing default shell reports a recoverable terminal error without blocking repository use', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-terminal-missing-shell-'));
+  const repository = createFixture(join(root, 'repo'), 'linear', 3);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+    env: {
+      ...process.env,
+      ...(process.platform === 'win32'
+        ? { ComSpec: join(root, 'missing-shell') }
+        : { SHELL: join(root, 'missing-shell') }),
+    },
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+      dialog.showMessageBoxSync = () => 1;
+    }, repository);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+    const panel = page.getByRole('region', { name: 'Terminal', exact: true });
+    await expect(panel.getByRole('status')).toHaveText('Terminal unavailable');
+    await expect(panel.getByRole('alert')).toContainText('default shell');
+    await panel.getByRole('button', { name: 'Close terminal', exact: true }).click();
+    await expect(panel).toHaveCount(0);
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect(page.getByTestId('commit-count')).toHaveText('3 commits');
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

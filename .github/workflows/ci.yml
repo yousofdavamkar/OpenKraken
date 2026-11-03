@@ -18,6 +18,9 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - if: runner.os == 'Linux'
+        name: Native terminal build and picker automation
+        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
@@ -34,6 +37,8 @@ jobs:
         run: xvfb-run -a pnpm exec playwright test tests/e2e/gitea.test.ts
       - run: pnpm package
       - if: runner.os == 'Linux'
+        env:
+          OPENKRAKEN_XDOTOOL: xdotool
         run: xvfb-run -a pnpm smoke:package
       - if: runner.os != 'Linux'
         run: pnpm smoke:package

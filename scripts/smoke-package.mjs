@@ -1,4 +1,4 @@
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 import { spawn, execFile } from 'node:child_process';
 import { createServer } from 'node:net';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -13,9 +13,24 @@ const executable =
     ? join(directory, 'OpenKraken.app/Contents/MacOS/openkraken')
     : join(directory, process.platform === 'win32' ? 'openkraken.exe' : 'openkraken');
 const profile = await mkdtemp(join(tmpdir(), 'openkraken-package-'));
-const child = spawn(executable, ['--remote-debugging-port=0', `--user-data-dir=${profile}`], {
-  stdio: ['ignore', 'ignore', 'pipe'],
-});
+const nativePicker = process.platform === 'linux' && !!process.env.OPENKRAKEN_XDOTOOL;
+const child = spawn(
+  executable,
+  [
+    '--remote-debugging-port=0',
+    `--user-data-dir=${profile}`,
+    ...(nativePicker ? ['--ozone-platform=x11', '--xdg-portal-required-version=999'] : []),
+  ],
+  {
+    stdio: ['ignore', 'ignore', 'pipe'],
+    env: {
+      ...process.env,
+      ...(process.platform === 'linux' && process.env.OPENKRAKEN_XDOTOOL
+        ? { SHELL: '/bin/sh' }
+        : {}),
+    },
+  },
+);
 let browser;
 try {
   const endpoint = await new Promise((resolve, reject) => {
@@ -117,6 +132,62 @@ try {
     await new Promise((resolve) => server.close(resolve));
   }
   await mkdir('test-results', { recursive: true });
+  if (process.platform === 'linux' && process.env.OPENKRAKEN_XDOTOOL) {
+    const repository = join(profile, 'terminal-repository');
+    await mkdir(repository);
+    await promisify(execFile)('git', ['init', repository]);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    const xdo = (...args) =>
+      promisify(execFile)(process.env.OPENKRAKEN_XDOTOOL, args, { timeout: 10000 });
+    const windows = await xdo('search', '--sync', '--onlyvisible', '--name', '^Open repository$');
+    const picker = windows.stdout.trim().split('\n').at(-1);
+    if (!picker || !/^\d+$/.test(picker)) throw new Error('Native repository picker was not found');
+    await xdo('windowfocus', '--sync', picker);
+    await xdo('mousemove', '--window', picker, '500', '400', 'click', '1');
+    await xdo('key', '--clearmodifiers', 'ctrl+l');
+    await xdo('key', '--clearmodifiers', 'ctrl+a');
+    await xdo('type', '--clearmodifiers', '--delay', '1', repository);
+    await xdo('key', '--clearmodifiers', 'alt+o');
+    await expect(
+      page.getByRole('heading', { name: 'terminal-repository', exact: true }),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+    const panel = page.getByRole('region', { name: 'Terminal', exact: true });
+    await expect(panel.getByRole('status')).toContainText('Running');
+    const input = panel.getByRole('textbox', { name: 'Terminal input', exact: true });
+    await input.pressSequentially('echo packaged-pty-ok');
+    await input.press('Enter');
+    await expect
+      .poll(
+        async () =>
+          (
+            (await panel.locator('.xterm-accessibility-tree').innerText()).match(
+              /packaged-pty-ok/g,
+            ) ?? []
+          ).length,
+      )
+      .toBe(2);
+    await input.pressSequentially(
+      'stty -echo -icanon; dd bs=1 count=1 2>/dev/null | od -An -t u1; stty sane',
+    );
+    await input.press('Enter');
+    const mainWindow = (
+      await xdo('search', '--onlyvisible', '--pid', String(child.pid), '--name', '^OpenKraken$')
+    ).stdout
+      .trim()
+      .split('\n')
+      .at(-1);
+    await xdo('windowfocus', '--sync', mainWindow);
+    await xdo('key', '--clearmodifiers', 'ctrl+p');
+    await expect(page.getByRole('dialog', { name: 'Command palette' })).toHaveCount(0);
+    await expect(panel.locator('.xterm-accessibility-tree')).toContainText('16');
+    await page.screenshot({ path: 'test-results/packaged-terminal.png' });
+    await input.pressSequentially('exit 0');
+    await input.press('Enter');
+    await expect(panel.getByRole('status')).toHaveText('Exited with code 0');
+    await panel.getByRole('button', { name: 'Close terminal', exact: true }).click();
+    console.log('Packaged native terminal opened the repository, echoed input and exited cleanly.');
+  }
   await page.screenshot({ path: 'test-results/packaged-shell.png' });
   console.log(
     'Packaged ASAR app starts with hardened fuses; renderer isolation and native askpass/editor helpers passed.',
