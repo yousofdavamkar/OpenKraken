@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { LfsState, LfsPullPreview, LfsLocks } from '@openkraken/ipc-contract';
+import type { LfsState, LfsPullPreview, LfsLocks, LfsSetupPreview } from '@openkraken/ipc-contract';
 import { CommandButton } from './commands.js';
 import { useRepository, waitForBackground } from './store.js';
 
@@ -10,6 +10,13 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
   const requestId = useRef<string | undefined>(undefined);
   const reviewed = useRef(false);
   const [review, setReview] = useState<LfsPullPreview>();
+  const [setupReview, setSetupReview] = useState<LfsSetupPreview>();
+  const [skipSmudge, setSkipSmudge] = useState(false);
+  const [settingUp, setSettingUp] = useState(false);
+  const setupButton = useRef<HTMLButtonElement>(null);
+  const cancelSetup = useRef<HTMLButtonElement>(null);
+  const setupReviewed = useRef(false);
+  const refreshFocus = useRef<HTMLButtonElement | null>(null);
   const [remotes, setRemotes] = useState<string[]>([]);
   const [remote, setRemote] = useState('');
   const [downloading, setDownloading] = useState(false);
@@ -39,9 +46,23 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
     if (review) cancelReview.current?.focus();
     else if (reviewed.current) reviewButton.current?.focus();
   }, [review, pending]);
+  useEffect(() => {
+    if (pending || !setupReviewed.current) return;
+    if (setupReview) cancelSetup.current?.focus();
+    else setupButton.current?.focus();
+  }, [setupReview, pending]);
+  useEffect(() => {
+    if (!pending && refreshFocus.current) {
+      refreshFocus.current.focus();
+      refreshFocus.current = null;
+    }
+  }, [pending]);
   const load = async () => {
+    setupReviewed.current = false;
+    reviewed.current = false;
     setServerLocks(undefined);
     setReview(undefined);
+    setSetupReview(undefined);
     setNotice('');
     setPending(true);
     setError('');
@@ -81,6 +102,7 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
     void load();
   }, []);
   const prepare = async () => {
+    setupReviewed.current = false;
     setPending(true);
     setError('');
     setNotice('');
@@ -98,6 +120,68 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
     } finally {
+      setPending(false);
+    }
+  };
+  const prepareSetup = async () => {
+    setPending(true);
+    setError('');
+    setNotice('');
+    setSetupReview(undefined);
+    setupReviewed.current = true;
+    reviewed.current = false;
+    try {
+      const result = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'lfsSetupPreview',
+        repoId,
+        skipSmudge,
+      });
+      if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'lfsSetupPreview') setSetupReview(result.preview);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPending(false);
+    }
+  };
+  const install = async () => {
+    if (!setupReview) return;
+    setPending(true);
+    setError('');
+    setNotice('');
+    setServerLocks(undefined);
+    try {
+      if (useRepository.getState().syncing) await waitForBackground();
+      if (useRepository.getState().snapshot?.repository.id !== repoId) return;
+      if (useRepository.getState().busy)
+        throw new Error('Wait for the current operation to finish');
+      const id = crypto.randomUUID();
+      requestId.current = id;
+      useRepository.setState({ busy: id });
+      setSettingUp(true);
+      const result = await window.openkraken.request({
+        id,
+        method: 'lfsSetup',
+        repoId,
+        token: setupReview.token,
+      });
+      if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'cancelled') throw new Error('LFS setup cancelled.');
+      if (result.kind === 'lfsInstalled')
+        setNotice('LFS setup complete. Existing files and tracking patterns were retained.');
+    } catch (error) {
+      setError(
+        `${error instanceof Error ? error.message : String(error)} Setup can leave partial configuration or hook changes. Review setup again before retrying.`,
+      );
+    } finally {
+      const id = requestId.current;
+      requestId.current = undefined;
+      setSettingUp(false);
+      setSetupReview(undefined);
+      if (id && useRepository.getState().busy === id) useRepository.setState({ busy: undefined });
+      if (id && useRepository.getState().snapshot?.repository.id === repoId)
+        await useRepository.getState().run({ id: crypto.randomUUID(), method: 'refresh', repoId });
       setPending(false);
     }
   };
@@ -145,6 +229,7 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
     }
   };
   const refreshLocks = async () => {
+    setupReviewed.current = false;
     setPending(true);
     setCheckingLocks(true);
     setServerLocks(undefined);
@@ -189,7 +274,8 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
       onCancel={(event) => {
         event.preventDefault();
         if (!pending) {
-          if (review) setReview(undefined);
+          if (setupReview) setSetupReview(undefined);
+          else if (review) setReview(undefined);
           else close();
         }
       }}
@@ -201,8 +287,52 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
       </p>
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
-      {pending && !downloading && !checkingLocks && !notice && !error && (
+      {pending && !downloading && !checkingLocks && !settingUp && !notice && !error && (
         <p role="status">Inspecting LFS state…</p>
+      )}
+      {settingUp && (
+        <div>
+          <p role="status">Setting up LFS…</p>
+          <button onClick={() => void useRepository.getState().cancel()}>Cancel setup</button>
+        </div>
+      )}
+      {setupReview && (
+        <fieldset disabled={pending}>
+          <legend>Review LFS setup</legend>
+          <p>
+            Install native LFS filters for{' '}
+            {setupReview.scope === 'worktree'
+              ? 'this worktree'
+              : 'this repository and its linked worktrees'}
+            .
+          </p>
+          <p>
+            {setupReview.skipSmudge
+              ? 'Leave LFS pointers during future checkouts. Use Review download to get content.'
+              : 'Download LFS content during future checkouts when needed.'}
+          </p>
+          <p>
+            Filter configuration: <code>{setupReview.configPath}</code>
+          </p>
+          <p>
+            Hook directory: <code>{setupReview.hooksPath}</code>
+          </p>
+          <p>
+            Install or update the four standard LFS hooks. This directory may be shared by other
+            worktrees or repositories. Custom hooks must be integrated manually.
+          </p>
+          <p>
+            Git LFS may also update repository-local LFS metadata. Global Git configuration,
+            tracking patterns and existing checkout files are retained. Setup does not download
+            objects and has no Undo.
+          </p>
+          <div className="dialog-actions">
+            <button onClick={() => void install()}>Apply LFS setup</button>
+            <button ref={cancelSetup} onClick={() => setSetupReview(undefined)}>
+              Cancel setup review
+            </button>
+          </div>
+        </fieldset>
       )}
       {checkingLocks && (
         <div>
@@ -361,7 +491,7 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
           LFS remote{' '}
           <select
             aria-label="LFS remote"
-            disabled={pending || !!review}
+            disabled={pending || !!review || !!setupReview}
             value={remote}
             onChange={(event) => {
               setRemote(event.target.value);
@@ -379,20 +509,52 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
         </label>
       )}
       <div className="dialog-actions">
+        <label>
+          <input
+            type="checkbox"
+            checked={skipSmudge}
+            disabled={pending || !!review || !!setupReview || !state?.available}
+            onChange={(event) => setSkipSmudge(event.target.checked)}
+          />{' '}
+          Leave pointers during checkout
+        </label>
         <button
-          disabled={pending || !!review || !state?.available || !remote}
-          onClick={() => void refreshLocks()}
+          ref={setupButton}
+          disabled={pending || !!review || !!setupReview || !state?.available}
+          onClick={() => void prepareSetup()}
+        >
+          Review local setup
+        </button>
+        <button
+          disabled={pending || !!review || !!setupReview || !state?.available || !remote}
+          onClick={(event) => {
+            refreshFocus.current = event.currentTarget;
+            void refreshLocks();
+          }}
         >
           Refresh server locks
         </button>
         <button
           ref={reviewButton}
-          disabled={pending || !!review || !state?.available || !state.files.length || !remote}
+          disabled={
+            pending ||
+            !!review ||
+            !!setupReview ||
+            !state?.available ||
+            !state.files.length ||
+            !remote
+          }
           onClick={() => void prepare()}
         >
           Review download
         </button>
-        <button disabled={pending || !!review} onClick={() => void load()}>
+        <button
+          disabled={pending || !!review || !!setupReview}
+          onClick={(event) => {
+            refreshFocus.current = event.currentTarget;
+            void load();
+          }}
+        >
           Refresh local state
         </button>
         <button disabled={pending} onClick={close}>
