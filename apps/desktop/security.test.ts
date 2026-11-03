@@ -1585,3 +1585,34 @@ test('native command context is bounded, main-only and cannot carry arbitrary ac
   ).toBe(false);
   expect(requestSchema.safeParse({ ...request, javascript: 'arbitrary code' }).success).toBe(false);
 });
+
+test('commit drafts are bounded main-only data with no caller-selected filesystem path', () => {
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    method: 'commitDraftSave',
+    repoId: 'opened-repository',
+    revision: null,
+    draft: { message: 'Text', amendMessage: '', amend: false, amendHead: null, sign: 'default' },
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  for (const patch of [
+    { path: '/tmp/arbitrary' },
+    { revision: '../arbitrary' },
+    { repoId: '' },
+    { draft: { ...request.draft, message: 'x'.repeat(65537) } },
+    { draft: { ...request.draft, amendMessage: 'x'.repeat(65537) } },
+    { draft: { ...request.draft, sign: 'shell' } },
+    { draft: { ...request.draft, token: 'secret' } },
+  ])
+    expect(requestSchema.safeParse({ ...request, ...patch }).success).toBe(false);
+  expect(
+    resultSchema.safeParse({ kind: 'commitDraft', state: { revision: null, draft: null } }).success,
+  ).toBe(true);
+  expect(
+    resultSchema.safeParse({
+      kind: 'commitDraft',
+      state: { revision: null, draft: null, path: '/tmp/arbitrary' },
+    }).success,
+  ).toBe(false);
+});

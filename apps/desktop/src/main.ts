@@ -1,4 +1,5 @@
 import { ActivityLog } from './activity-log.js';
+import { CommitDrafts } from './commit-drafts.js';
 import { CommandMenu } from './command-menu.js';
 import { TerminalHost } from './terminal-host.js';
 import { AppSettings } from './app-settings.js';
@@ -36,6 +37,7 @@ import type {
   ServiceRequest,
   AppearancePreferences,
   Request as DesktopRequest,
+  Repository,
 } from '@openkraken/ipc-contract';
 import { AvatarCache } from './avatars.js';
 import { fetchAvatar } from './avatar-provider.js';
@@ -61,6 +63,8 @@ let service: UtilityProcess | undefined;
 let avatars: AvatarCache | undefined;
 let appSettings: AppSettings | undefined;
 let activity: ActivityLog | undefined;
+let commitDrafts: CommitDrafts | undefined;
+const draftRepositories = new Map<string, Repository>();
 let activeAppearance: AppearancePreferences = {
   revision: 0,
   mode: 'dark',
@@ -281,6 +285,32 @@ else {
       )
         return await terminals.request(request, terminalRepository);
       try {
+        if (request.method === 'commitDraftRead' || request.method === 'commitDraftSave') {
+          const repository = draftRepositories.get(request.repoId);
+          if (!repository)
+            return {
+              kind: 'error',
+              code: 'UNKNOWN_REPOSITORY',
+              message: 'Open the repository before accessing its draft.',
+            };
+          const drafts = (commitDrafts ??= new CommitDrafts(app.getPath('userData')));
+          try {
+            return {
+              kind: 'commitDraft',
+              state:
+                request.method === 'commitDraftRead'
+                  ? await drafts.read(repository)
+                  : await drafts.save(repository, request.revision, request.draft),
+            };
+          } catch {
+            return {
+              kind: 'error',
+              code: 'DRAFT_UNAVAILABLE',
+              message:
+                'Draft storage could not be read or saved, or changed elsewhere. Keep a copy of your text before restarting OpenKraken. Existing draft files were retained.',
+            };
+          }
+        }
         if (request.method === 'activityRead' || request.method === 'activityClear')
           return {
             kind: 'activity',
@@ -1073,7 +1103,13 @@ else {
       if (format !== undefined && format !== 'json') throw new Error('Invalid response format');
       const request = requestSchema.parse(raw);
       const result = await handleRequest(request);
-      if (result.kind === 'snapshot') terminalRepository = result.snapshot.repository;
+      if (result.kind === 'snapshot') {
+        terminalRepository = result.snapshot.repository;
+        draftRepositories.delete(result.snapshot.repository.id);
+        draftRepositories.set(result.snapshot.repository.id, result.snapshot.repository);
+        if (draftRepositories.size > 128)
+          draftRepositories.delete(draftRepositories.keys().next().value!);
+      }
       // Serialize after validation and before both renderer IPC and isolated-world copying.
       return format === 'json' ? JSON.stringify(result) : result;
     });
@@ -1110,7 +1146,7 @@ else {
     providers?.deviceCancel();
     providers?.gitlabCancel();
     for (const controller of providerRequests.values()) controller.abort();
-    if ((!service && !providers && !appSettings) || quitting) return;
+    if ((!service && !providers && !appSettings && !commitDrafts) || quitting) return;
     event.preventDefault();
     quitting = true;
     const child = service;
@@ -1121,7 +1157,13 @@ else {
     const stopped = child
       ? new Promise<void>((resolve) => child.once('exit', () => resolve()))
       : Promise.resolve();
-    void Promise.all([stopped, providers?.idle(), appSettings?.idle(), terminals.close()])
+    void Promise.all([
+      stopped,
+      providers?.idle(),
+      appSettings?.idle(),
+      commitDrafts?.idle(),
+      terminals.close(),
+    ])
       .then(() => activity?.idle())
       .finally(() => {
         clearTimeout(deadline);

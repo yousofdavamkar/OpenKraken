@@ -1,4 +1,6 @@
 import { activityRequests, activityStateSchema, activityEventSchema } from './activity.js';
+import { commitDraftRequests, commitDraftStateSchema } from './commit-drafts.js';
+export * from './commit-drafts.js';
 export * from './activity.js';
 import {
   lfsRequests,
@@ -1241,6 +1243,7 @@ const workingRequests = [
     .strict(),
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  ...commitDraftRequests,
   ...activityRequests,
   worktreeAddRequest,
   ...terminalRequests,
@@ -1820,6 +1823,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('commitDraft'), state: commitDraftStateSchema }).strict(),
   z.object({ kind: z.literal('activity'), state: activityStateSchema }).strict(),
   z
     .object({ kind: z.literal('worktreePrunePreview'), preview: worktreePrunePreviewSchema })
