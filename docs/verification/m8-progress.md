@@ -1,6 +1,18 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The current checkpoint adds signed release checks and verified downloads, following local diagnostics, repository links, diagnostic redaction, security boundary acceptance, opt-in reporting, Linux installer generation, crash recovery and local commit drafts. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+M8 remains in progress. The current checkpoint adds an AppImage installation file transaction, following signed release checks/downloads, local diagnostics, repository links, diagnostic redaction, security boundary acceptance, opt-in reporting, Linux installer generation, crash recovery and local commit drafts. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+
+## AppImage installation transaction
+
+The file adapter (`c51af0c`) stages a bounded replacement next to an owned AppImage, rechecks its signed digest/size and format/architecture, writes a durable recovery journal, retains the old inode, and atomically replaces the original filename. Startup acknowledgement can remove the retained image only when the installed hash and running version match. Explicit rollback restores the exact retained predecessor and refuses an externally changed target. Interrupted staging and cleanup are recoverable; unknown, redirected or invalid files are preserved. See [ADR 0083](../decisions/0083-appimage-update-file-transactions.md).
+
+This adapter is **not yet wired to the desktop install/restart flow**. The UI continues to report installation unavailable. Target discovery, signed-release/cache revalidation at the actual handoff, busy/unsaved-work handling, accepted shutdown/relaunch, startup failure detection and acknowledgement remain necessary. No installed user application was replaced; native acceptance uses disposable, locally built fixtures.
+
+The native fixture (`a359a42`) passed actual replacement, predecessor restoration, retry and acknowledgement through both FUSE and extract-and-run runtimes (`NATIVE_EXIT=0`). While replacement happened, the old process continued reading its original mounted/extracted files. New launches observed the expected replacement and predecessor versions. This proves the file/runtime transaction for those fixtures, not Electron relaunch or complete automatic update acceptance. CI now invokes the native check; remote execution is unverified.
+
+The final native/unit run passed **642 tests in 90 files** with Git LFS enabled (`UNIT_EXIT=0`), plus typechecking and full ESLint/Prettier. Six new transaction tests cover retained images/acknowledgement, rollback, interrupted copy/journal/cleanup, cancellation, corruption, changed targets, wrong architecture, symlinks/hard links, writable locations and unexpected recovery files. Failing tests exposed interrupted copy recovery, premature backup cleanup when unknown files were present, cancelled cleanup, and a partially written journal; each was fixed before the final passing run. No desktop UI/runtime integration changed, so Electron regressions and package generation were not rerun for this adapter-only increment.
+
+Evidence: `/tmp/openkraken-appimage-install-{red,green,lint,unit,native-journal}.log`, `/tmp/openkraken-appimage-{recovery,rollback,journal}-red.log`. Physical power-loss recovery, other filesystems/architectures, Electron restart/failure detection and native non-AppImage installation remain unverified.
 
 ## Signed update checks and downloads
 
