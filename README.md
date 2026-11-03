@@ -237,6 +237,12 @@ Native command supervision stops active Git commands and ordinary descendants if
 
 If the Git service stops while a native document editor is open, the editor retains your text for copying and disables continuation of the interrupted request. **Discard unsaved draft** closes it explicitly; Escape keeps it open. Closing the app asks about unsaved changes. This recovery text stays only in the current renderer, so copy it before discarding or restarting. Authentication prompts are dismissed, and stale replies cannot resume the old request. See [interrupted native prompts](docs/decisions/0073-interrupted-native-prompts.md).
 
+## Local diagnostics
+
+**Diagnostics** shows local operational records and lets you select them for copying, refresh, or clear the logs. Records include app/runtime information, operation names, timings, outcomes and fixed failure categories. Request payloads, repository paths/content, credentials, URLs and native output are excluded. Logs are never uploaded automatically and are separate from opt-in crash reports.
+
+Three rotating JSON files under the application's user-data `diagnostics/` directory retain at most 768 records. Clearing removes retained supported files but does not turn off subsequent logging. Unsafe, corrupt or externally changed storage stops logging for that session while Git operations remain usable; repair the files/permissions and restart to resume. See [ADR 0081](docs/decisions/0081-local-rotating-diagnostics.md) for retention and crash limits.
+
 ## Terminal (M7 in progress)
 
 Open a repository and choose **Terminal** from the toolbar or command palette. The panel starts your default shell in that repository. **Hide terminal** keeps the session and scrollback; **Terminal** shows and focuses it again. Press **F6** to move keyboard focus to the terminal controls. **Close terminal** asks before ending a live shell. Changing the graph's repository does not change an existing shell's directory.

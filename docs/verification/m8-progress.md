@@ -1,6 +1,18 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The current checkpoint implements allowlisted local repository links with explicit review, following diagnostic redaction, security boundary acceptance, opt-in reporting, Linux installer generation, crash recovery and local commit drafts. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+M8 remains in progress. The current checkpoint adds bounded local diagnostic files and review/clearing, following repository links, diagnostic redaction, security boundary acceptance, opt-in reporting, Linux installer generation, crash recovery and local commit drafts. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+
+## Local rotating diagnostics
+
+The main-owned logger (`0fb675f`) records fixed lifecycle/failure categories and allowlisted operation outcomes/timings. It excludes request payloads, paths, URLs, credentials, repository content, native output and exception values. Unknown error codes/reasons are replaced by fixed categories. No arbitrary log-write IPC exists, and logs are not uploaded or attached to crash reports. The desktop viewer (`4a2ead4`) supports refresh, selection for copying and clearing. See [ADR 0081](../decisions/0081-local-rotating-diagnostics.md).
+
+Three private JSON segments retain at most 768 records. Writes use a single bounded scratch file, sync and atomic replacement; interrupted scratch writes are discarded safely at restart. An event queue cap records omissions rather than growing memory indefinitely. Unsupported, corrupt, externally changed, non-private or redirected storage stops logging while preserving affected files and allowing application operations to continue. Normal shutdown flushes under the existing app deadline; forced termination or power loss can still lose pending records.
+
+Verification passed **623 native/unit tests in 84 files** with Git LFS enabled, followed by eight focused privacy/storage/contract checks after tightening fixture permissions, plus typechecking/build and full ESLint/Prettier. **24 targeted Electron tests** passed, including actual hook-output exclusion on disk and in the viewer, clearing/restart, renderer crash/JavaScript categories, corrupt-storage operation continuity, opt-in reporting against the TLS fixture, service/main/PTY death, isolation and graph behavior. The first-paint measurement was **263.8 ms** for 2,000 commits; 5,000-commit paging measured **163.7 ms**, and 12,000-row scrolling **16.7 ms p95**. All six graph goldens were unchanged. The diagnostics screenshot was visually inspected.
+
+A fresh unsigned Linux x64 bundle passed packaging/fuse verification (`PACKAGE_EXIT=0`) and packaged smoke (`SMOKE_EXIT=0`). The smoke now requires successful local diagnostic initialization and also checks default-off reporting, native helpers, renderer isolation, native folder selection, Bash/PTY keyboard delivery and exit, and cold/resident repository-link consent. Installer artifacts were not regenerated; those remain from the preceding URI checkpoint.
+
+The initial missing implementation and orphan-temporary-file regressions failed before their fixes. A POSIX link test initially used Playwright's skip syntax under Vitest; correcting the harness exposed and verified the intended link checks. Evidence: `/tmp/openkraken-diagnostics-{red,green,recovery-red-final,storage-final,unit-final,unit-final-focused,lint-final,release-build,e2e,regression,package,smoke}.log`. This is Linux evidence; native Windows/macOS ACL/filesystem acceptance, power-loss durability, the full desktop suite and broader release readiness remain open.
 
 ## Local repository links
 
@@ -12,7 +24,7 @@ A fresh unsigned Linux x64 bundle passed packaging/fuse verification and package
 
 Fresh unsigned test-only DEB, RPM and AppImage artifacts all built successfully. Their scheme metadata, argument-forwarding launch entries, complete payloads and fuses passed verification, followed by packaged desktop/native-helper/terminal/link smoke checks with explicit zero exit statuses. AppImage passed both normal FUSE and extract-and-run modes. The initial DEB build rejected a direct `Exec` override; generation now uses electron-builder's supported protocol configuration. The initial AppImage run completed UI checks but failed on an asynchronously disappearing FUSE mount during temporary-profile removal. After confirming that the process and mount were gone, cleanup gained bounded filesystem retries (at most 750 ms); the application exit deadline remains unchanged. Both subsequent AppImage modes completed normally. The failed run is not passing acceptance evidence. Installer install/upgrade/remove lifecycle was not rerun for this increment.
 
-Evidence: `/tmp/openkraken-uri-{red,green,contract-final,unit,lint-final,final-build,e2e,regression,package,smoke}.log`, `/tmp/openkraken-uri-installer-{deb,rpm,AppImage}-final.log`, `/tmp/openkraken-uri-{deb,rpm}-smoke.log`, `/tmp/openkraken-uri-AppImage-smoke-final.log` and `/tmp/openkraken-uri-extract-smoke.log`. Full desktop coverage, native Windows/macOS dispatch, rotating diagnostic logs, signed updates and broader release acceptance remain open.
+Evidence: `/tmp/openkraken-uri-{red,green,contract-final,unit,lint-final,final-build,e2e,regression,package,smoke}.log`, `/tmp/openkraken-uri-installer-{deb,rpm,AppImage}-final.log`, `/tmp/openkraken-uri-{deb,rpm}-smoke.log`, `/tmp/openkraken-uri-AppImage-smoke-final.log` and `/tmp/openkraken-uri-extract-smoke.log`. Rotating diagnostics are implemented in the subsequent increment above. Full desktop coverage, native Windows/macOS dispatch, signed updates and broader release acceptance remain open.
 
 ## Security boundary acceptance and diagnostic redaction
 
@@ -26,7 +38,7 @@ A fresh unsigned Linux x64 bundle passed packaging/fuse verification (`PACKAGE_E
 
 Evidence: `/tmp/openkraken-security-diagnostics-{red,green}.log`, `/tmp/openkraken-security-userinfo-red.log`, `/tmp/openkraken-security-focused.log`, `/tmp/openkraken-security-socket-final.log`, `/tmp/openkraken-security-unit-final.log`, `/tmp/openkraken-security-lint.log`, `/tmp/openkraken-security-final-build.log`, `/tmp/openkraken-security-regression.log`, `/tmp/openkraken-security-package.log` and `/tmp/openkraken-security-smoke.log`.
 
-URI handling was absent at this checkpoint; the subsequent increment above adds its implementation and bounded Linux evidence. Rotating diagnostic files remain unimplemented. These tests do not establish Windows named-pipe ACL behavior, macOS execution, live reporting-service acceptance or complete release readiness. Signed updates, native platform acceptance and the other M8 release requirements remain unfinished.
+URI handling and rotating diagnostics were absent at this checkpoint; subsequent increments above add those implementations and bounded Linux evidence. These tests do not establish Windows named-pipe ACL behavior, macOS execution, live reporting-service acceptance or complete release readiness. Signed updates, native platform acceptance and the other M8 release requirements remain unfinished.
 
 ## Interrupted sessions and JavaScript reports
 
