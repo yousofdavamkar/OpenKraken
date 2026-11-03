@@ -1,6 +1,18 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The current checkpoint adds passing native Debian 13 version-upgrade acceptance alongside Fedora's existing gate. Guarded MSI install/repair/upgrade/removal and OS URI acceptance are implemented and configured in CI, but native Windows execution remains pending. The DMG pipeline also awaits native macOS acceptance. Existing Linux packaging, AppImage restart/recovery and opt-in automatic checks remain implemented. This does not close the remaining [M6](m6-progress.md), [M7](m7-progress.md) or release scope.
+M8 remains in progress. The current checkpoint bounds the large-reference sidebar and restores paging/scrolling budgets on a 50,000-ref Linux fixture; its first paint remains above budget. Native Debian 13 and Fedora 43 version upgrades are verified within their recorded scope. Native Windows/macOS acceptance and production release gates remain pending. This does not close the remaining [M6](m6-progress.md), [M7](m7-progress.md) or release scope.
+
+## Large-reference performance
+
+The bounded sidebar (`a2e40de`) keeps existing reference controls and actions, adds name filtering for large repositories, and retains focused rows so an active dialog survives offscreen scrolling. On full Linux history with 50,000 distinct refs, mounted reference rows fell from 50,000 to seven, renderer working set from about 2.63 GiB to 624 MiB, and scroll p95 from 166.7 ms to 16.7 ms. All three 5,000-commit pages now meet the 300 ms budget. **First paint remains red at 1,929.2 ms against 500 ms**, with native reference enumeration the largest measured backend cost. No reference metadata, history roots or budgets were removed or relaxed. See [ADR 0094](../decisions/0094-bounded-reference-sidebar.md) and the [report, raw measurements and fixture recipe](m8-reference-performance.md).
+
+The single-ref full Linux fixture first failed at 600 ms, then passed a repeat and a predetermined five-run sample at 343.3–371.8 ms. The first outlier remains unexplained; all records are retained. These are fresh app profiles with OS caches not cleared. A JSON bridge experiment did not resolve startup and was reverted.
+
+Typechecking/build, full ESLint/Prettier and **25 targeted Electron tests** passed, including large-sidebar filtering/keyboard/native rename, offscreen dialog retention, reference drag/drop, graph paging/search/navigation, six unchanged visual goldens, repository links and security/serialized IPC. Synthetic graph paging measured 155.0 ms and scrolling p95 16.7 ms. The full unit/desktop suites and native installer lifecycle gates were not repeated for this UI increment. Chromium-sized synthetic history, watcher-warm status, cold OS cache and cross-platform performance remain open.
+
+A fresh unsigned Linux x64 bundle passed native packaging/fuse checks and packaged desktop smoke with native helpers, renderer isolation, folder selection, Bash/PTY keyboard delivery and cold/resident repository-link consent. These commands completed with exit 0. Installer artifacts and native lifecycle suites were not regenerated or rerun. Logs: `/tmp/openkraken-m8-sidebar-{package,smoke,docs-lint}.log`.
+
+Evidence: `/tmp/openkraken-m8-sidebar-final-{build,lint,e2e}.log`, `/tmp/openkraken-m8-linux-full{,-repeat,-sample}.log`, `/tmp/openkraken-m8-many-refs-{measured-red,virtual,json}.log`. Temporary profiling probes were removed. The first large-ref benchmark failed while collecting full reference names into a default-size output buffer; metadata collection now counts a compact marker per ref.
 
 ## Native Debian version upgrade acceptance
 

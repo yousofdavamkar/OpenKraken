@@ -196,6 +196,9 @@ export const useRepository = create<State>()(
         const result = await window.openkraken.request(request);
         if (get().busy !== request.id) return;
         if (result.kind === 'snapshot') {
+          performance.mark('repository-snapshot-response', {
+            detail: { snapshotMs: result.snapshot.elapsedMs },
+          });
           const rows = projectCommits(result.snapshot.commits, result.snapshot, true);
           const previous = get(),
             sameRepository =
@@ -215,6 +218,7 @@ export const useRepository = create<State>()(
             pinnedOid: result.snapshot.pinnedOid,
           });
           if (layout.kind !== 'layout') throw new Error('Invalid graph response');
+          performance.mark('repository-layout-response');
           querySequence++;
           const nextLayout = [
             ...previous.layout.slice(0, layout.offset),
@@ -273,6 +277,7 @@ export const useRepository = create<State>()(
               selected: selected.length ? selected : focus ? [focus] : [],
             };
           });
+          performance.mark('repository-state-published');
           if (query) await get().search(query);
         } else if (result.kind === 'error') throw new Error(result.message);
       } catch (error) {

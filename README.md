@@ -76,7 +76,7 @@ Crash reporting is off by default. The default build has no receiver configured.
 
 ## Benchmark a real repository
 
-The opt-in benchmark needs an existing repository with more than 17,000 reachable commits. It measures first paint, three 5,000-commit pages, scrolling with 12,000 loaded rows, mounted DOM rows and Electron process memory. It records repository HEAD, total reachable commit count, CPU, Git version and cache conditions alongside the measurements.
+The opt-in benchmark needs an existing repository with more than 17,000 reachable commits. It measures first paint, three 5,000-commit pages, scrolling with 12,000 loaded rows, mounted commit/reference rows and Electron process memory. It records first-paint phase timings, repository HEAD, total reachable commit and reference counts, CPU, Git version and cache conditions alongside the measurements. The [M8 reference performance checkpoint](docs/verification/m8-reference-performance.md) retains the 50,000-ref startup failure and a reproducible isolated fixture.
 
 ```sh
 pnpm build

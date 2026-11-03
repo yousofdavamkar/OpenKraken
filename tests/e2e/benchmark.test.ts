@@ -50,6 +50,20 @@ test('real-repository first paint, paging and scrolling budgets', async ({
     const firstPaintMs = await page.evaluate(
       () => performance.getEntriesByName('repository-first-paint').at(-1)!.duration,
     );
+    const firstPaintPhases = await page.evaluate(() => {
+      const mark = (name: string) => performance.getEntriesByName(name).at(-1) as PerformanceMark;
+      const response = mark('repository-snapshot-response');
+      return {
+        serviceMs: response.startTime - mark('repository-open-start').startTime,
+        snapshotMs: response.detail.snapshotMs as number,
+        workerMs: mark('repository-layout-response').startTime - response.startTime,
+        publishMs:
+          mark('repository-state-published').startTime -
+          mark('repository-layout-response').startTime,
+        paintMs:
+          mark('repository-painted').startTime - mark('repository-state-published').startTime,
+      };
+    });
     const grid = page.getByRole('grid'),
       pages: number[] = [];
     for (const loaded of [7000, 12000]) {
@@ -78,6 +92,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
     });
     const p95FrameMs = frames[Math.floor(frames.length * 0.95)]!;
     const mountedRows = await grid.getByRole('row').count();
+    const mountedReferences = await page.locator('.refs .ref').count();
     await page.getByRole('button', { name: 'Load more commits', exact: true }).click();
     await expect(page.getByTestId('commit-count')).toHaveText('17,000 commits · more available');
     pages.push(
@@ -107,16 +122,19 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       repository: path,
       head: git('rev-parse', 'HEAD'),
       commits: Number(git('rev-list', '--count', 'HEAD')),
+      refs: git('for-each-ref', '--format=.').split('\n').filter(Boolean).length,
       shallow: git('rev-parse', '--is-shallow-repository'),
       git: git('--version'),
       platform: `${process.platform} ${process.arch} ${release()}`,
       cpu: cpus()[0]?.model,
       firstPaintMs,
+      firstPaintPhases,
       page5000Ms: pages,
       pagingPhases,
       scrollingRows: 12000,
       p95FrameMs,
       mountedRows,
+      mountedReferences,
       electronMemory: memory,
       cache: {
         os: 'Not cleared',
@@ -146,6 +164,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
     });
     await page.screenshot({ path: testInfo.outputPath('real-repository.png') });
     expect(mountedRows).toBeLessThan(100);
+    expect.soft(mountedReferences).toBeLessThan(100);
     expect.soft(firstPaintMs).toBeLessThan(500);
     for (const pageMs of pages) expect.soft(pageMs).toBeLessThan(300);
     // 60 Hz is ~16.67 ms; allow 2 ms scheduling jitter in the headless runner.
