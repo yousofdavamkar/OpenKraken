@@ -1,6 +1,18 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The current checkpoint implements native DMG creation and copy-install verification, with native macOS execution still pending. Existing Linux packaging, Fedora upgrade acceptance, AppImage restart/recovery and opt-in automatic checks remain implemented. This does not close the remaining [M6](m6-progress.md), [M7](m7-progress.md) or release scope.
+M8 remains in progress. The current checkpoint adds Windows payload ownership/access checks as a prerequisite for MSI packaging. Native Windows execution and the MSI producer/lifecycle remain pending. The DMG pipeline also awaits native macOS acceptance. Existing Linux packaging, Fedora upgrade acceptance, AppImage restart/recovery and opt-in automatic checks remain implemented. This does not close the remaining [M6](m6-progress.md), [M7](m7-progress.md) or release scope.
+
+## Windows payload access prerequisite
+
+The Windows payload verifier (`7ad56af`) reads native owners and DACLs, rejects untrusted mutation rights and reparse points, validates the access report and matches it against the subsequent payload inventory. It omits synthetic POSIX modes on Windows while retaining byte hashes and types. The Windows bundle packaging path now invokes this check after fuse verification. POSIX behavior remains intact. See [ADR 0090](../decisions/0090-windows-payload-access-control.md).
+
+Verification passed **32 focused packaging tests**: 27 Windows access-policy cases using explicit records and 5 existing host/payload checks. **7 native cases were skipped** on Linux (3 Windows access/junction fixtures and 4 macOS metadata cases). The initial tests failed on the missing policy and incomplete report handling before implementation. Full ESLint/Prettier passed after replacing a disallowed control-character regex with explicit character checks.
+
+The PowerShell reader passed syntax parsing with official PowerShell **7.6.9** on Linux. Its archive was checked against the release API's SHA-256, `1da6d6d6035d651f20e70ddee7c4c15ac6ab8b9fb40ee92240d91263f28a884b`, and installed only in the local tool cache. This does not prove native Windows PowerShell execution, ACL reading or junction behavior. The existing Windows CI matrix will run the three native tests and actual bundle check; remote execution remains unverified.
+
+The existing Linux test RPM passed payload/mode/link/fuse verification, desktop smoke and artifact/helper corruption rejection with the updated shared verifier, all with exit code 0. The artifact was reused rather than regenerated because application bytes did not change. The application unit/Electron suites and native package-manager lifecycles were not rerun for this packaging prerequisite.
+
+Evidence: `/tmp/openkraken-windows-payload-{red,schema-red,tests,lint,powershell,rpm-smoke,rpm-guards}.log`. MSI creation, protocol registration ownership/cleanup, installation/upgrade/removal, signing and native Windows acceptance remain open. The broader M6–M8 goal remains active.
 
 ## Native DMG pipeline, awaiting macOS acceptance
 
