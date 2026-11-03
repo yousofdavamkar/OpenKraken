@@ -9,6 +9,133 @@ const hasLfs = spawnSync('git', ['lfs', 'version']).status === 0;
 if (process.env.OPENKRAKEN_LFS_TEST === '1' && !hasLfs)
   throw new Error('LFS acceptance requires git-lfs on PATH');
 
+for (const cancel of [false, true]) {
+  test(`ordinary pull ${cancel ? 'cancels' : 'completes'} an authenticated LFS checkout`, async () => {
+    test.skip(!hasLfs, 'Install git-lfs to run native LFS acceptance');
+    const { createServer } = await import('node:http');
+    const { createHash } = await import('node:crypto');
+    const content = Buffer.from('LFS content through ordinary pull\n');
+    const oid = createHash('sha256').update(content).digest('hex');
+    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${content.length}\n`;
+    let endpoint = '';
+    let downloads = 0;
+    const server = createServer((request, response) => {
+      if (
+        request.headers.authorization !==
+        `Basic ${Buffer.from('fixture:fixture-password').toString('base64')}`
+      ) {
+        response.writeHead(401, { 'WWW-Authenticate': 'Basic realm="LFS fixture"' });
+        response.end();
+      } else if (request.url === '/lfs/objects/batch') {
+        response.writeHead(200, { 'Content-Type': 'application/vnd.git-lfs+json' });
+        response.end(
+          JSON.stringify({
+            transfer: 'basic',
+            objects: [
+              { oid, size: content.length, actions: { download: { href: `${endpoint}/object` } } },
+            ],
+          }),
+        );
+      } else if (request.url === '/lfs/object') {
+        downloads++;
+        response.writeHead(200, { 'Content-Length': content.length });
+        response.end(content);
+      } else {
+        response.writeHead(404);
+        response.end();
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Expected TCP listener');
+    endpoint = `http://127.0.0.1:${address.port}/lfs`;
+    const root = mkdtempSync(join(tmpdir(), 'openkraken-lfs-integration-ui-'));
+    const source = createFixture(join(root, 'source'));
+    const remote = join(root, 'remote.git');
+    fixtureGit(source, ['clone', '--bare', '.', remote]);
+    const local = join(root, 'local');
+    fixtureGit(source, ['clone', remote, local]);
+    fixtureGit(local, ['lfs', 'install', '--local']);
+    fixtureGit(local, ['config', 'lfs.url', endpoint]);
+    fixtureGit(local, ['config', 'credential.helper', '']);
+    writeFileSync(join(source, '.gitattributes'), '*.bin filter=lfs diff=lfs merge=lfs -text\n');
+    writeFileSync(join(source, 'asset.bin'), pointer);
+    fixtureGit(source, ['add', '.']);
+    fixtureGit(source, ['commit', '-m', 'Incoming LFS object']);
+    fixtureGit(source, ['push', remote, 'main']);
+    const before = fixtureGit(local, ['rev-parse', 'HEAD']);
+    const app = await electron.launch({
+      args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+    });
+    try {
+      const page = await app.firstWindow();
+      await app.evaluate(({ dialog }, path) => {
+        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+      }, local);
+      await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+      await page.getByRole('button', { name: 'Pull', exact: true }).click();
+      const pull = page.getByRole('dialog', { name: 'Pull upstream', exact: true });
+      await pull.getByRole('button', { name: 'Fetch and integrate', exact: true }).click();
+      const auth = page.getByRole('dialog', { name: 'Git authentication', exact: true });
+      await auth.getByLabel('Username', { exact: true }).fill('fixture');
+      await auth.getByRole('button', { name: 'Continue', exact: true }).click();
+      await expect(auth.getByLabel('Password or passphrase', { exact: true })).toHaveAttribute(
+        'type',
+        'password',
+      );
+      if (cancel) {
+        await auth.getByRole('button', { name: 'Cancel operation', exact: true }).click();
+        await expect(auth).toHaveCount(0);
+        await expect(pull).toContainText('Pull cancelled');
+        await expect(
+          pull.getByRole('button', { name: 'Fetch and integrate', exact: true }),
+        ).toBeEnabled();
+        expect(fixtureGit(local, ['rev-parse', 'HEAD'])).toBe(before);
+        expect(downloads).toBe(0);
+      } else {
+        await auth.getByLabel('Password or passphrase', { exact: true }).fill('fixture-password');
+        await auth.getByRole('button', { name: 'Continue', exact: true }).click();
+        // The batch API and object URL can request credentials separately when
+        // no credential helper stores them. Answer each native prompt.
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const completed = pull.getByText('Pull completed', { exact: true });
+          const username = auth.getByLabel('Username', { exact: true });
+          await expect(username.or(completed)).toBeVisible();
+          if (await completed.isVisible()) break;
+          await username.fill('fixture');
+          await auth.getByRole('button', { name: 'Continue', exact: true }).click();
+          await auth.getByLabel('Password or passphrase', { exact: true }).fill('fixture-password');
+          await auth.getByRole('button', { name: 'Continue', exact: true }).click();
+        }
+        await expect(auth).toHaveCount(0);
+        await expect(pull.getByText('Pull completed', { exact: true })).toBeVisible();
+        expect(readFileSync(join(local, 'asset.bin'))).toEqual(content);
+        expect(fixtureGit(local, ['rev-parse', 'HEAD'])).toBe(
+          fixtureGit(source, ['rev-parse', 'HEAD']),
+        );
+        expect(fixtureGit(local, ['show', 'HEAD:asset.bin']) + '\n').toBe(pointer);
+        expect(downloads).toBe(1);
+        expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(
+          'fixture-password',
+        );
+        await pull.getByRole('button', { name: 'Close', exact: true }).click();
+        await page.getByRole('button', { name: 'Git LFS', exact: true }).click();
+        const lfs = page.getByRole('dialog', { name: 'Git LFS', exact: true });
+        await expect(lfs).toContainText('Full content checked out');
+        await expect(lfs).toContainText('Object available locally');
+        await page.screenshot({ path: 'test-results/lfs-ordinary-pull.png' });
+      }
+    } finally {
+      await app.close();
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test('commit comparison explains LFS pointer identity and size without fetching content', async () => {
   const root = mkdtempSync(join(tmpdir(), 'openkraken-lfs-pointer-ui-'));
   const path = createFixture(join(root, 'parent'));
