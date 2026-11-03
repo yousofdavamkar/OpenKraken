@@ -1,3 +1,4 @@
+import { ActivityLog } from './activity-log.js';
 import { CommandMenu } from './command-menu.js';
 import { TerminalHost } from './terminal-host.js';
 import { AppSettings } from './app-settings.js';
@@ -30,7 +31,12 @@ import {
   nativeAppearanceMode,
   resolveAppearance,
 } from '@openkraken/ipc-contract';
-import type { Result, ServiceRequest, AppearancePreferences } from '@openkraken/ipc-contract';
+import type {
+  Result,
+  ServiceRequest,
+  AppearancePreferences,
+  Request as DesktopRequest,
+} from '@openkraken/ipc-contract';
 import { AvatarCache } from './avatars.js';
 import { fetchAvatar } from './avatar-provider.js';
 import { isTrustedDocument, windowPreferences } from './security.js';
@@ -54,6 +60,7 @@ const terminals = new TerminalHost((event) => {
 let service: UtilityProcess | undefined;
 let avatars: AvatarCache | undefined;
 let appSettings: AppSettings | undefined;
+let activity: ActivityLog | undefined;
 let activeAppearance: AppearancePreferences = {
   revision: 0,
   mode: 'dark',
@@ -115,6 +122,7 @@ function startService() {
     if (event.success) {
       // Native commands can originate only in main, never in the Git utility process.
       if (
+        event.data.type === 'activityChanged' ||
         event.data.type === 'commandExecute' ||
         event.data.type === 'appearanceChanged' ||
         event.data.type === 'terminalData' ||
@@ -262,8 +270,7 @@ else {
         cancel: !details.url.startsWith(pathToFileURL(join(__dirname, 'renderer') + '/').href),
       });
     });
-    const handleRequest = async (raw: unknown): Promise<Result> => {
-      const request = requestSchema.parse(raw);
+    const executeRequest = async (request: DesktopRequest): Promise<Result> => {
       // PTY acknowledgments must remain available while Git/provider requests are pending.
       if (
         request.method === 'terminalOpen' ||
@@ -273,12 +280,13 @@ else {
         request.method === 'terminalClose'
       )
         return await terminals.request(request, terminalRepository);
-      if (inFlight.has(request.id))
-        return { kind: 'error', code: 'DUPLICATE_REQUEST', message: 'Request is already running' };
-      if (inFlight.size >= 8)
-        return { kind: 'error', code: 'BUSY', message: 'Too many pending operations' };
-      inFlight.add(request.id);
       try {
+        if (request.method === 'activityRead' || request.method === 'activityClear')
+          return {
+            kind: 'activity',
+            state:
+              request.method === 'activityClear' ? await activity!.clear() : await activity!.read(),
+          };
         if (request.method === 'commandContext') {
           commandMenu?.context(request.revision, request.available);
           return { kind: 'commandContext' };
@@ -1037,6 +1045,25 @@ else {
         };
       } finally {
         providerRequests.delete(request.id);
+      }
+    };
+    const handleRequest = async (request: DesktopRequest): Promise<Result> => {
+      if (
+        request.method === 'terminalOpen' ||
+        request.method === 'terminalInput' ||
+        request.method === 'terminalResize' ||
+        request.method === 'terminalAck' ||
+        request.method === 'terminalClose'
+      )
+        return executeRequest(request);
+      if (inFlight.has(request.id))
+        return { kind: 'error', code: 'DUPLICATE_REQUEST', message: 'Request is already running' };
+      if (inFlight.size >= 8)
+        return { kind: 'error', code: 'BUSY', message: 'Too many pending operations' };
+      inFlight.add(request.id);
+      try {
+        return await activity!.track(request, () => executeRequest(request));
+      } finally {
         inFlight.delete(request.id);
         cancelled.delete(request.id);
       }
@@ -1044,7 +1071,8 @@ else {
     ipcMain.handle(CHANNEL, async (event, raw, format: unknown): Promise<Result | string> => {
       validateSender(event);
       if (format !== undefined && format !== 'json') throw new Error('Invalid response format');
-      const result = await handleRequest(raw);
+      const request = requestSchema.parse(raw);
+      const result = await handleRequest(request);
       if (result.kind === 'snapshot') terminalRepository = result.snapshot.repository;
       // Serialize after validation and before both renderer IPC and isolated-world copying.
       return format === 'json' ? JSON.stringify(result) : result;
@@ -1061,6 +1089,11 @@ else {
     appSettings ??= new AppSettings(app.getPath('userData'));
     activateAppearance(await appSettings.readAppearance());
     nativeTheme.on('updated', updateWindowBackground);
+    activity = new ActivityLog(app.getPath('userData'), () => {
+      if (window && !window.isDestroyed())
+        window.webContents.send(EVENT_CHANNEL, { type: 'activityChanged' });
+    });
+    await activity.read();
     startService();
     createWindow();
     app.on('activate', () => {
@@ -1088,14 +1121,14 @@ else {
     const stopped = child
       ? new Promise<void>((resolve) => child.once('exit', () => resolve()))
       : Promise.resolve();
-    void Promise.all([stopped, providers?.idle(), appSettings?.idle(), terminals.close()]).finally(
-      () => {
+    void Promise.all([stopped, providers?.idle(), appSettings?.idle(), terminals.close()])
+      .then(() => activity?.idle())
+      .finally(() => {
         clearTimeout(deadline);
         // With no live service, cleanup can finish in the original will-quit microtask.
         // Electron ignores a reentrant quit there; resume on the next event-loop turn.
         setImmediate(() => app.quit());
-      },
-    );
+      });
     child?.postMessage({ shutdown: true });
   });
 }

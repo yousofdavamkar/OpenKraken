@@ -1,3 +1,5 @@
+import { activityRequests, activityStateSchema, activityEventSchema } from './activity.js';
+export * from './activity.js';
 import {
   lfsRequests,
   lfsStateSchema,
@@ -1239,6 +1241,7 @@ const workingRequests = [
     .strict(),
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  ...activityRequests,
   worktreeAddRequest,
   ...terminalRequests,
   z
@@ -1817,6 +1820,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('activity'), state: activityStateSchema }).strict(),
   z
     .object({ kind: z.literal('worktreePrunePreview'), preview: worktreePrunePreviewSchema })
     .strict(),
@@ -2176,6 +2180,7 @@ export const gitProgressEventSchema = z
   .object({ type: z.literal('gitProgress'), id: requestId, text: z.string().max(4096) })
   .strict();
 export const desktopEventSchema = z.discriminatedUnion('type', [
+  activityEventSchema,
   ...terminalEvents,
   z.object({ type: z.literal('appearanceChanged'), state: appearancePreferencesSchema }).strict(),
   z

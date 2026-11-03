@@ -6,7 +6,30 @@ import {
   serviceResponseSchema,
   resultSchema,
   parseUserTheme,
+  activityEntrySchema,
+  activityStateSchema,
 } from '../../packages/ipc-contract/src/index.js';
+test('activity IPC permits reading and clearing but never renderer-supplied log entries or free text', () => {
+  const id = '00000000-0000-4000-8000-000000000001';
+  for (const method of ['activityRead', 'activityClear']) {
+    expect(requestSchema.safeParse({ id, method }).success).toBe(true);
+    expect(serviceRequestSchema.safeParse({ id, method }).success).toBe(false);
+    for (const fields of [{ path: '/outside' }, { entries: [] }, { message: 'secret' }])
+      expect(requestSchema.safeParse({ id, method, ...fields }).success).toBe(false);
+  }
+  const entry = { id, action: 'commit', startedAt: 1, finishedAt: 2, outcome: 'succeeded' };
+  expect(activityEntrySchema.safeParse(entry).success).toBe(true);
+  for (const fields of [
+    { message: 'secret' },
+    { action: 'arbitrary text' },
+    { outcome: 'untrusted' },
+    { startedAt: Infinity },
+  ])
+    expect(activityEntrySchema.safeParse({ ...entry, ...fields }).success).toBe(false);
+  expect(
+    activityStateSchema.safeParse({ entries: Array(501).fill(entry), warning: null }).success,
+  ).toBe(false);
+});
 test('submodule URL synchronization accepts only service reviews and no caller paths or network controls', () => {
   const base = { id: '00000000-0000-4000-8000-000000000001', repoId: 'a'.repeat(64) };
   const preview = { ...base, method: 'submoduleSyncPreview' };
