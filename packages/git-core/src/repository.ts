@@ -29,6 +29,7 @@ import type {
   StashPushOptions,
   StashActionOptions,
   WorktreeAdd,
+  WorktreeAction,
   GraphView,
   Repository,
   Snapshot,
@@ -846,6 +847,10 @@ export class RepositoryService {
   addWorktree(id: string, path: string, options: WorktreeAdd, signal?: AbortSignal) {
     const { repo, manager } = this.worktreeManager(id);
     return this.queue(repo.commonDir).run(true, () => manager.add(path, options, signal), signal);
+  }
+  worktreeAction(id: string, options: WorktreeAction, signal?: AbortSignal) {
+    const { repo, manager } = this.worktreeManager(id);
+    return this.queue(repo.commonDir).run(true, () => manager.action(options, signal), signal);
   }
   openWorktree(id: string, worktreeId: string, revision: string, signal?: AbortSignal) {
     const { repo, manager } = this.worktreeManager(id);

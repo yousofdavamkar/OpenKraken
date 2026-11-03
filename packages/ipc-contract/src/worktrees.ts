@@ -47,6 +47,22 @@ export const worktreeAddSchema = z.discriminatedUnion('mode', [
   z.object({ revision: identity, mode: z.literal('detached'), oid }).strict(),
 ]);
 export type WorktreeAdd = z.infer<typeof worktreeAddSchema>;
+const selection = { worktreeId: identity, revision: identity };
+export const worktreeActionSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      ...selection,
+      action: z.literal('lock'),
+      reason: z
+        .string()
+        .max(1024)
+        .refine((value) => !value.includes('\0')),
+    })
+    .strict(),
+  z.object({ ...selection, action: z.literal('unlock') }).strict(),
+  z.object({ ...selection, action: z.literal('remove') }).strict(),
+]);
+export type WorktreeAction = z.infer<typeof worktreeActionSchema>;
 export const worktreeAddRequest = z
   .object({
     id: z.string().uuid(),
@@ -57,6 +73,14 @@ export const worktreeAddRequest = z
   .strict();
 
 export const worktreeRequests = [
+  z
+    .object({
+      id: z.string().uuid(),
+      method: z.literal('worktreeAction'),
+      repoId: identity,
+      options: worktreeActionSchema,
+    })
+    .strict(),
   z.object({ id: z.string().uuid(), method: z.literal('worktrees'), repoId: identity }).strict(),
   z
     .object({

@@ -2,13 +2,15 @@ import { createHash } from 'node:crypto';
 import { readdir, realpath } from 'node:fs/promises';
 import {
   worktreeAddSchema,
+  worktreeActionSchema,
+  type WorktreeAction,
   type WorktreeAdd,
   type Repository,
   type Worktree,
   type WorktreeState,
 } from '@openkraken/ipc-contract';
 import { GitError, type RunOptions } from './runner.js';
-import { StatusParser } from './parsers.js';
+import { NulDecoder, StatusParser } from './parsers.js';
 
 type Run = (args: string[], options: RunOptions) => Promise<{ stdout: Buffer }>;
 const hash = (value: Buffer | string) => createHash('sha256').update(value).digest('hex');
@@ -106,7 +108,7 @@ export class Worktrees {
     return { revision: hash(stdout), entries };
   }
 
-  async select(id: string, revision: string, signal?: AbortSignal) {
+  private async review(id: string, revision: string, signal?: AbortSignal) {
     const state = await this.list(signal);
     if (state.revision !== revision)
       throw new GitError('STALE_WORKTREES', 'Worktrees changed. Refresh the list and try again.');
@@ -116,9 +118,114 @@ export class Worktrees {
         'WORKTREE_NOT_FOUND',
         'This worktree is not registered in this repository',
       );
+    return entry;
+  }
+
+  async select(id: string, revision: string, signal?: AbortSignal) {
+    const entry = await this.review(id, revision, signal);
     if (!entry.available)
       throw new GitError('WORKTREE_UNAVAILABLE', 'This worktree is unavailable');
     return entry;
+  }
+
+  async action(input: WorktreeAction, signal?: AbortSignal) {
+    const options = worktreeActionSchema.parse(input);
+    const entry = await this.review(options.worktreeId, options.revision, signal);
+    if (entry.main)
+      throw new GitError('MAIN_WORKTREE', 'The main worktree cannot be locked or removed');
+    if (options.action === 'remove') {
+      if (entry.current)
+        throw new GitError('CURRENT_WORKTREE', 'Open another worktree before removing this one');
+      if (entry.locked)
+        throw new GitError('WORKTREE_LOCKED', 'Unlock this worktree before removing it');
+      if (!entry.available)
+        throw new GitError('WORKTREE_UNAVAILABLE', 'This worktree is unavailable');
+      const gitDir = (
+        await this.run(['rev-parse', '--absolute-git-dir'], {
+          cwd: entry.path,
+          signal,
+          maxBytes: 65536,
+        })
+      ).stdout
+        .toString('utf8')
+        .replace(/\n$/, '');
+      const metadata = await readdir(gitDir);
+      if (
+        [
+          'MERGE_HEAD',
+          'MERGE_AUTOSTASH',
+          'CHERRY_PICK_HEAD',
+          'REVERT_HEAD',
+          'REBASE_HEAD',
+          'BISECT_LOG',
+          'sequencer',
+          'rebase-merge',
+          'rebase-apply',
+        ].some((name) => metadata.includes(name))
+      )
+        throw new GitError(
+          'WORKTREE_OPERATION',
+          'Finish or abort the Git operation in this worktree before removing it.',
+        );
+      const flags = new NulDecoder((field) => {
+        const flag = field.subarray(0, 1).toString();
+        if (flag === 'S' || /[a-z]/.test(flag))
+          throw new GitError(
+            'WORKTREE_INDEX_FLAGS',
+            'Clear skip-worktree and assume-unchanged flags, then review the files before removing this worktree.',
+          );
+      });
+      await this.run(['ls-files', '-v', '-z'], {
+        cwd: entry.path,
+        signal,
+        maxBytes: 8 * 1024 * 1024,
+        onStdout: (chunk) => flags.push(chunk),
+      });
+      flags.finish();
+      const parser = new StatusParser();
+      await this.run(
+        ['status', '--porcelain=v2', '-z', '--untracked-files=all', '--ignored=matching'],
+        {
+          cwd: entry.path,
+          signal,
+          maxBytes: 8 * 1024 * 1024,
+          onStdout: (chunk) => parser.push(chunk),
+        },
+      );
+      if (parser.finish().entries.length)
+        throw new GitError(
+          'WORKTREE_NOT_CLEAN',
+          'This worktree has changed, untracked or ignored files. Preserve them before removing it.',
+        );
+      if (entry.detached && entry.head) {
+        const retained = await this.run(
+          [
+            'for-each-ref',
+            `--contains=${entry.head}`,
+            '--format=%(refname)',
+            'refs/heads',
+            'refs/tags',
+            'refs/remotes',
+          ],
+          {
+            cwd: this.repo.path,
+            signal,
+            maxBytes: 1024 * 1024,
+          },
+        );
+        if (!retained.stdout.length)
+          throw new GitError(
+            'WORKTREE_UNREFERENCED',
+            'Create a branch or tag to retain this detached worktree’s commits before removing it.',
+          );
+      }
+    }
+    const args =
+      options.action === 'lock'
+        ? ['lock', '--reason', options.reason, '--', entry.path]
+        : [options.action, '--', entry.path];
+    await this.run(['worktree', ...args], { cwd: this.repo.path, signal, readOnly: false });
+    return this.list(signal);
   }
 
   async add(path: string, input: WorktreeAdd, signal?: AbortSignal) {

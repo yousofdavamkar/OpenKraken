@@ -337,6 +337,11 @@ async function executeGit(
     return { kind: 'stashes', state: await git.stashes(request.repoId, signal) };
   if (request.method === 'worktrees')
     return { kind: 'worktrees', state: await git.worktrees(request.repoId, signal) };
+  if (request.method === 'worktreeAction')
+    return {
+      kind: 'worktrees',
+      state: await git.worktreeAction(request.repoId, request.options, signal),
+    };
   if (request.method === 'addWorktree')
     return {
       kind: 'worktrees',
@@ -532,6 +537,7 @@ parent.on('message', (event) => {
   active.set(request.id, controller);
   const writing = [
     'addWorktree',
+    'worktreeAction',
     'files',
     'patch',
     'discard',

@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from 'vitest';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
@@ -7,6 +7,212 @@ import { RepositoryService } from './src/repository.js';
 
 const root = await mkdtemp(join(tmpdir(), 'openkraken-worktrees-'));
 afterAll(() => rm(root, { recursive: true, force: true }));
+
+test('removal preserves an in-progress merge even when its index and files are clean', async () => {
+  const path = createFixture(join(root, 'merging-source'), 'linear', 3);
+  const linked = join(root, 'merging-linked');
+  fixtureGit(path, ['worktree', 'add', '-b', 'merging-topic', linked]);
+  fixtureGit(path, ['checkout', '-b', 'merge-feature']);
+  fixtureGit(path, ['commit', '--allow-empty', '-m', 'empty feature']);
+  fixtureGit(path, ['checkout', 'main']);
+  fixtureGit(linked, ['merge', '--no-ff', '--no-commit', 'merge-feature']);
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const state = await service.worktrees(repo.id);
+    const entry = state.entries.find((item) => item.path === linked)!;
+    expect(entry.changedFiles).toBe(0);
+    await expect(
+      service.worktreeAction(repo.id, {
+        action: 'remove',
+        worktreeId: entry.id,
+        revision: state.revision,
+      }),
+    ).rejects.toMatchObject({ code: 'WORKTREE_OPERATION' });
+    expect(fixtureGit(linked, ['rev-parse', 'MERGE_HEAD'])).toBe(
+      fixtureGit(path, ['rev-parse', 'merge-feature']),
+    );
+  } finally {
+    await service.dispose();
+  }
+});
+
+for (const flag of ['assume-unchanged', 'skip-worktree']) {
+  test(`removal refuses ${flag} index flags that can conceal modified files`, async () => {
+    const path = createFixture(join(root, `${flag}-source`), 'linear', 3);
+    const linked = join(root, `${flag}-linked`);
+    fixtureGit(path, ['worktree', 'add', '-b', flag, linked]);
+    fixtureGit(linked, ['update-index', `--${flag}`, 'tracked.txt']);
+    await writeFile(join(linked, 'tracked.txt'), 'hidden edits');
+    const service = new RepositoryService('git');
+    try {
+      const repo = await service.open(path);
+      const state = await service.worktrees(repo.id);
+      const target = state.entries.find((entry) => entry.path === linked)!;
+      expect(target.changedFiles).toBe(0);
+      await expect(
+        service.worktreeAction(repo.id, {
+          action: 'remove',
+          worktreeId: target.id,
+          revision: state.revision,
+        }),
+      ).rejects.toMatchObject({ code: 'WORKTREE_INDEX_FLAGS' });
+      expect(await readFile(join(linked, 'tracked.txt'), 'utf8')).toBe('hidden edits');
+    } finally {
+      await service.dispose();
+    }
+  });
+}
+
+test('removing a detached worktree requires a ref that retains its commits', async () => {
+  const path = createFixture(join(root, 'detached-removal-source'), 'linear', 3);
+  const linked = join(root, 'detached-removal-linked');
+  fixtureGit(path, ['worktree', 'add', '--detach', linked]);
+  fixtureGit(linked, ['commit', '--allow-empty', '-m', 'unreferenced work']);
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const state = await service.worktrees(repo.id);
+    const entry = state.entries.find((item) => item.path === linked)!;
+    const options = { action: 'remove' as const, worktreeId: entry.id, revision: state.revision };
+    await expect(service.worktreeAction(repo.id, options)).rejects.toMatchObject({
+      code: 'WORKTREE_UNREFERENCED',
+    });
+    expect(fixtureGit(linked, ['rev-parse', 'HEAD'])).toBe(entry.head);
+    fixtureGit(path, ['branch', 'retained-work', entry.head!]);
+    expect(
+      (await service.worktreeAction(repo.id, options)).entries.some((item) => item.id === entry.id),
+    ).toBe(false);
+    expect(fixtureGit(path, ['rev-parse', 'retained-work'])).toBe(entry.head);
+  } finally {
+    await service.dispose();
+  }
+});
+
+test('worktree removal refuses current, locked, dirty and ignored files and retains the branch after clean removal', async () => {
+  const path = createFixture(join(root, 'removal-source'), 'linear', 3);
+  const linked = join(root, 'removal-linked');
+  fixtureGit(path, ['worktree', 'add', '-b', 'keep-branch', linked]);
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    let state = await service.worktrees(repo.id);
+    const target = state.entries.find((entry) => entry.path === linked)!;
+    const remove = () =>
+      service.worktreeAction(repo.id, {
+        action: 'remove',
+        worktreeId: target.id,
+        revision: state.revision,
+      });
+    await writeFile(join(linked, 'draft.txt'), 'untracked draft');
+    await expect(remove()).rejects.toMatchObject({ code: 'WORKTREE_NOT_CLEAN' });
+    expect(await readFile(join(linked, 'draft.txt'), 'utf8')).toBe('untracked draft');
+    await rm(join(linked, 'draft.txt'));
+    await appendFile(join(path, '.git/info/exclude'), '\nignored.txt\n');
+    await writeFile(join(linked, 'ignored.txt'), 'ignored but valuable');
+    expect(
+      (await service.worktrees(repo.id)).entries.find((entry) => entry.id === target.id)
+        ?.changedFiles,
+    ).toBe(0);
+    await expect(remove()).rejects.toMatchObject({ code: 'WORKTREE_NOT_CLEAN' });
+    expect(await readFile(join(linked, 'ignored.txt'), 'utf8')).toBe('ignored but valuable');
+    await rm(join(linked, 'ignored.txt'));
+    state = await service.worktreeAction(repo.id, {
+      action: 'lock',
+      worktreeId: target.id,
+      revision: state.revision,
+      reason: 'keep',
+    });
+    await expect(remove()).rejects.toMatchObject({ code: 'WORKTREE_LOCKED' });
+    state = await service.worktreeAction(repo.id, {
+      action: 'unlock',
+      worktreeId: target.id,
+      revision: state.revision,
+    });
+    const current = await service.open(linked);
+    await expect(
+      service.worktreeAction(current.id, {
+        action: 'remove',
+        worktreeId: target.id,
+        revision: state.revision,
+      }),
+    ).rejects.toMatchObject({ code: 'CURRENT_WORKTREE' });
+    await expect(
+      service.worktreeAction(repo.id, {
+        action: 'remove',
+        worktreeId: state.entries[0]!.id,
+        revision: state.revision,
+      }),
+    ).rejects.toMatchObject({ code: 'MAIN_WORKTREE' });
+    state = await remove();
+    expect(state.entries.some((entry) => entry.id === target.id)).toBe(false);
+    await expect(readFile(join(linked, 'tracked.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(fixtureGit(path, ['rev-parse', 'keep-branch'])).toBe(target.head);
+  } finally {
+    await service.dispose();
+  }
+});
+
+test('worktree locks retain a reason, reject stale reviews and can protect an offline checkout', async () => {
+  const path = createFixture(join(root, 'locks-source'), 'linear', 3);
+  const linked = join(root, 'locks-linked');
+  fixtureGit(path, ['worktree', 'add', '-b', 'locked-topic', linked]);
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    let state = await service.worktrees(repo.id);
+    const target = state.entries.find((entry) => entry.path === linked)!;
+    const original = state.revision;
+    state = await service.worktreeAction(repo.id, {
+      action: 'lock',
+      worktreeId: target.id,
+      revision: original,
+      reason: 'Portable drive',
+    });
+    expect(state.entries.find((entry) => entry.id === target.id)).toMatchObject({
+      locked: true,
+      lockReason: 'Portable drive',
+    });
+    await expect(
+      service.worktreeAction(repo.id, {
+        action: 'unlock',
+        worktreeId: target.id,
+        revision: original,
+      }),
+    ).rejects.toMatchObject({ code: 'STALE_WORKTREES' });
+    await rm(linked, { recursive: true });
+    state = await service.worktrees(repo.id);
+    state = await service.worktreeAction(repo.id, {
+      action: 'unlock',
+      worktreeId: target.id,
+      revision: state.revision,
+    });
+    expect(state.entries.find((entry) => entry.id === target.id)).toMatchObject({
+      locked: false,
+      available: false,
+    });
+    state = await service.worktreeAction(repo.id, {
+      action: 'lock',
+      worktreeId: target.id,
+      revision: state.revision,
+      reason: 'Still offline',
+    });
+    expect(state.entries.find((entry) => entry.id === target.id)).toMatchObject({
+      locked: true,
+      lockReason: 'Still offline',
+    });
+    await expect(
+      service.worktreeAction(repo.id, {
+        action: 'lock',
+        worktreeId: state.entries[0]!.id,
+        revision: state.revision,
+        reason: '',
+      }),
+    ).rejects.toMatchObject({ code: 'MAIN_WORKTREE' });
+  } finally {
+    await service.dispose();
+  }
+});
 
 test('worktree inventory distinguishes the main, dirty, detached, locked and missing checkouts', async () => {
   const path = createFixture(

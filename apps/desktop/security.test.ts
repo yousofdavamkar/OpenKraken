@@ -39,6 +39,30 @@ test('worktree IPC accepts reviewed identities but reserves destination paths fo
     { ...add.options, revision: '' },
   ])
     expect(requestSchema.safeParse({ ...add, options }).success).toBe(false);
+  const selected = { worktreeId: open.worktreeId, revision: open.revision };
+  for (const options of [
+    { ...selected, action: 'lock', reason: 'portable drive' },
+    { ...selected, action: 'unlock' },
+    { ...selected, action: 'remove' },
+  ]) {
+    const request = { ...base, method: 'worktreeAction', options };
+    expect(requestSchema.safeParse(request).success).toBe(true);
+    expect(serviceRequestSchema.safeParse(request).success).toBe(true);
+    expect(
+      requestSchema.safeParse({ ...request, options: { ...options, force: true } }).success,
+    ).toBe(false);
+    expect(
+      requestSchema.safeParse({ ...request, options: { ...options, path: '/arbitrary' } }).success,
+    ).toBe(false);
+  }
+  for (const reason of ['x'.repeat(1025), 'bad\0reason'])
+    expect(
+      requestSchema.safeParse({
+        ...base,
+        method: 'worktreeAction',
+        options: { ...selected, action: 'lock', reason },
+      }).success,
+    ).toBe(false);
 });
 test('terminal IPC is bounded, session-scoped and excluded from the Git service', () => {
   const id = '00000000-0000-4000-8000-000000000000';
