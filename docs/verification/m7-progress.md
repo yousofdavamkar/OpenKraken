@@ -1,6 +1,6 @@
 # M7 progress — productivity and polish
 
-M7 is in progress as of 2026-11-02 at implementation checkpoint `baab017`. M6 continues to have the gaps recorded in [M6 progress](m6-progress.md); M7 and M8 are not complete. React 19.3.1 and TypeScript 7.0.2 remain pinned.
+M7 is in progress as of 2026-11-02 at implementation checkpoint `ad67696`. M6 continues to have the gaps recorded in [M6 progress](m6-progress.md); M7 and M8 are not complete. React 19.3.1 and TypeScript 7.0.2 remain pinned.
 
 ## Implemented
 
@@ -19,11 +19,15 @@ M7 is in progress as of 2026-11-02 at implementation checkpoint `baab017`. M6 co
 - Worktrees are listed with main/current, branch/detached, commit, dirty-file, lock and missing-folder state. A registered checkout can be opened by a validated ID and inventory revision. Creation supports a new branch, an unused existing local branch or detached HEAD at an explicit commit, with an empty destination chosen through the native folder picker. Shared-repository writes use the existing queue and watcher suppression. Creation keeps the current checkout unchanged; cancellation/errors retain form choices. Newline-containing repository metadata uses an unambiguous fallback read.
 - Reviewed lock/unlock actions support offline worktrees and bounded lock reasons. Removal retains branches, refuses main/current/locked or unavailable checkouts, and checks ignored/untracked/modified files, index flags that can conceal edits, ongoing Git operations and unreferenced detached commits. Reviews remain open on failure; cancellation and success restore focus, and removal review initially focuses Cancel.
 
+- Worktree cleanup shows Git’s bounded dry-run report before pruning stale registrations. Repository-bound, expiring tokens and a fixed cutoff bind confirmation to the reviewed inventory and metadata fingerprint. Confirmation rechecks detached HEAD retention and consumes the token before execution. Locked/live checkouts and branches remain; the UI explains that registration index/reflog recovery data is removed.
+
 - History pages use a typed JSON response format, serialized in main after validation, to avoid copying thousands of nested objects through renderer IPC and the isolated-world bridge. Existing request validation, cancellation, cursor checks, append-only layout and performance budgets remain in place.
 
 ## Verification
 
-The latest worktree management increment (`baab017`) passed **521 unit tests across 68 files on its first full run**, **six targeted desktop tests** covering the four worktree flows and two native-menu regressions, typechecking, build and full ESLint/Prettier checks. The worktree management screenshot was visually inspected. No packaging, performance or full desktop-suite rerun was performed for this dialog/service increment. The earlier intermittent GitLab fixture failure did not occur in this run, but its cause remains unconfirmed.
+The latest prune increment (`ad67696`) passed **526 unit tests across 68 files on its first full run**, **seven targeted desktop tests** (five worktree flows and two native-menu regressions), typechecking, build and full ESLint/Prettier checks. The cleanup review screenshot was visually inspected. Packaging, performance and the complete desktop suite were not rerun for this increment. The earlier intermittent GitLab fixture failure did not occur; its cause remains unconfirmed.
+
+The preceding worktree management increment (`baab017`) passed **521 unit tests across 68 files on its first full run**, **six targeted desktop tests** covering the four worktree flows and two native-menu regressions, typechecking, build and full ESLint/Prettier checks. The worktree management screenshot was visually inspected. No packaging, performance or full desktop-suite rerun was performed for this dialog/service increment. The earlier intermittent GitLab fixture failure did not occur in this run, but its cause remains unconfirmed.
 
 The preceding creation/opening increment (`4a363c7`) passed **20 targeted desktop tests** covering worktrees, command menus, command preferences and the graph, including all six visual goldens. Paging measured **142.9 ms** and scrolling frame p95 **16.8 ms**. **515 unit tests across 68 files passed on a full rerun**. The first full run had one GitLab stale-file fixture failure (`PROVIDER_REQUEST` instead of `STALE_PROVIDER_MERGE`); its isolated nine-test suite and the subsequent full run passed. This resembles the previously recorded GitLab fixture failure, but its cause remains unconfirmed. No test timeout or performance threshold was relaxed. Typechecking, build, full ESLint/Prettier checks passed, and the worktree dialog screenshot was visually inspected. Packaging and the complete desktop suite were not rerun for that increment.
 
@@ -47,11 +51,13 @@ The full desktop run at `8c68b88` measured:
 
 ### Worktree acceptance
 
-Eleven native Git tests exercise main/current, locked, missing, dirty, detached, bare and unborn checkouts; Unicode/newline paths; unknown/stale selection refusal; and a registered directory replaced by an unrelated repository. Creation tests check empty destinations, explicit commits, new/existing/detached modes, moved branch tips, duplicate branch checkout refusal, unchanged original HEAD and cancellation. Management coverage includes offline locking/unlocking, lock reasons, refusal to remove main/current/locked checkouts, ignored and untracked files, tracked edits hidden behind either index flag, unreferenced detached commits and a clean-index pending merge. Successful removal retains the branch tip. IPC coverage rejects renderer paths, force fields, malformed IDs, symbolic revision expressions and oversized/NUL-containing reasons.
+Sixteen native Git tests exercise main/current, locked, missing, dirty, detached, bare and unborn checkouts; Unicode/newline paths; unknown/stale selection refusal; and a registered directory replaced by an unrelated repository. Creation tests check empty destinations, explicit commits, new/existing/detached modes, moved branch tips, duplicate branch checkout refusal, unchanged original HEAD and cancellation. Management coverage includes offline locking/unlocking, lock reasons, refusal to remove main/current/locked checkouts, ignored and untracked files, tracked edits hidden behind either index flag, unreferenced detached commits and a clean-index pending merge. Successful removal retains the branch tip. IPC coverage rejects renderer paths, force fields, malformed IDs, symbolic revision expressions and oversized/NUL-containing reasons.
 
-Four Electron tests cover stale-list recovery, explicit opening, creation in all three modes, picker cancellation and nonempty-folder recovery, lock/unlock review, canceled removal, a file created after review, clean removal with branch retention, and focus restoration after cancellation and success. Graph and command-palette regressions passed at the creation checkpoint; native-menu regressions passed again with management.
+Five Electron tests cover stale-list recovery, explicit opening, creation in all three modes, picker cancellation and nonempty-folder recovery, lock/unlock review, canceled removal, a file created after review, clean removal with branch retention, and focus restoration after cancellation and success. Graph and command-palette regressions passed at the creation checkpoint; native-menu regressions passed again with management.
 
-This proves list/create/open/lock/unlock and guarded removal behavior on Linux. It does not prove prune review, graph WIP rows, other-checkout watching, non-UTF-8 worktree paths or macOS/Windows runtime acceptance.
+Prune coverage checks live/locked checkout and branch retention, consumed/foreign/expired tokens, changed metadata, restored checkouts, detached HEAD retention before preview and confirmation, and malformed registrations omitted by the normal list. The Electron flow cancels review, refuses confirmation after an external lock, completes a fresh review and verifies empty-cleanup controls and focus. IPC checks reject caller-supplied paths, cutoffs, reports, candidates and force flags.
+
+This proves list/create/open/lock/unlock, guarded removal and reviewed pruning behavior on Linux. It does not prove graph WIP rows, other-checkout watching, non-UTF-8 worktree paths or macOS/Windows runtime acceptance. Prune revalidation is optimistic; external Git writers are not locked out.
 
 ### Terminal acceptance
 
@@ -73,7 +79,9 @@ Serializing in preload initially passed at 212, 206 and 203 ms, but a later run 
 
 These are Linux fixture measurements. CPU contention still affects timings, the dedicated real-repository benchmark was not run, and cross-platform performance remains unverified. The earlier diff/blame timing failures and investigations remain in the previous checkpoint logs; this clean full-suite result does not replace broader M8 regression requirements.
 
-Latest management logs are `/tmp/openkraken-worktree-management-final-{unit,lint,build,e2e}.log` and `/tmp/openkraken-worktree-management-core-security.log`. Red/green evidence for lock, removal, hidden index flags, detached commits, pending merges and review focus remains under `/tmp/openkraken-worktree-*.log`.
+Latest prune logs are `/tmp/openkraken-worktree-prune-final-{unit,lint,types}.log`, `/tmp/openkraken-worktree-prune-build.log`, `/tmp/openkraken-worktree-prune-ui-green.log` and `/tmp/openkraken-worktree-prune-menu.log`. Native and UI red/green evidence remains under `/tmp/openkraken-worktree-prune-*.log`.
+
+Management logs are `/tmp/openkraken-worktree-management-final-{unit,lint,build,e2e}.log` and `/tmp/openkraken-worktree-management-core-security.log`. Red/green evidence for lock, removal, hidden index flags, detached commits, pending merges and review focus remains under `/tmp/openkraken-worktree-*.log`.
 
 Creation/opening logs are `/tmp/openkraken-worktrees-final-{unit,unit-recheck,lint,build,e2e}.log`; the isolated GitLab rerun is `/tmp/openkraken-worktrees-gitlab-recheck.log`. Focused core, UI, newline-path and creation red/green evidence remains under `/tmp/openkraken-worktrees-*.log`. One UI test initially used a label selector containing dropdown option text; selecting the accessible combobox fixed the test without changing application behavior.
 
@@ -85,7 +93,7 @@ Logs for the preceding full-suite checkpoint are `/tmp/openkraken-terminal-final
 
 - Broader command coverage, including dynamic branch/file domains and contextual commands. Native accelerators are implemented; this is not an Atom selector keymap interpreter. Other older preferences (for example graph view settings) still need consolidation into the main settings store.
 - Automatic shell integration for zsh, fish and PowerShell, plus terminal runtime acceptance on macOS/Windows. Standard OSC 133 consumption and automatic Bash 5.1+ integration are implemented. The initial terminal supports one session; broader terminal workflows remain future work.
-- Worktree prune review; graph worktree WIP rows and other-checkout watch integration. List/create/open/lock/unlock and guarded removal are implemented for UTF-8 paths; non-UTF-8 worktree paths and cross-platform runtime acceptance remain open. Submodule UI and LFS awareness remain open.
+- Graph worktree WIP rows and other-checkout watch integration. List/create/open/lock/unlock, guarded removal and reviewed pruning are implemented for UTF-8 paths; non-UTF-8 worktree paths and cross-platform runtime acceptance remain open. Submodule UI and LFS awareness remain open.
 - Onboarding, activity log, toasts, a complete accessibility pass, and i18n scaffolding.
 - Optional git-flow and consent-gated BYO-key AI remain optional, not implemented.
 
