@@ -46,6 +46,14 @@ jobs:
         run: xvfb-run -a pnpm smoke:package
       - if: runner.os != 'Linux'
         run: pnpm smoke:package
+      - if: runner.os == 'macOS'
+        name: Build and verify unsigned DMG copy-install
+        timeout-minutes: 15
+        run: |
+          pnpm installer --test-metadata --target dmg
+          manifest="release/installers/darwin-$(node -p 'process.arch')/test/dmg/manifest.json"
+          node scripts/check-installer-guards.mjs "$manifest"
+          pnpm smoke:installer "$manifest"
       - if: runner.os == 'Linux'
         name: Build unsigned Linux test installers
         run: |

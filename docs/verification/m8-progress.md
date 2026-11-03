@@ -1,6 +1,18 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The current checkpoint adds native Fedora RPM install/reinstall/upgrade/removal acceptance, fixes release-version stamping, and makes RPM own its private application directories so final removal cleans them up. Earlier AppImage restart, recovery and opt-in automatic checks remain implemented. This does not close the remaining [M6](m6-progress.md), [M7](m7-progress.md) or release scope.
+M8 remains in progress. The current checkpoint implements native DMG creation and copy-install verification, with native macOS execution still pending. Existing Linux packaging, Fedora upgrade acceptance, AppImage restart/recovery and opt-in automatic checks remain implemented. This does not close the remaining [M6](m6-progress.md), [M7](m7-progress.md) or release scope.
+
+## Native DMG pipeline, awaiting macOS acceptance
+
+The native macOS producer and verifier (`28e8a84`) preserve the hardened `.app`, require matching bundle identity/version/executable/repository scheme and ad-hoc signature integrity, and check every recorded payload digest, mode and link. The verifier mounts read-only, copies into a disposable directory, detaches and then launches that copy through the existing desktop smoke. It never installs into `/Applications`. Uncertain attachment or failed detachment retains the temporary directory instead of recursively cleaning a possible mount. See [ADR 0089](../decisions/0089-native-dmg-payload-and-copy-install.md).
+
+Packager now explicitly sets `org.openkraken.desktop` and normalizes macOS POSIX permissions before resetting the ad-hoc signature. Linux behavior is retained. Native CI builds a test-only DMG, rejects corrupted artifact/helper hashes and a mismatched bundle version, checks rejection cleanup, and verifies copy-install and launch after detach. The four native metadata unit cases also run on macOS. No native macOS runner was available during this checkpoint: creation, mounting, signature checks and desktop execution remain **unverified**, not passing results inferred from Linux.
+
+Linux verification passed **5 focused packaging tests**, with **4 macOS-only cases skipped**. These cover host/manifest refusal, framework-style links and executable modes across copying, unsafe external links, and writable helpers. The host-refusal test initially failed before implementation. Full ESLint/Prettier, typechecking/build, a fresh Linux x64 package/fuse check and packaged smoke passed. The rebuilt RPM passed payload/mode/link/fuse and desktop checks, plus artifact/helper corruption guards. Packaged smoke covered renderer isolation, default-off settings, native helpers, native picker and Bash/PTY keyboard delivery, and cold/resident repository-link consent. All these commands returned exit code 0.
+
+The application unit and Electron regression suites were not rerun for this packaging-only increment; the earlier 666-test and 26-test results below remain historical checkpoints. DEB/AppImage generation and native Fedora/Debian lifecycles were not rerun. These results do not establish native macOS/Windows or ARM64 acceptance, Developer ID/notarization, Gatekeeper, Finder installation, system URL-handler registration, MSI, distribution or beta readiness. The overall goal remains active.
+
+Evidence: `/tmp/openkraken-dmg-host-red.log`, `/tmp/openkraken-dmg-tests.log`, `/tmp/openkraken-dmg-lint.log`, `/tmp/openkraken-dmg-linux-{package,smoke,rpm,rpm-smoke,guards}.log`. The rebuilt test RPM is under `release/installers/linux-x64/test/rpm/`. No DMG was produced on the Linux host.
 
 ## Native RPM lifecycle and versioned upgrade
 

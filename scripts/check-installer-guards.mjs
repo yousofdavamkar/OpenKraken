@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile, rm } from 'node:fs/promises';
+import { readFile, readdir, writeFile, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 const source = resolve(process.argv[2]);
 const original = JSON.parse(await readFile(source, 'utf8'));
+const dmgChecks = async () =>
+  (await readdir('release')).filter((name) => name.startsWith('dmg-check-')).sort();
+const existingDmgChecks = original.target === 'dmg' ? await dmgChecks() : [];
 const fixture = join(dirname(source), `rejection-${randomUUID()}.json`);
 try {
   const corruptArchive = structuredClone(original);
@@ -37,6 +40,27 @@ try {
       return true;
     },
   );
+  if (original.target === 'dmg') {
+    const wrongVersion = structuredClone(original);
+    wrongVersion.version = `${original.version}-mismatch`;
+    await writeFile(fixture, JSON.stringify(wrongVersion));
+    await assert.rejects(
+      run(process.execPath, ['scripts/verify-installer.mjs', fixture]),
+      (error) => {
+        assert.match(
+          error.stderr,
+          /macOS bundle identity, version, executable or repository scheme differs/,
+        );
+        assert.doesNotMatch(error.stdout, /Packaged|verified/);
+        return true;
+      },
+    );
+    assert.deepEqual(
+      await dmgChecks(),
+      existingDmgChecks,
+      'Rejected DMGs must detach and clean up',
+    );
+  }
   console.log('Archive and native-helper mismatches rejected before desktop launch');
 } finally {
   await rm(fixture, { force: true });
