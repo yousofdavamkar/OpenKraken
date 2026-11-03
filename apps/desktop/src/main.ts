@@ -3,6 +3,7 @@ import { CommitDrafts } from './commit-drafts.js';
 import { CommandMenu } from './command-menu.js';
 import { TerminalHost } from './terminal-host.js';
 import { AppSettings } from './app-settings.js';
+import { CrashReports } from './crash-reports.js';
 import { BitbucketProvider } from './bitbucket-provider.js';
 import {
   app,
@@ -53,6 +54,8 @@ import {
   electronSecretProtection,
 } from './provider-vault.js';
 const htmlPath = join(__dirname, 'renderer', 'index.html');
+declare const __OPENKRAKEN_SENTRY_DSN__: string | null;
+let crashReports: CrashReports | undefined;
 const documentUrl = pathToFileURL(htmlPath).href;
 let window: BrowserWindow | undefined;
 let terminalRepository: { id: string; path: string } | undefined;
@@ -251,6 +254,9 @@ function createWindow() {
     providers?.gitlabCancel();
   };
   window.webContents.on('render-process-gone', cancelProviderSignIn);
+  window.webContents.on('render-process-gone', (_event, details) => {
+    void crashReports?.capture('renderer', details.reason);
+  });
   window.webContents.on('did-start-navigation', (details) => {
     if (details.isMainFrame) cancelProviderSignIn();
   });
@@ -329,6 +335,22 @@ else {
         if (request.method === 'commandContext') {
           commandMenu?.context(request.revision, request.available);
           return { kind: 'commandContext' };
+        }
+        if (request.method === 'crashReporting' || request.method === 'crashReportingSave') {
+          try {
+            const state =
+              request.method === 'crashReportingSave'
+                ? await crashReports!.save(request.enabled, request.revision)
+                : await crashReports!.read();
+            return { kind: 'crashReporting', state };
+          } catch {
+            return {
+              kind: 'error',
+              code: 'CRASH_REPORTING_SETTINGS',
+              message:
+                'Crash reporting settings could not be saved. Reopen the dialog or restart before retrying. A requested opt-out takes effect for this session even if saving fails.',
+            };
+          }
         }
         if (
           request.method === 'commandPreferences' ||
@@ -1132,6 +1154,23 @@ else {
       }
     });
     appSettings ??= new AppSettings(app.getPath('userData'));
+    crashReports = new CrashReports(app.getPath('userData'), __OPENKRAKEN_SENTRY_DSN__, {
+      version: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+    });
+    await crashReports.read();
+    app.on('child-process-gone', (_event, details) => {
+      const kind =
+        details.name === 'OpenKraken Git'
+          ? 'git'
+          : details.name === 'OpenKraken Terminal'
+            ? 'terminal'
+            : details.type === 'GPU'
+              ? 'gpu'
+              : null;
+      if (kind) void crashReports?.capture(kind, details.reason);
+    });
     activateAppearance(await appSettings.readAppearance());
     nativeTheme.on('updated', updateWindowBackground);
     activity = new ActivityLog(app.getPath('userData'), () => {
@@ -1151,6 +1190,7 @@ else {
   let quitting = false;
   // Keep the service and caches alive if a renderer cancels the window close.
   app.on('will-quit', (event) => {
+    crashReports?.close();
     avatars?.close();
     providers?.deviceCancel();
     providers?.gitlabCancel();
@@ -1170,6 +1210,7 @@ else {
       stopped,
       providers?.idle(),
       appSettings?.idle(),
+      crashReports?.idle(),
       commitDrafts?.idle(),
       terminals.close(),
     ])

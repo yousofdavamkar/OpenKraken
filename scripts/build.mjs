@@ -4,6 +4,8 @@ import { build as esbuild } from 'esbuild';
 import { build as vite } from 'vite';
 import { resolve } from 'node:path';
 import { cp } from 'node:fs/promises';
+import { reportDestination } from '../apps/desktop/src/report-destination.ts';
+const reporting = reportDestination(process.env.OPENKRAKEN_SENTRY_DSN ?? null);
 await buildAskpass();
 await esbuild({
   entryPoints: {
@@ -17,6 +19,7 @@ await esbuild({
   format: 'cjs',
   external: ['electron', '@parcel/watcher', 'node-pty'],
   target: 'node24',
+  define: { __OPENKRAKEN_SENTRY_DSN__: JSON.stringify(reporting?.dsn ?? null) },
   outdir: 'apps/desktop/dist',
   outExtension: { '.js': '.cjs' },
 });
