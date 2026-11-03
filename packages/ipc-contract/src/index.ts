@@ -1,4 +1,6 @@
 import { crashReportingStateSchema } from './crash-reports.js';
+import { repositoryLinkRequests, repositoryLinkSchema } from './repository-links.js';
+export type { RepositoryLink } from './repository-links.js';
 export * from './crash-reports.js';
 import { activityRequests, activityStateSchema, activityEventSchema } from './activity.js';
 import { commitDraftRequests, commitDraftStateSchema } from './commit-drafts.js';
@@ -1245,6 +1247,7 @@ const workingRequests = [
     .strict(),
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  ...repositoryLinkRequests,
   z
     .object({
       id: requestId,
@@ -1846,6 +1849,7 @@ export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('rendererFailure') }).strict(),
   z.object({ kind: z.literal('crashReporting'), state: crashReportingStateSchema }).strict(),
+  z.object({ kind: z.literal('repositoryLink'), link: repositoryLinkSchema.nullable() }).strict(),
   z.object({ kind: z.literal('commitDraft'), state: commitDraftStateSchema }).strict(),
   z.object({ kind: z.literal('activity'), state: activityStateSchema }).strict(),
   z
@@ -2207,6 +2211,7 @@ export const gitProgressEventSchema = z
   .object({ type: z.literal('gitProgress'), id: requestId, text: z.string().max(4096) })
   .strict();
 export const desktopEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('repositoryLinkChanged') }).strict(),
   z
     .object({ type: z.literal('gitRequestsInterrupted'), requestIds: z.array(requestId).max(8) })
     .strict(),

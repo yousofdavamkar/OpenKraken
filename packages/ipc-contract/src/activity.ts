@@ -3,6 +3,7 @@ import { z } from 'zod';
 // Only fixed application vocabulary may enter the activity file. Never add request payloads.
 export const activityActions = {
   open: 'Open repository',
+  repositoryLinkOpen: 'Open linked repository',
   init: 'Initialize repository',
   clone: 'Clone repository',
   openWorktree: 'Open worktree',
