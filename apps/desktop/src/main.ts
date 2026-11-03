@@ -1,4 +1,5 @@
 import { ActivityLog } from './activity-log.js';
+import { Diagnostics } from './diagnostics.js';
 import { RepositoryLinks } from './repository-links.js';
 import { CommitDrafts } from './commit-drafts.js';
 import { CommandMenu } from './command-menu.js';
@@ -57,6 +58,7 @@ import {
 const htmlPath = join(__dirname, 'renderer', 'index.html');
 declare const __OPENKRAKEN_SENTRY_DSN__: string | null;
 let crashReports: CrashReports | undefined;
+let diagnostics: Diagnostics | undefined;
 const documentUrl = pathToFileURL(htmlPath).href;
 let window: BrowserWindow | undefined;
 let windowsReady = false;
@@ -267,6 +269,7 @@ function createWindow() {
   };
   window.webContents.on('render-process-gone', cancelProviderSignIn);
   window.webContents.on('render-process-gone', (_event, details) => {
+    diagnostics?.failure('renderer', details.reason);
     void crashReports?.capture('renderer', details.reason);
   });
   window.webContents.on('did-start-navigation', (details) => {
@@ -287,6 +290,11 @@ function createWindow() {
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
+  diagnostics = new Diagnostics(join(app.getPath('userData'), 'diagnostics'), {
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+  });
   // macOS may deliver a URL before ready. No path is opened until renderer consent.
   app.on('open-url', (event, url) => {
     event.preventDefault();
@@ -303,6 +311,10 @@ else {
   // Observe failures without replacing Node/Electron's exception handling or
   // inspecting the error object. Fatal exits are recovered through the marker.
   process.on('uncaughtExceptionMonitor', (_error, origin) => {
+    diagnostics?.failure(
+      'main',
+      origin === 'unhandledRejection' ? 'unhandled-rejection' : 'unhandled-exception',
+    );
     void crashReports?.capture(
       'main',
       origin === 'unhandledRejection' ? 'unhandled-rejection' : 'unhandled-exception',
@@ -324,6 +336,14 @@ else {
       });
     });
     const executeRequest = async (request: DesktopRequest): Promise<Result> => {
+      if (request.method === 'diagnosticsRead' || request.method === 'diagnosticsClear')
+        return {
+          kind: 'diagnostics',
+          state:
+            request.method === 'diagnosticsClear'
+              ? await diagnostics!.clear()
+              : await diagnostics!.read(),
+        };
       if (request.method === 'repositoryLink')
         return { kind: 'repositoryLink', link: repositoryLinks.read() };
       if (request.method === 'repositoryLinkDismiss') {
@@ -377,6 +397,7 @@ else {
           return { kind: 'commandContext' };
         }
         if (request.method === 'rendererFailure') {
+          diagnostics?.failure('renderer', request.reason);
           void crashReports?.capture('renderer', request.reason);
           return { kind: 'rendererFailure' };
         }
@@ -1181,7 +1202,7 @@ else {
       validateSender(event);
       if (format !== undefined && format !== 'json') throw new Error('Invalid response format');
       const request = requestSchema.parse(raw);
-      const result = await handleRequest(request);
+      const result = await diagnostics!.track(request, () => handleRequest(request));
       if (result.kind === 'snapshot') {
         terminalRepository = result.snapshot.repository;
         draftRepositories.delete(result.snapshot.repository.id);
@@ -1211,7 +1232,10 @@ else {
             : details.type === 'GPU'
               ? 'gpu'
               : null;
-      if (kind) void crashReports?.capture(kind, details.reason);
+      if (kind) {
+        diagnostics?.failure(kind, details.reason);
+        void crashReports?.capture(kind, details.reason);
+      }
     });
     activateAppearance(await appSettings.readAppearance());
     nativeTheme.on('updated', updateWindowBackground);
@@ -1235,6 +1259,7 @@ else {
   let quitting = false;
   // Keep the service and caches alive if a renderer cancels the window close.
   app.on('will-quit', (event) => {
+    void diagnostics?.close();
     crashReports?.close();
     avatars?.close();
     providers?.deviceCancel();
@@ -1257,6 +1282,7 @@ else {
       providers?.idle(),
       appSettings?.idle(),
       crashReports?.idle(),
+      diagnostics?.idle(),
       commitDrafts?.idle(),
       terminals.close(),
     ])
