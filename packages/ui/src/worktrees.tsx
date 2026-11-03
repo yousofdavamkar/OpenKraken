@@ -1,19 +1,46 @@
 import { useEffect, useRef, useState } from 'react';
-import type { WorktreeAdd, WorktreeState } from '@openkraken/ipc-contract';
+import type {
+  Worktree,
+  WorktreeAction,
+  WorktreeAdd,
+  WorktreeState,
+} from '@openkraken/ipc-contract';
 import { CommandButton } from './commands.js';
 import { useRepository, waitForBackground } from './store.js';
 
 function WorktreeDialog({ repoId, close }: { repoId: string; close: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const actionTrigger = useRef<HTMLButtonElement>(null);
+  const actionCancel = useRef<HTMLButtonElement>(null);
+  const lockReason = useRef<HTMLInputElement>(null);
+  const refreshButton = useRef<HTMLButtonElement>(null);
   const [state, setState] = useState<WorktreeState>();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [review, setReview] = useState<{
+    entry: Worktree;
+    action: WorktreeAction['action'];
+    revision: string;
+  }>();
+  const [reason, setReason] = useState('');
   const snapshot = useRepository((store) => store.snapshot);
   const [mode, setMode] = useState<WorktreeAdd['mode']>('new');
   const [branch, setBranch] = useState('');
   const [oid, setOid] = useState(snapshot?.repository.head.oid ?? '');
   const branches = snapshot?.refs.filter((ref) => ref.kind === 'local') ?? [];
+  useEffect(() => {
+    if (pending) return;
+    if (review?.action === 'lock') lockReason.current?.focus();
+    else if (review) actionCancel.current?.focus();
+    else if (actionTrigger.current) {
+      if (actionTrigger.current.isConnected) actionTrigger.current.focus();
+      else refreshButton.current?.focus();
+    }
+  }, [review, pending]);
   const load = async () => {
+    setReview(undefined);
+    setNotice('');
     setPending(true);
     setError('');
     try {
@@ -55,6 +82,7 @@ function WorktreeDialog({ repoId, close }: { repoId: string; close: () => void }
     if (!state) return;
     setPending(true);
     setError('');
+    setNotice('');
     let id: string | undefined;
     try {
       if (useRepository.getState().syncing) await waitForBackground();
@@ -87,6 +115,63 @@ function WorktreeDialog({ repoId, close }: { repoId: string; close: () => void }
       setPending(false);
     }
   };
+  const act = async () => {
+    if (!review) return;
+    setPending(true);
+    setError('');
+    setNotice('');
+    let id: string | undefined;
+    try {
+      if (useRepository.getState().syncing) await waitForBackground();
+      if (useRepository.getState().snapshot?.repository.id !== repoId) return;
+      if (useRepository.getState().busy)
+        throw new Error('Wait for the current operation to finish');
+      id = crypto.randomUUID();
+      useRepository.setState({ busy: id });
+      const selection = { worktreeId: review.entry.id, revision: review.revision };
+      const options: WorktreeAction =
+        review.action === 'lock'
+          ? { ...selection, action: 'lock', reason }
+          : { ...selection, action: review.action };
+      const result = await window.openkraken.request({
+        id,
+        method: 'worktreeAction',
+        repoId,
+        options,
+      });
+      if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'worktrees') {
+        setState(result.state);
+        setReview(undefined);
+        setNotice(
+          review.action === 'lock'
+            ? 'Worktree locked'
+            : review.action === 'unlock'
+              ? 'Worktree unlocked'
+              : 'Worktree removed',
+        );
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (id && useRepository.getState().busy === id) useRepository.setState({ busy: undefined });
+      if (id && useRepository.getState().snapshot?.repository.id === repoId)
+        await useRepository.getState().run({ id: crypto.randomUUID(), method: 'refresh', repoId });
+      setPending(false);
+    }
+  };
+  const chooseAction = (
+    entry: Worktree,
+    action: WorktreeAction['action'],
+    trigger: HTMLButtonElement,
+  ) => {
+    if (!state) return;
+    setError('');
+    setNotice('');
+    setReason('');
+    actionTrigger.current = trigger;
+    setReview({ entry, action, revision: state.revision });
+  };
   return (
     <dialog
       ref={dialog}
@@ -100,6 +185,7 @@ function WorktreeDialog({ repoId, close }: { repoId: string; close: () => void }
       <h2>Worktrees</h2>
       <p>Each worktree has its own checked-out branch and working files.</p>
       {error && <p role="alert">{error}</p>}
+      {notice && <p role="status">{notice}</p>}
       {!state && (
         <p role="status">{pending ? 'Loading worktrees…' : 'Worktrees could not be loaded'}</p>
       )}
@@ -182,6 +268,63 @@ function WorktreeDialog({ repoId, close }: { repoId: string; close: () => void }
           </button>
         </fieldset>
       </form>
+      {review && (
+        <fieldset disabled={pending} aria-label="Review worktree action">
+          <legend>
+            {review.action === 'remove'
+              ? 'Remove worktree?'
+              : review.action === 'lock'
+                ? 'Lock worktree?'
+                : 'Unlock worktree?'}
+          </legend>
+          <p className="worktree-path">{review.entry.path}</p>
+          <p>
+            {review.entry.branch ?? 'Detached HEAD'} · {review.entry.head?.slice(0, 12)}
+          </p>
+          {review.action === 'lock' && (
+            <>
+              <p>Prevent this checkout from being removed or pruned while it is offline.</p>
+              <label>
+                Lock reason
+                <input
+                  ref={lockReason}
+                  value={reason}
+                  maxLength={1024}
+                  onChange={(event) => setReason(event.target.value)}
+                />
+              </label>
+            </>
+          )}
+          {review.action === 'unlock' && (
+            <p>This allows Git to remove or prune the checkout. Its files stay in place.</p>
+          )}
+          {review.action === 'remove' && (
+            <p>
+              This deletes the checkout folder. Branches are retained. Removal is refused if there
+              are changed, untracked or ignored files, or detached commits without a retaining
+              branch or tag.
+            </p>
+          )}
+          <div className="dialog-actions">
+            <button onClick={() => void act()}>
+              {review.action === 'remove'
+                ? 'Confirm removal'
+                : review.action === 'lock'
+                  ? 'Confirm lock'
+                  : 'Confirm unlock'}
+            </button>
+            <button
+              ref={actionCancel}
+              onClick={() => {
+                setReview(undefined);
+                setError('');
+              }}
+            >
+              Cancel action
+            </button>
+          </div>
+        </fieldset>
+      )}
       <ul aria-label="Registered worktrees">
         {state?.entries.map((entry) => (
           <li key={entry.id}>
@@ -211,11 +354,35 @@ function WorktreeDialog({ repoId, close }: { repoId: string; close: () => void }
             >
               Open worktree
             </button>
+            {!entry.main && (
+              <div className="dialog-actions">
+                <button
+                  disabled={pending}
+                  onClick={(event) =>
+                    chooseAction(entry, entry.locked ? 'unlock' : 'lock', event.currentTarget)
+                  }
+                >
+                  {entry.locked ? 'Unlock worktree' : 'Lock worktree'}
+                </button>
+                <button
+                  disabled={
+                    pending ||
+                    entry.current ||
+                    entry.locked ||
+                    !entry.available ||
+                    entry.changedFiles !== 0
+                  }
+                  onClick={(event) => chooseAction(entry, 'remove', event.currentTarget)}
+                >
+                  Remove worktree
+                </button>
+              </div>
+            )}
           </li>
         ))}
       </ul>
       <div className="dialog-actions">
-        <button disabled={pending} onClick={() => void load()}>
+        <button ref={refreshButton} disabled={pending} onClick={() => void load()}>
           Refresh worktrees
         </button>
         <button disabled={pending} onClick={close}>

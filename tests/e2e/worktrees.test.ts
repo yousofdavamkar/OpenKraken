@@ -1,8 +1,62 @@
 import { _electron as electron, expect, test } from '@playwright/test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createFixture, fixtureGit } from '../../packages/test-fixtures/src/index.js';
+
+test('worktree lock and removal reviews preserve files and retain the branch after clean removal', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-worktrees-manage-ui-'));
+  const path = createFixture(join(root, 'source'), 'linear', 3);
+  const linked = join(root, 'managed-checkout');
+  fixtureGit(path, ['worktree', 'add', '-b', 'retained-branch', linked]);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('button', { name: 'Worktrees', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Worktrees', exact: true });
+    const row = dialog.getByRole('listitem').filter({ hasText: linked });
+    await row.getByRole('button', { name: 'Lock worktree', exact: true }).click({ timeout: 1500 });
+    const review = dialog.getByRole('group', { name: 'Review worktree action', exact: true });
+    await expect(review.getByRole('textbox', { name: 'Lock reason', exact: true })).toBeFocused();
+    await review.getByRole('textbox', { name: 'Lock reason', exact: true }).fill('Portable drive');
+    await review.getByRole('button', { name: 'Confirm lock', exact: true }).click();
+    await expect(row).toContainText('Locked · Portable drive');
+    await expect(row.getByRole('button', { name: 'Unlock worktree', exact: true })).toBeFocused();
+    await expect(row.getByRole('button', { name: 'Remove worktree', exact: true })).toBeDisabled();
+    await row.getByRole('button', { name: 'Unlock worktree', exact: true }).click();
+    await review.getByRole('button', { name: 'Confirm unlock', exact: true }).click();
+    await row.getByRole('button', { name: 'Remove worktree', exact: true }).click();
+    await expect(review).toContainText(linked);
+    await expect(review.getByRole('button', { name: 'Cancel action', exact: true })).toBeFocused();
+    await review.getByRole('button', { name: 'Cancel action', exact: true }).click();
+    await expect(row.getByRole('button', { name: 'Remove worktree', exact: true })).toBeFocused();
+    expect(existsSync(linked)).toBe(true);
+    await row.getByRole('button', { name: 'Remove worktree', exact: true }).click();
+    writeFileSync(join(linked, 'late-draft.txt'), 'created after review');
+    await review.getByRole('button', { name: 'Confirm removal', exact: true }).click();
+    await expect(dialog.getByRole('alert')).toContainText('changed, untracked or ignored files');
+    expect(readFileSync(join(linked, 'late-draft.txt'), 'utf8')).toBe('created after review');
+    rmSync(join(linked, 'late-draft.txt'));
+    await review.getByRole('button', { name: 'Confirm removal', exact: true }).click();
+    await expect(row).toHaveCount(0);
+    await expect(
+      dialog.getByRole('button', { name: 'Refresh worktrees', exact: true }),
+    ).toBeFocused();
+    expect(existsSync(linked)).toBe(false);
+    expect(fixtureGit(path, ['branch', '--list', 'retained-branch'])).toContain('retained-branch');
+    await page.screenshot({ path: 'test-results/worktree-management.png' });
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('worktrees show checkout state and refresh stale selections before opening a linked repository', async () => {
   const root = mkdtempSync(join(tmpdir(), 'openkraken-worktrees-ui-'));

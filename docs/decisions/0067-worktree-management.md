@@ -10,13 +10,21 @@ Creation offers a new branch at an explicit commit, an existing local branch at 
 
 Creation does not change the current checkout or automatically open the new one. Refresh updates the inventory and branch controls; the user explicitly opens a listed checkout. Picker cancellation and errors preserve form choices. Git errors or cancellation may leave partial Git-created state; the application never attempts an automatic recursive deletion or branch rollback. Refresh and Git's own worktree tools remain the recovery path. External Git writers are outside the application's queue, so this is optimistic revalidation, not a filesystem transaction.
 
+Lock and unlock use the same reviewed worktree ID and inventory revision, through the common-directory write queue. Lock reasons are bounded to 1,024 characters and reject NUL. These actions work for offline registered checkouts; they only change Git's registration metadata. The main worktree is not a valid target.
+
+Removal requires a separate explicit review of the path, branch/detached state and commit. It never passes force to Git and never deletes the branch. Main/current, locked or unavailable worktrees are refused. The service checks current operation markers, including merge, rebase, sequencer and bisect state, before deletion. A fresh status read includes ignored files as well as tracked and untracked changes. Index flags (`skip-worktree` and `assume-unchanged`) can conceal edits, so they must be cleared and files reviewed before removal. A detached HEAD must be reachable from a local branch, tag or remote-tracking branch. These checks protect work which an ordinary clean-status check would miss. Git's own final removal checks still apply, including submodule restrictions. External writers can race these checks; no cross-process transaction is claimed.
+
+The UI retains the review after an error and does not dismiss it until success or explicit cancellation. Lock review focuses the reason field; unlock and removal focus Cancel. Cancellation returns focus to the originating control. Successful actions restore that control, or the refresh button when removal deleted the row. Focus restoration waits until controls are enabled after the refresh.
+
 `rev-parse` metadata normally uses the existing single-query fast path. When newline-containing paths make its multi-value output ambiguous, the repository service reads the two path values separately. Worktree inventory itself always uses the NUL-delimited format.
 
 ## Scope and verification
 
-This checkpoint implements list, create and open. Lock/unlock, safe removal, prune review, graph worktree WIP rows and other-checkout watch integration remain follow-up work; the worktree feature is not complete yet.
+This checkpoint implements list, create, open, lock/unlock and guarded removal. Prune review, graph worktree WIP rows and other-checkout watch integration remain follow-up work; the worktree feature is not complete yet.
 
 Native Git tests cover locked, missing, dirty, detached, bare and unborn checkouts, Unicode/newline paths, unknown/stale selections, empty-directory requirements, branch-tip revalidation, refusal of duplicate branch checkouts, detached creation and cancellation. IPC tests reject renderer-supplied paths, force options, malformed IDs and arbitrary revision expressions. Electron acceptance covers stale selection recovery, checkout switching, all three creation modes, native picker cancellation and failed creation with retained form choices. The current platform is Linux; these results do not establish macOS/Windows runtime acceptance.
+
+Management tests cover lock reasons, stale reviews, offline locking/unlocking, refusal to remove main/current/locked checkouts, untracked and ignored content preservation, hidden tracked edits behind both index flags, unreferenced detached commits and clean-index pending merges. Successful removal retains the branch and its tip. Electron acceptance cancels a review, creates a file after review and verifies refusal with the bytes intact, then removes a clean checkout and verifies branch retention. It also checks review focus, focus restoration after cancellation and success, and native menu regression behavior.
 
 ## Reference
 
