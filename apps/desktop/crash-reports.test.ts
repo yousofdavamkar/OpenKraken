@@ -12,6 +12,88 @@ afterEach(async () => {
   );
 });
 
+test('interrupted main sessions are attempted once after restart with the original release', async () => {
+  const directory = await fixture();
+  const first = new CrashReports(directory, dsn, runtime);
+  await first.start();
+  await first.save(true, (await first.read()).revision);
+  const received: Record<string, unknown>[] = [];
+  const next = new CrashReports(
+    directory,
+    dsn,
+    { ...runtime, version: '0.2.0' },
+    async (_url, init) => {
+      received.push(JSON.parse(String(init?.body).trim().split('\n')[2]!));
+      return new Response(null);
+    },
+  );
+  await next.start();
+  await expect.poll(() => received.length).toBe(1);
+  expect(received[0]).toMatchObject({
+    level: 'warning',
+    release: 'openkraken@0.1.0',
+    tags: { process: 'main', reason: 'unclean-exit' },
+  });
+  await next.start();
+  expect(received).toHaveLength(1);
+  next.close();
+  await next.idle();
+  await expect(stat(join(directory, 'reporting-session.json'))).rejects.toMatchObject({
+    code: 'ENOENT',
+  });
+  const clean = new CrashReports(directory, dsn, runtime, async () => {
+    throw new Error('Unexpected upload after clean exit');
+  });
+  await clean.start();
+  expect((await clean.read()).delivery).toBe('idle');
+  clean.close();
+  await clean.idle();
+});
+
+test('renewing consent cancels the old in-flight generation without leaving a sending status', async () => {
+  let signal: AbortSignal | null | undefined;
+  const reports = new CrashReports(await fixture(), dsn, runtime, async (_url, init) => {
+    signal = init?.signal;
+    return new Promise<Response>((_resolve, reject) =>
+      signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }),
+    );
+  });
+  await reports.save(true, (await reports.read()).revision);
+  const sending = reports.capture('renderer', 'crashed');
+  await expect.poll(() => signal).toBeDefined();
+  await reports.save(true, (await reports.read()).revision);
+  await sending;
+  expect(signal?.aborted).toBe(true);
+  expect(await reports.read()).toMatchObject({ enabled: true, delivery: 'idle' });
+});
+
+test('old consent is reset and opting out removes the local session marker', async () => {
+  const directory = await fixture();
+  const reports = new CrashReports(directory, dsn, runtime);
+  await reports.save(true, (await reports.read()).revision);
+  const file = join(directory, 'crash-reporting.json');
+  const saved = JSON.parse(await readFile(file, 'utf8'));
+  delete saved.nonce;
+  saved.version = 1;
+  await writeFile(file, JSON.stringify(saved));
+  const upgraded = new CrashReports(directory, dsn, runtime);
+  expect(await upgraded.read()).toMatchObject({ enabled: false, warning: null });
+  await upgraded.start();
+  await expect(stat(join(directory, 'reporting-session.json'))).rejects.toMatchObject({
+    code: 'ENOENT',
+  });
+  await upgraded.save(true, (await upgraded.read()).revision);
+  const firstConsent = (await upgraded.read()).revision;
+  await upgraded.save(false, firstConsent);
+  await expect(stat(join(directory, 'reporting-session.json'))).rejects.toMatchObject({
+    code: 'ENOENT',
+  });
+  await upgraded.save(true, (await upgraded.read()).revision);
+  expect((await upgraded.read()).revision).not.toBe(firstConsent);
+  upgraded.close();
+  await upgraded.idle();
+});
+
 test('consent survives restart, is bound to the exact destination, and revocation persists', async () => {
   const directory = await fixture();
   const reports = new CrashReports(directory, dsn, runtime);

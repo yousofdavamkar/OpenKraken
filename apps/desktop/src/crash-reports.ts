@@ -4,33 +4,35 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import type { CrashReportingState } from '@openkraken/ipc-contract';
 import { reportDestination } from './report-destination.js';
+import {
+  ReportSession,
+  reportingRuntimeSchema as runtimeSchema,
+  type ReportingRuntime,
+} from './report-session.js';
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
-const diskSchema = z
+const oldDiskSchema = z
   .object({
     version: z.literal(1),
     enabled: z.boolean(),
     destination: z.string().regex(/^[a-f0-9]{64}$/),
   })
   .strict();
-const processSchema = z.enum(['renderer', 'git', 'terminal', 'gpu']);
+const diskSchema = z.discriminatedUnion('version', [
+  oldDiskSchema,
+  oldDiskSchema.extend({ version: z.literal(2), nonce: z.string().uuid() }),
+]);
+const processSchema = z.enum(['main', 'renderer', 'git', 'terminal', 'gpu']);
 const reasonSchema = z.enum([
   'crashed',
   'oom',
   'abnormal-exit',
   'launch-failed',
   'integrity-failure',
+  'unclean-exit',
+  'unhandled-exception',
+  'unhandled-rejection',
 ]);
-const runtimeSchema = z
-  .object({
-    version: z
-      .string()
-      .regex(/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/)
-      .max(64),
-    platform: z.enum(['linux', 'darwin', 'win32']),
-    arch: z.enum(['x64', 'arm64']),
-  })
-  .strict();
 
 export class CrashReports {
   private config: ReturnType<typeof reportDestination>;
@@ -45,12 +47,15 @@ export class CrashReports {
   private attempts = 0;
   private generation = 0;
   private closed = false;
+  private started = false;
+  private session: ReportSession;
   constructor(
     private directory: string,
     dsn: string | null,
     runtime: unknown,
     private send: typeof fetch = fetch,
   ) {
+    this.session = new ReportSession(directory);
     this.config = reportDestination(dsn);
     this.runtime = runtimeSchema.parse(runtime);
     this.file = join(directory, 'crash-reporting.json');
@@ -82,10 +87,37 @@ export class CrashReports {
       const saved = diskSchema.parse(JSON.parse(this.source));
       this.state.revision = digest(this.source);
       this.state.enabled =
-        !!this.config && saved.enabled && saved.destination === digest(this.config.dsn);
+        !!this.config &&
+        saved.version === 2 &&
+        saved.enabled &&
+        saved.destination === digest(this.config.dsn);
     } catch {
       this.state.warning = 'unreadable';
     }
+  }
+  start(): Promise<void> {
+    if (this.started) return this.idle().then(() => {});
+    this.started = true;
+    const next = this.writes
+      .catch(() => {})
+      .then(async () => {
+        await this.ready;
+        if (!this.state.enabled || this.closed) return null;
+        try {
+          if ((await this.readSource()) !== this.source) throw new Error('Consent changed');
+          return await this.session.begin(this.state.revision!, this.runtime);
+        } catch {
+          this.stop();
+          this.state.warning = 'unreadable';
+          return null;
+        }
+      });
+    this.writes = next;
+    return next.then((previous) => {
+      // Replace the marker before attempting delivery. No failed-report queue
+      // or retry is retained, and startup never waits for the network.
+      if (previous) void this.captureEvent('main', 'unclean-exit', previous);
+    });
   }
   async read() {
     await this.ready;
@@ -107,7 +139,10 @@ export class CrashReports {
       .then(async () => {
         await this.ready;
         if (this.closed) throw new Error('Crash reporting is closed');
-        if (!enabled) this.stop();
+        if (!enabled) {
+          this.stop();
+          await this.session.end();
+        }
         if (
           revision !== this.state.revision ||
           this.state.warning ||
@@ -122,7 +157,8 @@ export class CrashReports {
         if (!(await lstat(this.directory)).isDirectory())
           throw new Error('Unsupported profile directory');
         const raw = JSON.stringify({
-          version: 1,
+          version: 2,
+          nonce: randomUUID(),
           enabled,
           destination: digest(this.config?.dsn ?? ''),
         });
@@ -144,13 +180,27 @@ export class CrashReports {
         this.source = raw;
         this.state.revision = digest(raw);
         this.generation++;
+        this.active?.abort();
+        this.state.delivery = 'idle';
         this.state.enabled = enabled && !this.closed;
+        if (this.state.enabled && this.started) {
+          try {
+            await this.session.begin(this.state.revision, this.runtime);
+          } catch (error) {
+            this.stop();
+            this.state.warning = 'unreadable';
+            throw error;
+          }
+        }
         return structuredClone(this.state);
       });
     this.writes = next;
     return next;
   }
-  async capture(process: string, reason: string) {
+  capture(process: string, reason: string) {
+    return this.captureEvent(process, reason, this.runtime);
+  }
+  private async captureEvent(process: string, reason: string, runtime: ReportingRuntime) {
     // No caller-provided message, stack, path, exit description or exception
     // object can cross this boundary. Unknown events are discarded.
     if (!processSchema.safeParse(process).success || !reasonSchema.safeParse(reason).success)
@@ -192,10 +242,11 @@ export class CrashReports {
     const payload = JSON.stringify({
       event_id,
       platform: 'native',
-      level: 'fatal',
-      release: `openkraken@${this.runtime.version}`,
+      level:
+        reason === 'unclean-exit' ? 'warning' : reason.startsWith('unhandled-') ? 'error' : 'fatal',
+      release: `openkraken@${runtime.version}`,
       message: 'OpenKraken process failure',
-      tags: { process, reason, os: this.runtime.platform, arch: this.runtime.arch },
+      tags: { process, reason, os: runtime.platform, arch: runtime.arch },
     });
     this.state.delivery = 'sending';
     try {
@@ -218,8 +269,15 @@ export class CrashReports {
     }
   }
   close() {
+    if (this.closed) return;
     this.closed = true;
     this.stop();
+    this.writes = this.writes
+      .catch(() => {})
+      .then(() => this.session.end())
+      .catch(() => {
+        this.state.warning = 'changed';
+      });
   }
   idle() {
     return this.writes.catch(() => {});
