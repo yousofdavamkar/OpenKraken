@@ -13,6 +13,7 @@ import { OperationPanel } from './operation.js';
 import { DiscardDialog } from './discard-dialog.js';
 import { WorkingDiffDialog } from './working-diff.js';
 import { useRepository, waitForBackground } from './store.js';
+import { useCommitDraft } from './commit-draft.js';
 const WorkingFileEditor = lazy(() =>
   import('./working-file-editor.js').then((module) => ({ default: module.WorkingFileEditor })),
 );
@@ -30,19 +31,17 @@ export function WorkingTreePanel() {
   const [previewBusy, setPreviewBusy] = useState(false);
   const previewSequence = useRef(0);
   const setState = (state: WorkingState) => useRepository.setState({ workingState: state });
-  const [message, setMessage] = useState('');
-  const [amendText, setAmendText] = useState('');
-  const [amend, setAmend] = useState(false);
-  const [amendHead, setAmendHead] = useState<string>();
-  const [sign, setSign] = useState('default');
+  const commitDraft = useCommitDraft(snapshot?.repository.id);
+  const { message, amendMessage: amendText, amend, amendHead, sign } = commitDraft.draft;
   const templateLoaded = useRef(false);
   const draftVersion = useRef(0);
   useEffect(() => {
-    if (state && !templateLoaded.current) {
+    if (state && commitDraft.ready && !templateLoaded.current) {
       templateLoaded.current = true;
-      setMessage((draft) => draft || state.messageTemplate || '');
+      if (!commitDraft.restored && state.messageTemplate && !message)
+        commitDraft.change({ message: state.messageTemplate });
     }
-  }, [state]);
+  }, [state, commitDraft, message]);
   const [error, setError] = useState<string>();
   const repoId = snapshot?.repository.id,
     cursor = snapshot?.cursor;
@@ -403,9 +402,12 @@ export function WorkingTreePanel() {
                 },
                 () => {
                   if (draftVersion.current !== submittedVersion) return;
-                  setMessage('');
-                  setAmendText('');
-                  setAmend(false);
+                  commitDraft.change({
+                    ...(amend ? {} : { message: '' }),
+                    amendMessage: '',
+                    amend: false,
+                    amendHead: null,
+                  });
                 },
               );
             }}
@@ -416,18 +418,26 @@ export function WorkingTreePanel() {
                 rows={5}
                 aria-label="Commit message"
                 maxLength={65536}
+                disabled={!commitDraft.ready}
                 value={amend ? amendText : message}
                 onChange={(event) => {
                   draftVersion.current++;
-                  (amend ? setAmendText : setMessage)(event.target.value);
+                  commitDraft.change(
+                    amend ? { amendMessage: event.target.value } : { message: event.target.value },
+                  );
                 }}
               />
             </label>
+            <p role="status" aria-label="Commit draft status">
+              {commitDraft.status}
+            </p>
+            {commitDraft.error && <p role="alert">{commitDraft.error}</p>}
             <label>
               <input
                 type="checkbox"
                 checked={amend}
                 disabled={
+                  !commitDraft.ready ||
                   !!busy ||
                   !state?.head.oid ||
                   (!!state.operation &&
@@ -436,11 +446,16 @@ export function WorkingTreePanel() {
                 }
                 onChange={(event) => {
                   draftVersion.current++;
-                  setAmend(event.target.checked);
-                  if (event.target.checked) {
-                    setAmendText(state?.amendMessage ?? '');
-                    setAmendHead(state?.head.oid);
-                  }
+                  commitDraft.change(
+                    event.target.checked
+                      ? {
+                          amend: true,
+                          amendMessage:
+                            amendHead === state?.head.oid ? amendText : (state?.amendMessage ?? ''),
+                          amendHead: state?.head.oid ?? null,
+                        }
+                      : { amend: false },
+                  );
                 }}
               />{' '}
               Amend last commit
@@ -453,7 +468,10 @@ export function WorkingTreePanel() {
               <select
                 aria-label="Signing"
                 value={sign}
-                onChange={(event) => setSign(event.target.value)}
+                disabled={!commitDraft.ready}
+                onChange={(event) =>
+                  commitDraft.change({ sign: event.target.value as 'default' | 'on' | 'off' })
+                }
               >
                 <option value="default">Git setting ({state?.signing ? 'on' : 'off'})</option>
                 <option value="on">Sign with configured agent</option>
