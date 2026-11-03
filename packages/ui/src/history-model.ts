@@ -62,12 +62,16 @@ export function projectCommits(
   }
   return result;
 }
+export interface RefBadge {
+  label: string;
+  names: string[];
+  kind: string;
+}
 export function refBadges(refs: Ref[]) {
-  type Badge = { label: string; names: string[]; kind: string };
-  const groups = new Map<string, Badge[]>();
+  const groups = new Map<string, RefBadge[]>();
   // Allocate a label index only when a target has more than one ref. Most
   // targets in large histories have a single badge and need no second map.
-  const indexes = new Map<string, Map<string, Badge>>();
+  const indexes = new Map<string, Map<string, RefBadge>>();
   const key = (kind: string, label: string) => `${kind}\0${label}`;
   for (const ref of refs) {
     const oid = ref.peeled ?? ref.target;

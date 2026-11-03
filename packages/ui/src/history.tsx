@@ -8,6 +8,9 @@ import { AuthorAvatar, useVisibleAvatars } from './avatars.js';
 import { CommandButton } from './commands.js';
 import { useRepository } from './store.js';
 import { useTheme } from './theme.js';
+import { CommitBadges, CommitReferencesDialog } from './commit-references.js';
+import type { RefBadge } from './history-model.js';
+const noBadges: RefBadge[] = [];
 const dateFormatter = new Intl.DateTimeFormat();
 export function History() {
   const theme = useTheme();
@@ -49,6 +52,19 @@ export function History() {
     search = useRef<HTMLInputElement>(null);
   const [bounds, setBounds] = useState({ width: 500, height: 400 });
   const [scroll, setScroll] = useState({ top: 0, left: 0 });
+  const [references, setReferences] = useState<{
+    repoId: string;
+    oid: string;
+    opener: HTMLButtonElement;
+  }>();
+  useEffect(() => {
+    setReferences((current) => (current?.repoId === snapshot?.repository.id ? current : undefined));
+  }, [snapshot?.repository.id]);
+  const closeReferences = () => {
+    setReferences(undefined);
+    if (references?.opener.isConnected) references.opener.focus({ preventScroll: true });
+    else viewport.current?.focus({ preventScroll: true });
+  };
   const graphWidth = Math.max(80, maxColumns * LANE_WIDTH + GRAPH_PADDING * 2);
   const totalWidth = graphWidth + 500;
   const virtual = useVirtualizer({
@@ -328,16 +344,18 @@ export function History() {
                     {commit.kind === 'commit' ? commit.oid.slice(0, 8) : commit.kind.toUpperCase()}
                   </code>
                   <span role="gridcell" className="commit-subject" title={commit.body}>
-                    {badges.get(commit.oid)?.map((badge) => (
-                      <b
-                        className={`badge ${badge.kind}`}
-                        key={badge.kind + badge.label}
-                        title={badge.names.join('\n')}
-                      >
-                        {badge.label}
-                        {badge.names.length > 1 ? ` (${badge.names.length})` : ''}
-                      </b>
-                    ))}
+                    <CommitBadges
+                      badges={badges.get(commit.oid) ?? noBadges}
+                      oid={commit.oid}
+                      open={(opener) => {
+                        if (snapshot)
+                          setReferences({
+                            repoId: snapshot.repository.id,
+                            oid: commit.oid,
+                            opener,
+                          });
+                      }}
+                    />
                     {commit.isStash && <b className="badge">stash</b>}
                     {commit.summary || '(empty message)'}
                   </span>
@@ -372,6 +390,14 @@ export function History() {
           <span>End of history</span>
         )}
       </div>
+      {references && references.repoId === snapshot?.repository.id && (
+        <CommitReferencesDialog
+          key={references.oid}
+          oid={references.oid}
+          badges={badges.get(references.oid) ?? noBadges}
+          close={closeReferences}
+        />
+      )}
     </>
   );
 }
