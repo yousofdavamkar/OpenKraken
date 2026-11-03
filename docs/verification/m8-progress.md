@@ -1,6 +1,24 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The current checkpoint adds verified predecessor restoration after failed AppImage execution or exit before startup confirmation, with a persistent recovery notice. It follows opt-in automatic checks, signed downloads and desktop installation/restart. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+M8 remains in progress. The current checkpoint verifies restart-helper readiness before closing the app and fixes overlapping cancellation and queued-quit admission. Verified predecessor restoration after failed AppImage startup and its persistent recovery notice are also implemented. It follows opt-in automatic checks, signed downloads and desktop installation/restart. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+
+## Restart-helper preparation before shutdown
+
+The helper preflight (`7c96838`) starts and validates the copied native helper while the installed image and current window are intact. A missing, silent or malformed helper fails before shutdown, discards staging and preserves the verified download with a fresh installation identity. An isolated main-only transaction snapshot supplies the signed replacement and predecessor/journal hashes. The helper stays unarmed through the unsaved-work prompt; accepted shutdown arms it before committing replacement. Readiness and arming each have a 750 ms bound; the parent-exit and shutdown bounds are unchanged. See [ADR 0087](../decisions/0087-appimage-restart-helper-preflight.md).
+
+Concurrent cancellation shares one discard operation. Cancelling an already-ready restart revokes the queued quit and releases operation admission; Keep editing and shutdown during pending preparation also stop the waiting helper. The initial overlapping-cancel test reproduced conflicting cleanup outcomes. A packaged regression then reproduced operation admission remaining locked after cancellation before the queued quit; normal requests now resume. Stopped and non-arming helpers cannot commit the replacement.
+
+Verification passed **666 native/unit tests in 92 files** with Git LFS enabled (`UNIT_EXIT=0`), typechecking/build and full ESLint/Prettier. New native cases cover readiness without early launch, cancellation and abort signals, and missing, silent, malformed, stopped and non-arming helpers. The controller test checks the prepared plan's exact hashes and isolation from caller mutation, expiry before commit, and overlapping cancellation.
+
+The packaged acceptance (`b25e8f6`) passed **six cases**: healthy startup, failed-startup restoration and an unavailable helper through each of **FUSE and extract-and-run**. Missing-helper preparation leaves the original window usable, preserves the installed image, removes staging, rotates installation consent and admits another attempt. Healthy and rollback cases also exercise cancellation before the queued quit and Keep editing, then complete the accepted restart. These are disposable hardened fixtures with compiled test-only trust, failure and cancellation hooks. CI includes both modes; remote CI execution remains unverified.
+
+**26 targeted Electron regressions** passed (`E2E_EXIT=0`), covering real HTTPS update checks/consent, diagnostics/reporting, main/service/PTY failures, renderer isolation and graph behavior. First paint measured **262.7 ms** for 2,000 commits, paging **155.8 ms** for 5,000 commits, and scrolling **16.7 ms p95** for 12,000 rows. Six graph visual goldens passed unchanged. No existing performance or shutdown budget was relaxed. This is not the complete desktop suite or cross-platform runtime evidence.
+
+A fresh unsigned Linux x64 bundle passed packaging/fuse verification (`PACKAGE_EXIT=0`) and packaged smoke (`SMOKE_EXIT=0`): default-off update/reporting settings, diagnostics, renderer isolation, native helpers and folder selection, Bash/PTY keyboard delivery and exit, and cold/resident repository-link consent. Ordinary DEB/RPM/AppImage installer artifacts were not regenerated; the six AppImage acceptance fixtures were built separately.
+
+Evidence: `/tmp/openkraken-restart-preflight-{red,green}.log`, `/tmp/openkraken-preflight-cancel-{red,green}.log`, `/tmp/openkraken-preflight-queued-cancel-red.log`, `/tmp/openkraken-preflight-{focused,unit,types,build-final,lint-final,regression,package,smoke}.log`, and `/tmp/openkraken-preflight-{fuse,extract}-{unavailable,healthy,failed}.log`.
+
+Unexpected helper death after arming, interrupted replacement/recovery, hung startup, profile compatibility and feed/key migration remain open, as do native Windows/macOS installation, signing, distribution and beta evidence. This checkpoint does not close M6, M7 or M8.
 
 ## AppImage startup exit recovery
 
