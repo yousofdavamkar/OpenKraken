@@ -41,7 +41,7 @@ import { HistoryParser, RefsParser, StatusParser, HISTORY_FORMAT, REF_FORMAT } f
 import { HistoryCache } from './history-cache.js';
 import { RepositoryPreferences } from './preferences.js';
 import { HistoryCursor } from './history.js';
-import { Remotes } from './remotes.js';
+import { Remotes, transportError } from './remotes.js';
 import { predictMerge } from './merge-prediction.js';
 import { commitFiles } from './commit-files.js';
 import { blame } from './blame.js';
@@ -818,7 +818,12 @@ export class RepositoryService {
             'This upstream is local. Use Git credential helpers for this pull.',
           );
         if (context.remote !== '.') await manager.fetch(context.remote, signal);
-        return work.integratePull(options, context, signal, onProgress);
+        return work
+          .integratePull(options, context, signal, onProgress, authentication, provider)
+          .catch((error: unknown) => {
+            if (error instanceof GitError) throw transportError(error);
+            throw error;
+          });
       },
       signal,
     );

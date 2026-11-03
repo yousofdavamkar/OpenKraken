@@ -27,6 +27,7 @@ import {
   type StashActionOptions,
   pullOptionsSchema,
   type PullOptions,
+  type ProviderGitTarget,
   type OperationState,
   type OperationAction,
   operationActionSchema,
@@ -61,6 +62,7 @@ import { FileBackups, fileImageSchema, sameImages, type FileImage } from './file
 import { BranchConfiguration } from './branch-config.js';
 import { parsePatch, selectPatch } from './patch.js';
 import { StatusParser, NulDecoder } from './parsers.js';
+import { providerTransportSettings } from './provider-transport.js';
 const MAX_INDEX = 32 * 1024 * 1024;
 const savedSchema = z.object({
   head: headSchema,
@@ -895,6 +897,7 @@ export class WorkingTree {
     discardUndo = false,
     plan?: InteractiveRebase,
     edit?: GitEditor,
+    environment?: NodeJS.ProcessEnv,
   ) {
     const before = await this.saved(indexFile);
     const id = randomUUID();
@@ -940,7 +943,7 @@ export class WorkingTree {
         readOnly: false,
         allowedExitCodes: [0, 1],
         timeoutMs: 180000,
-        env: editor?.environment ?? { GIT_EDITOR: 'true' },
+        env: { ...environment, ...(editor?.environment ?? { GIT_EDITOR: 'true' }) },
         onStderr: progress ? (chunk) => progress.push(chunk) : undefined,
       });
       if (result.exitCode)
@@ -1096,6 +1099,8 @@ export class WorkingTree {
     context: Awaited<ReturnType<WorkingTree['pullContext']>>,
     signal?: AbortSignal,
     onProgress?: (text: string) => void,
+    authentication?: NodeJS.ProcessEnv,
+    provider?: ProviderGitTarget,
   ) {
     const options = pullOptionsSchema.parse(input);
     await this.locked(async (indexFile, publish) => {
@@ -1111,29 +1116,46 @@ export class WorkingTree {
           .toString()
           .trim(),
       );
+      // Checkout filters can use the network too. Retain fetch's credential scope
+      // during integration instead of reverting to repository credential helpers.
+      const transport = provider
+        ? await providerTransportSettings(
+            (args, options) => this.run(args, options),
+            { url: provider.url, username: provider.username },
+            signal,
+            authentication,
+          )
+        : { args: [], env: authentication };
       await this.runOperation(
-        options.mode === 'rebase'
-          ? [
-              'rebase',
-              '--merge',
-              '--no-autostash',
-              '--no-update-refs',
-              '--no-rebase-merges',
-              target,
-            ]
-          : [
-              'merge',
-              options.mode === 'ff-only' ? '--ff-only' : '--ff',
-              '--no-autostash',
-              '--no-edit',
-              target,
-            ],
+        [
+          ...transport.args,
+          ...(options.mode === 'rebase'
+            ? [
+                'rebase',
+                '--merge',
+                '--no-autostash',
+                '--no-update-refs',
+                '--no-rebase-merges',
+                target,
+              ]
+            : [
+                'merge',
+                options.mode === 'ff-only' ? '--ff-only' : '--ff',
+                '--no-autostash',
+                '--no-edit',
+                target,
+              ]),
+        ],
         `Pull (${options.mode})`,
         indexFile,
         publish,
         signal,
         onProgress,
         true,
+        false,
+        undefined,
+        undefined,
+        { ...transport.env, GIT_ALLOW_PROTOCOL: provider ? 'https' : 'file:https:http:ssh:git' },
       );
     }, signal);
     return this.state();
