@@ -8,6 +8,49 @@ import { RepositoryService } from './src/repository.js';
 const root = await mkdtemp(join(tmpdir(), 'openkraken-worktrees-'));
 afterAll(() => rm(root, { recursive: true, force: true }));
 
+test('history includes detached worktree HEADs and checkout state while respecting solo and hidden branches', async () => {
+  const path = createFixture(join(root, 'history-source'), 'linear', 3);
+  const detached = join(root, 'history-detached');
+  const branch = join(root, 'history-branch');
+  fixtureGit(path, ['worktree', 'add', '--detach', detached]);
+  fixtureGit(detached, ['commit', '--allow-empty', '-m', 'Detached checkout only']);
+  const detachedHead = fixtureGit(detached, ['rev-parse', 'HEAD']);
+  fixtureGit(path, ['worktree', 'add', '-b', 'linked-topic', branch]);
+  fixtureGit(branch, ['commit', '--allow-empty', '-m', 'Linked branch only']);
+  const branchHead = fixtureGit(branch, ['rev-parse', 'HEAD']);
+  await writeFile(join(detached, 'draft.txt'), 'unfinished');
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const snapshot = await service.snapshot(repo.id);
+    expect(snapshot.commits.map((commit) => commit.oid)).toContain(detachedHead);
+    expect(snapshot.worktrees?.entries.find((entry) => entry.path === detached)).toMatchObject({
+      head: detachedHead,
+      detached: true,
+      current: false,
+      changedFiles: 1,
+    });
+    expect(
+      (await service.search(repo.id, snapshot.cursor, 'Detached checkout only')).commits.map(
+        (commit) => commit.oid,
+      ),
+    ).toEqual([detachedHead]);
+    const hidden = await service.snapshot(repo.id, undefined, true, {
+      hiddenRefs: ['refs/heads/linked-topic'],
+    });
+    expect(hidden.commits.map((commit) => commit.oid)).not.toContain(branchHead);
+    expect(hidden.commits.map((commit) => commit.oid)).toContain(detachedHead);
+    const solo = await service.snapshot(repo.id, undefined, true, {
+      hiddenRefs: [],
+      soloRef: 'refs/heads/main',
+    });
+    expect(solo.commits.map((commit) => commit.oid)).not.toContain(detachedHead);
+    expect(solo.commits.map((commit) => commit.oid)).not.toContain(branchHead);
+  } finally {
+    await service.dispose();
+  }
+});
+
 test('prune tokens are repository-bound and expire; a restored checkout invalidates the review', async () => {
   const path = createFixture(join(root, 'prune-token-source'), 'linear', 3);
   const other = createFixture(join(root, 'prune-token-other'), 'linear', 2);

@@ -272,7 +272,7 @@ export class RepositoryService {
         const repository = refresh ? await this.open(known.path, signal) : known;
         const refsParser = new RefsParser(),
           statusParser = new StatusParser();
-        await Promise.all([
+        const [, , worktrees] = await Promise.all([
           this.run(['for-each-ref', `--format=${REF_FORMAT}`], {
             cwd: repository.path,
             signal,
@@ -291,6 +291,9 @@ export class RepositoryService {
                 ],
                 { cwd: repository.path, signal, onStdout: (b) => statusParser.push(b) },
               ),
+          exists(join(repository.commonDir, 'worktrees')).then((present) =>
+            present ? this.worktreeManager(id).manager.list(signal) : undefined,
+          ),
         ]);
         const refs = refsParser.finish(),
           status = statusParser.finish();
@@ -319,6 +322,15 @@ export class RepositoryService {
           (head.kind === 'detached' || !view.hiddenRefs.includes(head.ref))
         )
           starts.add(head.oid);
+        for (const worktree of worktrees?.entries ?? []) {
+          if (worktree.current || !worktree.head) continue;
+          const visible = worktree.branch
+            ? view.soloRef
+              ? worktree.branch === view.soloRef
+              : !view.hiddenRefs.includes(worktree.branch)
+            : !view.soloRef;
+          if (visible) starts.add(worktree.head);
+        }
         // Walk stash bases with normal history, but hide index/untracked parents.
         let stashCommits: Commit[] = [];
         if (visible.some((r) => r.kind === 'stash')) {
@@ -392,6 +404,7 @@ export class RepositoryService {
         return {
           repository,
           view,
+          worktrees,
           pinnedOid: pinned ? (pinned.peeled ?? pinned.target) : undefined,
           refs,
           status,

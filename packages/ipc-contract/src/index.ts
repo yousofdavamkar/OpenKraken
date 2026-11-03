@@ -308,6 +308,7 @@ export const graphViewSchema = z
 export type GraphView = z.infer<typeof graphViewSchema>;
 export const snapshotSchema = z.object({
   view: graphViewSchema,
+  worktrees: worktreeStateSchema.optional(),
   pinnedOid: oidSchema.optional(),
   repository: repositorySchema,
   refs: z.array(refSchema),
