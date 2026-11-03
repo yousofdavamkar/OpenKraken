@@ -5,7 +5,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import { mkdtemp, rm, mkdir, writeFile, readFile, lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { assertMsiSmokeProfile } from './msi-lifecycle.mjs';
 
@@ -51,8 +51,18 @@ await mkdir(linkedRepository, { recursive: !!msiProfile });
 await promisify(execFile)('git', ['init', '--initial-branch=main', linkedRepository]);
 const repositoryUri = `openkraken://repo?path=${encodeURIComponent(linkedRepository)}`;
 const nativePicker = process.platform === 'linux' && !!process.env.OPENKRAKEN_XDOTOOL;
-if (nativePicker)
-  await writeFile(join(profile, '.bashrc'), 'HISTFILE=/dev/null\nPS1="packaged> "\n');
+const packageShell = process.env.OPENKRAKEN_PACKAGE_SHELL ?? '/bin/bash';
+if (nativePicker) {
+  if (!isAbsolute(packageShell) || !['bash', 'zsh'].includes(basename(packageShell)))
+    throw new Error('Packaged terminal smoke requires an absolute Bash or zsh executable');
+  if (basename(packageShell) === 'zsh') {
+    await writeFile(
+      join(profile, '.zshenv'),
+      'if [[ -n ${ZSH_TEST_MODULES-} ]]; then module_path=("$ZSH_TEST_MODULES"); fi\n',
+    );
+    await writeFile(join(profile, '.zshrc'), 'HISTFILE=/dev/null\nPROMPT="packaged> "\n');
+  } else await writeFile(join(profile, '.bashrc'), 'HISTFILE=/dev/null\nPS1="packaged> "\n');
+}
 const child = spawn(
   executable,
   [
@@ -66,7 +76,14 @@ const child = spawn(
     env: {
       ...process.env,
       ...(process.env.OPENKRAKEN_PACKAGE_EXECUTABLE ? { TMPDIR: profile } : {}),
-      ...(nativePicker ? { SHELL: '/bin/bash', HOME: profile } : {}),
+      ...(nativePicker
+        ? {
+            SHELL: packageShell,
+            HOME: profile,
+            ...(basename(packageShell) === 'zsh' ? { ZDOTDIR: profile } : {}),
+            ZSH_TEST_MODULES: process.env.OPENKRAKEN_ZSH_MODULE_PATH ?? '',
+          }
+        : {}),
     },
   },
 );
@@ -283,7 +300,7 @@ try {
     await expect(panel.getByRole('status')).toHaveText('Exited with code 0');
     await panel.getByRole('button', { name: 'Close terminal', exact: true }).click();
     console.log(
-      'Packaged native terminal opened the repository, tracked Bash commands, received native keyboard input and exited cleanly.',
+      `Packaged native terminal opened the repository, tracked ${basename(packageShell)} commands, received native keyboard input and exited cleanly.`,
     );
   }
   if (process.platform !== 'darwin') {
