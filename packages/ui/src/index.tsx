@@ -8,6 +8,7 @@ import { createRoot } from 'react-dom/client';
 import { AvatarSettings } from './avatars.js';
 import { Appearance } from './appearance.js';
 import { CrashReporting } from './crash-reporting.js';
+import { reportRendererFailure } from './report-failure.js';
 import { RepositorySync } from './repository-sync.js';
 import { WorkingTreePanel } from './working-tree.js';
 import { History } from './history.js';
@@ -322,6 +323,9 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
   state: { error?: string } = {};
   static getDerivedStateFromError(error: Error) {
     return { error: error.message };
+  }
+  componentDidCatch() {
+    reportRendererFailure('unhandled-exception');
   }
   render() {
     return this.state.error ? (

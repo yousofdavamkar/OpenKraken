@@ -275,11 +275,26 @@ function createWindow() {
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
+  crashReports = new CrashReports(app.getPath('userData'), __OPENKRAKEN_SENTRY_DSN__, {
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+  });
+  const reportingReady = crashReports.start();
+  // Observe failures without replacing Node/Electron's exception handling or
+  // inspecting the error object. Fatal exits are recovered through the marker.
+  process.on('uncaughtExceptionMonitor', (_error, origin) => {
+    void crashReports?.capture(
+      'main',
+      origin === 'unhandledRejection' ? 'unhandled-rejection' : 'unhandled-exception',
+    );
+  });
   app.on('second-instance', () => {
     if (window?.isMinimized()) window.restore();
     window?.focus();
   });
   app.whenReady().then(async () => {
+    await reportingReady;
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) =>
       callback(false),
     );
@@ -335,6 +350,10 @@ else {
         if (request.method === 'commandContext') {
           commandMenu?.context(request.revision, request.available);
           return { kind: 'commandContext' };
+        }
+        if (request.method === 'rendererFailure') {
+          void crashReports?.capture('renderer', request.reason);
+          return { kind: 'rendererFailure' };
         }
         if (request.method === 'crashReporting' || request.method === 'crashReportingSave') {
           try {
@@ -1154,12 +1173,6 @@ else {
       }
     });
     appSettings ??= new AppSettings(app.getPath('userData'));
-    crashReports = new CrashReports(app.getPath('userData'), __OPENKRAKEN_SENTRY_DSN__, {
-      version: app.getVersion(),
-      platform: process.platform,
-      arch: process.arch,
-    });
-    await crashReports.read();
     app.on('child-process-gone', (_event, details) => {
       const kind =
         details.name === 'OpenKraken Git'
@@ -1195,7 +1208,8 @@ else {
     providers?.deviceCancel();
     providers?.gitlabCancel();
     for (const controller of providerRequests.values()) controller.abort();
-    if ((!service && !providers && !appSettings && !commitDrafts) || quitting) return;
+    if ((!service && !providers && !appSettings && !commitDrafts && !crashReports) || quitting)
+      return;
     event.preventDefault();
     quitting = true;
     const child = service;

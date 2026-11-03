@@ -5,6 +5,8 @@ test('crash reporting consent routes are strict and main-only', () => {
   for (const request of [
     { id, method: 'crashReporting' },
     { id, method: 'crashReportingSave', enabled: true, revision: null },
+    { id, method: 'rendererFailure', reason: 'unhandled-exception' },
+    { id, method: 'rendererFailure', reason: 'unhandled-rejection' },
   ]) {
     expect(requestSchema.safeParse(request).success).toBe(true);
     expect(serviceRequestSchema.safeParse(request).success).toBe(false);
@@ -15,6 +17,17 @@ test('crash reporting consent routes are strict and main-only', () => {
   }
   expect(
     requestSchema.safeParse({ id, method: 'crashReportingCapture', reason: 'crashed' }).success,
+  ).toBe(false);
+  expect(
+    requestSchema.safeParse({ id, method: 'rendererFailure', reason: 'unclean-exit' }).success,
+  ).toBe(false);
+  expect(
+    requestSchema.safeParse({
+      id,
+      method: 'rendererFailure',
+      reason: 'unhandled-exception',
+      process: 'main',
+    }).success,
   ).toBe(false);
   expect(
     resultSchema.safeParse({

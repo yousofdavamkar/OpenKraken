@@ -35,13 +35,16 @@ test('the default build has no reporting destination and cannot be opted in', as
     await expect(readFile(join(profile, 'crash-reporting.json'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
+    await expect(readFile(join(profile, 'reporting-session.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
   } finally {
     await app.close();
     await rm(profile, { recursive: true, force: true });
   }
 });
 
-test('real renderer crashes reach a trusted TLS receiver only after persisted consent', async () => {
+test('crashes, JavaScript failures and interrupted sessions reach TLS only with consent', async () => {
   test.skip(
     process.platform !== 'linux',
     'Local OpenSSL trust fixture currently validated on Linux',
@@ -152,6 +155,44 @@ test('real renderer crashes reach a trusted TLS receiver only after persisted co
     await expect(page.getByRole('checkbox', { name: 'Send crash summaries' })).toBeChecked();
     await page.screenshot({ path: 'test-results/crash-reporting-consent.png' });
     await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.evaluate(() => {
+      setTimeout(() => {
+        throw new Error('PRIVATE-renderer-source:/home/person/repo');
+      }, 0);
+    });
+    await expect.poll(() => received.length).toBe(1);
+    expect(JSON.parse(received[0]!.body.trim().split('\n')[2]!).tags).toEqual({
+      process: 'renderer',
+      reason: 'unhandled-exception',
+      os: 'linux',
+      arch: process.arch,
+    });
+    expect(received[0]!.body).not.toContain('PRIVATE');
+    received.splice(0);
+    await page.evaluate(() => {
+      void Promise.reject('PRIVATE-rejection-token');
+    });
+    await expect.poll(() => received.length).toBe(1);
+    expect(JSON.parse(received[0]!.body.trim().split('\n')[2]!).tags.reason).toBe(
+      'unhandled-rejection',
+    );
+    expect(received[0]!.body).not.toContain('PRIVATE');
+    received.splice(0);
+    await app.evaluate(({ dialog }) => {
+      dialog.showErrorBox = () => {};
+      setTimeout(() => {
+        throw new Error('PRIVATE-main-error-token');
+      }, 0);
+    });
+    await expect.poll(() => received.length).toBe(1);
+    expect(JSON.parse(received[0]!.body.trim().split('\n')[2]!).tags).toEqual({
+      process: 'main',
+      reason: 'unhandled-exception',
+      os: 'linux',
+      arch: process.arch,
+    });
+    expect(received[0]!.body).not.toContain('PRIVATE');
+    received.splice(0);
     const utilityFailure = await app.evaluate(async ({ app }) => {
       const service = app.getAppMetrics().find((metric) => metric.name === 'OpenKraken Git');
       if (!service) throw new Error('Missing Git utility');
@@ -190,9 +231,46 @@ test('real renderer crashes reach a trusted TLS receiver only after persisted co
     });
     expect(received[0]!.body).not.toContain(root);
     await app.close();
+    await expect(readFile(join(root, 'profile/reporting-session.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    received.splice(0);
+
+    app = await launch();
+    await app.firstWindow();
+    const processHandle = app.process();
+    const exited = new Promise<void>((resolve) => processHandle.once('exit', () => resolve()));
+    expect(processHandle.kill('SIGKILL')).toBe(true);
+    await exited;
+    app = undefined;
+    expect(received).toHaveLength(0);
+    app = await launch();
+    await app.firstWindow();
+    await expect.poll(() => received.length).toBe(1);
+    const recovered = JSON.parse(received[0]!.body.trim().split('\n')[2]!);
+    expect(recovered.tags).toEqual({
+      process: 'main',
+      reason: 'unclean-exit',
+      os: 'linux',
+      arch: process.arch,
+    });
+    expect(recovered.level).toBe('warning');
+    expect(Object.keys(recovered).sort()).toEqual([
+      'event_id',
+      'level',
+      'message',
+      'platform',
+      'release',
+      'tags',
+    ]);
+    await app.close();
 
     app = await launch();
     page = await app.firstWindow();
+    const clean = await page.evaluate(() =>
+      window.openkraken.request({ id: crypto.randomUUID(), method: 'crashReporting' }),
+    );
+    expect(clean).toMatchObject({ kind: 'crashReporting', state: { delivery: 'idle' } });
     await page.getByRole('button', { name: 'Crash reporting', exact: true }).click();
     dialog = page.getByRole('dialog', { name: 'Crash reporting' });
     await dialog.getByRole('checkbox', { name: 'Send crash summaries' }).uncheck();

@@ -1245,6 +1245,13 @@ const workingRequests = [
     .strict(),
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  z
+    .object({
+      id: requestId,
+      method: z.literal('rendererFailure'),
+      reason: z.enum(['unhandled-exception', 'unhandled-rejection']),
+    })
+    .strict(),
   z.object({ id: requestId, method: z.literal('crashReporting') }).strict(),
   z
     .object({
@@ -1837,6 +1844,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('rendererFailure') }).strict(),
   z.object({ kind: z.literal('crashReporting'), state: crashReportingStateSchema }).strict(),
   z.object({ kind: z.literal('commitDraft'), state: commitDraftStateSchema }).strict(),
   z.object({ kind: z.literal('activity'), state: activityStateSchema }).strict(),

@@ -55,8 +55,13 @@ function ReportingDialog({
     >
       <h2>Crash reporting</h2>
       <p>
-        Off by default. You can choose to send summaries of renderer, Git service, terminal service
-        and GPU crashes while OpenKraken is running.
+        Off by default. You can choose to send summaries of process crashes and unhandled JavaScript
+        failures.
+      </p>
+      <p>
+        After an interrupted session, the next launch can send one unclean-exit summary. This can
+        include a force-quit or power loss; it does not establish that the app crashed. Normal
+        shutdown and opting out clear the local session marker.
       </p>
       <p>
         Reports contain only the app version, operating system, architecture, process type and
@@ -89,8 +94,8 @@ function ReportingDialog({
       </label>
       {state.warning && (
         <p role="alert">
-          Saved consent cannot be verified. Reporting is off. Check the crash-reporting settings
-          file and restart before enabling it.
+          Saved reporting state cannot be verified. Reporting is off. Check the reporting settings
+          and session data, then restart before enabling it.
         </p>
       )}
       {error && <p role="alert">{error}</p>}

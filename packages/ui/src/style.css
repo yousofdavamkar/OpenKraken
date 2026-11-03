@@ -802,6 +802,10 @@ footer {
   margin: 0.75rem 0;
   line-height: 1.5;
 }
+.crash-reporting-dialog {
+  max-height: 90vh;
+  overflow-y: auto;
+}
 .crash-reporting-dialog .dialog-actions {
   display: flex;
   gap: 0.5rem;
