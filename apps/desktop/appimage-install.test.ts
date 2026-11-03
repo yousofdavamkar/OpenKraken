@@ -56,6 +56,30 @@ test.skipIf(process.platform !== 'linux')(
     }
   },
 );
+
+test.skipIf(process.platform !== 'linux')(
+  'arming verifies and retains the predecessor without replacing it, and detects changes before commit',
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-appimage-arm-'));
+    const target = join(root, 'OpenKraken.AppImage'),
+      source = join(root, 'cache');
+    try {
+      await writeFile(target, oldImage, { mode: 0o700 });
+      await writeFile(source, newImage, { mode: 0o600 });
+      const staged = await stageAppImageUpdate(
+        { target, source, artifact, version: '0.2.0', arch: 'x64' },
+        new AbortController().signal,
+      );
+      await staged.arm();
+      expect(await readFile(target)).toEqual(oldImage);
+      await writeFile(join(target + '.openkraken-update', 'next.AppImage'), image('tampered!'));
+      await expect(staged.commit()).rejects.toThrow();
+      expect(await readFile(target)).toEqual(oldImage);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 const oldImage = image('old-image');
 const newImage = image('new-image');
 const artifact = {

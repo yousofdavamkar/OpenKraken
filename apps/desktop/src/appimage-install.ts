@@ -173,6 +173,7 @@ export async function stageAppImageUpdate(
   const journal = folder + '/transaction.json';
   const journalTemporary = folder + '/transaction.tmp';
   let committed = false;
+  let armed: { target: Stats; staged: Stats; backup: Stats } | null = null;
   const checkFolder = async () => {
     const current = await directory(folder, true);
     const currentParent = await directory(dirname(target));
@@ -228,28 +229,55 @@ export async function stageAppImageUpdate(
     await rmdir(folder);
     throw error;
   }
+  const arm = async () => {
+    if (committed) fail();
+    if (armed) return;
+    signal.throwIfAborted();
+    await checkFolder();
+    if (
+      JSON.stringify(await readTransaction(target)) !== JSON.stringify(transaction) ||
+      !same(await lstat(target), original) ||
+      !matches(await imageDigest(target, arch, signal), previous) ||
+      !matches(await imageDigest(staged, arch, signal), next)
+    )
+      fail();
+    const { file: executable } = await ownedFile(staged, maximum, 1, true);
+    try {
+      await executable.chmod(0o700);
+      await executable.sync();
+    } finally {
+      await executable.close();
+    }
+    await link(target, backup);
+    await syncDirectory(folder);
+    if (!same(await lstat(target), original) || !same(await lstat(backup), original)) fail();
+    armed = {
+      target: await lstat(target),
+      staged: await lstat(staged),
+      backup: await lstat(backup),
+    };
+  };
   return {
+    arm,
     async commit() {
       if (committed) fail();
-      signal.throwIfAborted();
+      await arm();
       await checkFolder();
-      if (
-        JSON.stringify(await readTransaction(target)) !== JSON.stringify(transaction) ||
-        !same(await lstat(target), original) ||
-        !matches(await imageDigest(target, arch, signal), previous) ||
-        !matches(await imageDigest(staged, arch, signal), next)
-      )
-        fail();
-      const { file: executable } = await ownedFile(staged, maximum, 1, true);
-      try {
-        await executable.chmod(0o700);
-        await executable.sync();
-      } finally {
-        await executable.close();
+      if (JSON.stringify(await readTransaction(target)) !== JSON.stringify(transaction)) fail();
+      for (const [path, before] of [
+        [target, armed!.target],
+        [staged, armed!.staged],
+        [backup, armed!.backup],
+      ] as const) {
+        const current = await lstat(path);
+        if (
+          !same(current, before) ||
+          current.ctimeMs !== before.ctimeMs ||
+          current.mode !== before.mode ||
+          current.nlink !== before.nlink
+        )
+          fail();
       }
-      await link(target, backup);
-      await syncDirectory(folder);
-      if (!same(await lstat(target), original) || !same(await lstat(backup), original)) fail();
       signal.throwIfAborted();
       await rename(staged, target);
       committed = true;
