@@ -1,4 +1,5 @@
 import { build, Platform, Arch } from 'electron-builder';
+import { buildAppImage } from './appimage.mjs';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
@@ -18,7 +19,8 @@ const { values } = parseArgs({
 const target = values.target;
 if (process.platform !== 'linux' || !['x64', 'arm64'].includes(process.arch))
   throw new Error('This installer pipeline currently supports native Linux x64/arm64 builds only');
-if (!['deb', 'rpm'].includes(target)) throw new Error('Supported targets: deb, rpm');
+if (!['deb', 'rpm', 'AppImage'].includes(target))
+  throw new Error('Supported targets: deb, rpm, AppImage');
 if (values['test-metadata'] === Boolean(values.metadata))
   throw new Error('Choose --test-metadata for local validation or --metadata <JSON file>');
 const testMetadata = values['test-metadata'];
@@ -68,70 +70,87 @@ try {
   const prepackaged = join(work, 'app');
   await cp(source, prepackaged, { recursive: true, verbatimSymlinks: true });
   comparePayload(original, await payloadManifest(prepackaged));
-  const artifacts = await build({
-    projectDir: root,
-    prepackaged,
-    targets: Platform.LINUX.createTarget(target, Arch[process.arch]),
-    publish: 'never',
-    config: {
-      appId: 'org.openkraken.desktop',
-      productName: 'OpenKraken',
-      executableName: 'openkraken',
-      electronVersion: '45.2.1',
-      npmRebuild: false,
-      publish: null,
-      directories: { output: join(work, 'output'), buildResources: 'build-resources' },
-      artifactName: `OpenKraken-${version}-linux-${process.arch}${testMetadata ? '-TEST-ONLY' : '-unsigned'}.\${ext}`,
-      extraMetadata: {
-        name: 'openkraken',
-        version,
-        desktopName: 'openkraken.desktop',
-        description: testMetadata
-          ? 'OpenKraken local installer validation — not for distribution'
-          : 'OpenKraken desktop Git client',
-        author: { name: metadata.name, email: metadata.email },
-        homepage: metadata.homepage,
-        license: metadata.license,
+  let artifacts;
+  let appdir;
+  if (target === 'AppImage') {
+    const built = await buildAppImage(
+      prepackaged,
+      work,
+      `OpenKraken-${version}-linux-${process.arch}${testMetadata ? '-TEST-ONLY' : '-unsigned'}.AppImage`,
+      { version, metadata, metadataMode: testMetadata ? 'test-only' : 'provided', signed: false },
+    );
+    artifacts = [built.artifact];
+    appdir = built.appdir;
+  } else
+    artifacts = await build({
+      projectDir: root,
+      prepackaged,
+      targets: Platform.LINUX.createTarget(target, Arch[process.arch]),
+      publish: 'never',
+      config: {
+        appId: 'org.openkraken.desktop',
+        productName: 'OpenKraken',
+        executableName: 'openkraken',
+        electronVersion: '45.2.1',
+        npmRebuild: false,
+        publish: null,
+        directories: { output: join(work, 'output'), buildResources: 'build-resources' },
+        artifactName: `OpenKraken-${version}-linux-${process.arch}${testMetadata ? '-TEST-ONLY' : '-unsigned'}.\${ext}`,
+        extraMetadata: {
+          name: 'openkraken',
+          version,
+          desktopName: 'openkraken.desktop',
+          description: testMetadata
+            ? 'OpenKraken local installer validation — not for distribution'
+            : 'OpenKraken desktop Git client',
+          author: { name: metadata.name, email: metadata.email },
+          homepage: metadata.homepage,
+          license: metadata.license,
+        },
+        linux: {
+          icon: 'build-resources/openkraken.png',
+          category: 'Development',
+          executableArgs: [],
+          syncDesktopName: true,
+          desktop: { entry: { StartupWMClass: 'openkraken', Terminal: 'false' } },
+        },
+        [target]: {
+          fpm: [
+            '--depends',
+            'git >= 2.38',
+            '--depends',
+            'ca-certificates',
+            // Builder's defaults omit direct Electron shared-library requirements.
+            // Keep its defaults and add these so fresh desktop installs can start.
+            ...(target === 'deb'
+              ? ['libasound2t64 | libasound2', 'libgbm1', 'libcups2t64 | libcups2', 'libstdc++6']
+              : [
+                  'libasound.so.2()(64bit)',
+                  'libgbm.so.1()(64bit)',
+                  'libcups.so.2()(64bit)',
+                  'libsecret-1.so.0()(64bit)',
+                  'libstdc++.so.6()(64bit)',
+                ]
+            ).flatMap((dependency) => ['--depends', dependency]),
+            ...(target === 'rpm'
+              ? ['--rpm-rpmbuild-define', '_rpmformat 4', '--rpm-digest', 'sha256']
+              : []),
+          ],
+          afterRemove: 'build-resources/linux-after-remove.sh',
+        },
       },
-      linux: {
-        icon: 'build-resources/openkraken.png',
-        category: 'Development',
-        executableArgs: [],
-        syncDesktopName: true,
-        desktop: { entry: { StartupWMClass: 'openkraken', Terminal: 'false' } },
-      },
-      [target]: {
-        fpm: [
-          '--depends',
-          'git >= 2.38',
-          '--depends',
-          'ca-certificates',
-          // Builder's defaults omit direct Electron shared-library requirements.
-          // Keep its defaults and add these so fresh desktop installs can start.
-          ...(target === 'deb'
-            ? ['libasound2t64 | libasound2', 'libgbm1', 'libcups2t64 | libcups2', 'libstdc++6']
-            : [
-                'libasound.so.2()(64bit)',
-                'libgbm.so.1()(64bit)',
-                'libcups.so.2()(64bit)',
-                'libsecret-1.so.0()(64bit)',
-                'libstdc++.so.6()(64bit)',
-              ]
-          ).flatMap((dependency) => ['--depends', dependency]),
-          ...(target === 'rpm'
-            ? ['--rpm-rpmbuild-define', '_rpmformat 4', '--rpm-digest', 'sha256']
-            : []),
-        ],
-        afterRemove: 'build-resources/linux-after-remove.sh',
-      },
-    },
-  });
-  const payload = await payloadManifest(prepackaged);
-  // FPM adds this profile for Ubuntu's user namespace policy. Nothing else may
-  // change, particularly the ASAR, fuses, native modules or helper permissions.
-  const { 'resources/apparmor-profile': profile, ...unchanged } = payload;
-  if (!profile || profile.type !== 'file') throw new Error('Expected AppArmor profile is missing');
-  comparePayload(original, unchanged);
+    });
+  const payload = await payloadManifest(appdir ?? prepackaged);
+  if (appdir) {
+    comparePayload(original, await payloadManifest(join(appdir, 'usr/lib/openkraken')));
+  } else {
+    // FPM adds this profile for Ubuntu's user namespace policy. Nothing else may
+    // change, particularly the ASAR, fuses, native modules or helper permissions.
+    const { 'resources/apparmor-profile': profile, ...unchanged } = payload;
+    if (!profile || profile.type !== 'file')
+      throw new Error('Expected AppArmor profile is missing');
+    comparePayload(original, unchanged);
+  }
   comparePayload(original, await payloadManifest(source));
   await verifyFuses(join(prepackaged, 'openkraken'));
   if (artifacts.length !== 1 || !artifacts[0].endsWith(`.${target}`))

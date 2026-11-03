@@ -17,7 +17,7 @@ if (
   manifest.platform !== 'linux' ||
   process.platform !== manifest.platform ||
   process.arch !== manifest.arch ||
-  !['deb', 'rpm'].includes(manifest.target) ||
+  !['deb', 'rpm', 'AppImage'].includes(manifest.target) ||
   manifest.artifact?.file !== basename(manifest.artifact?.file ?? '') ||
   !manifest.artifact.file.endsWith(`.${manifest.target}`)
 )
@@ -32,7 +32,19 @@ const run = promisify(execFile);
 await mkdir('release', { recursive: true });
 const temporary = await mkdtemp(resolve('release/installer-check-'));
 try {
-  if (manifest.target === 'deb') {
+  let directory = join(temporary, 'opt/OpenKraken');
+  let desktopPath = join(temporary, 'usr/share/applications/openkraken.desktop');
+  if (manifest.target === 'AppImage') {
+    await run(artifact, ['--appimage-extract'], { cwd: temporary, maxBuffer: 8 * 1024 * 1024 });
+    const appdir = join(temporary, 'squashfs-root');
+    comparePayload(manifest.payload, await payloadManifest(appdir));
+    directory = join(appdir, 'usr/lib/openkraken');
+    desktopPath = join(appdir, 'openkraken.desktop');
+    const launcher = await readFile(join(appdir, 'AppRun'), 'utf8');
+    if (launcher !== (await readFile('build-resources/AppRun', 'utf8')))
+      throw new Error('AppImage launcher differs from the reviewed sandbox-preserving launcher');
+    await run('sh', ['-n', join(appdir, 'AppRun')]);
+  } else if (manifest.target === 'deb') {
     await run('dpkg-deb', ['--extract', artifact, temporary]);
     const { stdout: dependencies } = await run('dpkg-deb', ['--field', artifact, 'Depends']);
     if (
@@ -62,24 +74,30 @@ try {
     // No shell interpolation or root install: bsdtar reads the RPM payload directly.
     await run('bsdtar', ['-xpf', artifact, '-C', temporary]);
   }
-  const directory = join(temporary, 'opt/OpenKraken');
-  comparePayload(manifest.payload, await payloadManifest(directory));
+  if (manifest.target !== 'AppImage')
+    comparePayload(manifest.payload, await payloadManifest(directory));
   await verifyFuses(join(directory, 'openkraken'));
-  const desktop = await readFile(
-    join(temporary, 'usr/share/applications/openkraken.desktop'),
-    'utf8',
-  );
+  const desktop = await readFile(desktopPath, 'utf8');
+  const expectedExec =
+    manifest.target === 'AppImage'
+      ? /^Exec=AppRun %U$/m
+      : /^Exec=\/?opt\/OpenKraken\/openkraken(?: %U)?$/m;
   if (
-    !/^Exec=\/?opt\/OpenKraken\/openkraken(?: %U)?$/m.test(desktop) ||
+    !expectedExec.test(desktop) ||
     !/^Icon=openkraken$/m.test(desktop) ||
     !/^StartupWMClass=openkraken$/m.test(desktop) ||
     /--(?:no|disable)-sandbox/.test(desktop)
   )
     throw new Error('Desktop launcher does not match the sandboxed application');
-  console.log('Installer payload, launch entry, Git dependency and Electron fuses verified');
+  console.log('Installer payload, launch entry and Electron fuses verified');
   const smoke = spawn(process.execPath, ['scripts/smoke-package.mjs'], {
     stdio: 'inherit',
-    env: { ...process.env, OPENKRAKEN_PACKAGE_DIRECTORY: directory },
+    env: {
+      ...process.env,
+      OPENKRAKEN_PACKAGE_DIRECTORY: directory,
+      OPENKRAKEN_PACKAGE_EXECUTABLE:
+        manifest.target === 'AppImage' ? artifact : join(directory, 'openkraken'),
+    },
   });
   await new Promise((resolve, reject) => {
     smoke.once('error', reject);
@@ -88,7 +106,9 @@ try {
     );
   });
   console.log(
-    `Verified extracted ${manifest.target} payload; install/uninstall lifecycle is a separate gate`,
+    manifest.target === 'AppImage'
+      ? 'Verified AppImage payload and launch through its embedded runtime'
+      : `Verified extracted ${manifest.target} payload; install/uninstall lifecycle is a separate gate`,
   );
 } finally {
   await rm(temporary, { recursive: true, force: true });

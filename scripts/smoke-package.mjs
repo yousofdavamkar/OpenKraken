@@ -12,9 +12,10 @@ const directory = resolve(
     `release/OpenKraken-${process.platform}-${process.arch}`,
 );
 const executable =
-  process.platform === 'darwin'
+  process.env.OPENKRAKEN_PACKAGE_EXECUTABLE ??
+  (process.platform === 'darwin'
     ? join(directory, 'OpenKraken.app/Contents/MacOS/openkraken')
-    : join(directory, process.platform === 'win32' ? 'openkraken.exe' : 'openkraken');
+    : join(directory, process.platform === 'win32' ? 'openkraken.exe' : 'openkraken'));
 const profile = await mkdtemp(join(tmpdir(), 'openkraken-package-'));
 const nativePicker = process.platform === 'linux' && !!process.env.OPENKRAKEN_XDOTOOL;
 if (nativePicker)
@@ -30,11 +31,20 @@ const child = spawn(
     stdio: ['ignore', 'ignore', 'pipe'],
     env: {
       ...process.env,
+      ...(process.env.OPENKRAKEN_PACKAGE_EXECUTABLE ? { TMPDIR: profile } : {}),
       ...(nativePicker ? { SHELL: '/bin/bash', HOME: profile } : {}),
     },
   },
 );
 let browser;
+let mainProcessId;
+function signalMainProcess(signal) {
+  try {
+    process.kill(mainProcessId, signal);
+  } catch (error) {
+    if (error.code !== 'ESRCH') throw error;
+  }
+}
 try {
   const endpoint = await new Promise((resolve, reject) => {
     let diagnostics = '';
@@ -61,6 +71,12 @@ try {
     });
   });
   browser = await chromium.connectOverCDP(endpoint);
+  const session = await browser.newBrowserCDPSession();
+  const { processInfo } = await session.send('SystemInfo.getProcessInfo');
+  const mainProcess = processInfo.find((entry) => entry.type === 'browser');
+  if (!mainProcess) throw new Error('Packaged browser process is missing');
+  mainProcessId = mainProcess.id;
+  await session.detach();
   const context = browser.contexts()[0];
   const page = context.pages()[0] ?? (await context.waitForEvent('page'));
   await page.getByRole('heading', { name: 'A clear view of your history.' }).waitFor();
@@ -176,8 +192,10 @@ try {
       'stty -echo -icanon; dd bs=1 count=1 2>/dev/null | od -An -t u1; stty sane',
     );
     await input.press('Enter');
+    // An AppImage runtime can supervise Electron in a child process. Ask the
+    // connected browser for its actual PID instead of assuming the launcher PID.
     const mainWindow = (
-      await xdo('search', '--onlyvisible', '--pid', String(child.pid), '--name', '^OpenKraken$')
+      await xdo('search', '--onlyvisible', '--pid', String(mainProcessId), '--name', '^OpenKraken$')
     ).stdout
       .trim()
       .split('\n')
@@ -204,15 +222,30 @@ try {
   );
 } finally {
   await browser?.close();
-  child.kill();
-  await new Promise((resolve) => {
-    if (child.exitCode !== null) resolve();
+  // CDP disconnect does not quit Electron. In extract-and-run mode the runtime
+  // supervises a child; stop that child first so the runtime can finish and
+  // close inherited pipes. Its extraction directory is inside our temp profile.
+  if (mainProcessId && mainProcessId !== child.pid) {
+    signalMainProcess('SIGTERM');
+  } else child.kill();
+  await new Promise((resolve, reject) => {
+    if (child.exitCode !== null || child.signalCode !== null) resolve();
     else {
-      child.once('exit', resolve);
-      setTimeout(() => {
+      const timeout = setTimeout(() => {
+        if (mainProcessId && mainProcessId !== child.pid) {
+          try {
+            signalMainProcess('SIGKILL');
+          } catch (error) {
+            return reject(error);
+          }
+        }
         child.kill('SIGKILL');
-        resolve();
+        reject(new Error('Packaged application did not shut down within 2 seconds'));
       }, 2000).unref();
+      child.once('exit', () => {
+        clearTimeout(timeout);
+        resolve();
+      });
     }
   });
   await rm(profile, { recursive: true, force: true });
