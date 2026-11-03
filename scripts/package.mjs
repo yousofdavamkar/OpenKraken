@@ -1,12 +1,14 @@
 import { packager } from '@electron/packager';
 import { flipFuses, FuseVersion } from '@electron/fuses';
 import { packageFuses, verifyFuses } from './package-security.mjs';
+import { buildLinuxNative } from './linux-native.mjs';
 import { cp, mkdir, writeFile, rm, lstat, readdir, chmod } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 const staging = resolve('release/staging');
 await rm(staging, { recursive: true, force: true });
 await mkdir(staging, { recursive: true });
 await cp('apps/desktop/dist', join(staging, 'dist'), { recursive: true });
+await buildLinuxNative(staging);
 await writeFile(
   join(staging, 'package.json'),
   JSON.stringify({

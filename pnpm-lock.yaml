@@ -56,6 +56,9 @@ importers:
       msw:
         specifier: 3.0.3
         version: 3.0.3(@types/node@26.6.6)(supports-color@7.2.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
+      node-gyp:
+        specifier: 12.4.0
+        version: 12.4.0
       prettier:
         specifier: latest
         version: 3.9.10
