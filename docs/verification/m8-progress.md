@@ -1,6 +1,18 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The current checkpoint adds guarded MSI install/repair/upgrade/removal and OS URI acceptance to the existing producer/verifier. The lifecycle gate is implemented and configured in CI, but native Windows execution remains pending. The DMG pipeline also awaits native macOS acceptance. Existing Linux packaging, Fedora upgrade acceptance, AppImage restart/recovery and opt-in automatic checks remain implemented. This does not close the remaining [M6](m6-progress.md), [M7](m7-progress.md) or release scope.
+M8 remains in progress. The current checkpoint adds passing native Debian 13 version-upgrade acceptance alongside Fedora's existing gate. Guarded MSI install/repair/upgrade/removal and OS URI acceptance are implemented and configured in CI, but native Windows execution remains pending. The DMG pipeline also awaits native macOS acceptance. Existing Linux packaging, AppImage restart/recovery and opt-in automatic checks remain implemented. This does not close the remaining [M6](m6-progress.md), [M7](m7-progress.md) or release scope.
+
+## Native Debian version upgrade acceptance
+
+The Debian gate (`12ff3e9`) now requires two architecture-matched OpenKraken packages with a strictly newer dpkg version and distinct ASAR digests. It refuses existing product/integration/profile state, checks all installed package checksums plus the exact expected ASAR, and verifies launcher/native-helper/desktop/icon/CA/shared-library behavior and retained user data through each stage. A package-specific include overrides Debian slim's documentation exclusion so missing documentation is not silently ignored. Future-version fixture pointers are separate for DEB, RPM and MSI; CI consumes the format-specific pointer and retains the Debian lifecycle log. See [ADR 0093](../decisions/0093-debian-version-upgrade-acceptance.md).
+
+The final fresh Debian 13 x64 container passed **installation, replacement guards, same-version reinstall, actual 0.1.0 → 0.2.0 upgrade, removal, purge and user-data retention**, with process exit **0** and container exit **0**. The installed package version and actual ASAR digest matched each input artifact, including after upgrade. The old/new artifacts were locally built test-only packages; no production signing or distribution is implied. A separate empty-container check rejected same-version inputs before installation or profile creation.
+
+Both newly generated **0.2.0 DEB and RPM** fixtures passed their builder's bundled-version checks, artifact/payload/fuse verification and extracted desktop smoke with native helpers, folder picker, Bash/PTY keyboard delivery and repository-link consent. Their independent pointers remained correct after building both formats. The DEB fixture is `release/installer-upgrade-uZUujB/`; the RPM fixture is `release/installer-upgrade-iNxd8R/`. Full ESLint/Prettier and shell syntax checks passed. Application TypeScript/build output was unchanged; full application unit/Electron/performance suites, Fedora lifecycle, AppImage and native Windows/macOS gates were not repeated.
+
+Initial network-transfer attempts were stopped after confirmed archive timeouts (exit 143), and one cache setup command failed before invoking the lifecycle script. A subsequent checksum check correctly rejected the slim image's omitted changelog; the final run explicitly included all OpenKraken documentation. The passing fresh container reused SHA-256-checked archives and authenticated package indexes with normal APT validation, disabling only the disposable image's archive-cleanup hook. The host package database was not modified. Stopped/failed attempts are not passing evidence; all task containers were removed after terminal state and log collection.
+
+Evidence: `/tmp/openkraken-deb-upgrade-{final-lifecycle,guards,fixture,rpm-fixture,smoke,rpm-smoke,lint,cache,docs-exclusion-red}.log`. Final native/smoke/guard logs are also copied under `test-results/deb-upgrade/`. This proves the bounded native package-manager upgrade case, not arbitrary future profile-schema migration, a graphical Debian login session, other Debian derivatives or ARM64 acceptance.
 
 ## Disposable MSI lifecycle gate, native execution pending
 
@@ -14,7 +26,7 @@ Full ESLint/Prettier passed. The existing Linux platform bundle passed the modif
 
 No MSI was generated or installed locally. Native COM inventory, Windows compilation/extraction/install/repair/upgrade/removal, OS URI dispatch and retained-user-data acceptance remain unverified, as do macOS execution and production signing/distribution. CI configuration is not passing native evidence.
 
-Evidence: `/tmp/openkraken-msi-lifecycle-{state-red,profile-red,tests,lint,linux-smoke,linux-upgrade,linux-upgrade-smoke}.log`. The new DEB fixture is under `release/installer-upgrade-obTNJj/`; `release/installer-upgrade.json` now points to that DEB fixture.
+Evidence: `/tmp/openkraken-msi-lifecycle-{state-red,profile-red,tests,lint,linux-smoke,linux-upgrade,linux-upgrade-smoke}.log`. That checkpoint's DEB fixture is under `release/installer-upgrade-obTNJj/`; subsequent builds update the generic last-built pointer. Current format-specific fixtures are recorded above.
 
 ## Native MSI pipeline, awaiting Windows acceptance
 
@@ -300,7 +312,7 @@ Evidence: `/tmp/openkraken-supervisor-{red,green,native,hook,unit,e2e,types,buil
 
 - Native supervision runtime acceptance on Windows/macOS, further crash/write scenarios beyond the Linux fetch/PTY/prompt fixtures above, native lock handling and durable write recovery. POSIX processes that intentionally detach or daemonize beyond the active command's stream lifetime are not contained.
 - Durable drafts for working-file, conflict/native editors and provider composers; commit-form drafts are implemented within the bounds above. Crash-report coverage before reporting initialization, live receiver configuration/acceptance, hung-startup and interrupted-update recovery, non-AppImage installation/restart, signed installers/distribution, security review and beta evidence remain open. Signed release checks/downloads, opt-in automatic checks, supported AppImage desktop installation/restart and startup-exit restoration, opt-in process/JavaScript summaries and interrupted-session recovery are implemented within the bounds above.
-- DMG/MSI, broader RPM distribution acceptance, Debian version-to-version upgrades, broader AppImage distribution acceptance, Linux arm64 and macOS/Windows installer runtime checks, and real release metadata. DEB/RPM/AppImage artifacts in this checkpoint remain unsigned local test builds.
+- Native DMG/MSI acceptance, broader RPM/AppImage distribution acceptance, Linux arm64 and macOS/Windows installer runtime checks, and real release metadata. DEB/RPM/AppImage artifacts in this checkpoint remain unsigned local test builds; native Debian 13 and Fedora 43 x64 version upgrades are verified within the bounds above.
 - Broader real-repository and cross-platform performance/regression gates, plus the unresolved intermittent command exit-143 investigation recorded in M7 progress.
 
 Interrupted operations retain an unknown activity outcome. Process cleanup does not prove that a remote write failed, reverse completed changes or authorize an automatic retry. Linux fixtures and an unsigned local bundle do not establish production release readiness.
