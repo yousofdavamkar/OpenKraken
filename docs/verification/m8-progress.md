@@ -1,6 +1,20 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The current checkpoint extends opt-in reporting to interrupted main sessions and fixed-category JavaScript failures, following Linux installer generation, crash recovery and local commit drafts. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+M8 remains in progress. The current checkpoint fixes Git diagnostic credential disclosure and expands security boundary acceptance, following opt-in reporting, Linux installer generation, crash recovery and local commit drafts. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+
+## Security boundary acceptance and diagnostic redaction
+
+A real failing commit hook reproduced raw URL credentials and parameters reaching the renderer through general Git error replies. Those replies and SSH host-key problem events now apply the shared URL redactor (`702b300`). A second regression demonstrated partial password disclosure when userinfo contained a literal `@`; authority-aware masking now removes the whole password (`f66f77b`). Saved-provider fixed error messages remain unchanged. This is structural URL masking, not arbitrary secret detection. See [ADR 0079](../decisions/0079-security-boundaries-and-git-diagnostics.md).
+
+New Electron acceptance checks observe Chromium CSP violations for inline/dynamic/external scripts, direct fetch, embedded documents and data-URL workers. Node globals remain absent and new windows are denied. A second sandboxed window using the exact production document and preload cannot invoke either request or cancellation IPC; the primary window remains usable. Authentication socket tests reject malformed, oversized, repeated and revoked-capability requests without disclosing credentials, then verify a valid native helper request still succeeds. Existing tests cover exact saved-credential URL binding, scope ownership, cancellation and private POSIX socket permissions.
+
+Verification passed **611 native/unit tests in 80 files** with Git LFS enabled (`UNIT_EXIT=0`), typechecking/build, full ESLint/Prettier, and **24 targeted Electron tests** (`REGRESSION_EXIT=0`). Desktop coverage includes security, activity, authentication, native prompt interruption and graph behavior. The 2,000-commit first paint measured **272.6 ms**, a 5,000-commit page **155.1 ms**, and 12,000-row scrolling **16.8 ms p95**; all six graph goldens passed unchanged. No performance budget or timeout was relaxed. The initial socket fixture used an unsupported provider URL shape and failed before connecting; the corrected fixture and full suite passed.
+
+A fresh unsigned Linux x64 bundle passed packaging/fuse verification (`PACKAGE_EXIT=0`) and packaged smoke (`SMOKE_EXIT=0`), including default-off reporting, renderer isolation, native helpers, folder selection, Bash/PTY interaction, native keyboard delivery and clean terminal exit. Installer artifacts were not regenerated. The full desktop suite and cross-platform execution were not rerun.
+
+Evidence: `/tmp/openkraken-security-diagnostics-{red,green}.log`, `/tmp/openkraken-security-userinfo-red.log`, `/tmp/openkraken-security-focused.log`, `/tmp/openkraken-security-socket-final.log`, `/tmp/openkraken-security-unit-final.log`, `/tmp/openkraken-security-lint.log`, `/tmp/openkraken-security-final-build.log`, `/tmp/openkraken-security-regression.log`, `/tmp/openkraken-security-package.log` and `/tmp/openkraken-security-smoke.log`.
+
+URI dispatch/OS registration and rotating diagnostic files are not implemented, so their security acceptance remains open. The tests do not establish Windows named-pipe ACL behavior, macOS execution, live reporting-service acceptance or complete release readiness. Signed updates, native platform acceptance and the other M8 release requirements remain unfinished.
 
 ## Interrupted sessions and JavaScript reports
 
