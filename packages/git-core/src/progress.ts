@@ -1,7 +1,8 @@
 import { StringDecoder } from 'node:string_decoder';
 /** Mask URL credentials and parameters in endpoints or native diagnostics. */
 export function redactGitMessage(value: string) {
-  return value.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s<>"']+/gi, (url) =>
+  // Apostrophes can belong to URL userinfo, paths and parameters, even in quoted diagnostics.
+  return value.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s<>"]+/gi, (url) =>
     url
       // Userinfo ends at the last @ in the authority, including unescaped @ in passwords.
       .replace(/^(https?:\/\/)[^/?#]*@/i, '$1[credentials]@')

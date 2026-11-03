@@ -141,7 +141,17 @@ test('failed native hooks keep URL credentials and parameters out of renderer di
   fixtureGit(repo, ['add', 'tracked.txt']);
   writeFileSync(
     join(repo, '.git/hooks/pre-commit'),
-    '#!/bin/sh\necho "Hook rejected https://private-user:private-password@example.test/repo?token=private-query#private-fragment" >&2\nexit 1\n',
+    [
+      '#!/bin/sh',
+      "cat >&2 <<'DIAGNOSTICS'",
+      'Hook rejected https://private-user:private-password@example.test/repo?token=private-query#private-fragment',
+      "Quoted credentials https://private'user:private'password@example.test/repo",
+      "Quoted query https://example.test/repo?token='private-query'",
+      "Quoted fragment https://example.test/repo#'private-fragment'",
+      'DIAGNOSTICS',
+      'exit 1',
+      '',
+    ].join('\n'),
     { mode: 0o755 },
   );
   const app = await electron.launch({
@@ -162,8 +172,15 @@ test('failed native hooks keep URL credentials and parameters out of renderer di
     await expect(alert).toContainText(
       'https://[credentials]@example.test/repo[redacted parameters]',
     );
+    await expect(alert).toContainText('Quoted credentials https://[credentials]@example.test/repo');
+    await expect(alert).toContainText(
+      'Quoted query https://example.test/repo[redacted parameters]',
+    );
+    await expect(alert).toContainText(
+      'Quoted fragment https://example.test/repo[redacted parameters]',
+    );
     expect(await page.locator('body').innerText()).not.toMatch(
-      /private-(user|password|query|fragment)/,
+      /private[-'](user|password|query|fragment)/,
     );
     await expect(page.getByRole('textbox', { name: 'Commit message', exact: true })).toHaveValue(
       'Rejected commit',

@@ -48,3 +48,26 @@ test('progress masks complete URL userinfo when passwords contain literal at sig
     'ssh://git@example.test/repo',
   ]);
 });
+
+test('progress masks apostrophes inside URL credentials and parameters across byte boundaries', () => {
+  const lines: string[] = [];
+  const progress = new GitProgressLines((text) => lines.push(text));
+  const bytes = Buffer.from(
+    "https://private'user:private'password@example.test/repo\n" +
+      "ssh://git:private'password@example.test/repo\n" +
+      "https://example.test/repo?token='private-query'\n" +
+      "https://example.test/repo#'private-fragment'\n" +
+      "fatal: unable to access 'https://private'user:private'password@example.test/repo': denied\n" +
+      "https://example.test/team's/repo\n",
+  );
+  for (const byte of bytes) progress.push(Buffer.from([byte]));
+  progress.end();
+  expect(lines).toEqual([
+    'https://[credentials]@example.test/repo',
+    'ssh://git:[redacted]@example.test/repo',
+    'https://example.test/repo[redacted parameters]',
+    'https://example.test/repo[redacted parameters]',
+    "fatal: unable to access 'https://[credentials]@example.test/repo': denied",
+    "https://example.test/team's/repo",
+  ]);
+});
