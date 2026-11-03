@@ -36,6 +36,15 @@ export const updatesStateSchema = z.strictObject({
     .min(0)
     .max(2 * 1024 ** 3),
   installId: z.uuid().nullable().default(null),
+  automatic: z
+    .strictObject({
+      enabled: z.boolean(),
+      revision: z.uuid().nullable(),
+      nextCheckAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
+      warning: z.enum(['storage']).nullable(),
+      host: z.string().max(2048).nullable(),
+    })
+    .default({ enabled: false, revision: null, nextCheckAt: null, warning: null, host: null }),
   error: z
     .enum([
       'network',
@@ -51,6 +60,12 @@ export const updatesStateSchema = z.strictObject({
 });
 export type UpdateState = z.infer<typeof updatesStateSchema>;
 export const updatesRequests = [
+  z.strictObject({
+    id: z.uuid(),
+    method: z.literal('updatesAutomatic'),
+    enabled: z.boolean(),
+    revision: z.uuid().nullable(),
+  }),
   z.strictObject({ id: z.uuid(), method: z.literal('updatesStarted') }),
   z.strictObject({ id: z.uuid(), method: z.literal('updatesInstall'), installId: z.uuid() }),
   z.strictObject({ id: z.uuid(), method: z.literal('updatesRead') }),

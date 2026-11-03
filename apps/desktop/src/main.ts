@@ -367,6 +367,23 @@ else {
     const executeRequest = async (request: DesktopRequest): Promise<Result> => {
       if (request.method === 'updatesStarted')
         return { kind: 'updates', state: updatesStateSchema.parse(await updates!.started()) };
+      if (request.method === 'updatesAutomatic') {
+        try {
+          return {
+            kind: 'updates',
+            state: updatesStateSchema.parse(
+              await updates!.setAutomatic(request.enabled, request.revision),
+            ),
+          };
+        } catch {
+          return {
+            kind: 'error',
+            code: 'UPDATE_SETTINGS',
+            message:
+              'Automatic update settings could not be saved. Refresh the dialog and check the storage warning before trying again.',
+          };
+        }
+      }
       if (request.method === 'updatesInstall') {
         const state = await updates!.read();
         if (

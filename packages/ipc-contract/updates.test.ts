@@ -9,12 +9,14 @@ test('updates stay in main and renderer requests cannot choose trust or download
     'updatesDownload',
     'updatesStarted',
     'updatesInstall',
+    'updatesAutomatic',
   ]) {
     const request = {
       id: crypto.randomUUID(),
       method,
       ...(method === 'updatesDownload' ? { format: 'AppImage' } : {}),
       ...(method === 'updatesInstall' ? { installId: crypto.randomUUID() } : {}),
+      ...(method === 'updatesAutomatic' ? { enabled: true, revision: null } : {}),
     };
     expect(requestSchema.safeParse(request).success).toBe(true);
     expect(serviceRequestSchema.safeParse(request).success).toBe(false);
@@ -26,6 +28,14 @@ test('updates stay in main and renderer requests cannot choose trust or download
     ])
       expect(requestSchema.safeParse({ ...request, ...extra }).success).toBe(false);
   }
+  expect(
+    requestSchema.safeParse({
+      id: crypto.randomUUID(),
+      method: 'updatesAutomatic',
+      enabled: 'yes',
+      revision: null,
+    }).success,
+  ).toBe(false);
   expect(
     requestSchema.safeParse({
       id: crypto.randomUUID(),

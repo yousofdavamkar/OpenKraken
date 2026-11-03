@@ -28,6 +28,13 @@ const watermarkSchema = z.strictObject({
   sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   digest: z.string().regex(/^[a-f0-9]{64}$/),
 });
+const automaticSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  configuration: z.string().regex(/^[a-f0-9]{64}$/),
+  enabled: z.boolean(),
+  revision: z.uuid(),
+  nextCheckAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
+});
 
 /** Main-owned updater. No renderer-provided URL, path, key or executable is accepted. */
 export class Updates {
@@ -45,6 +52,13 @@ export class Updates {
   private installation: Awaited<ReturnType<typeof stageAppImageUpdate>> | null = null;
   private installController: AbortController | null = null;
   private startup: Promise<void> | null = null;
+  private automatic: z.infer<typeof automaticSchema> | null = null;
+  private automaticSource: string | null = null;
+  private automaticFailure = false;
+  private preferences: Promise<unknown> = Promise.resolve();
+  private automaticTimer: ReturnType<typeof setTimeout> | null = null;
+  private schedulingReady = false;
+  private checkingAutomatically = false;
   constructor(
     private directory: string,
     configuration: unknown,
@@ -69,7 +83,18 @@ export class Updates {
       selected: null,
       downloaded: 0,
       installId: null,
+      automatic: this.automaticState(),
       error: null,
+    };
+  }
+  private automaticState(): UpdateState['automatic'] {
+    return {
+      enabled: !this.automaticFailure && !!this.automatic?.enabled,
+      revision: this.automatic?.revision ?? null,
+      nextCheckAt:
+        !this.automaticFailure && this.automatic?.enabled ? this.automatic.nextCheckAt : null,
+      warning: this.automaticFailure ? 'storage' : null,
+      host: this.config ? new URL(this.config.feed).host : null,
     };
   }
   private file(name: string) {
@@ -91,8 +116,8 @@ export class Updates {
       (process.platform === 'win32' || (info.mode & 0o077) === 0)
     );
   }
-  private async readSource() {
-    const path = this.file('trusted-release.json');
+  private async readSource(name = 'trusted-release.json') {
+    const path = this.file(name);
     try {
       const original = await lstat(path);
       if (!this.safeFile(original, 4096)) throw new UpdateFailure('storage');
@@ -144,6 +169,132 @@ export class Updates {
     await this.removeOwned('trusted-release.tmp', 4096);
     await this.removeOwned('artifact.part', 2 * 1024 ** 3);
     await this.removeOwned('artifact.ready', 2 * 1024 ** 3);
+    try {
+      this.automaticSource = await this.readSource('automatic-checks.json');
+      if (this.automaticSource !== null) {
+        this.automatic = automaticSchema.parse(JSON.parse(this.automaticSource));
+        if (this.automatic.configuration !== this.binding())
+          throw new Error('Configuration changed');
+      }
+      await this.removeOwned('automatic-checks.tmp', 4096);
+    } catch {
+      this.automaticFailure = true;
+    }
+  }
+  private savePreferences<T>(action: () => Promise<T>): Promise<T> {
+    const next = this.preferences
+      .catch(() => {})
+      .then(async () => {
+        await this.ready;
+        return action();
+      });
+    this.preferences = next;
+    return next;
+  }
+  private scheduleAutomatic(minimumDelay = 0) {
+    if (this.automaticTimer) clearTimeout(this.automaticTimer);
+    this.automaticTimer = null;
+    if (
+      !this.schedulingReady ||
+      this.closed ||
+      this.failedStorage ||
+      this.automaticFailure ||
+      !this.automatic?.enabled
+    )
+      return;
+    // Bound timer delays even if the wall clock moves backwards.
+    const delay = Math.min(
+      36_000_000,
+      Math.max(minimumDelay, (this.automatic.nextCheckAt ?? this.now()) - this.now()),
+    );
+    this.automaticTimer = setTimeout(() => {
+      this.automaticTimer = null;
+      void this.runAutomatic().finally(() => this.scheduleAutomatic());
+    }, delay);
+    this.automaticTimer.unref();
+  }
+  private async runAutomatic() {
+    try {
+      const due = await this.savePreferences(async () => {
+        if (this.closed || !this.automatic?.enabled || this.automaticFailure) return false;
+        if (this.automatic.nextCheckAt !== null && this.automatic.nextCheckAt > this.now())
+          return false;
+        await this.persistAutomatic({ ...this.automatic, nextCheckAt: this.now() + 36_000_000 });
+        return true;
+      });
+      if (
+        due &&
+        !this.closed &&
+        this.automatic?.enabled &&
+        !this.automaticFailure &&
+        !this.work &&
+        ['idle', 'current', 'unsupported', 'available', 'error'].includes(this.state.phase)
+      )
+        await this.check(true);
+    } catch {
+      // Preference failure disables background work; manual checks remain available.
+    }
+  }
+  private async persistAutomatic(next: z.infer<typeof automaticSchema>) {
+    try {
+      if (this.failedStorage) throw new UpdateFailure('storage');
+      await this.checkDirectory();
+      if (
+        this.automaticFailure ||
+        (await this.readSource('automatic-checks.json')) !== this.automaticSource
+      )
+        throw new Error('Automatic update settings changed');
+      const raw = JSON.stringify(automaticSchema.parse(next));
+      const handle = await open(this.file('automatic-checks.tmp'), 'wx', 0o600);
+      try {
+        await handle.writeFile(raw);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      if ((await this.readSource('automatic-checks.json')) !== this.automaticSource)
+        throw new Error('Automatic update settings changed');
+      await this.checkDirectory();
+      await rename(this.file('automatic-checks.tmp'), this.file('automatic-checks.json'));
+      if (process.platform !== 'win32') {
+        const directory = await open(this.directory, 'r');
+        try {
+          await directory.sync();
+        } finally {
+          await directory.close();
+        }
+      }
+      this.automaticSource = raw;
+      this.automatic = next;
+    } catch {
+      this.automaticFailure = true;
+      this.scheduleAutomatic();
+      throw new Error(
+        'Automatic update settings are unavailable or changed. Restart before trying again.',
+      );
+    }
+  }
+  setAutomatic(enabled: boolean, revision: string | null): Promise<UpdateState> {
+    return this.savePreferences(async () => {
+      if (!this.config || this.closed) throw new Error('Automatic updates are unavailable.');
+      if (revision !== (this.automatic?.revision ?? null))
+        throw new Error('Automatic update settings changed. Reopen the dialog before saving.');
+      if (!enabled) {
+        if (this.automatic)
+          this.automatic = { ...this.automatic, enabled: false, nextCheckAt: null };
+        this.scheduleAutomatic();
+        if (this.checkingAutomatically) this.cancel();
+      }
+      await this.persistAutomatic({
+        schemaVersion: 1,
+        configuration: this.binding(),
+        enabled,
+        revision: randomUUID(),
+        nextCheckAt: enabled ? this.now() + 30_000 : null,
+      });
+      this.scheduleAutomatic();
+      return this.read();
+    });
   }
   private async checkStorage() {
     if (this.failedStorage) throw new UpdateFailure('storage');
@@ -200,7 +351,7 @@ export class Updates {
   async read(): Promise<UpdateState> {
     await this.ready;
     if (this.failedStorage && !this.work) return { ...this.empty('error'), error: 'storage' };
-    return structuredClone(this.state);
+    return structuredClone({ ...this.state, automatic: this.automaticState() });
   }
   private start(
     phase: 'checking' | 'downloading' | 'preparing',
@@ -233,8 +384,9 @@ export class Updates {
         controller.abort();
         this.controller = null;
         this.work = null;
+        this.checkingAutomatically = false;
       }
-      return structuredClone(this.state);
+      return this.read();
     })();
     return this.work;
   }
@@ -256,8 +408,21 @@ export class Updates {
     }
     return response;
   }
-  check(): Promise<UpdateState> {
+  check(automatic = false): Promise<UpdateState> {
+    if (this.work || this.closed || !this.config || this.installation) return this.read();
+    this.checkingAutomatically = automatic;
     return this.start('checking', 30_000, async (signal) => {
+      if (!automatic && this.automatic?.enabled) {
+        await this.savePreferences(async () => {
+          if (this.automatic?.enabled && !this.automaticFailure)
+            await this.persistAutomatic({
+              ...this.automatic,
+              nextCheckAt: this.now() + 36_000_000,
+            });
+        }).catch(() => {});
+        this.scheduleAutomatic();
+      }
+      signal.throwIfAborted();
       this.release = null;
       this.state = this.empty('checking');
       await this.removeOwned('artifact.ready', 2 * 1024 ** 3);
@@ -388,6 +553,10 @@ export class Updates {
       })();
     }
     await this.startup;
+    if (!this.schedulingReady) {
+      this.schedulingReady = true;
+      this.scheduleAutomatic(30_000);
+    }
     return this.read();
   }
   prepareInstall(installId: string) {
@@ -493,8 +662,10 @@ export class Updates {
   }
   async close() {
     this.closed = true;
+    this.scheduleAutomatic();
     this.cancel();
     await this.work;
     await this.ready;
+    await this.preferences.catch(() => {});
   }
 }

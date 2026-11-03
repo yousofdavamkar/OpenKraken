@@ -32,6 +32,188 @@ const release = (sequence = 7, version = '0.2.0') => ({
   ],
 });
 
+test('automatic checks require saved consent and stale preference changes cannot overwrite it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-update-preferences-'));
+  const directory = join(root, 'updates');
+  const send = vi.fn<typeof fetch>(async () => new Response(signed(release())));
+  const updater = new Updates(directory, configuration, runtime, send);
+  try {
+    expect((await updater.started()).automatic).toMatchObject({ enabled: false, revision: null });
+    const enabled = await updater.setAutomatic(true, null);
+    expect(enabled.automatic).toMatchObject({ enabled: true, warning: null });
+    expect(enabled.automatic.revision).toBeTruthy();
+    await expect(updater.setAutomatic(false, null)).rejects.toThrow('changed');
+    expect((await updater.read()).automatic.enabled).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+    await updater.close();
+    const restarted = new Updates(directory, configuration, runtime, send);
+    try {
+      expect((await restarted.started()).automatic).toEqual(enabled.automatic);
+      const disabled = await restarted.setAutomatic(false, enabled.automatic.revision);
+      expect(disabled.automatic).toMatchObject({ enabled: false, nextCheckAt: null });
+      expect(disabled.automatic.revision).not.toBe(enabled.automatic.revision);
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      await restarted.close();
+    }
+  } finally {
+    await updater.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('consented checks wait for startup, repeat every ten hours and retain their deadline across restart', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-update-schedule-'));
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  vi.setSystemTime(now);
+  const send = vi.fn<typeof fetch>(async () => new Response(signed(release())));
+  let updater = new Updates(join(root, 'updates'), configuration, runtime, send);
+  try {
+    await updater.started();
+    await vi.advanceTimersByTimeAsync(3600000);
+    expect(send).not.toHaveBeenCalled();
+    await updater.setAutomatic(true, null);
+    await vi.advanceTimersByTimeAsync(29999);
+    expect(send).not.toHaveBeenCalled();
+    await updater.started(); // A renderer remount must not postpone the scheduled check.
+    await vi.advanceTimersByTimeAsync(1);
+    await expect.poll(async () => (await updater.read()).phase).toBe('available');
+    expect(send).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(35999999);
+    expect(send).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect.poll(() => send.mock.calls.length).toBe(2);
+    const saved = (await updater.read()).automatic;
+    await updater.close();
+    updater = new Updates(join(root, 'updates'), configuration, runtime, send);
+    await updater.started();
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect((await updater.read()).automatic).toEqual(saved);
+    await updater.setAutomatic(false, saved.revision);
+    await vi.advanceTimersByTimeAsync(36000000);
+    expect(send).toHaveBeenCalledTimes(2);
+  } finally {
+    await updater.close();
+    vi.useRealTimers();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('background checks preserve verified downloads and changed consent stops automatic networking', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-update-background-'));
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  vi.setSystemTime(now);
+  const directory = join(root, 'updates');
+  const send = vi.fn<typeof fetch>(
+    async (url) => new Response(String(url).endsWith('.json') ? signed(release()) : 'fixture'),
+  );
+  const updater = new Updates(directory, configuration, runtime, send);
+  try {
+    await updater.started();
+    await updater.setAutomatic(true, null);
+    await updater.check();
+    await updater.download('AppImage');
+    await vi.advanceTimersByTimeAsync(36_000_000);
+    await expect
+      .poll(async () => (await updater.read()).automatic.nextCheckAt)
+      .toBe(now + 72_000_000);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect((await updater.read()).phase).toBe('verified');
+    expect(await readFile(join(directory, 'artifact.ready'), 'utf8')).toBe('fixture');
+    await writeFile(join(directory, 'automatic-checks.json'), '{}', { mode: 0o600 });
+    await vi.advanceTimersByTimeAsync(36_000_000);
+    await expect
+      .poll(async () => (await updater.read()).automatic)
+      .toMatchObject({ enabled: false, warning: 'storage' });
+    expect(send).toHaveBeenCalledTimes(2);
+    expect((await updater.check()).phase).toBe('available');
+    expect(await readFile(join(directory, 'automatic-checks.json'), 'utf8')).toBe('{}');
+  } finally {
+    await updater.close();
+    vi.useRealTimers();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('opting out aborts a scheduled request but preserves a user-initiated transfer', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-update-optout-'));
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  vi.setSystemTime(now);
+  let signal: AbortSignal | null | undefined;
+  const getSignal = (): AbortSignal | null | undefined => signal;
+  const send: typeof fetch = async (_url, options) => {
+    signal = options?.signal;
+    return new Promise((_resolve, reject) =>
+      signal!.addEventListener('abort', () => reject(signal!.reason), { once: true }),
+    );
+  };
+  const updater = new Updates(join(root, 'updates'), configuration, runtime, send);
+  try {
+    await updater.started();
+    let enabled = await updater.setAutomatic(true, null);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect.poll(() => signal).toBeTruthy();
+    const backgroundSignal = signal;
+    let disabled = await updater.setAutomatic(false, enabled.automatic.revision);
+    expect(backgroundSignal?.aborted).toBe(true);
+    await expect.poll(async () => (await updater.read()).error).toBe('cancelled');
+    enabled = await updater.setAutomatic(true, disabled.automatic.revision);
+    signal = undefined;
+    const manual = updater.check();
+    await expect.poll(() => signal).toBeTruthy();
+    disabled = await updater.setAutomatic(false, enabled.automatic.revision);
+    expect(disabled.automatic.enabled).toBe(false);
+    expect(getSignal()?.aborted).toBe(false);
+    updater.cancel();
+    expect((await manual).error).toBe('cancelled');
+  } finally {
+    await updater.close();
+    vi.useRealTimers();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('unreadable automatic settings cannot authorize network checks after restart', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-update-invalid-consent-'));
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  try {
+    for (const kind of ['corrupt', 'redirected']) {
+      if (kind === 'redirected' && process.platform === 'win32') continue;
+      vi.setSystemTime(now);
+      const directory = join(root, kind);
+      const send = vi.fn<typeof fetch>(async () => new Response(signed(release())));
+      const initial = new Updates(directory, configuration, runtime, send);
+      await initial.started();
+      await initial.setAutomatic(true, null);
+      await initial.close();
+      const file = join(directory, 'automatic-checks.json');
+      if (kind === 'corrupt') await writeFile(file, 'private-invalid-preference');
+      else {
+        await writeFile(join(root, 'outside'), await readFile(file));
+        await rm(file);
+        await symlink(join(root, 'outside'), file);
+      }
+      const restarted = new Updates(directory, configuration, runtime, send);
+      try {
+        expect((await restarted.started()).automatic).toMatchObject({
+          enabled: false,
+          warning: 'storage',
+        });
+        await vi.advanceTimersByTimeAsync(36_000_000);
+        expect(send).not.toHaveBeenCalled();
+        expect(JSON.stringify(await restarted.read())).not.toContain('private-invalid-preference');
+        expect((await restarted.check()).phase).toBe('available');
+      } finally {
+        await restarted.close();
+      }
+    }
+  } finally {
+    vi.useRealTimers();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('corrupt, truncated, oversized and expired downloads never become verified files', async () => {
   const root = await mkdtemp(join(tmpdir(), 'openkraken-update-integrity-'));
   let clock = now;
@@ -337,6 +519,9 @@ test('signed downloads are verified and rollback protection survives an app rest
   try {
     const disabled = new Updates(directory, null, runtime, send);
     expect((await disabled.check()).phase).toBe('disabled');
+    expect((await disabled.started()).automatic).toMatchObject({ enabled: false, host: null });
+    await expect(disabled.setAutomatic(true, null)).rejects.toThrow('unavailable');
+    await disabled.close();
     await expect(stat(directory)).rejects.toThrow();
     expect(requests).toHaveLength(0);
     const updater = new Updates(directory, configuration, runtime, send);
