@@ -131,6 +131,8 @@ export function Authentication() {
           ]);
         if (event.type === 'authenticationClosed')
           setPrompts((current) => current.filter((item) => item.promptId !== event.promptId));
+        if (event.type === 'gitRequestsInterrupted')
+          setPrompts((current) => current.filter((item) => !event.requestIds.includes(item.id)));
       }),
     [],
   );

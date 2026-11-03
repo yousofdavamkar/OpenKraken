@@ -124,8 +124,9 @@ function startService() {
   child.on('message', (message) => {
     const event = desktopEventSchema.safeParse(message);
     if (event.success) {
-      // Native commands can originate only in main, never in the Git utility process.
+      // Main-owned lifecycle and UI events must never originate in the Git utility.
       if (
+        event.data.type === 'gitRequestsInterrupted' ||
         event.data.type === 'activityChanged' ||
         event.data.type === 'commandExecute' ||
         event.data.type === 'appearanceChanged' ||
@@ -148,17 +149,23 @@ function startService() {
   });
   child.on('exit', () => {
     if (service === child) service = undefined;
+    interruptGitRequests([...pending.keys()]);
     for (const [id, request] of pending) {
       clearTimeout(request.timer);
       request.resolve({
         kind: 'error',
         code: 'SERVICE_EXIT',
-        message: 'The Git service stopped. Retry the operation.',
+        message:
+          'The Git service stopped. The operation may have partially completed. Inspect the repository or remote before retrying.',
       });
       pending.delete(id);
     }
   });
   return child;
+}
+function interruptGitRequests(requestIds: string[]) {
+  if (requestIds.length && window && !window.isDestroyed())
+    window.webContents.send(EVENT_CHANNEL, { type: 'gitRequestsInterrupted', requestIds });
 }
 function callService(request: ServiceRequest, signal?: AbortSignal): Promise<Result> {
   if (signal?.aborted) return Promise.resolve({ kind: 'cancelled' });
@@ -168,12 +175,14 @@ function callService(request: ServiceRequest, signal?: AbortSignal): Promise<Res
   return new Promise<Result>((resolve) => {
     const timer = setTimeout(
       () => {
+        interruptGitRequests([request.id]);
         child.postMessage({ id: request.id });
         pending.delete(request.id);
         resolve({
           kind: 'error',
           code: 'SERVICE_TIMEOUT',
-          message: 'The Git service did not respond in time.',
+          message:
+            'The Git service did not respond in time. The operation may have partially completed. Inspect the repository or remote before retrying.',
         });
       },
       request.method === 'clone' || request.method === 'resolveConflict'

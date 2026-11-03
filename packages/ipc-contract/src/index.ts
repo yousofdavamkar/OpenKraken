@@ -2184,6 +2184,9 @@ export const gitProgressEventSchema = z
   .object({ type: z.literal('gitProgress'), id: requestId, text: z.string().max(4096) })
   .strict();
 export const desktopEventSchema = z.discriminatedUnion('type', [
+  z
+    .object({ type: z.literal('gitRequestsInterrupted'), requestIds: z.array(requestId).max(8) })
+    .strict(),
   activityEventSchema,
   ...terminalEvents,
   z.object({ type: z.literal('appearanceChanged'), state: appearancePreferencesSchema }).strict(),

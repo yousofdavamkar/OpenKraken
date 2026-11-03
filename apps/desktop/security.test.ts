@@ -8,7 +8,21 @@ import {
   parseUserTheme,
   activityEntrySchema,
   activityStateSchema,
+  desktopEventSchema,
 } from '../../packages/ipc-contract/src/index.js';
+test('interrupted Git requests carry only a bounded set of request identities', () => {
+  const requestIds = ['00000000-0000-4000-8000-000000000001'];
+  const event = { type: 'gitRequestsInterrupted', requestIds };
+  expect(desktopEventSchema.safeParse(event).success).toBe(true);
+  expect(requestSchema.safeParse(event).success).toBe(false);
+  for (const patch of [
+    { requestIds: Array(9).fill(requestIds[0]) },
+    { requestIds: ['arbitrary'] },
+    { text: 'secret' },
+    { path: '/outside' },
+  ])
+    expect(desktopEventSchema.safeParse({ ...event, ...patch }).success).toBe(false);
+});
 test('activity IPC permits reading and clearing but never renderer-supplied log entries or free text', () => {
   const id = '00000000-0000-4000-8000-000000000001';
   for (const method of ['activityRead', 'activityClear']) {
