@@ -13,24 +13,35 @@ const failures: Record<NonNullable<UpdateState['error']>, string> = {
     'The update could not be prepared or confirmed. Existing recovery files were retained.',
 };
 
-function UpdatesDialog({ onClose }: { onClose: () => void }) {
+function UpdatesDialog({
+  onClose,
+  onState,
+}: {
+  onClose: () => void;
+  onState: (state: UpdateState) => void;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [state, setState] = useState<UpdateState>();
   const [error, setError] = useState('');
   const [dispatching, setDispatching] = useState(false);
+  const [pendingAutomatic, setPendingAutomatic] = useState<boolean | null>(null);
+  const preferenceChange = useRef(0);
+  const savingAutomatic = pendingAutomatic !== null;
   useEffect(() => {
     dialog.current?.showModal();
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     const read = async () => {
+      const generation = preferenceChange.current;
       try {
         const result = await window.openkraken.request({
           id: crypto.randomUUID(),
           method: 'updatesRead',
         });
         if (result.kind !== 'updates') throw new Error('Unavailable');
-        if (!stopped) {
+        if (!stopped && generation === preferenceChange.current) {
           setState(result.state);
+          onState(result.state);
         }
       } catch {
         if (!stopped) setError('Update status is unavailable.');
@@ -42,7 +53,33 @@ function UpdatesDialog({ onClose }: { onClose: () => void }) {
       stopped = true;
       clearTimeout(timer);
     };
-  }, []);
+  }, [onState]);
+  const saveAutomatic = async (enabled: boolean) => {
+    if (!state) return;
+    preferenceChange.current++;
+    setPendingAutomatic(enabled);
+    setError('');
+    try {
+      const result = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'updatesAutomatic',
+        enabled,
+        revision: state.automatic.revision,
+      });
+      if (result.kind === 'error') {
+        setError(result.message);
+        return;
+      }
+      if (result.kind !== 'updates') throw new Error('Unavailable');
+      setState(result.state);
+      onState(result.state);
+    } catch {
+      setError('Automatic update settings could not be saved.');
+    } finally {
+      preferenceChange.current++;
+      setPendingAutomatic(null);
+    }
+  };
   const act = async (
     method: 'updatesCheck' | 'updatesCancel' | 'updatesDownload' | 'updatesInstall',
     format?: UpdateState['selected'],
@@ -69,6 +106,7 @@ function UpdatesDialog({ onClose }: { onClose: () => void }) {
       }
       if (result.kind !== 'updates') throw new Error('Unavailable');
       setState(result.state);
+      onState(result.state);
     } catch {
       setError('The update request could not be completed.');
     } finally {
@@ -114,6 +152,35 @@ function UpdatesDialog({ onClose }: { onClose: () => void }) {
         Checking contacts the release server. Repository contents and account information are not
         sent.
       </p>
+      {state?.automatic.host && (
+        <div className="automatic-updates">
+          <label>
+            <input
+              type="checkbox"
+              checked={pendingAutomatic ?? state.automatic.enabled}
+              disabled={
+                savingAutomatic ||
+                !!state.automatic.warning ||
+                state.error === 'storage' ||
+                ['preparing', 'restart-ready', 'installed'].includes(state.phase)
+              }
+              onChange={(event) => void saveAutomatic(event.target.checked)}
+            />{' '}
+            Automatically check every 10 hours
+          </label>
+          <p>
+            Checks contact {state.automatic.host} while OpenKraken is open. Downloads and
+            installation require your action.
+          </p>
+          {savingAutomatic && <p>Saving update preference…</p>}
+          {state.automatic.warning && (
+            <p role="alert">
+              Automatic checks stopped because their settings are unavailable or changed. Restart
+              and review the setting before enabling them again.
+            </p>
+          )}
+        </div>
+      )}
       <p role="status">{status}</p>
       {error && <p role="alert">{error}</p>}
       {state?.phase === 'downloading' && (
@@ -170,10 +237,50 @@ function UpdatesDialog({ onClose }: { onClose: () => void }) {
 
 export function UpdatesControl() {
   const [open, setOpen] = useState(false);
+  const [state, setState] = useState<UpdateState>();
+  useEffect(() => {
+    if (open) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const read = async () => {
+      try {
+        const result = await window.openkraken.request({
+          id: crypto.randomUUID(),
+          method: 'updatesRead',
+        });
+        if (!stopped && result.kind === 'updates') {
+          setState(result.state);
+          if (result.state.automatic.enabled) timer = setTimeout(() => void read(), 30_000);
+        }
+      } catch {
+        /* Keep the Updates button available if status cannot be read. */
+      }
+    };
+    void read();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [open, state?.automatic.enabled]);
+  const available =
+    state?.version &&
+    ['available', 'downloading', 'verified', 'preparing', 'restart-ready'].includes(state.phase)
+      ? `OpenKraken ${state.version} is available`
+      : undefined;
   return (
     <>
-      <button onClick={() => setOpen(true)}>Updates</button>
-      {open && <UpdatesDialog onClose={() => setOpen(false)} />}
+      <button
+        aria-label="Updates"
+        aria-describedby={available ? 'update-available-notice' : undefined}
+        title={available}
+        onClick={() => setOpen(true)}
+      >
+        Updates{available && <span aria-hidden="true"> •</span>}
+      </button>
+      <span id="update-available-notice" className="sr-only" aria-live="polite">
+        {available}
+      </span>
+      {open && <UpdatesDialog onClose={() => setOpen(false)} onState={setState} />}
     </>
   );
 }

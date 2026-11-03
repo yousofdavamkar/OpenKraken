@@ -26,6 +26,9 @@ test('the default build stays disconnected and offers no update download', async
     );
     await expect(dialog.getByRole('button', { name: 'Check for updates' })).toBeDisabled();
     await expect(dialog.getByRole('button', { name: /Download/ })).toHaveCount(0);
+    await expect(
+      dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' }),
+    ).toHaveCount(0);
     expect(
       await page.evaluate(() =>
         window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesCheck' }),
@@ -39,6 +42,8 @@ test('the default build stays disconnected and offers no update download', async
 });
 
 test('signed update UI checks, downloads, cancels and rejects tampering through real HTTPS', async () => {
+  // Includes the real startup delay, background notice polling and two consent restarts.
+  test.setTimeout(90000);
   test.skip(process.platform !== 'linux', 'Local OpenSSL fixture currently validated on Linux');
   const root = await mkdtemp(join(tmpdir(), 'openkraken-update-e2e-'));
   const main = resolve(`apps/desktop/dist/update-test-${randomUUID()}.cjs`);
@@ -186,12 +191,48 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     await expect(dialog.getByRole('button', { name: 'Download AppImage' })).toHaveCount(0);
     tamper = false;
     slow = false;
+    const automatic = dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' });
+    await expect(automatic).not.toBeChecked();
+    await automatic.check();
+    await expect(automatic).toBeEnabled();
+    await expect(automatic).toBeChecked();
+    const beforeAutomatic = requests.length;
+    await app.close();
+    app = await electron.launch({ args, env });
+    page = await app.firstWindow();
+    await expect.poll(() => requests.length, { timeout: 35000 }).toBe(beforeAutomatic + 1);
+    await expect(page.getByRole('button', { name: 'Updates', exact: true })).toHaveAttribute(
+      'title',
+      'OpenKraken 0.2.0 is available',
+      { timeout: 35000 },
+    );
+    await page.getByRole('button', { name: 'Updates', exact: true }).click();
+    dialog = page.getByRole('dialog', { name: 'App updates' });
+    await expect(dialog.getByRole('status')).toHaveText('Version 0.2.0 is available.');
+    await expect(
+      dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' }),
+    ).toBeChecked();
+    await expect(page.getByRole('button', { name: 'Updates', exact: true })).toHaveAttribute(
+      'title',
+      'OpenKraken 0.2.0 is available',
+    );
+    await page.screenshot({ path: 'test-results/automatic-updates.png' });
+    await dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' }).uncheck();
+    await expect(
+      dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' }),
+    ).toBeEnabled();
+    await expect(
+      dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' }),
+    ).not.toBeChecked();
     sequence = 6;
     await app.close();
     app = await electron.launch({ args, env });
     page = await app.firstWindow();
     await page.getByRole('button', { name: 'Updates', exact: true }).click();
     dialog = page.getByRole('dialog', { name: 'App updates' });
+    await expect(
+      dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' }),
+    ).not.toBeChecked();
     await dialog.getByRole('button', { name: 'Check for updates' }).click();
     await expect(dialog.getByRole('status')).toContainText('older or conflicting release metadata');
     sequence = 8;
