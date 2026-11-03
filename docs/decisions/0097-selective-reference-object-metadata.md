@@ -1,5 +1,7 @@
 # 0097 — Read peeled metadata only where the reference needs it
 
+The initial enumeration sequence and compatibility selection are superseded by [ADR 0098](0098-direct-first-reference-enumeration.md). The field selection and bounded annotated-tag detail rules remain in effect.
+
 ## Context
 
 The 50,000-reference first-paint gate still fails after bounded native paging. Native format probes show that requesting dereferenced object fields forces expensive object reads even for ordinary commit refs. The implementation also collected `Ref.subject`, which is absent from the blueprint's reference model and has no product consumer. Commit summaries and stash messages use separate models.

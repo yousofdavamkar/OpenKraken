@@ -74,45 +74,47 @@ export class ReferenceReader {
   }
 
   private async readStable(cwd: string, signal: AbortSignal): Promise<Ref[]> {
-    if (this.pagingSupported === false) return this.all(cwd, signal);
-    const identity = () =>
-      this.run(['for-each-ref', `--format=${KEY_FORMAT}`], {
-        cwd,
-        signal,
-        maxBytes: this.maxBytes,
-      });
-    const before = (await identity()).stdout;
-    // Node argv cannot represent arbitrary non-UTF-8 ref-name bytes. Preserve
-    // the original single native enumeration for these repositories.
-    if (!isUtf8(before)) return this.all(cwd, signal);
-    const expected = keys(before);
-    if (expected.length < PARALLEL_THRESHOLD) return this.all(cwd, signal);
-    const count = Math.ceil(expected.length / 3);
-    const starts = [0, count, count * 2];
-    const markers = starts.map((start) => (start ? expected[start - 1]![0] : ''));
-    if (markers.some((marker) => Buffer.byteLength(marker) > 4096)) return this.all(cwd, signal);
-    if (this.pagingSupported === undefined) {
-      const probe = await this.run(
-        ['for-each-ref', '--start-after=', '--count=1', '--format=%(refname)'],
-        {
-          cwd,
-          signal,
-          maxBytes: this.maxBytes,
-          allowedExitCodes: [0, 129],
-        },
-      );
-      this.pagingSupported = probe.exitCode === 0;
-      if (!this.pagingSupported) return this.all(cwd, signal);
-    }
-    const cancelled = new AbortController();
-    const groupSignal = AbortSignal.any([signal, cancelled.signal]);
+    const parser = new RefsParser();
+    const chunks: Buffer[] = [];
     let bytes = 0;
     const account = (chunk: Buffer) => {
       bytes += chunk.length;
       if (bytes > this.maxBytes)
         throw new GitError('OUTPUT_LIMIT', 'Git output exceeded the safety limit');
     };
+    await this.run(['for-each-ref', `--format=${REF_DIRECT_FORMAT}`], {
+      cwd,
+      signal,
+      maxBytes: this.maxBytes,
+      onStdout: (chunk) => {
+        account(chunk);
+        chunks.push(chunk);
+        parser.push(chunk);
+      },
+      onStderr: account,
+    });
+    let refs = parser.finish();
+    if (!refs.some((ref) => ref.objectType === 'tag')) return refs;
+    if (!isUtf8(Buffer.concat(chunks))) return this.all(cwd, signal);
+    const expected: Key[] = refs.map((ref) => [
+      ref.name,
+      ref.target,
+      ref.upstream?.ref ?? '',
+      ref.isHead ? '*' : ' ',
+    ]);
+    const identity = () =>
+      this.run(['for-each-ref', `--format=${KEY_FORMAT}`], {
+        cwd,
+        signal,
+        maxBytes: this.maxBytes,
+      });
+    const cancelled = new AbortController();
+    const groupSignal = AbortSignal.any([signal, cancelled.signal]);
     const readPages = async (format: string): Promise<Ref[]> => {
+      const count = Math.ceil(expected.length / 3);
+      const starts = [0, count, count * 2];
+      const markers = starts.map((start) => (start ? expected[start - 1]![0] : ''));
+      if (markers.some((marker) => Buffer.byteLength(marker) > 4096)) return this.all(cwd, signal);
       const jobs = starts.map(async (start, index) => {
         const parser = new RefsParser();
         await this.run(
@@ -143,7 +145,6 @@ export class ReferenceReader {
         throw error;
       }
     };
-    let refs = await readPages(REF_DIRECT_FORMAT);
     // Exact names are valid ref names (no glob metacharacters). Git also matches
     // slash descendants, so retain only requested names and validate coverage.
     const tags = refs.filter((ref) => ref.objectType === 'tag');
@@ -164,8 +165,18 @@ export class ReferenceReader {
     if (names.length) batches.push(names);
     // Dense annotated-tag repositories use three full pages rather than an
     // unbounded number of pattern scans. All reads share the same byte budget.
-    if (batches.length > 3) refs = await readPages(REF_FORMAT);
-    else {
+    if (batches.length > 3) {
+      if (refs.length < PARALLEL_THRESHOLD) return this.all(cwd, signal);
+      if (this.pagingSupported === undefined) {
+        const probe = await this.run(
+          ['for-each-ref', '--start-after=', '--count=1', '--format=%(refname)'],
+          { cwd, signal, maxBytes: this.maxBytes, allowedExitCodes: [0, 129] },
+        );
+        this.pagingSupported = probe.exitCode === 0;
+      }
+      if (!this.pagingSupported) return this.all(cwd, signal);
+      refs = await readPages(REF_FORMAT);
+    } else {
       const details = new Map<string, Ref>();
       for (const names of batches) {
         const wanted = new Set(names);
@@ -188,10 +199,13 @@ export class ReferenceReader {
       refs = refs.map((ref) => details.get(ref.name) ?? ref);
     }
     const after = (await identity()).stdout;
+    if (!isUtf8(after)) return this.all(cwd, signal);
+    const observed = keys(after);
     // New/deleted/moved refs or changed HEAD/upstream state invalidate page
     // boundaries. Retry once with the original complete native command.
     if (
-      !before.equals(after) ||
+      observed.length !== expected.length ||
+      observed.some((key, index) => key.some((field, at) => field !== expected[index]?.[at])) ||
       refs.length !== expected.length ||
       refs.some((ref, index) => !matches(ref, expected[index]!))
     ) {
