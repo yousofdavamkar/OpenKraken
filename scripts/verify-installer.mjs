@@ -35,7 +35,11 @@ try {
   if (manifest.target === 'deb') {
     await run('dpkg-deb', ['--extract', artifact, temporary]);
     const { stdout: dependencies } = await run('dpkg-deb', ['--field', artifact, 'Depends']);
-    if (!/git \(>= 2\.38\)/.test(dependencies)) throw new Error('Git version dependency missing');
+    if (
+      !/git \(>= 2\.38\)/.test(dependencies) ||
+      !/(?:^|,\s*)ca-certificates(?:,|\s*$)/.test(dependencies)
+    )
+      throw new Error('Git version or CA certificate dependency missing');
     await run('dpkg-deb', ['--control', artifact, join(temporary, 'DEBIAN')]);
     for (const script of ['postinst', 'postrm']) {
       const text = await readFile(join(temporary, 'DEBIAN', script), 'utf8');
@@ -44,9 +48,15 @@ try {
       await run('bash', ['-n', join(temporary, 'DEBIAN', script)]);
     }
   } else {
-    const { stdout: dependencies } = await run('rpm', ['-qp', '--requires', artifact]);
-    if (!/^git >= 2\.38$/m.test(dependencies)) throw new Error('Git version dependency missing');
-    const { stdout: scripts } = await run('rpm', ['-qp', '--scripts', artifact]);
+    const database = join(temporary, 'rpmdb');
+    await mkdir(database);
+    // Even query-only RPM 6 can attempt to lock the system RPM database. Keep
+    // this verification entirely inside the disposable extraction directory.
+    const query = ['--dbpath', database, '-qp'];
+    const { stdout: dependencies } = await run('rpm', [...query, '--requires', artifact]);
+    if (!/^git >= 2\.38$/m.test(dependencies) || !/^ca-certificates$/m.test(dependencies))
+      throw new Error('Git version or CA certificate dependency missing');
+    const { stdout: scripts } = await run('rpm', [...query, '--scripts', artifact]);
     if (scripts.includes('--no-sandbox') || scripts.includes('--disable-sandbox'))
       throw new Error('Installer disables the Chromium sandbox');
     // No shell interpolation or root install: bsdtar reads the RPM payload directly.

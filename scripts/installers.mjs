@@ -104,6 +104,8 @@ try {
         fpm: [
           '--depends',
           'git >= 2.38',
+          '--depends',
+          'ca-certificates',
           // Builder's defaults omit direct Electron shared-library requirements.
           // Keep its defaults and add these so fresh desktop installs can start.
           ...(target === 'deb'
