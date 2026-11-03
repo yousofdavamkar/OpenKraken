@@ -12,6 +12,10 @@ Tests cover path classification, external edit/add/commit latency below 1.5 seco
 
 Public API reference: [Parcel watcher](https://github.com/parcel-bundler/watcher).
 
+## Other worktrees
+
+M7 extends the active repository's observer to its registered checkouts, as described in [worktree management](0067-worktree-management.md). Membership is verified before subscription, and subscriptions reconcile after registration changes. Availability and changed-file counts use a separate `worktreeStatus` event domain so status updates preserve loaded history. Missing checkouts are polled for reconnection. The active repository still owns the lifecycle: switching or closing releases its checkout subscriptions. Watcher Git processes use a three-reader pool.
+
 ## User actions during background refresh
 
 Background reads keep existing working-action controls available and mark their activity separately from user mutations. If a click arrives while a background read owns the state, the action waits for it instead of being discarded. Ref-bearing undo now performs an explicit full refresh (currently all Undo/Redo actions use this path): a quick delete/undo pair can return the watcher to its baseline while an intermediate snapshot is still visible. Watch notifications alone cannot repair that case. Pure status events continue to preserve the loaded history window.

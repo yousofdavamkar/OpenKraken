@@ -1,6 +1,6 @@
 # M7 progress — productivity and polish
 
-M7 is in progress as of 2026-11-02 at implementation checkpoint `e2485be`. M6 continues to have the gaps recorded in [M6 progress](m6-progress.md); M7 and M8 are not complete. React 19.3.1 and TypeScript 7.0.2 remain pinned.
+M7 is in progress as of 2026-11-02 at implementation checkpoint `77366a1`. M6 continues to have the gaps recorded in [M6 progress](m6-progress.md); M7 and M8 are not complete. React 19.3.1 and TypeScript 7.0.2 remain pinned.
 
 ## Implemented
 
@@ -21,13 +21,15 @@ M7 is in progress as of 2026-11-02 at implementation checkpoint `e2485be`. M6 co
 
 - Worktree cleanup shows Git’s bounded dry-run report before pruning stale registrations. Repository-bound, expiring tokens and a fixed cutoff bind confirmation to the reviewed inventory and metadata fingerprint. Confirmation rechecks detached HEAD retention and consumes the token before execution. Locked/live checkouts and branches remain; the UI explains that registration index/reflog recovery data is removed.
 
-- Worktree HEADs seed history and search, including detached checkout-only commits, while respecting hidden/solo ref filters. Each other non-bare checkout has a stable synthetic graph row above its HEAD, with status, branch and path, loaded search, details and ancestry navigation. Rows are inserted on the parent’s page without moving earlier lanes. Other-checkout status is reread with snapshots; file-watch integration remains open.
+- Worktree HEADs seed history and search, including detached checkout-only commits, while respecting hidden/solo ref filters. Each other non-bare checkout has a stable synthetic graph row above its HEAD, with status, branch and path, loaded search, details and ancestry navigation. Rows are inserted on the parent’s page without moving earlier lanes. Other-checkout status is updated automatically through native subscriptions and a typed status-only event, preserving loaded pages, selection, search and row details. New registrations become watched; unavailable checkouts are polled for reconnection. Changed HEADs or inventory use a full refresh.
 
 - History pages use a typed JSON response format, serialized in main after validation, to avoid copying thousands of nested objects through renderer IPC and the isolated-world bridge. Existing request validation, cancellation, cursor checks, append-only layout and performance budgets remain in place.
 
 ## Verification
 
-The latest graph increment (`e2485be`) passed **527 unit tests across 68 files on its first full run**, **18 targeted desktop tests** (seven worktree flows, nine graph tests including six visual goldens, and two native-menu regressions), typechecking, build and full ESLint/Prettier checks. The graph screenshot was visually inspected. Paging measured **134.2 ms** against the 300 ms budget and scrolling frame p95 **16.8 ms**. Packaging and the complete desktop suite were not rerun. These are Linux fixture results; cross-platform and real-repository acceptance remain open.
+The latest watcher increment (`77366a1`) passed **530 unit tests across 68 files on its first full run**, **23 targeted desktop tests** (eight worktree flows, four working-tree tests, nine graph tests including six visual goldens, and two native-menu regressions), typechecking, build and full ESLint/Prettier checks. Paging measured **148.1 ms** and scrolling frame p95 **16.8 ms**. No packaging or complete desktop-suite rerun was performed. The intermittent GitLab fixture failure did not recur, but its cause remains unconfirmed.
+
+The preceding graph increment (`e2485be`) passed **527 unit tests across 68 files on its first full run**, **18 targeted desktop tests** (seven worktree flows, nine graph tests including six visual goldens, and two native-menu regressions), typechecking, build and full ESLint/Prettier checks. The graph screenshot was visually inspected. Paging measured **134.2 ms** against the 300 ms budget and scrolling frame p95 **16.8 ms**. Packaging and the complete desktop suite were not rerun. These are Linux fixture results; cross-platform and real-repository acceptance remain open.
 
 The preceding prune increment (`ad67696`) passed **526 unit tests across 68 files on its first full run**, **seven targeted desktop tests** (five worktree flows and two native-menu regressions), typechecking, build and full ESLint/Prettier checks. The cleanup review screenshot was visually inspected. Packaging, performance and the complete desktop suite were not rerun for this increment. The earlier intermittent GitLab fixture failure did not occur; its cause remains unconfirmed.
 
@@ -57,13 +59,15 @@ The full desktop run at `8c68b88` measured:
 
 Seventeen native Git tests exercise main/current, locked, missing, dirty, detached, bare and unborn checkouts; Unicode/newline paths; unknown/stale selection refusal; and a registered directory replaced by an unrelated repository. Creation tests check empty destinations, explicit commits, new/existing/detached modes, moved branch tips, duplicate branch checkout refusal, unchanged original HEAD and cancellation. Management coverage includes offline locking/unlocking, lock reasons, refusal to remove main/current/locked checkouts, ignored and untracked files, tracked edits hidden behind either index flag, unreferenced detached commits and a clean-index pending merge. Successful removal retains the branch tip. IPC coverage rejects renderer paths, force fields, malformed IDs, symbolic revision expressions and oversized/NUL-containing reasons.
 
-Seven Electron tests cover stale-list recovery, explicit opening, creation in all three modes, picker cancellation and nonempty-folder recovery, lock/unlock review, canceled removal, a file created after review, clean removal with branch retention, and focus restoration after cancellation and success. Graph and command-palette regressions passed at the creation checkpoint; native-menu regressions passed again with management.
+Eight Electron tests cover stale-list recovery, explicit opening, creation in all three modes, picker cancellation and nonempty-folder recovery, lock/unlock review, canceled removal, a file created after review, clean removal with branch retention, and focus restoration after cancellation and success. Graph and command-palette regressions passed at the creation checkpoint; native-menu regressions passed again with management.
 
 Prune coverage checks live/locked checkout and branch retention, consumed/foreign/expired tokens, changed metadata, restored checkouts, detached HEAD retention before preview and confirmation, and malformed registrations omitted by the normal list. The Electron flow cancels review, refuses confirmation after an external lock, completes a fresh review and verifies empty-cleanup controls and focus. IPC checks reject caller-supplied paths, cutoffs, reports, candidates and force flags.
 
 Graph coverage verifies detached checkout-only commits in native history/search, hidden/solo root filtering, two checkout rows at one HEAD, details, clean/dirty labels, keyboard ancestry navigation, and a newly created checkout row. A later-page checkout test verifies one loaded search match, its position directly above HEAD, and unchanged earlier rows/lanes.
 
-This proves list/create/open/lock/unlock, guarded removal, reviewed pruning and graph worktree row behavior on Linux. It does not prove other-checkout watching, non-UTF-8 worktree paths or macOS/Windows runtime acceptance. Prune revalidation is optimistic; external Git writers are not locked out.
+Seven native watcher tests cover active and other-checkout changes, dynamically registered checkouts, paused writes, returning offline locked checkouts, replaced/restored Git pointers, polling fallback and the main checkout while a linked checkout is active. The new desktop flow disables focus refresh, edits/removes a draft in another checkout and verifies live row/details updates with 2,200 commits, selection and prior lanes retained. A subsequent commit refreshes history without switching checkouts.
+
+This proves list/create/open/lock/unlock, guarded removal, reviewed pruning, graph rows and other-checkout observation on Linux. It does not prove non-UTF-8 worktree paths, macOS/Windows runtime acceptance, every mounted filesystem’s event delivery or performance with many large checkouts. Prune revalidation is optimistic; external Git writers are not locked out.
 
 ### Terminal acceptance
 
@@ -85,7 +89,9 @@ Serializing in preload initially passed at 212, 206 and 203 ms, but a later run 
 
 These are Linux fixture measurements. CPU contention still affects timings, the dedicated real-repository benchmark was not run, and cross-platform performance remains unverified. The earlier diff/blame timing failures and investigations remain in the previous checkpoint logs; this clean full-suite result does not replace broader M8 regression requirements.
 
-Latest graph logs are `/tmp/openkraken-worktree-graph-final-{unit,lint,types}.log`, `/tmp/openkraken-worktree-graph-build.log` and `/tmp/openkraken-worktree-graph-e2e.log`. Native and UI red/green evidence remains under `/tmp/openkraken-worktree-graph-*.log`. The first UI implementation build caught a missing graph document kind; extending the shared worker type resolved it before acceptance ran.
+Latest watcher logs are `/tmp/openkraken-worktree-watch-final-{unit,lint,types}.log`, `/tmp/openkraken-worktree-watch-build.log`, `/tmp/openkraken-worktree-watch-e2e.log` and `/tmp/openkraken-worktree-watch-native-final.log`. Native status-event and UI page-preservation red/green evidence is under `/tmp/openkraken-worktree-watch-*.log`. The initial UI test demonstrated that treating a worktree-status event as a full refresh reset 2,200 loaded commits to 2,000; the status-only path preserves them. The replaced-pointer fixture already passed before removing the redundant pointer ignore, so it is coverage rather than a reproduced failure.
+
+Graph logs are `/tmp/openkraken-worktree-graph-final-{unit,lint,types}.log`, `/tmp/openkraken-worktree-graph-build.log` and `/tmp/openkraken-worktree-graph-e2e.log`. Native and UI red/green evidence remains under `/tmp/openkraken-worktree-graph-*.log`. The first UI implementation build caught a missing graph document kind; extending the shared worker type resolved it before acceptance ran.
 
 Prune logs are `/tmp/openkraken-worktree-prune-final-{unit,lint,types}.log`, `/tmp/openkraken-worktree-prune-build.log`, `/tmp/openkraken-worktree-prune-ui-green.log` and `/tmp/openkraken-worktree-prune-menu.log`. Native and UI red/green evidence remains under `/tmp/openkraken-worktree-prune-*.log`.
 
@@ -101,7 +107,7 @@ Logs for the preceding full-suite checkpoint are `/tmp/openkraken-terminal-final
 
 - Broader command coverage, including dynamic branch/file domains and contextual commands. Native accelerators are implemented; this is not an Atom selector keymap interpreter. Other older preferences (for example graph view settings) still need consolidation into the main settings store.
 - Automatic shell integration for zsh, fish and PowerShell, plus terminal runtime acceptance on macOS/Windows. Standard OSC 133 consumption and automatic Bash 5.1+ integration are implemented. The initial terminal supports one session; broader terminal workflows remain future work.
-- Other-checkout watch integration. List/create/open/lock/unlock, guarded removal, reviewed pruning and graph worktree rows are implemented for UTF-8 paths; non-UTF-8 worktree paths and cross-platform runtime acceptance remain open. Submodule UI and LFS awareness remain open.
+- Worktree operations, graph rows and other-checkout observation are implemented for UTF-8 paths on Linux. Non-UTF-8 worktree paths, cross-platform runtime acceptance and broader filesystem/performance coverage remain open. Submodule UI and LFS awareness remain open.
 - Onboarding, activity log, toasts, a complete accessibility pass, and i18n scaffolding.
 - Optional git-flow and consent-gated BYO-key AI remain optional, not implemented.
 
