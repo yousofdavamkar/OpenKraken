@@ -1689,6 +1689,29 @@ input:not([type='checkbox']):not([type='radio']) {
   list-style: none;
   padding: 0;
 }
+.submodules-dialog ul {
+  list-style: none;
+  padding: 0;
+}
+.submodules-dialog li {
+  border-bottom: 1px solid var(--border);
+  padding: 12px 0;
+}
+.submodules-dialog li p {
+  margin: 4px 0;
+}
+.submodules-dialog h3 {
+  text-transform: none;
+}
+.submodules-dialog .dialog-actions {
+  display: flex;
+  gap: 8px;
+}
+.submodules-dialog code,
+.submodule-path {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .worktree-prune-report {
   max-height: 180px;
   overflow: auto;

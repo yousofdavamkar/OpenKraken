@@ -1,5 +1,10 @@
 import { z } from 'zod';
 export const commandCatalog = {
+  'repository.submodules': {
+    label: 'Submodules',
+    category: 'Repository',
+    keywords: 'nested repositories checkout dependencies',
+  },
   'repository.worktrees': {
     label: 'Worktrees',
     category: 'Repository',
