@@ -99,6 +99,8 @@ Public references: [Git status](https://git-scm.com/docs/git-status), [for-each-
 
 Use **Stage** or **Unstage** for an entire file, or **View** to select individual hunks and lines. Commit drafts remain available after a hook or signing failure. **Amend last commit** loads the existing message; signing uses your Git configuration or the explicit selection in the form. Native hooks and configured signing agents run normally.
 
+Commit messages save automatically to the local profile, separately for each checkout. **Draft saved locally** confirms persistence; acknowledged drafts survive app restart and renderer crashes. Normal and amend messages remain separate, and an amend draft restored against a different HEAD requires another review. Successful commits clear the submitted draft while retaining newer edits. Storage warnings leave text editable: copy it before restarting to investigate a failure. These files contain plaintext messages; edits still marked **Saving draft…** can be lost in a crash. See [local commit drafts](docs/decisions/0072-local-commit-drafts.md) for limits. File-editor and provider-composer drafts are not yet persisted this way.
+
 **Discard** first shows the affected file and backup size. Tracked files return to their staged version; untracked files move to recoverable application trash. **Undo** and **Redo** refuse to overwrite edits or index/HEAD changes made after the recorded action. Backups live in the application profile, not the repository. See the M2 report for limits and recovery details.
 
 ## Branches and remotes
