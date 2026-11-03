@@ -71,6 +71,17 @@ try {
     const { stdout: scripts } = await run('rpm', [...query, '--scripts', artifact]);
     if (scripts.includes('--no-sandbox') || scripts.includes('--disable-sandbox'))
       throw new Error('Installer disables the Chromium sandbox');
+    const { stdout: files } = await run('rpm', [...query, '--list', artifact]);
+    const owned = new Set(files.trimEnd().split('\n'));
+    for (const directory of [
+      '/opt/OpenKraken',
+      ...Object.entries(manifest.payload)
+        .filter(([, entry]) => entry.type === 'directory')
+        .map(([name]) => `/opt/OpenKraken/${name}`),
+    ]) {
+      if (!owned.has(directory))
+        throw new Error(`RPM does not own its application directory: ${directory}`);
+    }
     // No shell interpolation or root install: bsdtar reads the RPM payload directly.
     await run('bsdtar', ['-xpf', artifact, '-C', temporary]);
   }

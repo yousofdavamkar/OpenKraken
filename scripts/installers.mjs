@@ -134,7 +134,16 @@ try {
                 ]
             ).flatMap((dependency) => ['--depends', dependency]),
             ...(target === 'rpm'
-              ? ['--rpm-rpmbuild-define', '_rpmformat 4', '--rpm-digest', 'sha256']
+              ? [
+                  '--rpm-rpmbuild-define',
+                  '_rpmformat 4',
+                  '--rpm-digest',
+                  'sha256',
+                  // Own only the private application tree. RPM can then remove
+                  // its empty directories without a destructive removal hook.
+                  '--directories',
+                  '/opt/OpenKraken',
+                ]
               : []),
           ],
           afterRemove: 'build-resources/linux-after-remove.sh',
