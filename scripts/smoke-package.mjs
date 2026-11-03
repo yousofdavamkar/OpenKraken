@@ -87,6 +87,11 @@ try {
       typeof Reflect.get(window, 'openkraken')?.request === 'function',
   );
   if (!isolated) throw new Error('Packaged renderer isolation failed');
+  const reporting = await page.evaluate(() =>
+    window.openkraken.request({ id: crypto.randomUUID(), method: 'crashReporting' }),
+  );
+  if (reporting.kind !== 'crashReporting' || reporting.state.enabled)
+    throw new Error('Packaged crash reporting must start without consent');
   const socketPath =
     process.platform === 'win32'
       ? `\\\\.\\pipe\\openkraken-${randomUUID()}`

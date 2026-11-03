@@ -798,6 +798,15 @@ footer {
 .reference-dialog::backdrop {
   background: var(--backdrop);
 }
+.reference-dialog.crash-reporting-dialog p {
+  margin: 0.75rem 0;
+  line-height: 1.5;
+}
+.crash-reporting-dialog .dialog-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
 .provider-dialog {
   max-height: 90vh;
   overflow-y: auto;

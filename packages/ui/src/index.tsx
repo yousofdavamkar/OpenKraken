@@ -7,6 +7,7 @@ const TerminalPanel = lazy(() => import('./terminal.js'));
 import { createRoot } from 'react-dom/client';
 import { AvatarSettings } from './avatars.js';
 import { Appearance } from './appearance.js';
+import { CrashReporting } from './crash-reporting.js';
 import { RepositorySync } from './repository-sync.js';
 import { WorkingTreePanel } from './working-tree.js';
 import { History } from './history.js';
@@ -67,6 +68,7 @@ function App() {
         <div className="toolbar">
           <CommandControls />
           <Appearance />
+          <CrashReporting />
           <Activity />
           <AvatarSettings />
           <Clone />
