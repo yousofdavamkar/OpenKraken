@@ -1,11 +1,21 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readdir, readFile, stat, writeFile, rm } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
-import type { Repository } from '@openkraken/ipc-contract';
+import type { Repository, Worktree } from '@openkraken/ipc-contract';
 import type { subscribe, AsyncSubscription } from '@parcel/watcher';
-import { runGit } from './runner.js';
+import { runGit, type RunOptions } from './runner.js';
+import { Worktrees } from './worktrees.js';
+import { RepositoryQueue } from './queue.js';
 export type RefreshDomain =
-  'status' | 'refs' | 'graph' | 'stash' | 'worktrees' | 'operationState' | 'config' | 'remotes';
+  | 'status'
+  | 'refs'
+  | 'graph'
+  | 'stash'
+  | 'worktrees'
+  | 'worktreeStatus'
+  | 'operationState'
+  | 'config'
+  | 'remotes';
 export interface WatchEvent {
   repoId: string;
   domains: RefreshDomain[];
@@ -40,7 +50,7 @@ export function classifyPath(repo: Repository, path: string): RefreshDomain[] {
       return ['refs', 'graph'];
     if (name.startsWith('refs/tags/')) return ['refs'];
     if (name === 'refs/stash' || name === 'logs/refs/stash') return ['stash', 'graph'];
-    if (name.startsWith('worktrees/')) return ['worktrees'];
+    if (name === 'worktrees' || name.startsWith('worktrees/')) return ['worktrees'];
     if (
       /^(MERGE_HEAD|CHERRY_PICK_HEAD|REVERT_HEAD|BISECT_LOG|rebase-merge|rebase-apply|sequencer)(\/|$)/.test(
         name,
@@ -59,6 +69,11 @@ const digest = (data: Buffer | string) => createHash('sha256').update(data).dige
 export class RepositoryWatcher {
   mode: 'native' | 'polling' = 'polling';
   private subscriptions: AsyncSubscription[] = [];
+  private checkoutSubscriptions = new Map<string, AsyncSubscription>();
+  private subscribe?: typeof subscribe;
+  private otherWorktrees: Worktree[] = [];
+  private unavailablePoll?: ReturnType<typeof setInterval>;
+  private processPool = new RepositoryQueue(3);
   private controller = new AbortController();
   private timer?: ReturnType<typeof setTimeout>;
   private poll?: ReturnType<typeof setInterval>;
@@ -77,6 +92,56 @@ export class RepositoryWatcher {
   ) {}
   private emit(domains: RefreshDomain[]) {
     if (!this.closed) this.notify({ repoId: this.repo.id, domains, mode: this.mode });
+  }
+  private run(args: string[], options: RunOptions) {
+    return this.processPool.run(false, () => runGit(this.git, args, options), options.signal);
+  }
+  private async syncCheckouts() {
+    if (this.closed || this.mode !== 'native' || !this.subscribe) return;
+    const paths = new Set(
+      this.otherWorktrees
+        .filter((entry) => entry.available && !entry.bare)
+        .map((entry) => entry.path),
+    );
+    for (const [path, subscription] of this.checkoutSubscriptions) {
+      if (paths.has(path)) continue;
+      this.checkoutSubscriptions.delete(path);
+      await subscription.unsubscribe();
+    }
+    for (const path of paths) {
+      if (this.closed || this.mode !== 'native') return;
+      if (this.checkoutSubscriptions.has(path)) continue;
+      const subscription = await this.subscribe(
+        path,
+        (error, events) => {
+          if (this.closed) return;
+          if (error) return this.fallback();
+          if (events.some((event) => within(path, event.path) !== undefined)) this.schedule(300);
+        },
+        { ignore: [this.repo.gitDir, this.repo.commonDir] },
+      );
+      if (this.closed || this.mode !== 'native') {
+        await subscription.unsubscribe();
+        return;
+      }
+      this.checkoutSubscriptions.set(path, subscription);
+      this.again = true; // Recheck edits made between the fingerprint and subscription.
+    }
+    if (this.otherWorktrees.some((entry) => !entry.available)) {
+      this.unavailablePoll ??= setInterval(() => {
+        void this.check();
+      }, 750);
+    } else {
+      clearInterval(this.unavailablePoll);
+      this.unavailablePoll = undefined;
+    }
+  }
+  private releaseCheckouts() {
+    const subscriptions = [...this.checkoutSubscriptions.values()];
+    this.checkoutSubscriptions.clear();
+    clearInterval(this.unavailablePoll);
+    this.unavailablePoll = undefined;
+    return Promise.allSettled(subscriptions.map((subscription) => subscription.unsubscribe()));
   }
   private async metadata(path: string, depth = 0): Promise<string> {
     try {
@@ -101,7 +166,7 @@ export class RepositoryWatcher {
   }
   private async fingerprint(): Promise<Record<RefreshDomain, string>> {
     const run = (args: string[]) =>
-      runGit(this.git, args, {
+      this.run(args, {
         cwd: this.repo.path,
         signal: this.controller.signal,
         timeoutMs: 10000,
@@ -131,18 +196,40 @@ export class RepositoryWatcher {
           this.metadata(p),
         ),
       ),
-      this.metadata(join(this.repo.commonDir, 'worktrees')),
+      stat(join(this.repo.commonDir, 'worktrees')).then(
+        () =>
+          new Worktrees(
+            this.repo,
+            (args, options) => this.run(args, { timeoutMs: 10000, ...options }),
+            new Map(),
+          ).list(this.controller.signal),
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return undefined;
+          throw error;
+        },
+      ),
       this.metadata(join(this.repo.commonDir, 'shallow')),
       this.metadata(join(this.repo.gitDir, 'FETCH_HEAD')),
     ]);
     const lines = refs.stdout.toString().split('\n');
     const refHash = digest(refs.stdout);
+    this.otherWorktrees = worktrees?.entries.filter((entry) => !entry.current) ?? [];
     return {
       status: digest(status?.stdout ?? ''),
       refs: digest(refHash + head + fetch),
       graph: digest(lines.filter((l) => !l.startsWith('refs/tags/')).join('\n') + head + shallow),
       stash: digest(lines.filter((l) => l.startsWith('refs/stash\0')).join('\n')),
-      worktrees,
+      worktrees: worktrees?.revision ?? '',
+      worktreeStatus: digest(
+        JSON.stringify(
+          this.otherWorktrees.map((entry) => [
+            entry.id,
+            entry.available,
+            entry.changedFiles,
+            entry.problem,
+          ]),
+        ),
+      ),
       operationState: digest(JSON.stringify(operation)),
       config: digest(JSON.stringify(config)),
       remotes: digest(JSON.stringify(config)),
@@ -157,6 +244,7 @@ export class RepositoryWatcher {
     if (this.closed) return;
     try {
       const subscribe = this.options.subscribe ?? (await import('@parcel/watcher')).subscribe;
+      this.subscribe = subscribe;
       const roots = [
         ...new Set([
           ...(this.repo.isBare ? [] : [this.repo.path]),
@@ -225,6 +313,7 @@ export class RepositoryWatcher {
   private fallback() {
     if (this.closed) return;
     this.mode = 'polling';
+    void this.releaseCheckouts();
     void Promise.allSettled(this.subscriptions.splice(0).map((s) => s.unsubscribe()));
     if (!this.poll)
       this.poll = setInterval(() => {
@@ -256,6 +345,8 @@ export class RepositoryWatcher {
       try {
         const next = await this.fingerprint();
         if (this.closed || this.paused) return;
+        await this.syncCheckouts();
+        if (this.closed || this.paused) return;
         const changed = this.baseline
           ? (Object.keys(next) as RefreshDomain[]).filter(
               (key) => next[key] !== this.baseline![key],
@@ -284,6 +375,7 @@ export class RepositoryWatcher {
     clearInterval(this.poll);
     this.probe?.observed();
     await Promise.allSettled(this.subscriptions.splice(0).map((s) => s.unsubscribe()));
+    await this.releaseCheckouts();
     await this.checking;
     await this.starting;
   }

@@ -2098,12 +2098,13 @@ export const repositoryEventSchema = z
           'graph',
           'stash',
           'worktrees',
+          'worktreeStatus',
           'operationState',
           'config',
           'remotes',
         ]),
       )
-      .max(8),
+      .max(9),
     mode: z.enum(['native', 'polling']),
   })
   .strict();

@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from 'vitest';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
@@ -12,6 +12,100 @@ async function setup(name: string) {
   const service = new RepositoryService('git');
   return { path, repo: await service.open(path) };
 }
+test('other checkout edits publish status without invalidating history and new checkouts become watched', async () => {
+  const { path, repo } = await setup('other-worktrees');
+  const linked = join(root, 'observed-linked');
+  fixtureGit(path, ['worktree', 'add', '-b', 'observed', linked]);
+  const events: string[][] = [];
+  const watch = new RepositoryWatcher('git', repo, (event) => {
+    if (event.domains.length) events.push(event.domains);
+  });
+  try {
+    await watch.start();
+    expect(watch.mode).toBe('native');
+    await writeFile(join(linked, 'draft.txt'), 'linked draft');
+    await expect
+      .poll(() => events.flat(), { timeout: 1400, interval: 20 })
+      .toContain('worktreeStatus');
+    expect(events.flat()).not.toContain('worktrees');
+    expect(events.flat()).not.toContain('graph');
+    const added = join(root, 'observed-added');
+    events.length = 0;
+    fixtureGit(path, ['worktree', 'add', '-b', 'added', added]);
+    await expect.poll(() => events.flat(), { timeout: 1400, interval: 20 }).toContain('worktrees');
+    events.length = 0;
+    await writeFile(join(added, 'draft.txt'), 'new checkout draft');
+    await expect
+      .poll(() => events.flat(), { timeout: 1400, interval: 20 })
+      .toContain('worktreeStatus');
+    events.length = 0;
+    watch.pause();
+    await writeFile(join(added, 'while-paused.txt'), 'do not lose this update');
+    await watch.check();
+    expect(events).toEqual([]);
+    watch.resume();
+    await expect
+      .poll(() => events.flat(), { timeout: 1400, interval: 20 })
+      .toContain('worktreeStatus');
+  } finally {
+    await watch.close();
+  }
+});
+test('an offline locked checkout is rediscovered without a parent-directory notification', async () => {
+  const { path, repo } = await setup('offline-worktree');
+  const linked = join(root, 'offline-linked');
+  const offline = join(root, 'offline-storage');
+  fixtureGit(path, ['worktree', 'add', '-b', 'offline', linked]);
+  fixtureGit(path, ['worktree', 'lock', linked]);
+  await rename(linked, offline);
+  const events: string[][] = [];
+  const watch = new RepositoryWatcher('git', repo, (event) => events.push(event.domains));
+  try {
+    await watch.start();
+    expect(watch.mode).toBe('native');
+    events.length = 0;
+    await rename(offline, linked);
+    await expect
+      .poll(() => events.flat(), { timeout: 1400, interval: 20 })
+      .toContain('worktreeStatus');
+    events.length = 0;
+    await writeFile(join(linked, 'reconnected.txt'), 'back online');
+    await expect
+      .poll(() => events.flat(), { timeout: 1400, interval: 20 })
+      .toContain('worktreeStatus');
+  } finally {
+    await watch.close();
+  }
+});
+test('replaced checkout metadata becomes unavailable and polling reconnects the registered checkout', async () => {
+  const { path, repo } = await setup('replaced-worktree');
+  const foreign = createFixture(join(root, 'foreign-worktree'));
+  const linked = join(root, 'replaced-linked');
+  fixtureGit(path, ['worktree', 'add', '-b', 'replaced', linked]);
+  const pointer = await readFile(join(linked, '.git'));
+  const events: string[][] = [];
+  const watch = new RepositoryWatcher('git', repo, (event) => events.push(event.domains));
+  try {
+    await watch.start();
+    events.length = 0;
+    await writeFile(join(linked, '.git'), `gitdir: ${join(foreign, '.git')}\n`);
+    await expect
+      .poll(() => events.flat(), { timeout: 1400, interval: 20 })
+      .toContain('worktreeStatus');
+    events.length = 0;
+    await writeFile(join(linked, '.git'), pointer);
+    await expect
+      .poll(() => events.flat(), { timeout: 1400, interval: 20 })
+      .toContain('worktreeStatus');
+    events.length = 0;
+    await writeFile(join(linked, 'after-reconnect.txt'), 'now observed again');
+    await expect
+      .poll(() => events.flat(), { timeout: 1400, interval: 20 })
+      .toContain('worktreeStatus');
+  } finally {
+    await watch.close();
+  }
+});
 test('refresh classification separates worktree, refs, operations and ignored Git internals', async () => {
   const { path, repo } = await setup('classifier');
   expect(classifyPath(repo, join(path, 'tracked.txt'))).toEqual(['status']);
@@ -64,6 +158,8 @@ test('native watcher detects external worktree, staging and commit changes withi
 });
 test('failed native self-test falls back to polling and stops cleanly', async () => {
   const { path, repo } = await setup('fallback');
+  const linked = join(root, 'fallback-linked');
+  fixtureGit(path, ['worktree', 'add', '-b', 'fallback-topic', linked]);
   const events: string[][] = [];
   const watch = new RepositoryWatcher('git', repo, (event) => events.push(event.domains), {
     subscribe: async () => ({ unsubscribe: async () => {} }),
@@ -74,6 +170,11 @@ test('failed native self-test falls back to polling and stops cleanly', async ()
   events.length = 0;
   await writeFile(join(path, 'tracked.txt'), 'poll this\n');
   await expect.poll(() => events.flat(), { timeout: 1400, interval: 20 }).toContain('status');
+  events.length = 0;
+  await writeFile(join(linked, 'draft.txt'), 'poll other checkout');
+  await expect
+    .poll(() => events.flat(), { timeout: 1400, interval: 20 })
+    .toContain('worktreeStatus');
   await watch.close();
   events.length = 0;
   await writeFile(join(path, 'tracked.txt'), 'after close\n');
@@ -95,6 +196,11 @@ test('linked worktrees watch both private HEAD and common refs; bare repositorie
     events.length = 0;
     fixtureGit(linked, ['checkout', '--detach']);
     await expect.poll(() => events.flat(), { timeout: 1400, interval: 20 }).toContain('graph');
+    events.length = 0;
+    await writeFile(join(path, 'main-draft.txt'), 'main checkout changed');
+    await expect
+      .poll(() => events.flat(), { timeout: 1400, interval: 20 })
+      .toContain('worktreeStatus');
   } finally {
     await watch.close();
   }
