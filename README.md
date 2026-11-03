@@ -175,3 +175,24 @@ Use **Keybindings** to edit the JSON map. Missing entries inherit defaults; `nul
 ```
 
 Apply validates conflicts, including inherited bindings on both platforms, before saving. The editor lists command IDs and active shortcuts. Restore defaults changes the draft; Apply saves it. Shortcuts pause in dialogs; action shortcuts also pause in text fields, except opening the palette or focusing commit search. The native Commands menu uses the same keymap and availability checks. Settings and usage are saved atomically in the profile’s `settings.json`; older renderer preferences migrate once. The rest of M7 remains open. See [M7 progress](docs/verification/m7-progress.md).
+
+## Appearance
+
+Open **Appearance** from the toolbar or command palette. Choose Dark, Light, or System and select **Apply**. System follows your device’s preference. Colors update the graph, dialogs and open editors while preserving drafts and undo history. The choice persists across restarts.
+
+Choose **Custom** to edit a JSON theme. Start with a light or dark base and override any of the names listed under **Available color tokens**. Unspecified colors inherit the base. For example:
+
+```json
+{
+  "version": 1,
+  "name": "Evening",
+  "base": "dark",
+  "colors": {
+    "background": "#142135",
+    "text": "#e9efff",
+    "graph1": "#f0a030"
+  }
+}
+```
+
+Colors accept CSS hex notation (`#RGB`, `#RGBA`, `#RRGGBB`, or `#RRGGBBAA`). Invalid themes leave the current appearance active. Switching to a built-in theme keeps your saved custom theme available. Appearance shares the atomic profile settings file with keyboard shortcuts.

@@ -5,7 +5,46 @@ import {
   serviceRequestSchema,
   serviceResponseSchema,
   resultSchema,
+  parseUserTheme,
 } from '../../packages/ipc-contract/src/index.js';
+test('custom themes accept bounded named hex tokens and reject CSS, unknown fields and incomplete selections', () => {
+  const custom = {
+    version: 1,
+    name: 'Paper',
+    base: 'light',
+    colors: { background: '#fff', accent: '#12345678' },
+  };
+  const request = {
+    id: '00000000-0000-4000-8000-000000000000',
+    method: 'appearanceSave',
+    revision: 0,
+    mode: 'custom',
+    custom,
+  };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(parseUserTheme(JSON.stringify(custom))).toEqual(custom);
+  for (const fields of [
+    { version: 2 },
+    { name: 'x'.repeat(81) },
+    { base: 'system' },
+    { colors: { background: 'url(https://example.test)' } },
+    { colors: { background: 'red' } },
+    { colors: { background: '#12345' } },
+    { colors: { unknownToken: '#fff' } },
+    { css: '* { display: none }' },
+  ])
+    expect(requestSchema.safeParse({ ...request, custom: { ...custom, ...fields } }).success).toBe(
+      false,
+    );
+  expect(() => parseUserTheme('{broken')).toThrow('valid JSON');
+  expect(() => parseUserTheme(' '.repeat(32769))).toThrow('32,768');
+  expect(
+    resultSchema.safeParse({
+      kind: 'appearancePreferences',
+      state: { revision: 0, mode: 'custom', custom: null, warning: null },
+    }).success,
+  ).toBe(false);
+});
 test('appearance requests are strict main-only preferences with bounded revisions and known modes', () => {
   const id = '00000000-0000-4000-8000-000000000000';
   const save = { id, method: 'appearanceSave', revision: 0, mode: 'light' };

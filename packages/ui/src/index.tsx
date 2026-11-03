@@ -1,3 +1,4 @@
+import { themeReady } from './theme.js';
 import { CommandButton, CommandControls, CommandProvider } from './commands.js';
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -291,10 +292,12 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
     );
   }
 }
-createRoot(document.getElementById('root')!).render(
-  <ErrorBoundary>
-    <CommandProvider>
-      <App />
-    </CommandProvider>
-  </ErrorBoundary>,
-);
+void themeReady.then(() => {
+  createRoot(document.getElementById('root')!).render(
+    <ErrorBoundary>
+      <CommandProvider>
+        <App />
+      </CommandProvider>
+    </ErrorBoundary>,
+  );
+});

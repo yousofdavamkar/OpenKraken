@@ -26,8 +26,10 @@ import {
   providerAccountsSchema,
   deviceChallengeSchema,
   resultSchema,
+  nativeAppearanceMode,
+  resolveAppearance,
 } from '@openkraken/ipc-contract';
-import type { Result, ServiceRequest } from '@openkraken/ipc-contract';
+import type { Result, ServiceRequest, AppearancePreferences } from '@openkraken/ipc-contract';
 import { AvatarCache } from './avatars.js';
 import { fetchAvatar } from './avatar-provider.js';
 import { isTrustedDocument, windowPreferences } from './security.js';
@@ -47,6 +49,31 @@ let window: BrowserWindow | undefined;
 let service: UtilityProcess | undefined;
 let avatars: AvatarCache | undefined;
 let appSettings: AppSettings | undefined;
+let activeAppearance: AppearancePreferences = {
+  revision: 0,
+  mode: 'dark',
+  custom: null,
+  warning: null,
+};
+function nativeBackground() {
+  const raw = resolveAppearance(
+    activeAppearance,
+    nativeTheme.shouldUseDarkColors,
+  ).colors.background.slice(1);
+  const hex = raw.length <= 4 ? [...raw].map((char) => char + char).join('') : raw;
+  const [red, green, blue] = [0, 2, 4].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
+  const alpha = hex.length === 8 ? Number.parseInt(hex.slice(6, 8), 16) / 255 : 1;
+  // Electron's hex alpha order differs from CSS. Functional RGBA is unambiguous.
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+function updateWindowBackground() {
+  if (window && !window.isDestroyed()) window.setBackgroundColor(nativeBackground());
+}
+function activateAppearance(state: AppearancePreferences) {
+  activeAppearance = state;
+  nativeTheme.themeSource = nativeAppearanceMode(state);
+  updateWindowBackground();
+}
 let commandMenu: CommandMenu | undefined;
 let providers: ProviderService | undefined;
 const providerRequests = new Map<string, AbortController>();
@@ -165,7 +192,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: 'OpenKraken',
-    backgroundColor: '#10151e',
+    backgroundColor: nativeBackground(),
     webPreferences: { ...windowPreferences, preload: join(__dirname, 'preload.cjs') },
   });
   commandMenu = new CommandMenu(window);
@@ -264,9 +291,9 @@ else {
           try {
             const state =
               request.method === 'appearanceSave'
-                ? await settings.saveAppearance(request.mode, request.revision)
+                ? await settings.saveAppearance(request.mode, request.revision, request.custom)
                 : await settings.readAppearance();
-            nativeTheme.themeSource = state.mode;
+            activateAppearance(state);
             if (request.method === 'appearanceSave' && window && !window.isDestroyed())
               window.webContents.send(EVENT_CHANNEL, { type: 'appearanceChanged', state });
             return resultSchema.parse({ kind: 'appearancePreferences', state });
@@ -999,7 +1026,8 @@ else {
       }
     });
     appSettings ??= new AppSettings(app.getPath('userData'));
-    nativeTheme.themeSource = (await appSettings.readAppearance()).mode;
+    activateAppearance(await appSettings.readAppearance());
+    nativeTheme.on('updated', updateWindowBackground);
     startService();
     createWindow();
     app.on('activate', () => {

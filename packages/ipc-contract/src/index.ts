@@ -1,5 +1,9 @@
 import { commandIdSchema, commandUsageSchema, commandPreferencesSchema } from './commands.js';
-import { appearanceModeSchema, appearancePreferencesSchema } from './appearance.js';
+import {
+  appearanceModeSchema,
+  appearancePreferencesSchema,
+  userThemeSchema,
+} from './appearance.js';
 export * from './appearance.js';
 export * from './theme-colors.js';
 export * from './commands.js';
@@ -1214,6 +1218,7 @@ export const requestSchema = z.discriminatedUnion('method', [
       method: z.literal('appearanceSave'),
       revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
       mode: appearanceModeSchema,
+      custom: userThemeSchema.nullable().optional(),
     })
     .strict(),
   z

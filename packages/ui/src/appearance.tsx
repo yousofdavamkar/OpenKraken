@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AppearancePreferences } from '@openkraken/ipc-contract';
+import {
+  parseUserTheme,
+  themeColorNames,
+  type AppearancePreferences,
+} from '@openkraken/ipc-contract';
 import { CommandButton } from './commands.js';
 import { acceptAppearance } from './theme.js';
 function AppearanceDialog({
@@ -12,6 +16,18 @@ function AppearanceDialog({
   const dialog = useRef<HTMLDialogElement>(null);
   const [state, setState] = useState(initial);
   const [mode, setMode] = useState(initial.mode);
+  const [custom, setCustom] = useState(
+    JSON.stringify(
+      initial.custom ?? {
+        version: 1,
+        name: 'My theme',
+        base: 'dark',
+        colors: { accent: '#6bdfc2' },
+      },
+      null,
+      2,
+    ),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
@@ -29,6 +45,7 @@ function AppearanceDialog({
         method: 'appearanceSave',
         revision: state.revision,
         mode,
+        custom: mode === 'custom' ? parseUserTheme(custom) : state.custom,
       });
       if (result.kind !== 'appearancePreferences')
         throw new Error(
@@ -67,9 +84,33 @@ function AppearanceDialog({
           <option value="dark">Dark</option>
           <option value="light">Light</option>
           <option value="system">System</option>
+          <option value="custom">Custom</option>
         </select>
       </label>
       {mode === 'system' && <p>Follow your device’s light or dark preference.</p>}
+      {mode === 'custom' && (
+        <>
+          <p>Choose a light or dark base and override named colors with hex values.</p>
+          <label>
+            Custom theme JSON
+            <textarea
+              rows={12}
+              spellCheck={false}
+              disabled={saving}
+              maxLength={32768}
+              value={custom}
+              onChange={(event) => {
+                setCustom(event.target.value);
+                setSaved(false);
+              }}
+            />
+          </label>
+          <details>
+            <summary>Available color tokens</summary>
+            <p className="theme-token-names">{themeColorNames.join(', ')}</p>
+          </details>
+        </>
+      )}
       {state.warning && (
         <p role="alert">
           {state.warning === 'corrupt'

@@ -6,6 +6,7 @@ import {
   commandUsageSchema,
   appearanceSettingsSchema,
   type AppearanceSettings,
+  type UserTheme,
   emptyKeymap,
   parseKeymap,
   type CommandId,
@@ -30,7 +31,7 @@ const halfLife = 14 * 24 * 60 * 60 * 1000;
 // A legacy keymap may expand to six JSON bytes per UTF-16 code unit.
 const maxSettingsBytes = 256 * 1024;
 export class AppSettings {
-  private appearance: AppearanceSettings = { revision: 0, mode: 'dark' };
+  private appearance: AppearanceSettings = { revision: 0, mode: 'dark', custom: null };
   private file: string;
   private source: string | null = null;
   private state: CommandPreferences = {
@@ -99,11 +100,15 @@ export class AppSettings {
     await this.read();
     return { ...this.appearance, warning: this.state.warning };
   }
-  saveAppearance(mode: AppearanceSettings['mode'], revision: number) {
+  saveAppearance(mode: AppearanceSettings['mode'], revision: number, custom?: UserTheme | null) {
     return this.enqueue(async () => {
       if (revision !== this.appearance.revision)
         throw new Error('Appearance changed. Reopen the dialog before saving.');
-      const appearance = appearanceSettingsSchema.parse({ mode, revision: revision + 1 });
+      const appearance = appearanceSettingsSchema.parse({
+        mode,
+        revision: revision + 1,
+        custom: custom === undefined ? this.appearance.custom : custom,
+      });
       await this.persist(this.state, { appearance, repair: true, initializeCommands: false });
       return { ...this.appearance, warning: this.state.warning };
     });
