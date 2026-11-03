@@ -1,6 +1,6 @@
 # M7 progress — productivity and polish
 
-M7 is in progress as of 2026-11-02 at implementation checkpoint `77366a1`. M6 continues to have the gaps recorded in [M6 progress](m6-progress.md); M7 and M8 are not complete. React 19.3.1 and TypeScript 7.0.2 remain pinned.
+M7 is in progress as of 2026-11-02 at implementation checkpoint `82f1659`. M6 continues to have the gaps recorded in [M6 progress](m6-progress.md); M7 and M8 are not complete. React 19.3.1 and TypeScript 7.0.2 remain pinned.
 
 ## Implemented
 
@@ -23,11 +23,15 @@ M7 is in progress as of 2026-11-02 at implementation checkpoint `77366a1`. M6 co
 
 - Worktree HEADs seed history and search, including detached checkout-only commits, while respecting hidden/solo ref filters. Each other non-bare checkout has a stable synthetic graph row above its HEAD, with status, branch and path, loaded search, details and ancestry navigation. Rows are inserted on the parent’s page without moving earlier lanes. Other-checkout status is updated automatically through native subscriptions and a typed status-only event, preserving loaded pages, selection, search and row details. New registrations become watched; unavailable checkouts are polled for reconnection. Changed HEADs or inventory use a full refresh.
 
+- Submodules are discovered recursively from index gitlinks, with configured URLs, recorded/checked-out commits, status and initialization state. The toolbar/command dialog opens a reviewed initialized checkout and supports refresh after stale selections. Paths are selected by service-issued identities; symlinks, ambiguous configuration, ancestor cycles and discovery bounds are checked. This is the discovery/opening increment; recursive initialization/update remains required.
+
 - History pages use a typed JSON response format, serialized in main after validation, to avoid copying thousands of nested objects through renderer IPC and the isolated-world bridge. Existing request validation, cancellation, cursor checks, append-only layout and performance budgets remain in place.
 
 ## Verification
 
-The latest watcher increment (`77366a1`) passed **530 unit tests across 68 files on its first full run**, **23 targeted desktop tests** (eight worktree flows, four working-tree tests, nine graph tests including six visual goldens, and two native-menu regressions), typechecking, build and full ESLint/Prettier checks. Paging measured **148.1 ms** and scrolling frame p95 **16.8 ms**. No packaging or complete desktop-suite rerun was performed. The intermittent GitLab fixture failure did not recur, but its cause remains unconfirmed.
+The latest submodule increment (`82f1659`) passed **535 unit tests across 69 files**, with an explicitly captured exit status of 0 in `/tmp/openkraken-submodule-unit-exit-trace.log`, **18 targeted desktop tests** (the submodule flow, eight command/menu tests, and nine graph tests including six goldens), typechecking, build and full ESLint/Prettier checks. Paging measured **147.5 ms** and scrolling frame p95 **16.7 ms**. The submodule screenshot was visually inspected. Two earlier full unit runs printed all 535 tests passing but their command sessions ended with status 143; the cause remains unconfirmed and needs M8 follow-up. The successful run did not change tests or thresholds. An initial formatting warning was fixed. Packaging and the complete desktop suite were not rerun.
+
+The preceding watcher increment (`77366a1`) passed **530 unit tests across 68 files on its first full run**, **23 targeted desktop tests** (eight worktree flows, four working-tree tests, nine graph tests including six visual goldens, and two native-menu regressions), typechecking, build and full ESLint/Prettier checks. Paging measured **148.1 ms** and scrolling frame p95 **16.8 ms**. No packaging or complete desktop-suite rerun was performed. The intermittent GitLab fixture failure did not recur, but its cause remains unconfirmed.
 
 The preceding graph increment (`e2485be`) passed **527 unit tests across 68 files on its first full run**, **18 targeted desktop tests** (seven worktree flows, nine graph tests including six visual goldens, and two native-menu regressions), typechecking, build and full ESLint/Prettier checks. The graph screenshot was visually inspected. Paging measured **134.2 ms** against the 300 ms budget and scrolling frame p95 **16.8 ms**. Packaging and the complete desktop suite were not rerun. These are Linux fixture results; cross-platform and real-repository acceptance remain open.
 
@@ -69,6 +73,10 @@ Seven native watcher tests cover active and other-checkout changes, dynamically 
 
 This proves list/create/open/lock/unlock, guarded removal, reviewed pruning, graph rows and other-checkout observation on Linux. It does not prove non-UTF-8 worktree paths, macOS/Windows runtime acceptance, every mounted filesystem’s event delivery or performance with many large checkouts. Prune revalidation is optimistic; external Git writers are not locked out.
 
+### Submodule acceptance
+
+Four real-Git tests exercise recursive initialized/uninitialized modules, modified and out-of-date checkouts, stale/unknown open selections, Unicode/newline paths, configuration-only paths, symlink/cycle refusal, conflict stages, cancellation, bare-repository refusal, duplicate/redirected configuration and the 256-entry bound. IPC checks reject arbitrary paths, URLs, force/recursive flags and malformed selection identities. Electron verifies recursive state, a disabled uninitialized entry, stale selection refusal after an external edit, refreshed dirty state and opening the child with its draft intact. These are Linux fixture results; recursive initialization/update and cross-platform runtime acceptance are not established.
+
 ### Terminal acceptance
 
 Native tests verify separate Git/PTY utility processes, the opened repository as the shell working directory, terminal resize, exit status and refusal of stale sessions or unknown repositories. The output test pauses without acknowledgments, then receives a complete one-megabyte stream after resuming. Closing a foreground command reaps the shell; reload removes the utility. UI tests retain hidden scrollback, restore focus, support F6 navigation, confirm close, and recover from a missing default shell without blocking repository refresh.
@@ -89,7 +97,9 @@ Serializing in preload initially passed at 212, 206 and 203 ms, but a later run 
 
 These are Linux fixture measurements. CPU contention still affects timings, the dedicated real-repository benchmark was not run, and cross-platform performance remains unverified. The earlier diff/blame timing failures and investigations remain in the previous checkpoint logs; this clean full-suite result does not replace broader M8 regression requirements.
 
-Latest watcher logs are `/tmp/openkraken-worktree-watch-final-{unit,lint,types}.log`, `/tmp/openkraken-worktree-watch-build.log`, `/tmp/openkraken-worktree-watch-e2e.log` and `/tmp/openkraken-worktree-watch-native-final.log`. Native status-event and UI page-preservation red/green evidence is under `/tmp/openkraken-worktree-watch-*.log`. The initial UI test demonstrated that treating a worktree-status event as a full refresh reset 2,200 loaded commits to 2,000; the status-only path preserves them. The replaced-pointer fixture already passed before removing the redundant pointer ignore, so it is coverage rather than a reproduced failure.
+Latest submodule evidence is `/tmp/openkraken-submodule-unit-exit-trace.log`, `/tmp/openkraken-submodule-final-lint-recheck.log`, `/tmp/openkraken-submodule-final-types.log`, `/tmp/openkraken-submodule-build.log` and `/tmp/openkraken-submodule-final-e2e.log`. The earlier nonzero command sessions are recorded in `/tmp/openkraken-submodule-final-unit{,-recheck}.log`. Focused service/UI red/green evidence is under `/tmp/openkraken-submodule-*.log`. A diagnostic newline-name fixture was rejected by Git itself before product code ran; ordinary newline paths remain covered using valid configuration names.
+
+Watcher logs are `/tmp/openkraken-worktree-watch-final-{unit,lint,types}.log`, `/tmp/openkraken-worktree-watch-build.log`, `/tmp/openkraken-worktree-watch-e2e.log` and `/tmp/openkraken-worktree-watch-native-final.log`. Native status-event and UI page-preservation red/green evidence is under `/tmp/openkraken-worktree-watch-*.log`. The initial UI test demonstrated that treating a worktree-status event as a full refresh reset 2,200 loaded commits to 2,000; the status-only path preserves them. The replaced-pointer fixture already passed before removing the redundant pointer ignore, so it is coverage rather than a reproduced failure.
 
 Graph logs are `/tmp/openkraken-worktree-graph-final-{unit,lint,types}.log`, `/tmp/openkraken-worktree-graph-build.log` and `/tmp/openkraken-worktree-graph-e2e.log`. Native and UI red/green evidence remains under `/tmp/openkraken-worktree-graph-*.log`. The first UI implementation build caught a missing graph document kind; extending the shared worker type resolved it before acceptance ran.
 
@@ -107,7 +117,7 @@ Logs for the preceding full-suite checkpoint are `/tmp/openkraken-terminal-final
 
 - Broader command coverage, including dynamic branch/file domains and contextual commands. Native accelerators are implemented; this is not an Atom selector keymap interpreter. Other older preferences (for example graph view settings) still need consolidation into the main settings store.
 - Automatic shell integration for zsh, fish and PowerShell, plus terminal runtime acceptance on macOS/Windows. Standard OSC 133 consumption and automatic Bash 5.1+ integration are implemented. The initial terminal supports one session; broader terminal workflows remain future work.
-- Worktree operations, graph rows and other-checkout observation are implemented for UTF-8 paths on Linux. Non-UTF-8 worktree paths, cross-platform runtime acceptance and broader filesystem/performance coverage remain open. Submodule UI and LFS awareness remain open.
+- Worktree operations, graph rows and other-checkout observation are implemented for UTF-8 paths on Linux. Non-UTF-8 worktree paths, cross-platform runtime acceptance and broader filesystem/performance coverage remain open. Submodule discovery/status/opening is implemented; recursive initialization/update, reviewed transport writes and other management controls remain open. LFS awareness remains open.
 - Onboarding, activity log, toasts, a complete accessibility pass, and i18n scaffolding.
 - Optional git-flow and consent-gated BYO-key AI remain optional, not implemented.
 
@@ -124,3 +134,5 @@ Cross-platform keyboard execution and packaging remain unverified on macOS/Windo
 - [0065 — Integrated terminal](../decisions/0065-integrated-terminal.md)
 - [0066 — Terminal shell integration](../decisions/0066-terminal-shell-integration.md)
 - [0067 — Worktree management](../decisions/0067-worktree-management.md)
+
+- [0068 — Submodule management](../decisions/0068-submodule-management.md)
