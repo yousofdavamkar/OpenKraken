@@ -1,6 +1,6 @@
 import type { Commit, Ref, Snapshot } from '@openkraken/ipc-contract';
 export interface DisplayCommit extends Commit {
-  kind: 'commit' | 'wip' | 'conflict';
+  kind: 'commit' | 'wip' | 'conflict' | 'worktree';
 }
 export function projectCommits(
   commits: Commit[],
@@ -10,6 +10,37 @@ export function projectCommits(
   const result: DisplayCommit[] = [];
   const dirty = snapshot.status.entries.length > 0;
   const conflict = snapshot.status.entries.some((e) => e.kind === 'conflict');
+  const worktrees = new Map<string | undefined, DisplayCommit[]>();
+  for (const entry of snapshot.worktrees?.entries ?? []) {
+    if (entry.current || entry.bare) continue;
+    if (
+      snapshot.view.soloRef
+        ? entry.branch !== snapshot.view.soloRef
+        : entry.branch && snapshot.view.hiddenRefs.includes(entry.branch)
+    )
+      continue;
+    const state =
+      !entry.available || entry.changedFiles === null
+        ? 'Status unavailable'
+        : entry.changedFiles === 0
+          ? 'Clean'
+          : `${entry.changedFiles} uncommitted change${entry.changedFiles === 1 ? '' : 's'}`;
+    const branch = entry.branch?.replace(/^refs\/heads\//, '') ?? 'Detached HEAD';
+    const summary = `${state}${entry.locked ? ' · Locked' : ''} · ${branch} · ${entry.path}`;
+    const row: DisplayCommit = {
+      oid: `worktree:${entry.id}`,
+      parents: entry.head ? [entry.head] : [],
+      author: { name: 'Worktree', email: '', time: 0, tzOffsetMin: 0 },
+      committer: { name: '', email: '', time: 0, tzOffsetMin: 0 },
+      summary,
+      body: [summary, entry.head, entry.lockReason, entry.pruneReason, entry.problem]
+        .filter(Boolean)
+        .join('\n'),
+      isStash: false,
+      kind: 'worktree',
+    };
+    worktrees.set(entry.head, [...(worktrees.get(entry.head) ?? []), row]);
+  }
   const synthetic = (): DisplayCommit => ({
     oid: `${conflict ? 'conflict' : 'wip'}:${snapshot.repository.id}`,
     parents: snapshot.repository.head.oid ? [snapshot.repository.head.oid] : [],
@@ -23,8 +54,10 @@ export function projectCommits(
     kind: conflict ? 'conflict' : 'wip',
   });
   if (firstPage && !snapshot.repository.head.oid && dirty) result.push(synthetic());
+  if (firstPage) result.push(...(worktrees.get(undefined) ?? []));
   for (const commit of commits) {
     if (dirty && commit.oid === snapshot.repository.head.oid) result.push(synthetic());
+    result.push(...(worktrees.get(commit.oid) ?? []));
     result.push({ ...commit, kind: 'commit' });
   }
   return result;

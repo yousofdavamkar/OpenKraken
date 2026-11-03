@@ -5,7 +5,7 @@ export interface GraphDocument extends GraphCommit {
   summary: string;
   body: string;
   author: { name: string; email: string };
-  kind?: 'commit' | 'wip' | 'conflict';
+  kind?: 'commit' | 'wip' | 'conflict' | 'worktree';
 }
 export type GraphRequest =
   | {

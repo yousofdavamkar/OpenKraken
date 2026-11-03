@@ -4,6 +4,114 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createFixture, fixtureGit } from '../../packages/test-fixtures/src/index.js';
 
+test('worktree rows arrive with their parent page without moving prior graph lanes', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-worktree-page-ui-'));
+  const path = createFixture(join(root, 'source'), 'linear', 2200);
+  const linked = join(root, 'page-anchored-checkout');
+  const head = fixtureGit(path, ['rev-parse', 'HEAD~2100']);
+  fixtureGit(path, ['worktree', 'add', '--detach', linked, head]);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    const grid = page.getByRole('grid');
+    await expect(page.getByTestId('commit-count')).toHaveText('2,000 commits · more available');
+    const before = await grid
+      .getByRole('row')
+      .evaluateAll((rows) =>
+        rows
+          .slice(0, 10)
+          .map((row) => [
+            row.getAttribute('data-oid'),
+            row.getAttribute('data-column'),
+            row.getAttribute('style'),
+          ]),
+      );
+    const search = page.getByRole('textbox', { name: 'Search commits' });
+    await search.fill('page-anchored-checkout');
+    await expect(page.getByText('0 loaded matches', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Load more commits', exact: true }).click();
+    await expect(page.getByTestId('commit-count')).toHaveText('2,200 commits');
+    expect(
+      await grid
+        .getByRole('row')
+        .evaluateAll((rows) =>
+          rows
+            .slice(0, 10)
+            .map((row) => [
+              row.getAttribute('data-oid'),
+              row.getAttribute('data-column'),
+              row.getAttribute('style'),
+            ]),
+        ),
+    ).toEqual(before);
+    await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
+    await search.press('Enter');
+    const row = grid.getByRole('row', { selected: true });
+    await expect(row).toContainText(linked);
+    const parent = grid.locator(`[data-oid="${head}"]`);
+    expect(Number(await row.getAttribute('aria-rowindex')) + 1).toBe(
+      Number(await parent.getAttribute('aria-rowindex')),
+    );
+    await grid.focus();
+    await grid.press('Shift+ArrowDown');
+    await expect(parent).toHaveAttribute('aria-selected', 'true');
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('graph shows each linked checkout above its HEAD and supports worktree row details and ancestry navigation', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-worktree-graph-ui-'));
+  const path = createFixture(join(root, 'source'), 'linear', 3);
+  const detached = join(root, 'detached-checkout');
+  const clean = join(root, 'clean-checkout');
+  fixtureGit(path, ['worktree', 'add', '--detach', detached]);
+  fixtureGit(detached, ['commit', '--allow-empty', '-m', 'Detached graph commit']);
+  const head = fixtureGit(detached, ['rev-parse', 'HEAD']);
+  fixtureGit(path, ['worktree', 'add', '--detach', clean, head]);
+  writeFileSync(join(detached, 'draft.txt'), 'unfinished');
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    const grid = page.getByRole('grid');
+    const dirtyRow = grid.getByRole('row').filter({ hasText: detached });
+    const cleanRow = grid.getByRole('row').filter({ hasText: clean });
+    await expect(dirtyRow).toContainText('1 uncommitted change', { timeout: 1500 });
+    await expect(cleanRow).toContainText('Clean');
+    const parent = grid.locator(`[data-oid="${head}"]`);
+    expect(Number(await dirtyRow.getAttribute('aria-rowindex'))).toBeLessThan(
+      Number(await parent.getAttribute('aria-rowindex')),
+    );
+    expect(Number(await cleanRow.getAttribute('aria-rowindex'))).toBeLessThan(
+      Number(await parent.getAttribute('aria-rowindex')),
+    );
+    await dirtyRow.click();
+    await grid.press('Enter');
+    await expect(page.getByRole('region', { name: 'Commit details' })).toContainText(detached);
+    await page.getByRole('button', { name: 'Close details', exact: true }).click();
+    await grid.focus();
+    await grid.press('Shift+ArrowDown');
+    await expect(parent).toHaveAttribute('aria-selected', 'true');
+    await page.screenshot({ path: 'test-results/worktree-graph.png' });
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('worktree cleanup is reviewed, cancellable and revalidated while locked registrations survive', async () => {
   const root = mkdtempSync(join(tmpdir(), 'openkraken-worktrees-prune-ui-'));
   const path = createFixture(join(root, 'source'), 'linear', 3);
@@ -255,6 +363,11 @@ test('a new worktree is created through the folder picker and can be opened with
     expect(fixtureGit(path, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/main');
     expect(fixtureGit(destination, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/feature/from-ui');
     await page.screenshot({ path: 'test-results/worktrees.png' });
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(
+      page.getByRole('grid').getByRole('row').filter({ hasText: destination }),
+    ).toContainText('Clean');
+    await page.getByRole('button', { name: 'Worktrees', exact: true }).click();
     await row.getByRole('button', { name: 'Open worktree', exact: true }).click();
     await expect(
       page.getByRole('heading', { name: 'feature-checkout', exact: true }),
