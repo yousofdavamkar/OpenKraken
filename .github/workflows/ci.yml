@@ -54,6 +54,7 @@ jobs:
           pnpm installer --test-metadata --target rpm
           pnpm installer --test-metadata --target AppImage
           node scripts/check-installer-guards.mjs release/installers/linux-x64/test/AppImage/manifest.json
+          node scripts/verify-appimage-update.mjs
       - if: runner.os == 'Linux'
         name: Verify extracted installer payloads and desktop behavior
         env:
