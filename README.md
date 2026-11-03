@@ -209,6 +209,8 @@ The local profile's `activity.json` contains fixed operation names, times and ou
 
 Native command supervision stops active Git commands and ordinary descendants if their Git service crashes. Linux fixtures verify a stalled fetch and a commit hook that ignores termination. Interrupted operations still have unknown outcomes and can leave partial changes; inspect before retrying. Detached programs, broader write recovery and macOS/Windows runtime acceptance remain outside this verification. See [native supervision](docs/decisions/0071-native-process-supervision.md).
 
+If the Git service stops while a native document editor is open, the editor retains your text for copying and disables continuation of the interrupted request. **Discard unsaved draft** closes it explicitly; Escape keeps it open. Closing the app asks about unsaved changes. This recovery text stays only in the current renderer, so copy it before discarding or restarting. Authentication prompts are dismissed, and stale replies cannot resume the old request. See [interrupted native prompts](docs/decisions/0073-interrupted-native-prompts.md).
+
 ## Terminal (M7 in progress)
 
 Open a repository and choose **Terminal** from the toolbar or command palette. The panel starts your default shell in that repository. **Hide terminal** keeps the session and scrollback; **Terminal** shows and focuses it again. Press **F6** to move keyboard focus to the terminal controls. **Close terminal** asks before ending a live shell. Changing the graph's repository does not change an existing shell's directory.

@@ -1,6 +1,16 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The current implementation checkpoint is `e874b32`, adding local commit drafts after native command supervision at `bba9063` and crash regression tests at `d68c18b`. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+M8 remains in progress. The current checkpoint adds main/PTY crash acceptance and interrupted native-prompt recovery after local commit drafts and native command supervision. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+
+## Crash and prompt recovery
+
+Linux crash acceptance (`d211bf5`) now kills the main app during a stalled native fetch, observes transport closure before fixture-server cleanup, restarts with an unknown activity outcome and recovers an acknowledged commit draft. Main-app and terminal-utility death also terminate the PTY shell and its ordinary foreground command. These scenarios already passed with native supervision and Electron/PTY lifecycle behavior; no new process-termination mechanism was needed for them.
+
+A separate service-crash test reproduced lost unsaved text in the native Git document editor. The correction (`d164003`) reports interrupted request identities from main before resolving service-exit errors; the editor retains its live textarea for copying and explicit discard, removes continuation actions and protects window closure with the existing unsaved-changes prompt. Escape does not discard it. Native authentication prompts are removed and replacement services reject stale editor/password replies. Error messages describe uncertain partial completion and require inspection before retrying. The same interruption event is emitted on a service deadline; that long-deadline path was not separately advanced in these fixtures. See [ADR 0073](../decisions/0073-interrupted-native-prompts.md).
+
+Verification passed **593 native/unit tests in 77 files** with explicit `UNIT_EXIT=0`, typechecking/build, full ESLint/Prettier with explicit `LINT_EXIT=0`, and **50 targeted desktop tests** with explicit `E2E_EXIT=0`. Coverage includes five new crash/prompt scenarios plus service shutdown, activity, commit drafts, authentication, rebase, operations, terminal, working-tree and graph regressions. Paging measured **150.7 ms** and 12,000-row scrolling **16.8 ms p95**; six graph visual goldens passed unchanged. The interrupted-editor screenshot was visually inspected. No timeout or budget was relaxed. This increment did not rerun packaging, the complete desktop suite, live-provider acceptance or cross-platform runtime checks.
+
+Evidence is `/tmp/openkraken-main-crash-{fetch,pty,types}.log`, `/tmp/openkraken-prompt-crash-{red,green,retain-build}.log` and `/tmp/openkraken-crash-final-{unit,lint,build,e2e}.log`. The parent/PTY crash fixtures passed initially; the native-editor retention test failed before the correction. Recovery text remains in the surviving renderer only. This does not establish persistent native-editor drafts, cleanup of intentionally detached or signal-ignoring terminal commands, arbitrary write rollback or native lock recovery.
 
 ## Local commit drafts
 
@@ -34,7 +44,7 @@ Evidence: `/tmp/openkraken-supervisor-{red,green,native,hook,unit,e2e,types,buil
 
 ## Remaining work
 
-- Native supervision runtime acceptance on Windows/macOS, broader prompt/editor and main-process crash scenarios, native lock handling and durable write recovery. POSIX processes that intentionally detach or daemonize beyond the active command's stream lifetime are not contained.
+- Native supervision runtime acceptance on Windows/macOS, further crash/write scenarios beyond the Linux fetch/PTY/prompt fixtures above, native lock handling and durable write recovery. POSIX processes that intentionally detach or daemonize beyond the active command's stream lifetime are not contained.
 - Durable drafts for working-file, conflict/native editors and provider composers; commit-form drafts are implemented within the bounds above. Opt-in crash reporting, signature-verified updates, signed installers/distribution, security review and beta evidence remain open.
 - Broader real-repository and cross-platform performance/regression gates, plus the unresolved intermittent command exit-143 investigation recorded in M7 progress.
 
