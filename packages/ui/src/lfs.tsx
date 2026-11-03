@@ -1,10 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
-import type { LfsState } from '@openkraken/ipc-contract';
+import type { LfsState, LfsPullPreview } from '@openkraken/ipc-contract';
 import { CommandButton } from './commands.js';
-import { useRepository } from './store.js';
+import { useRepository, waitForBackground } from './store.js';
 
 function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const reviewButton = useRef<HTMLButtonElement>(null);
+  const cancelReview = useRef<HTMLButtonElement>(null);
+  const requestId = useRef<string | undefined>(undefined);
+  const reviewed = useRef(false);
+  const [review, setReview] = useState<LfsPullPreview>();
+  const [remotes, setRemotes] = useState<string[]>([]);
+  const [remote, setRemote] = useState('');
+  const [downloading, setDownloading] = useState(false);
+  const [progress, setProgress] = useState('');
+  const [notice, setNotice] = useState('');
   const [state, setState] = useState<LfsState>();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -15,7 +25,21 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
     if (existing) existing.push(lock.owner ?? 'Unknown owner');
     else owners.set(lock.path, [lock.owner ?? 'Unknown owner']);
   }
+  useEffect(
+    () =>
+      window.openkraken.subscribe((event) => {
+        if (event.type === 'gitProgress' && event.id === requestId.current) setProgress(event.text);
+      }),
+    [],
+  );
+  useEffect(() => {
+    if (pending) return;
+    if (review) cancelReview.current?.focus();
+    else if (reviewed.current) reviewButton.current?.focus();
+  }, [review, pending]);
   const load = async () => {
+    setReview(undefined);
+    setNotice('');
     setPending(true);
     setError('');
     try {
@@ -26,6 +50,23 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
       });
       if (result.kind === 'error') throw new Error(result.message);
       if (result.kind === 'lfsState') setState(result.state);
+      const configured = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'remotes',
+        repoId,
+      });
+      if (configured.kind === 'error') throw new Error(configured.message);
+      if (configured.kind === 'remotes') {
+        const names = configured.state.remotes.map((item) => item.name);
+        setRemotes(names);
+        setRemote((current) =>
+          names.includes(current)
+            ? current
+            : names.includes('origin')
+              ? 'origin'
+              : (names[0] ?? ''),
+        );
+      }
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -36,6 +77,69 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
     dialog.current?.showModal();
     void load();
   }, []);
+  const prepare = async () => {
+    setPending(true);
+    setError('');
+    setNotice('');
+    setReview(undefined);
+    reviewed.current = true;
+    try {
+      const result = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'lfsPullPreview',
+        repoId,
+        remote,
+      });
+      if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'lfsPullPreview') setReview(result.preview);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPending(false);
+    }
+  };
+  const pull = async () => {
+    if (!review) return;
+    setPending(true);
+    setError('');
+    setNotice('');
+    setProgress('Downloading LFS objects…');
+    try {
+      if (useRepository.getState().syncing) await waitForBackground();
+      if (useRepository.getState().snapshot?.repository.id !== repoId) return;
+      if (useRepository.getState().busy)
+        throw new Error('Wait for the current operation to finish');
+      const id = crypto.randomUUID();
+      requestId.current = id;
+      useRepository.setState({ busy: id });
+      setDownloading(true);
+      const result = await window.openkraken.request({
+        id,
+        method: 'lfsPull',
+        repoId,
+        token: review.token,
+      });
+      if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'cancelled') throw new Error('LFS download cancelled.');
+      if (result.kind === 'lfsState') {
+        setState(result.state);
+        setNotice('LFS pull finished. Check any remaining pointer or missing entries.');
+      }
+    } catch (error) {
+      setError(
+        `${error instanceof Error ? error.message : String(error)} Some objects or files may already have changed. Refresh local state before retrying.`,
+      );
+    } finally {
+      const id = requestId.current;
+      requestId.current = undefined;
+      setDownloading(false);
+      setReview(undefined);
+      if (id && useRepository.getState().busy === id) useRepository.setState({ busy: undefined });
+      if (id && useRepository.getState().snapshot?.repository.id === repoId)
+        await useRepository.getState().run({ id: crypto.randomUUID(), method: 'refresh', repoId });
+      setPending(false);
+    }
+  };
   return (
     <dialog
       ref={dialog}
@@ -43,16 +147,71 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
       aria-label="Git LFS"
       onCancel={(event) => {
         event.preventDefault();
-        if (!pending) close();
+        if (!pending) {
+          if (review) setReview(undefined);
+          else close();
+        }
       }}
     >
       <h2>Git LFS</h2>
       <p>
-        Large files are stored as pointers in Git. This view inspects local files and cached locks
-        without downloading objects or contacting a lock server.
+        Large files are stored as pointers in Git. Refresh local state reads files and cached locks.
+        Review download before fetching objects and filling unchanged pointers or missing files.
       </p>
       {error && <p role="alert">{error}</p>}
-      {pending && <p role="status">Reading local LFS state…</p>}
+      {notice && <p role="status">{notice}</p>}
+      {pending && !downloading && !notice && !error && <p role="status">Inspecting LFS state…</p>}
+      {downloading && (
+        <div>
+          <p role="status">{progress}</p>
+          <button
+            onClick={() => {
+              if (requestId.current) void window.openkraken.cancel(requestId.current);
+            }}
+          >
+            Cancel download
+          </button>
+        </div>
+      )}
+      {review && (
+        <fieldset disabled={pending}>
+          <legend>Review LFS download</legend>
+          <p>Remote: {review.remote}</p>
+          <p className="lfs-endpoint">Endpoint: {review.endpoint}</p>
+          <p>
+            Download objects for the current checkout and fill unchanged pointers or missing files.
+            Local edits are preserved. The server may supply separate object download URLs. A
+            failure or cancellation can leave partial downloads or checkouts; there is no Undo.
+          </p>
+          <p>
+            Configured download filters apply.
+            {review.filters.length
+              ? ` ${review.filters.join(' · ')}`
+              : ' No include/exclude filters are reported.'}
+          </p>
+          <p>{review.files.length.toLocaleString()} known LFS files; filters may exclude some.</p>
+          <ul aria-label="Reviewed LFS objects">
+            {review.files.slice(0, visible).map((file) => (
+              <li key={`${file.path}:${file.oid}`}>
+                <h4>{file.path}</h4>
+                <p>
+                  {file.size.toLocaleString()} bytes · <code>{file.oid}</code>
+                </p>
+                <p>{file.downloaded ? 'Object available locally' : 'Object missing locally'}</p>
+              </li>
+            ))}
+          </ul>
+          {review.files.length > visible && (
+            <button onClick={() => setVisible(visible + 200)}>Show more reviewed objects</button>
+          )}
+          <div className="dialog-actions">
+            <button onClick={() => void pull()}>Download and check out</button>
+            <button ref={cancelReview} onClick={() => setReview(undefined)}>
+              Cancel review
+            </button>
+          </div>
+        </fieldset>
+      )}
       {state && !state.available && (
         <p>
           Git LFS is not available to OpenKraken. Install Git LFS, then restart OpenKraken and
@@ -109,8 +268,32 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
           )}
         </>
       )}
+      {state?.available && (
+        <label>
+          LFS remote{' '}
+          <select
+            aria-label="LFS remote"
+            disabled={pending || !!review}
+            value={remote}
+            onChange={(event) => setRemote(event.target.value)}
+          >
+            {remotes.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <div className="dialog-actions">
-        <button disabled={pending} onClick={() => void load()}>
+        <button
+          ref={reviewButton}
+          disabled={pending || !!review || !state?.available || !state.files.length || !remote}
+          onClick={() => void prepare()}
+        >
+          Review download
+        </button>
+        <button disabled={pending || !!review} onClick={() => void load()}>
           Refresh local state
         </button>
         <button disabled={pending} onClick={close}>

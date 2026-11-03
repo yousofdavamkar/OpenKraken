@@ -1763,3 +1763,11 @@ input:not([type='checkbox']):not([type='radio']) {
   display: flex;
   gap: 8px;
 }
+
+.lfs-dialog fieldset {
+  padding: 14px;
+}
+.lfs-endpoint {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
