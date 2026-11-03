@@ -1800,3 +1800,21 @@ input:not([type='checkbox']):not([type='radio']) {
   margin: 0.25rem 0 0;
   color: var(--muted);
 }
+.repository-link-dialog {
+  max-width: min(600px, 90vw);
+}
+.repository-link-dialog h2,
+.repository-link-dialog p {
+  margin-bottom: 12px;
+}
+.repository-link-dialog .dialog-actions {
+  display: flex;
+  gap: 8px;
+}
+.repository-link-path {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 40vh;
+  overflow: auto;
+  unicode-bidi: plaintext;
+}

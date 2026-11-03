@@ -1,4 +1,5 @@
 import { ActivityLog } from './activity-log.js';
+import { RepositoryLinks } from './repository-links.js';
 import { CommitDrafts } from './commit-drafts.js';
 import { CommandMenu } from './command-menu.js';
 import { TerminalHost } from './terminal-host.js';
@@ -58,6 +59,16 @@ declare const __OPENKRAKEN_SENTRY_DSN__: string | null;
 let crashReports: CrashReports | undefined;
 const documentUrl = pathToFileURL(htmlPath).href;
 let window: BrowserWindow | undefined;
+let windowsReady = false;
+function focusForLink() {
+  if (!window && windowsReady) createWindow();
+  if (window?.isMinimized()) window.restore();
+  window?.focus();
+}
+const repositoryLinks = new RepositoryLinks(process.platform, () => {
+  if (window && !window.isDestroyed())
+    window.webContents.send(EVENT_CHANNEL, { type: 'repositoryLinkChanged' });
+});
 let terminalRepository: { id: string; path: string } | undefined;
 const terminals = new TerminalHost((event) => {
   if (window && !window.isDestroyed()) window.webContents.send(EVENT_CHANNEL, event);
@@ -130,6 +141,7 @@ function startService() {
       // Main-owned lifecycle and UI events must never originate in the Git utility.
       if (
         event.data.type === 'gitRequestsInterrupted' ||
+        event.data.type === 'repositoryLinkChanged' ||
         event.data.type === 'activityChanged' ||
         event.data.type === 'commandExecute' ||
         event.data.type === 'appearanceChanged' ||
@@ -275,6 +287,13 @@ function createWindow() {
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
+  // macOS may deliver a URL before ready. No path is opened until renderer consent.
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    repositoryLinks.receive(url);
+    focusForLink();
+  });
+  for (const argument of process.argv) repositoryLinks.receive(argument);
   crashReports = new CrashReports(app.getPath('userData'), __OPENKRAKEN_SENTRY_DSN__, {
     version: app.getVersion(),
     platform: process.platform,
@@ -289,9 +308,9 @@ else {
       origin === 'unhandledRejection' ? 'unhandled-rejection' : 'unhandled-exception',
     );
   });
-  app.on('second-instance', () => {
-    if (window?.isMinimized()) window.restore();
-    window?.focus();
+  app.on('second-instance', (_event, commandLine) => {
+    for (const argument of commandLine) repositoryLinks.receive(argument);
+    focusForLink();
   });
   app.whenReady().then(async () => {
     await reportingReady;
@@ -305,6 +324,12 @@ else {
       });
     });
     const executeRequest = async (request: DesktopRequest): Promise<Result> => {
+      if (request.method === 'repositoryLink')
+        return { kind: 'repositoryLink', link: repositoryLinks.read() };
+      if (request.method === 'repositoryLinkDismiss') {
+        repositoryLinks.dismiss(request.linkId);
+        return { kind: 'repositoryLink', link: repositoryLinks.read() };
+      }
       // PTY acknowledgments must remain available while Git/provider requests are pending.
       if (
         request.method === 'terminalOpen' ||
@@ -978,6 +1003,10 @@ else {
           };
         if (request.method === 'avatars')
           return { kind: 'avatars', images: await avatars.images(request.emails) };
+        if (request.method === 'repositoryLinkOpen') {
+          const path = repositoryLinks.accept(request.linkId);
+          return await callService({ id: request.id, method: 'open', path });
+        }
         let path: string | undefined;
         if (
           request.method === 'open' ||
@@ -1192,6 +1221,9 @@ else {
     });
     await activity.read();
     startService();
+    if (process.platform === 'win32' && app.isPackaged)
+      app.setAsDefaultProtocolClient('openkraken');
+    windowsReady = true;
     createWindow();
     app.on('activate', () => {
       if (!window) createWindow();

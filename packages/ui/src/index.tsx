@@ -1,4 +1,5 @@
 import { Activity } from './activity.js';
+import { RepositoryLinkControl } from './repository-link.js';
 import { themeReady } from './theme.js';
 import { CommandButton, CommandControls, CommandProvider } from './commands.js';
 import React, { lazy, Suspense, useRef, useState } from 'react';
@@ -67,6 +68,7 @@ function App() {
           OpenKraken <span className="edition">LOCAL GIT CLIENT</span>
         </div>
         <div className="toolbar">
+          <RepositoryLinkControl />
           <CommandControls />
           <Appearance />
           <CrashReporting />
