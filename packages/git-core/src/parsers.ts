@@ -144,7 +144,11 @@ export class StatusParser {
   }
 }
 export const REF_FORMAT =
-  '%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00%(upstream)%00%(upstream:track)%00%(HEAD)%00%(subject)%00';
+  '%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00%(upstream)%00%(upstream:track)%00%(HEAD)%00';
+// Leave peeling slots empty until annotated tags are read separately. Asking
+// Git for dereferenced fields makes it parse even ordinary commit objects.
+export const REF_DIRECT_FORMAT =
+  '%(refname)%00%(objectname)%00%(objecttype)%00%00%00%(upstream)%00%(upstream:track)%00%(HEAD)%00';
 const oid = (value: string) => {
   if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value)) throw new Error('Invalid object ID');
   return value;
@@ -154,9 +158,9 @@ export class RefsParser {
   private fields: string[] = [];
   private decoder = new TextNulDecoder((field) => {
     this.fields.push(field);
-    if (this.fields.length !== 9) return;
-    const [rawName, target, objectType, peeled, peeledType, upstream, track, head, subject] = this
-      .fields as [string, string, string, string, string, string, string, string, string];
+    if (this.fields.length !== 8) return;
+    const [rawName, target, objectType, peeled, peeledType, upstream, track, head] = this
+      .fields as [string, string, string, string, string, string, string, string];
     const name = rawName.replace(/^\n/, '');
     if (!name.startsWith('refs/')) throw new Error('Invalid ref name');
     const kind = name.startsWith('refs/heads/')
@@ -176,7 +180,6 @@ export class RefsParser {
       shortName: name.replace(/^refs\/(heads|remotes|tags)\//, ''),
       kind,
       isHead: head === '*',
-      subject,
     };
     if (peeled) ref.peeled = oid(peeled);
     if (upstream)

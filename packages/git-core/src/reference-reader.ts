@@ -1,6 +1,6 @@
 import type { Ref } from '@openkraken/ipc-contract';
 import { isUtf8 } from 'node:buffer';
-import { RefsParser, REF_FORMAT } from './parsers.js';
+import { RefsParser, REF_FORMAT, REF_DIRECT_FORMAT } from './parsers.js';
 import { GitError, type RunOptions, type runGit } from './runner.js';
 
 type Run = (args: string[], options: RunOptions) => ReturnType<typeof runGit>;
@@ -112,35 +112,80 @@ export class ReferenceReader {
       if (bytes > this.maxBytes)
         throw new GitError('OUTPUT_LIMIT', 'Git output exceeded the safety limit');
     };
-    const jobs = starts.map(async (start, index) => {
-      const parser = new RefsParser();
-      await this.run(
-        [
-          'for-each-ref',
-          `--format=${REF_FORMAT}`,
-          `--start-after=${markers[index]}`,
-          `--count=${Math.min(count, expected.length - start)}`,
-        ],
-        {
+    const readPages = async (format: string): Promise<Ref[]> => {
+      const jobs = starts.map(async (start, index) => {
+        const parser = new RefsParser();
+        await this.run(
+          [
+            'for-each-ref',
+            `--format=${format}`,
+            `--start-after=${markers[index]}`,
+            `--count=${Math.min(count, expected.length - start)}`,
+          ],
+          {
+            cwd,
+            signal: groupSignal,
+            maxBytes: this.maxBytes,
+            onStdout: (chunk) => {
+              account(chunk);
+              parser.push(chunk);
+            },
+            onStderr: account,
+          },
+        );
+        return parser.finish();
+      });
+      try {
+        return (await Promise.all(jobs)).flat();
+      } catch (error) {
+        cancelled.abort();
+        await Promise.allSettled(jobs); // Release the repository queue only after every child closes.
+        throw error;
+      }
+    };
+    let refs = await readPages(REF_DIRECT_FORMAT);
+    // Exact names are valid ref names (no glob metacharacters). Git also matches
+    // slash descendants, so retain only requested names and validate coverage.
+    const tags = refs.filter((ref) => ref.objectType === 'tag');
+    const batches: string[][] = [];
+    let names: string[] = [],
+      nameBytes = 0;
+    for (const tag of tags) {
+      const size = Buffer.byteLength(tag.name) + 1;
+      if (size > 4096) return this.all(cwd, signal);
+      if (names.length >= 128 || nameBytes + size > 16384) {
+        batches.push(names);
+        names = [];
+        nameBytes = 0;
+      }
+      names.push(tag.name);
+      nameBytes += size;
+    }
+    if (names.length) batches.push(names);
+    // Dense annotated-tag repositories use three full pages rather than an
+    // unbounded number of pattern scans. All reads share the same byte budget.
+    if (batches.length > 3) refs = await readPages(REF_FORMAT);
+    else {
+      const details = new Map<string, Ref>();
+      for (const names of batches) {
+        const wanted = new Set(names);
+        const parser = new RefsParser();
+        await this.run(['for-each-ref', `--format=${REF_FORMAT}`, '--', ...names], {
           cwd,
-          signal: groupSignal,
+          signal,
           maxBytes: this.maxBytes,
           onStdout: (chunk) => {
             account(chunk);
             parser.push(chunk);
           },
           onStderr: account,
-        },
-      );
-      return parser.finish();
-    });
-    let refs: Ref[];
-    try {
-      refs = (await Promise.all(jobs)).flat();
-    } catch (error) {
-      cancelled.abort();
-      await Promise.allSettled(jobs); // Release the repository queue only after every child closes.
-      throw error;
+        });
+        for (const ref of parser.finish()) if (wanted.has(ref.name)) details.set(ref.name, ref);
+      }
+      if (tags.some((tag) => details.get(tag.name)?.target !== tag.target)) {
+        return this.all(cwd, signal);
+      }
+      refs = refs.map((ref) => details.get(ref.name) ?? ref);
     }
     const after = (await identity()).stdout;
     // New/deleted/moved refs or changed HEAD/upstream state invalidate page
@@ -149,8 +194,9 @@ export class ReferenceReader {
       !before.equals(after) ||
       refs.length !== expected.length ||
       refs.some((ref, index) => !matches(ref, expected[index]!))
-    )
+    ) {
       return this.all(cwd, signal);
+    }
     return refs;
   }
 }

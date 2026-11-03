@@ -155,7 +155,6 @@ export const refSchema = z.object({
   peeled: oidSchema.optional(),
   peeledType: z.string(),
   isHead: z.boolean(),
-  subject: z.string(),
   upstream: z
     .object({
       ref: z.string(),

@@ -105,13 +105,13 @@ describe('stream parsers', () => {
   });
   test('refs handle empty fields and ahead/behind', () => {
     fc.assert(
-      fc.property(path, fc.integer({ min: 1, max: 25 }), (subject, size) => {
+      fc.property(path, fc.integer({ min: 1, max: 25 }), (name, size) => {
         const data = Buffer.from(
-          `refs/heads/main\0${hash}\0commit\0\0\0refs/remotes/origin/main\0[ahead 2, behind 3]\0*\0${subject}\0\n`,
+          `refs/heads/${name}\0${hash}\0commit\0\0\0refs/remotes/origin/main\0[ahead 2, behind 3]\0*\0\n`,
         );
         const result = feed(new RefsParser(), data, size) as ReturnType<RefsParser['finish']>;
         expect(result[0]).toMatchObject({
-          subject,
+          name: `refs/heads/${name}`,
           isHead: true,
           upstream: { ahead: 2, behind: 3 },
         });

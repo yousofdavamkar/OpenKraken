@@ -1,5 +1,7 @@
 # 0095 — Parallel native reference reads
 
+The metadata strategy and nine-field format below are superseded by [ADR 0097](0097-selective-reference-object-metadata.md). The pagination capability probe, coverage checks and complete-enumeration fallback remain in use.
+
 Large reference snapshots spend most of their native time reading subjects and peeled object metadata. Keep those fields and the existing complete-snapshot contract. For repositories with at least 10,000 refs, use bounded native pagination to parallelize this work when the selected Git supports it.
 
 Read an ordered identity list containing names, object IDs, upstream names and HEAD markers. Probe `for-each-ref --start-after=` at runtime; an unsupported-option exit selects the original single-command path for subsequent reads. This preserves Git 2.38 compatibility without assuming that a version string implies a capability. Git documents the pagination option in its [2.51 manual](https://git-scm.com/docs/git-for-each-ref/2.51.0). Do not combine it with an explicit sort or pattern arguments.

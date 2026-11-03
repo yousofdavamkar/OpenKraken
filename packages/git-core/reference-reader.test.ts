@@ -66,6 +66,179 @@ test.skipIf(!modern)(
   },
 );
 
+test.skipIf(!modern)('native pages only read tag bodies for actual annotated tags', async () => {
+  const formats: string[] = [];
+  const reader = new ReferenceReader(async (args, options) => {
+    if (paged(args)) formats.push(args.find((arg) => arg.startsWith('--format='))!);
+    return runGit(git.path, args, options);
+  });
+  expect(await reader.read(repository)).toEqual(await nativeRefs());
+  expect(formats).toHaveLength(3);
+  for (const format of formats) {
+    expect(format).not.toContain('*object');
+    expect(format).not.toContain('subject');
+  }
+});
+
+test.skipIf(!modern)(
+  'annotated tag reads use bounded batches and preserve non-commit tags',
+  async () => {
+    const target = fixtureGit(repository, ['rev-parse', 'refs/tags/blob-tag']);
+    const names = Array.from({ length: 260 }, (_, index) => `refs/tags/annotated-${index}`);
+    fixtureGit(
+      repository,
+      ['update-ref', '--stdin'],
+      names.map((name) => `create ${name} ${target}\n`).join(''),
+    );
+    const batches: string[][] = [];
+    try {
+      const reader = new ReferenceReader(async (args, options) => {
+        if (args.includes('--')) batches.push(args.slice(args.indexOf('--') + 1));
+        return runGit(git.path, args, options);
+      });
+      expect(await reader.read(repository)).toEqual(await nativeRefs());
+      expect(batches).toHaveLength(3);
+      expect(batches.flat()).toHaveLength(263);
+      for (const batch of batches) {
+        expect(batch.length).toBeLessThanOrEqual(128);
+        expect(Buffer.byteLength(batch.join('\0')) + 1).toBeLessThanOrEqual(16384);
+      }
+    } finally {
+      fixtureGit(
+        repository,
+        ['update-ref', '--stdin'],
+        names.map((name) => `delete ${name}\n`).join(''),
+      );
+    }
+  },
+);
+
+test.skipIf(!modern)(
+  'dense annotated tags use bounded full pages instead of repeated pattern scans',
+  async () => {
+    const target = fixtureGit(repository, ['rev-parse', 'refs/tags/annotated']);
+    const names = Array.from({ length: 520 }, (_, index) => `refs/tags/dense-${index}`);
+    fixtureGit(
+      repository,
+      ['update-ref', '--stdin'],
+      names.map((name) => `create ${name} ${target}\n`).join(''),
+    );
+    fixtureGit(repository, ['pack-refs', '--all']);
+    let pages = 0,
+      batches = 0;
+    try {
+      const reader = new ReferenceReader((args, options) => {
+        if (paged(args)) pages++;
+        if (args.includes('--')) batches++;
+        return runGit(git.path, args, options);
+      });
+      expect(await reader.read(repository)).toEqual(await nativeRefs());
+      expect(pages).toBe(6);
+      expect(batches).toBe(0);
+    } finally {
+      fixtureGit(
+        repository,
+        ['update-ref', '--stdin'],
+        names.map((name) => `delete ${name}\n`).join(''),
+      );
+    }
+  },
+);
+
+test.skipIf(!modern).each(['before', 'after', 'delete'] as const)(
+  'a tag changed %s its detail read returns a complete current enumeration',
+  async (when) => {
+    const name = 'refs/tags/nested/猫';
+    const old = fixtureGit(repository, ['rev-parse', name]);
+    let changed = false,
+      fullReads = 0;
+    const change = () => {
+      changed = true;
+      fixtureGit(
+        repository,
+        when === 'delete' ? ['update-ref', '-d', name] : ['update-ref', name, 'HEAD'],
+      );
+    };
+    try {
+      const reader = new ReferenceReader(async (args, options) => {
+        if (args.includes(`--format=${REF_FORMAT}`) && !args.includes('--') && !paged(args))
+          fullReads++;
+        const details = args.includes('--') && !changed;
+        if (details && when !== 'after') change();
+        const result = await runGit(git.path, args, options);
+        if (details && when === 'after') change();
+        return result;
+      });
+      expect(await reader.read(repository)).toEqual(await nativeRefs());
+      expect(changed).toBe(true);
+      expect(fullReads).toBe(1);
+    } finally {
+      fixtureGit(repository, ['update-ref', name, old]);
+      fixtureGit(repository, ['pack-refs', '--all']);
+    }
+  },
+);
+
+test.skipIf(!modern)(
+  'mixed loose and packed refs cannot omit or duplicate page boundaries',
+  async () => {
+    const name = 'refs/tags/a-loose-tag';
+    fixtureGit(repository, ['update-ref', name, 'refs/tags/annotated']);
+    const pages = new Map<string, string[]>();
+    let fullReads = 0;
+    try {
+      const expected = await nativeRefs();
+      const reader = new ReferenceReader(async (args, options) => {
+        if (args.includes(`--format=${REF_FORMAT}`) && !args.includes('--') && !paged(args))
+          fullReads++;
+        if (!paged(args)) return runGit(git.path, args, options);
+        const parser = new RefsParser();
+        const result = await runGit(git.path, args, {
+          ...options,
+          onStdout: (chunk) => {
+            parser.push(chunk);
+            return options.onStdout?.(chunk);
+          },
+        });
+        pages.set(
+          args.find((arg) => arg.startsWith('--start-after='))!,
+          parser.finish().map((ref) => ref.name),
+        );
+        return result;
+      });
+      expect(await reader.read(repository)).toEqual(expected);
+      const nativeNames = [...pages]
+        .sort(([a], [b]) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
+        .flatMap(([, names]) => names);
+      const complete =
+        JSON.stringify(nativeNames) === JSON.stringify(expected.map((ref) => ref.name));
+      expect(fullReads).toBe(complete ? 0 : 1);
+    } finally {
+      fixtureGit(repository, ['update-ref', '-d', name]);
+      fixtureGit(repository, ['pack-refs', '--all']);
+    }
+  },
+);
+
+test.skipIf(!modern).each(['cancel', 'failure'] as const)(
+  '%s during tag detail reads cannot return incomplete metadata',
+  async (mode) => {
+    const controller = new AbortController();
+    const reader = new ReferenceReader(async (args, options) => {
+      if (args.includes('--')) {
+        if (mode === 'failure') throw new Error('Tag details failed');
+        controller.abort();
+      }
+      return runGit(git.path, args, options);
+    });
+    if (mode === 'cancel')
+      await expect(reader.read(repository, controller.signal)).rejects.toMatchObject({
+        code: 'CANCELLED',
+      });
+    else await expect(reader.read(repository)).rejects.toThrow('Tag details failed');
+  },
+);
+
 test('older Git falls back once and retains complete native records', async () => {
   let probes = 0;
   let pages = 0;
@@ -90,7 +263,8 @@ test('native capability detection preserves complete records across repeated rea
   let fullReads = 0;
   const reader = new ReferenceReader(async (args, options) => {
     if (paged(args)) pages++;
-    if (args.includes(`--format=${REF_FORMAT}`) && !paged(args)) fullReads++;
+    if (args.includes(`--format=${REF_FORMAT}`) && !paged(args) && !args.includes('--'))
+      fullReads++;
     const result = await runGit(git.path, args, options);
     if (args.includes('--start-after=') && args.includes('--count=1'))
       probeResults.push(result.exitCode);
@@ -117,7 +291,8 @@ test
     let changed = false;
     let fullReads = 0;
     const reader = new ReferenceReader(async (args, options) => {
-      if (args.includes(`--format=${REF_FORMAT}`) && !paged(args)) fullReads++;
+      if (args.includes(`--format=${REF_FORMAT}`) && !paged(args) && !args.includes('--'))
+        fullReads++;
       const result = await runGit(git.path, args, options);
       if (paged(args) && !changed) {
         changed = true;
