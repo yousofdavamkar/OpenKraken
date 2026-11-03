@@ -7,6 +7,26 @@ import {
   resultSchema,
   parseUserTheme,
 } from '../../packages/ipc-contract/src/index.js';
+test('LFS inspection accepts a repository identity without caller paths or network options', () => {
+  const request = {
+    id: '00000000-0000-4000-8000-000000000001',
+    method: 'lfsState',
+    repoId: 'a'.repeat(64),
+  };
+  for (const schema of [requestSchema, serviceRequestSchema]) {
+    expect(schema.safeParse(request).success).toBe(true);
+    for (const fields of [
+      { repoId: '../repo' },
+      { path: '/outside' },
+      { url: 'https://outside.test' },
+      { remote: 'origin' },
+      { pull: true },
+      { args: ['--all'] },
+    ])
+      expect(schema.safeParse({ ...request, ...fields }).success).toBe(false);
+  }
+});
+
 test('submodule updates accept only a reviewed token and explicit local transport choice', () => {
   const base = { id: '00000000-0000-4000-8000-000000000001', repoId: 'a'.repeat(64) };
   const request = { ...base, method: 'updateSubmodules', token: base.id, allowLocal: false };

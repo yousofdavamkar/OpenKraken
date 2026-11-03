@@ -1,3 +1,5 @@
+import { lfsRequests, lfsStateSchema } from './lfs.js';
+export * from './lfs.js';
 import { commandIdSchema, commandUsageSchema, commandPreferencesSchema } from './commands.js';
 import { terminalRequests, terminalEvents } from './terminal.js';
 import {
@@ -599,13 +601,20 @@ export const workingComparisonOptionsSchema = commitComparisonOptionsSchema
 export type WorkingComparisonOptions = z.infer<typeof workingComparisonOptionsSchema>;
 export const fileVersionSchema = z
   .object({
-    kind: z.enum(['missing', 'text', 'binary', 'submodule', 'large', 'image']),
+    kind: z.enum(['missing', 'text', 'binary', 'submodule', 'large', 'image', 'lfs']),
     oid: oidSchema.optional(),
     mode: z.string().regex(/^[0-7]{6}$/),
     bytes: z.number().int().nonnegative(),
     text: z.string().optional(),
     encoding: z.string().optional(),
     lines: z.number().int().nonnegative().optional(),
+    lfs: z
+      .object({
+        oid: z.string().regex(/^[0-9a-f]{64}$/),
+        size: z.string().regex(/^(?:0|[1-9][0-9]{0,18})$/),
+      })
+      .strict()
+      .optional(),
     image: z
       .object({
         mime: z.enum(['image/png', 'image/jpeg', 'image/webp']),
@@ -936,6 +945,7 @@ export const providerGitOperationSchema = z.discriminatedUnion('method', [
 const workingRequests = [
   ...worktreeRequests,
   ...submoduleRequests,
+  ...lfsRequests,
   z
     .object({
       id: requestId,
@@ -1805,6 +1815,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z
     .object({ kind: z.literal('submoduleUpdatePreview'), preview: submoduleUpdatePreviewSchema })
     .strict(),
+  z.object({ kind: z.literal('lfsState'), state: lfsStateSchema }).strict(),
   z.object({ kind: z.literal('submodules'), state: submoduleStateSchema }).strict(),
   z
     .object({

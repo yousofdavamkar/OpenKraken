@@ -1,3 +1,4 @@
+import { lfsState } from './lfs.js';
 import type { ProviderGitTarget, ProviderRemoteAuthorization } from '@openkraken/ipc-contract';
 import { createHash } from 'node:crypto';
 import { access, readdir, realpath, readFile, stat } from 'node:fs/promises';
@@ -864,6 +865,15 @@ export class RepositoryService {
     const repo = this.repositories.get(id);
     if (!repo) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
     return { repo, manager: new Submodules(repo, (args, options) => this.run(args, options)) };
+  }
+  lfsState(id: string, signal?: AbortSignal) {
+    const repo = this.repositories.get(id);
+    if (!repo) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
+    return this.queue(repo.commonDir).run(
+      false,
+      () => lfsState((args, options) => this.run(args, { ...options, cwd: repo.path }), signal),
+      signal,
+    );
   }
   submodules(id: string, signal?: AbortSignal) {
     const { repo, manager } = this.submoduleManager(id);

@@ -340,6 +340,8 @@ async function executeGit(
     return { kind: 'stashes', state: await git.stashes(request.repoId, signal) };
   if (request.method === 'worktrees')
     return { kind: 'worktrees', state: await git.worktrees(request.repoId, signal) };
+  if (request.method === 'lfsState')
+    return { kind: 'lfsState', state: await git.lfsState(request.repoId, signal) };
   if (request.method === 'submodules')
     return { kind: 'submodules', state: await git.submodules(request.repoId, signal) };
   if (request.method === 'submoduleUpdatePreview')

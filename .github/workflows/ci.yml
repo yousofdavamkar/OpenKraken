@@ -2,6 +2,8 @@ name: CI
 on: [push, pull_request]
 jobs:
   verify:
+    env:
+      OPENKRAKEN_LFS_TEST: '1'
     strategy:
       fail-fast: false
       matrix:
@@ -20,7 +22,9 @@ jobs:
           cache: pnpm
       - if: runner.os == 'Linux'
         name: Native terminal build and picker automation
-        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool
+        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool git-lfs
+      - name: Verify native Git LFS prerequisite
+        run: git lfs version
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint

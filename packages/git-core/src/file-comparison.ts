@@ -8,6 +8,7 @@ import {
   type FileVersion,
   type ChangedFile,
 } from '@openkraken/ipc-contract';
+import { lfsPointer } from './lfs-pointer.js';
 import { rasterPreview } from './raster-preview.js';
 import { decodeText } from './text-encoding.js';
 import { commitFiles } from './commit-files.js';
@@ -46,6 +47,8 @@ export function contentVersion(
 ): FileVersion {
   const bytes = content.length;
   if (bytes > (allowLarge ? HARD_BYTES : SOFT_BYTES)) return { kind: 'large', oid, mode, bytes };
+  const lfs = mode === '100644' || mode === '100755' ? lfsPointer(content) : undefined;
+  if (lfs) return { kind: 'lfs', oid, mode, bytes, lfs };
   const image = rasterPreview(content);
   if (image) return { kind: 'image', oid, mode, bytes, image };
   const decoded = decodeText(content, encoding);

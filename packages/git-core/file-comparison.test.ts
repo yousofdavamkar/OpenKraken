@@ -190,3 +190,76 @@ test('comparison exposes bounded raster images but refuses excessive dimensions 
     await service.dispose();
   }
 });
+
+test('comparison identifies LFS pointers without fetching objects or treating them as editable text', async () => {
+  const path = createFixture(join(root, 'lfs-pointers'));
+  const oid = '4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393';
+  const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize 12345\n`;
+  await writeFile(join(path, 'asset.bin'), pointer);
+  fixtureGit(path, ['add', '.']);
+  fixtureGit(path, ['commit', '-m', 'LFS pointer']);
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const options = {
+      commit: fixtureGit(path, ['rev-parse', 'HEAD']),
+      pathBytes: Buffer.from('asset.bin').toString('base64'),
+    };
+    const result = await service.commitComparison(repo.id, options);
+    expect(result.newVersion).toMatchObject({ kind: 'lfs', lfs: { oid, size: '12345' } });
+    expect(result.newVersion.text).toBeUndefined();
+    expect(result.hunks).toEqual([]);
+    expect(fixtureGit(path, ['status', '--porcelain'])).toBe('');
+    await writeFile(join(path, 'asset.bin'), pointer.replace('size 12345', 'size invalid'));
+    fixtureGit(path, ['commit', '-am', 'Not a pointer']);
+    const invalid = await service.commitComparison(repo.id, {
+      ...options,
+      commit: fixtureGit(path, ['rev-parse', 'HEAD']),
+    });
+    expect(invalid.oldVersion.kind).toBe('lfs');
+    expect(invalid.newVersion).toMatchObject({
+      kind: 'text',
+      text: expect.stringContaining('size invalid'),
+    });
+  } finally {
+    await service.dispose();
+  }
+});
+
+test('LFS pointer recognition preserves large size metadata and rejects ambiguous or malformed encodings', async () => {
+  const path = createFixture(join(root, 'lfs-validation'));
+  const version = 'version https://git-lfs.github.com/spec/v1\n';
+  const oid = `oid sha256:${'b'.repeat(64)}\n`;
+  const cases = [
+    [
+      'extension',
+      `${version}ext-0-fixture sha256:${'c'.repeat(64)}\n${oid}size 9223372036854775807\n`,
+      'lfs',
+    ],
+    ['legacy', `version https://hawser.github.com/spec/v1\n${oid}size 0\n`, 'lfs'],
+    ['duplicate', `${version}${oid}${oid}size 1\n`, 'text'],
+    ['unsorted', `${version}size 1\n${oid}`, 'text'],
+    ['oversized-number', `${version}${oid}size 9223372036854775808\n`, 'text'],
+    ['oversized-pointer', `${version}extra ${'a'.repeat(1024)}\n${oid}size 1\n`, 'text'],
+    ['crlf', `${version}${oid}size 1\n`.replaceAll('\n', '\r\n'), 'text'],
+    ['no-newline', `${version}${oid}size 1`, 'text'],
+  ] as const;
+  for (const [name, text] of cases) await writeFile(join(path, name), text);
+  fixtureGit(path, ['add', '.']);
+  fixtureGit(path, ['commit', '-m', 'Pointer validation']);
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const commit = fixtureGit(path, ['rev-parse', 'HEAD']);
+    for (const [name, , kind] of cases) {
+      const result = await service.commitComparison(repo.id, {
+        commit,
+        pathBytes: Buffer.from(name).toString('base64'),
+      });
+      expect(result.newVersion.kind, name).toBe(kind);
+      if (name === 'extension') expect(result.newVersion.lfs?.size).toBe('9223372036854775807');
+    }
+  } finally {
+    await service.dispose();
+  }
+});
