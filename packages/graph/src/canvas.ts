@@ -22,7 +22,11 @@ export interface Segment {
   color: string;
   dashed: boolean;
 }
-export function rowSegments(row: GraphRow, top: number): Segment[] {
+export function rowSegments(
+  row: GraphRow,
+  top: number,
+  colors: readonly string[] = palette,
+): Segment[] {
   return row.edges.map((edge) => ({
     x1: GRAPH_PADDING + edge.from * LANE_WIDTH,
     x2: GRAPH_PADDING + edge.to * LANE_WIDTH,
@@ -32,7 +36,7 @@ export function rowSegments(row: GraphRow, top: number): Segment[] {
         ? ROW_HEIGHT / 2
         : 0),
     y2: top + (edge.kind === 'end' ? ROW_HEIGHT / 2 : ROW_HEIGHT),
-    color: palette[edge.colorIndex % palette.length]!,
+    color: colors[edge.colorIndex % colors.length]!,
     dashed: edge.dashed,
   }));
 }
@@ -50,9 +54,12 @@ export function paintGraph(
     selected?: ReadonlySet<string>;
     synthetic?: ReadonlySet<string>;
     passages?: readonly (readonly GraphPassage[])[];
+    colors?: readonly string[];
+    background?: string;
   },
 ) {
   const { width, height, scrollTop, dpr } = options;
+  const colors = options.colors?.length ? options.colors : palette;
   const pixelWidth = Math.ceil(width * dpr),
     pixelHeight = Math.ceil(height * dpr);
   if (ctx.canvas.width !== pixelWidth) ctx.canvas.width = pixelWidth;
@@ -68,7 +75,7 @@ export function paintGraph(
     const row = rows[i]!;
     const y = row.rowIndex * ROW_HEIGHT - scrollTop;
     ctx.globalAlpha = options.matches && !options.matches.has(row.oid) ? 0.22 : 1;
-    const segments = rowSegments(row, y);
+    const segments = rowSegments(row, y, colors);
     const split = row.edges.findIndex((e) => !['end', 'pass'].includes(e.kind));
     const outgoing = segments.splice(split < 0 ? segments.length : split);
     for (const p of options.passages?.[Math.floor(i / 500)] ?? []) {
@@ -78,7 +85,7 @@ export function paintGraph(
           x2: GRAPH_PADDING + p.column * LANE_WIDTH,
           y1: y,
           y2: y + ROW_HEIGHT,
-          color: palette[p.colorIndex % palette.length]!,
+          color: colors[p.colorIndex % colors.length]!,
           dashed: p.dashed,
         });
     }
@@ -112,9 +119,9 @@ export function paintGraph(
       Math.PI * 2,
     );
     ctx.fillStyle = options.synthetic?.has(row.oid)
-      ? '#10151e'
-      : palette[row.colorIndex % palette.length]!;
-    ctx.strokeStyle = palette[row.colorIndex % palette.length]!;
+      ? (options.background ?? '#10151e')
+      : colors[row.colorIndex % colors.length]!;
+    ctx.strokeStyle = colors[row.colorIndex % colors.length]!;
     ctx.fill();
     ctx.stroke();
   }

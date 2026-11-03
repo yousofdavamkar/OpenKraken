@@ -1,6 +1,7 @@
 import { commandIdSchema, commandUsageSchema, commandPreferencesSchema } from './commands.js';
 import { appearanceModeSchema, appearancePreferencesSchema } from './appearance.js';
 export * from './appearance.js';
+export * from './theme-colors.js';
 export * from './commands.js';
 import {
   providerBitbucketCommentsOptionsSchema,
@@ -2105,6 +2106,7 @@ export const gitProgressEventSchema = z
   .object({ type: z.literal('gitProgress'), id: requestId, text: z.string().max(4096) })
   .strict();
 export const desktopEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('appearanceChanged'), state: appearancePreferencesSchema }).strict(),
   z
     .object({
       type: z.literal('commandExecute'),

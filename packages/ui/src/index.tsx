@@ -2,6 +2,7 @@ import { CommandButton, CommandControls, CommandProvider } from './commands.js';
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AvatarSettings } from './avatars.js';
+import { Appearance } from './appearance.js';
 import { RepositorySync } from './repository-sync.js';
 import { WorkingTreePanel } from './working-tree.js';
 import { History } from './history.js';
@@ -55,6 +56,7 @@ function App() {
         </div>
         <div className="toolbar">
           <CommandControls />
+          <Appearance />
           <AvatarSettings />
           <Clone />
           <ProviderAccountsControl />

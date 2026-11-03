@@ -8,10 +8,14 @@ Version-one files may omit either section. A missing commands section remains el
 
 Main-only typed IPC reads appearance and saves a known dark/light/system mode with a revision check. The Git utility process cannot receive these requests. Main activates the native preference only after persistence succeeds, and restores it before creating the initial window. Renderer storage is not authoritative.
 
-Native theme selection uses [Electron nativeTheme](https://www.electronjs.org/docs/latest/api/native-theme): explicit light or dark overrides the OS preference; system follows it. Renderer theme styling will follow the resulting color scheme. User JSON tokens and their editor are subsequent parts of the theme implementation, not yet implemented at this native-settings checkpoint.
+Native theme selection uses [Electron nativeTheme](https://www.electronjs.org/docs/latest/api/native-theme): explicit light or dark overrides the OS preference; system follows it. An Appearance dialog and catalogue command save these preferences. Main publishes validated appearance changes only after persistence; utility-origin appearance events are discarded. The renderer honors explicit modes and listens to the native media query for system mode.
+
+Shared named color tokens cover application surfaces, text, state indicators, diff lines, syntax and graph lanes. Each existing dark CSS color retains its value; light mode supplies a corresponding palette. Tokens become CSS variables. Canvas receives the active lane palette and background and repaints without changing graph topology, paging or selection. The toolbar wraps its controls within the window rather than widening the document. User JSON themes remain a subsequent part of the implementation.
 
 ## Verification
 
 Real Electron tests cover simultaneous appearance and keymap saves, stale appearance writes, native color-scheme changes, restart after clearing renderer storage, and importing legacy shortcuts into an appearance-only profile. The existing six command-settings regression tests continue to pass. Contract tests reject unknown modes, unsafe revisions and extra fields, and keep both appearance routes out of the utility process.
 
 The native preference test resets [Playwright color-scheme emulation](https://playwright.dev/docs/api/class-page#page-emulate-media) to null on each launch. Otherwise Playwright's light emulation hides Electron's actual dark preference from the media query. Native behavior is currently verified on Linux; macOS and Windows still require acceptance.
+
+Rendered acceptance switches light/dark through the Appearance dialog, verifies computed surface colors and Canvas node colors, preserves row identities and lanes, and checks for document overflow. The six existing dark Canvas snapshots pass unchanged. Light graph screenshots are also visually inspected.

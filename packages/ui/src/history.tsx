@@ -7,8 +7,25 @@ import { navigationTarget, refBadges, refNavigationTargets } from './history-mod
 import { AuthorAvatar, useVisibleAvatars } from './avatars.js';
 import { CommandButton } from './commands.js';
 import { useRepository } from './store.js';
+import { useTheme } from './theme.js';
 const dateFormatter = new Intl.DateTimeFormat();
 export function History() {
+  const theme = useTheme();
+  const graphColors = useMemo(
+    () => [
+      theme.colors.graph1,
+      theme.colors.graph2,
+      theme.colors.graph3,
+      theme.colors.graph4,
+      theme.colors.graph5,
+      theme.colors.graph6,
+      theme.colors.graph7,
+      theme.colors.graph8,
+      theme.colors.graph9,
+      theme.colors.graph10,
+    ],
+    [theme.colors],
+  );
   const state = useRepository();
   const {
     snapshot,
@@ -81,8 +98,21 @@ export function History() {
       selected,
       synthetic,
       passages: buckets,
+      colors: graphColors,
+      background: theme.colors.background,
     });
-  }, [layout, bounds, graphWidth, scroll, matching, selected, synthetic, buckets]);
+  }, [
+    layout,
+    bounds,
+    graphWidth,
+    scroll,
+    matching,
+    selected,
+    synthetic,
+    buckets,
+    graphColors,
+    theme.colors.background,
+  ]);
   useLayoutEffect(() => {
     let second = 0;
     const first = requestAnimationFrame(() => {

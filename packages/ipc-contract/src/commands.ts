@@ -1,5 +1,10 @@
 import { z } from 'zod';
 export const commandCatalog = {
+  'app.appearance': {
+    label: 'Appearance',
+    category: 'Settings',
+    keywords: 'theme light dark system colors',
+  },
   'app.commands': {
     label: 'Command palette',
     category: 'Settings',

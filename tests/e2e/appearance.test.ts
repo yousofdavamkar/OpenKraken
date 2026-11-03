@@ -2,6 +2,7 @@ import { _electron as electron, expect, test } from '@playwright/test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { createFixture } from '../../packages/test-fixtures/src/index.js';
 
 test('native appearance persists independently of command preferences and rejects stale saves', async () => {
   const root = mkdtempSync(join(tmpdir(), 'openkraken-appearance-'));
@@ -110,6 +111,66 @@ test('native appearance persists independently of command preferences and reject
     await expect
       .poll(() => page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches))
       .toBe(system.dark);
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Appearance switches the rendered theme and Canvas colors without moving graph rows', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-appearance-ui-'));
+  const repository = createFixture(join(root, 'repo'), 'merge');
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await page.emulateMedia({ colorScheme: null });
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, repository);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    const graph = page.getByTestId('commit-graph');
+    await expect(graph).toBeVisible();
+    const rows = () =>
+      page
+        .getByRole('grid')
+        .getByRole('row')
+        .evaluateAll((elements) =>
+          elements.map((el) => `${el.getAttribute('data-oid')}:${el.getAttribute('data-column')}`),
+        );
+    const before = await rows();
+    const nodeColor = () =>
+      graph.evaluate((canvas: HTMLCanvasElement) => [
+        ...canvas.getContext('2d')!.getImageData(14 * devicePixelRatio, 14 * devicePixelRatio, 1, 1)
+          .data,
+      ]);
+    expect(await nodeColor()).toEqual([121, 223, 195, 255]);
+    await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+    const settings = page.getByRole('dialog', { name: 'Appearance', exact: true });
+    await settings.getByLabel('Color theme').selectOption('light');
+    await settings.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(settings.getByRole('status')).toHaveText('Appearance saved.');
+    await expect
+      .poll(() => page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor))
+      .toBe('rgb(245, 247, 251)');
+    await expect.poll(nodeColor).toEqual([8, 127, 104, 255]);
+    await settings.getByRole('button', { name: 'Close', exact: true }).click();
+    expect(await rows()).toEqual(before);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({ path: 'test-results/appearance-light.png' });
+    await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+    await expect(settings.getByLabel('Color theme')).toHaveValue('light');
+    await settings.getByLabel('Color theme').selectOption('dark');
+    await settings.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor))
+      .toBe('rgb(16, 21, 30)');
+    await expect.poll(nodeColor).toEqual([121, 223, 195, 255]);
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

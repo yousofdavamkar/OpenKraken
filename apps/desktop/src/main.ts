@@ -82,7 +82,7 @@ function startService() {
     const event = desktopEventSchema.safeParse(message);
     if (event.success) {
       // Native commands can originate only in main, never in the Git utility process.
-      if (event.data.type === 'commandExecute') return;
+      if (event.data.type === 'commandExecute' || event.data.type === 'appearanceChanged') return;
       if (event.data.type !== 'repositoryChanged' && !pending.has(event.data.id)) return;
       if (service === child && window && !window.isDestroyed())
         window.webContents.send(EVENT_CHANNEL, event.data);
@@ -267,6 +267,8 @@ else {
                 ? await settings.saveAppearance(request.mode, request.revision)
                 : await settings.readAppearance();
             nativeTheme.themeSource = state.mode;
+            if (request.method === 'appearanceSave' && window && !window.isDestroyed())
+              window.webContents.send(EVENT_CHANNEL, { type: 'appearanceChanged', state });
             return resultSchema.parse({ kind: 'appearancePreferences', state });
           } catch {
             return {
