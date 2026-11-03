@@ -47,6 +47,7 @@ import { fileHistory } from './file-history.js';
 import { commitComparison } from './file-comparison.js';
 import { WorkingTree } from './working-tree.js';
 import { Worktrees, type WorktreePrunePlan } from './worktrees.js';
+import { Submodules } from './submodules.js';
 import type { GitEditor } from './editor-document.js';
 import { RepositoryQueue } from './queue.js';
 
@@ -856,6 +857,29 @@ export class RepositoryService {
       repo,
       manager: new Worktrees(repo, (args, options) => this.run(args, options), this.worktreePrunes),
     };
+  }
+  private submoduleManager(id: string) {
+    const repo = this.repositories.get(id);
+    if (!repo) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
+    return { repo, manager: new Submodules(repo, (args, options) => this.run(args, options)) };
+  }
+  submodules(id: string, signal?: AbortSignal) {
+    const { repo, manager } = this.submoduleManager(id);
+    return this.queue(repo.commonDir).run(false, () => manager.list(signal), signal);
+  }
+  openSubmodule(id: string, submoduleId: string, revision: string, signal?: AbortSignal) {
+    const { repo, manager } = this.submoduleManager(id);
+    return this.queue(repo.commonDir).run(
+      false,
+      async () => {
+        const selected = await manager.select(submoduleId, revision, signal);
+        const opened = await this.open(selected.path, signal);
+        if (opened.path !== selected.path || opened.gitDir !== selected.gitDir)
+          throw new GitError('SUBMODULE_REPLACED', 'Submodule checkout changed before opening');
+        return opened;
+      },
+      signal,
+    );
   }
   worktrees(id: string, signal?: AbortSignal) {
     const { repo, manager } = this.worktreeManager(id);

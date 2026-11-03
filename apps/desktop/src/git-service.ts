@@ -337,6 +337,8 @@ async function executeGit(
     return { kind: 'stashes', state: await git.stashes(request.repoId, signal) };
   if (request.method === 'worktrees')
     return { kind: 'worktrees', state: await git.worktrees(request.repoId, signal) };
+  if (request.method === 'submodules')
+    return { kind: 'submodules', state: await git.submodules(request.repoId, signal) };
   if (request.method === 'worktreePrunePreview')
     return {
       kind: 'worktreePrunePreview',
@@ -497,24 +499,26 @@ async function executeGit(
   if (request.method === 'discover')
     return { kind: 'discovery', paths: await git.discover(request.path, signal) };
   const repo =
-    request.method === 'openWorktree'
-      ? await git.openWorktree(request.repoId, request.worktreeId, request.revision, signal)
-      : request.method === 'refresh'
-        ? { id: request.repoId }
-        : request.method === 'clone'
-          ? await git.clone(
-              request.path,
-              request.options,
-              signal,
-              progress,
-              auth,
-              request.credential
-                ? { url: request.credential.url, username: request.credential.username }
-                : undefined,
-            )
-          : request.method === 'init'
-            ? await git.init(request.path, request.branch, signal)
-            : await git.open(request.path, signal);
+    request.method === 'openSubmodule'
+      ? await git.openSubmodule(request.repoId, request.submoduleId, request.revision, signal)
+      : request.method === 'openWorktree'
+        ? await git.openWorktree(request.repoId, request.worktreeId, request.revision, signal)
+        : request.method === 'refresh'
+          ? { id: request.repoId }
+          : request.method === 'clone'
+            ? await git.clone(
+                request.path,
+                request.options,
+                signal,
+                progress,
+                auth,
+                request.credential
+                  ? { url: request.credential.url, username: request.credential.username }
+                  : undefined,
+              )
+            : request.method === 'init'
+              ? await git.init(request.path, request.branch, signal)
+              : await git.open(request.path, signal);
   if ('path' in repo) await prepareWatcher(repo);
   return {
     kind: 'snapshot',

@@ -7,6 +7,28 @@ import {
   resultSchema,
   parseUserTheme,
 } from '../../packages/ipc-contract/src/index.js';
+test('submodule IPC selects reviewed identities and rejects caller paths and Git options', () => {
+  const base = { id: '00000000-0000-4000-8000-000000000000', repoId: 'a'.repeat(64) };
+  const open = {
+    ...base,
+    method: 'openSubmodule',
+    submoduleId: 'b'.repeat(64),
+    revision: 'c'.repeat(64),
+  };
+  for (const schema of [requestSchema, serviceRequestSchema]) {
+    expect(schema.safeParse({ ...base, method: 'submodules' }).success).toBe(true);
+    expect(schema.safeParse(open).success).toBe(true);
+    for (const extra of [
+      { path: '/arbitrary' },
+      { url: 'ext::command' },
+      { force: true },
+      { recursive: true },
+      { submoduleId: '../child' },
+      { revision: 'HEAD' },
+    ])
+      expect(schema.safeParse({ ...open, ...extra }).success).toBe(false);
+  }
+});
 test('worktree IPC accepts reviewed identities but reserves destination paths for main', () => {
   const base = { id: '00000000-0000-4000-8000-000000000000', repoId: 'a'.repeat(64) };
   for (const schema of [requestSchema, serviceRequestSchema]) {

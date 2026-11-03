@@ -1,5 +1,7 @@
 import { commandIdSchema, commandUsageSchema, commandPreferencesSchema } from './commands.js';
 import { terminalRequests, terminalEvents } from './terminal.js';
+import { submoduleRequests, submoduleStateSchema } from './submodules.js';
+export * from './submodules.js';
 import {
   worktreeRequests,
   worktreeStateSchema,
@@ -929,6 +931,7 @@ export const providerGitOperationSchema = z.discriminatedUnion('method', [
 ]);
 const workingRequests = [
   ...worktreeRequests,
+  ...submoduleRequests,
   z
     .object({
       id: requestId,
@@ -1795,6 +1798,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
     .object({ kind: z.literal('worktreePrunePreview'), preview: worktreePrunePreviewSchema })
     .strict(),
   z.object({ kind: z.literal('worktrees'), state: worktreeStateSchema }).strict(),
+  z.object({ kind: z.literal('submodules'), state: submoduleStateSchema }).strict(),
   z
     .object({
       kind: z.literal('terminalOpened'),
