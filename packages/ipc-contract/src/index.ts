@@ -1,5 +1,7 @@
 import { commandIdSchema, commandUsageSchema, commandPreferencesSchema } from './commands.js';
 import { terminalRequests, terminalEvents } from './terminal.js';
+import { worktreeRequests, worktreeStateSchema, worktreeAddRequest } from './worktrees.js';
+export * from './worktrees.js';
 export * from './terminal.js';
 import {
   appearanceModeSchema,
@@ -920,6 +922,7 @@ export const providerGitOperationSchema = z.discriminatedUnion('method', [
     .strict(),
 ]);
 const workingRequests = [
+  ...worktreeRequests,
   z
     .object({
       id: requestId,
@@ -1204,6 +1207,7 @@ const workingRequests = [
     .strict(),
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  worktreeAddRequest,
   ...terminalRequests,
   z
     .object({
@@ -1729,6 +1733,7 @@ export const requestSchema = z.discriminatedUnion('method', [
 ]);
 const repositoryPath = z.string().min(1).max(32768);
 export const serviceRequestSchema = z.discriminatedUnion('method', [
+  worktreeAddRequest.extend({ path: repositoryPath }),
   z
     .object({
       id: requestId,
@@ -1780,6 +1785,7 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('worktrees'), state: worktreeStateSchema }).strict(),
   z
     .object({
       kind: z.literal('terminalOpened'),

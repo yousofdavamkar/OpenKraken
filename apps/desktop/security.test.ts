@@ -7,6 +7,39 @@ import {
   resultSchema,
   parseUserTheme,
 } from '../../packages/ipc-contract/src/index.js';
+test('worktree IPC accepts reviewed identities but reserves destination paths for main', () => {
+  const base = { id: '00000000-0000-4000-8000-000000000000', repoId: 'a'.repeat(64) };
+  const open = {
+    ...base,
+    method: 'openWorktree',
+    worktreeId: 'b'.repeat(64),
+    revision: 'c'.repeat(64),
+  };
+  expect(requestSchema.safeParse(open).success).toBe(true);
+  expect(requestSchema.safeParse({ ...open, path: '/arbitrary' }).success).toBe(false);
+  expect(requestSchema.safeParse({ ...open, worktreeId: '../other' }).success).toBe(false);
+  const add = {
+    ...base,
+    method: 'addWorktree',
+    options: {
+      revision: 'c'.repeat(64),
+      mode: 'new',
+      branch: 'topic',
+      oid: 'd'.repeat(40),
+    },
+  };
+  expect(requestSchema.safeParse(add).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(add).success).toBe(false);
+  expect(requestSchema.safeParse({ ...add, path: '/destination' }).success).toBe(false);
+  expect(serviceRequestSchema.safeParse({ ...add, path: '/destination' }).success).toBe(true);
+  for (const options of [
+    { ...add.options, force: true },
+    { ...add.options, branch: '--force' },
+    { ...add.options, oid: 'HEAD' },
+    { ...add.options, revision: '' },
+  ])
+    expect(requestSchema.safeParse({ ...add, options }).success).toBe(false);
+});
 test('terminal IPC is bounded, session-scoped and excluded from the Git service', () => {
   const id = '00000000-0000-4000-8000-000000000000';
   const sessionId = '00000000-0000-4000-8000-000000000001';

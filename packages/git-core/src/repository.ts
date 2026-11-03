@@ -28,6 +28,7 @@ import type {
   ResolveConflict,
   StashPushOptions,
   StashActionOptions,
+  WorktreeAdd,
   GraphView,
   Repository,
   Snapshot,
@@ -44,6 +45,7 @@ import { blame } from './blame.js';
 import { fileHistory } from './file-history.js';
 import { commitComparison } from './file-comparison.js';
 import { WorkingTree } from './working-tree.js';
+import { Worktrees } from './worktrees.js';
 import type { GitEditor } from './editor-document.js';
 import { RepositoryQueue } from './queue.js';
 
@@ -140,8 +142,22 @@ export class RepositoryService {
         signal,
       )
     ).split('\n');
-    const [gitDir, commonDir, bare, shallow] = metadata;
-    if (!gitDir || !commonDir || metadata.length !== 4)
+    let [gitDir, commonDir] = metadata;
+    const [bare, shallow] = metadata.slice(-2);
+    // rev-parse separates values with newlines even when a path contains one.
+    // Keep the common fast path, but read paths individually when ambiguous.
+    if (metadata.length > 4)
+      [gitDir, commonDir] = await Promise.all([
+        this.text(cwd, ['rev-parse', '--path-format=absolute', '--absolute-git-dir'], signal),
+        this.text(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'], signal),
+      ]);
+    if (
+      !gitDir ||
+      !commonDir ||
+      metadata.length < 4 ||
+      !['true', 'false'].includes(bare!) ||
+      !['true', 'false'].includes(shallow!)
+    )
       throw new GitError('INVALID_REPOSITORY', 'Cannot read repository metadata');
     const path = await realpath(
       bare === 'true' ? gitDir : await this.text(cwd, ['rev-parse', '--show-toplevel'], signal),
@@ -817,6 +833,33 @@ export class RepositoryService {
   stashes(id: string, signal?: AbortSignal) {
     const work = this.working(id);
     return this.queue(work.repo.commonDir).run(false, () => work.stashes(signal), signal);
+  }
+  private worktreeManager(id: string) {
+    const repo = this.repositories.get(id);
+    if (!repo) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
+    return { repo, manager: new Worktrees(repo, (args, options) => this.run(args, options)) };
+  }
+  worktrees(id: string, signal?: AbortSignal) {
+    const { repo, manager } = this.worktreeManager(id);
+    return this.queue(repo.commonDir).run(false, () => manager.list(signal), signal);
+  }
+  addWorktree(id: string, path: string, options: WorktreeAdd, signal?: AbortSignal) {
+    const { repo, manager } = this.worktreeManager(id);
+    return this.queue(repo.commonDir).run(true, () => manager.add(path, options, signal), signal);
+  }
+  openWorktree(id: string, worktreeId: string, revision: string, signal?: AbortSignal) {
+    const { repo, manager } = this.worktreeManager(id);
+    return this.queue(repo.commonDir).run(
+      false,
+      async () => {
+        const entry = await manager.select(worktreeId, revision, signal);
+        const opened = await this.open(entry.path, signal);
+        if (opened.commonDir !== repo.commonDir)
+          throw new GitError('WORKTREE_REPLACED', 'This folder belongs to another repository');
+        return opened;
+      },
+      signal,
+    );
   }
   stashPush(id: string, options: StashPushOptions, signal?: AbortSignal) {
     const work = this.working(id);

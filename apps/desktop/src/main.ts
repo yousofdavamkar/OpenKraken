@@ -895,20 +895,25 @@ else {
           request.method === 'open' ||
           request.method === 'init' ||
           request.method === 'clone' ||
+          request.method === 'addWorktree' ||
           request.method === 'discover'
         ) {
           const selected = await dialog.showOpenDialog(window!, {
             title:
-              request.method === 'clone'
-                ? 'Clone into an empty folder'
-                : request.method === 'init'
-                  ? 'Initialize repository in folder'
-                  : request.method === 'discover'
-                    ? 'Scan for repositories'
-                    : 'Open repository',
+              request.method === 'addWorktree'
+                ? 'Create worktree in an empty folder'
+                : request.method === 'clone'
+                  ? 'Clone into an empty folder'
+                  : request.method === 'init'
+                    ? 'Initialize repository in folder'
+                    : request.method === 'discover'
+                      ? 'Scan for repositories'
+                      : 'Open repository',
             properties: [
               'openDirectory',
-              ...(['init', 'clone'].includes(request.method) ? ['createDirectory' as const] : []),
+              ...(['init', 'clone', 'addWorktree'].includes(request.method)
+                ? ['createDirectory' as const]
+                : []),
             ],
           });
           if (selected.canceled || !selected.filePaths[0] || cancelled.has(request.id))
@@ -935,7 +940,10 @@ else {
           });
         }
         return await callService(
-          request.method === 'open' || request.method === 'init' || request.method === 'discover'
+          request.method === 'open' ||
+            request.method === 'init' ||
+            request.method === 'discover' ||
+            request.method === 'addWorktree'
             ? { ...request, path: path! }
             : request,
         );
