@@ -1,0 +1,9 @@
+# 0107 — Build-time glob security updates
+
+The M8 dependency audit found two moderate advisories in development dependencies: [minimatch pattern amplification](https://github.com/advisories/GHSA-g3hv-75wg-m249) and [glob cancellation continuing filesystem traversal](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4). These paths belong to ESLint and Electron packaging tools, not the renderer or Git service. An audit finding alone does not demonstrate a reachable attack in OpenKraken's fixed build patterns.
+
+The workspace overrides modern minimatch versions from 9 through the vulnerable 11.0.0 to 11.0.1, and affected modern glob versions to 14.0.2. The lockfile pins their resolutions and integrity values. These packages retain the named-export API used by the modern consumers; our Node 24 toolchain meets their published engine requirements. The overrides are temporary until upstream consumers adopt fixed ranges. Native packaging and linting must be checked because this crosses major-version ranges.
+
+Legacy minimatch 3.1.5 and 5.1.9 remain in electron-builder's older dependency branches. Replacing their callable CommonJS export with the modern named-export object would break consumers. Inspection of both installed legacy sources finds neither the `optimizationLevel` option nor the `firstPhasePreProcess` routine identified by the advisory. That supports a narrower applicability assessment for this particular mechanism; it is not a general security guarantee. The advisory's broad `<11.0.1` range still reports those versions, and we do not suppress it or claim an entirely clean development audit. Retiring those branches requires compatible upstream packaging changes and native platform verification.
+
+No runtime dependency, React/TypeScript version, updater trust root, network permission or release signing requirement changes. Linux packaging evidence cannot establish native Windows/macOS packaging compatibility.

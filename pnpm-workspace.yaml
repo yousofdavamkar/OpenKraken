@@ -1,6 +1,10 @@
 packages:
   - apps/*
   - packages/*
+overrides:
+  # Modern glob/minimatch security fixes; preserve legacy callable minimatch APIs.
+  'minimatch@>=9 <11.0.1': 11.0.1
+  'glob@>=9 <14.0.2': 14.0.2
 allowBuilds:
   '@parcel/watcher': false
   electron: true
