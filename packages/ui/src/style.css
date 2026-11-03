@@ -1739,3 +1739,27 @@ input:not([type='checkbox']):not([type='radio']) {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+
+.lfs-dialog ul {
+  list-style: none;
+  padding: 0;
+}
+.lfs-dialog li {
+  border-bottom: 1px solid var(--border);
+  padding: 12px 0;
+}
+.lfs-dialog p {
+  margin: 8px 0;
+}
+.lfs-dialog code,
+.lfs-dialog h4 {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.lfs-dialog h4 {
+  text-transform: none;
+}
+.lfs-dialog .dialog-actions {
+  display: flex;
+  gap: 8px;
+}

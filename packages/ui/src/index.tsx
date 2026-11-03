@@ -19,6 +19,7 @@ import { Authentication } from './authentication.js';
 import { GitEditors } from './git-editor.js';
 import { Stashes } from './stashes.js';
 import { WorktreesControl } from './worktrees.js';
+import { LfsControl } from './lfs.js';
 import { SubmodulesControl } from './submodules.js';
 import { Push } from './push.js';
 import { Reset } from './reset.js';
@@ -80,6 +81,7 @@ function App() {
           <Stashes />
           <WorktreesControl key={snapshot?.repository.id} />
           <SubmodulesControl key={snapshot?.repository.id} />
+          <LfsControl key={snapshot?.repository.id} />
           <CommandButton
             command="repository.terminal"
             disabled={!snapshot}

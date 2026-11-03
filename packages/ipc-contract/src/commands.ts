@@ -1,5 +1,10 @@
 import { z } from 'zod';
 export const commandCatalog = {
+  'repository.lfs': {
+    label: 'Git LFS',
+    category: 'Repository',
+    keywords: 'large files pointers objects locks',
+  },
   'repository.submodules': {
     label: 'Submodules',
     category: 'Repository',

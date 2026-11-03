@@ -467,6 +467,38 @@ export function FileComparisonDialog({
                 <p>The hard display limit prevents loading this file.</p>
               )}
             </div>
+          ) : data.oldVersion.lfs || data.newVersion.lfs ? (
+            <section aria-label="Git LFS pointer comparison">
+              <h3>Git LFS pointer</h3>
+              <p>
+                Git stores a pointer to this content. Opening this comparison does not download the
+                LFS object.
+              </p>
+              {[
+                { label: 'Before', version: data.oldVersion },
+                { label: 'After', version: data.newVersion },
+              ].map(({ label, version }) => {
+                return (
+                  <div key={label}>
+                    <h4>{label}</h4>
+                    {version.lfs ? (
+                      <>
+                        <p>
+                          SHA-256 <code>{version.lfs.oid}</code>
+                        </p>
+                        <p>Object size: {BigInt(version.lfs.size).toLocaleString()} bytes</p>
+                      </>
+                    ) : (
+                      <p>
+                        {version.kind === 'missing'
+                          ? 'Absent'
+                          : `${version.kind} · ${version.bytes.toLocaleString()} bytes`}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </section>
           ) : data.oldVersion.image || data.newVersion.image ? (
             <ImageComparison data={data} />
           ) : text ? (
