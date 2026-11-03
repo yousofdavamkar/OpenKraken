@@ -198,3 +198,9 @@ Choose **Custom** to edit a JSON theme. Start with a light or dark base and over
 ```
 
 Colors accept CSS hex notation (`#RGB`, `#RGBA`, `#RRGGBB`, or `#RRGGBBAA`). Invalid themes leave the current appearance active. Switching to a built-in theme keeps your saved custom theme available. Appearance shares the atomic profile settings file with keyboard shortcuts.
+
+## Terminal (M7 in progress)
+
+Open a repository and choose **Terminal** from the toolbar or command palette. The panel starts your default shell in that repository. **Hide terminal** keeps the session and scrollback; **Terminal** shows and focuses it again. Press **F6** to move keyboard focus to the terminal controls. **Close terminal** asks before ending a live shell. Changing the graph's repository does not change an existing shell's directory.
+
+The terminal follows the selected application theme and provides screen-reader output. Its scrollback stays in memory; your shell still controls its own history files. Reloading or closing the app ends the session. OSC 133 shell integration and broader platform acceptance remain in progress.

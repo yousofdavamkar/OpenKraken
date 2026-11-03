@@ -1,6 +1,8 @@
 import { themeReady } from './theme.js';
 import { CommandButton, CommandControls, CommandProvider } from './commands.js';
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useRef, useState } from 'react';
+import type { TerminalHandle, TerminalSession } from './terminal.js';
+const TerminalPanel = lazy(() => import('./terminal.js'));
 import { createRoot } from 'react-dom/client';
 import { AvatarSettings } from './avatars.js';
 import { Appearance } from './appearance.js';
@@ -44,6 +46,9 @@ function App() {
   const busy = syncing ? undefined : active;
   const [init, setInit] = useState(false);
   const [branch, setBranch] = useState('main');
+  const [terminal, setTerminal] = useState<TerminalSession>();
+  const [terminalHidden, setTerminalHidden] = useState(false);
+  const terminalHandle = useRef<TerminalHandle>(null);
   const open = () => void run({ id: crypto.randomUUID(), method: 'open' });
   const head = snapshot?.repository.head;
   return (
@@ -71,6 +76,22 @@ function App() {
           <Reset />
           <Push />
           <Stashes />
+          <CommandButton
+            command="repository.terminal"
+            disabled={!snapshot}
+            onClick={() => {
+              if (!terminal && snapshot)
+                setTerminal({
+                  id: crypto.randomUUID(),
+                  repoId: snapshot.repository.id,
+                  path: snapshot.repository.path,
+                });
+              setTerminalHidden(false);
+              terminalHandle.current?.focus();
+            }}
+          >
+            Terminal
+          </CommandButton>
           <CommandButton command="repository.open" onClick={open} disabled={!!busy}>
             Open repository
           </CommandButton>
@@ -235,6 +256,17 @@ function App() {
               <WorkingTreePanel key={snapshot.repository.id} />
             </aside>
           </main>
+          {terminal && (
+            <Suspense fallback={<div role="status">Loading terminal…</div>}>
+              <TerminalPanel
+                ref={terminalHandle}
+                session={terminal}
+                hidden={terminalHidden}
+                onHide={() => setTerminalHidden(true)}
+                onClose={() => setTerminal(undefined)}
+              />
+            </Suspense>
+          )}
           <footer>
             <span>
               {snapshot.repository.state === 'clean' ? 'Ready' : snapshot.repository.state}

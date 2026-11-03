@@ -1,5 +1,10 @@
 import { z } from 'zod';
 export const commandCatalog = {
+  'repository.terminal': {
+    label: 'Terminal',
+    category: 'Repository',
+    keywords: 'shell console command line',
+  },
   'app.appearance': {
     label: 'Appearance',
     category: 'Settings',

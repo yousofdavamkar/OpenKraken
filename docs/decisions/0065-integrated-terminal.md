@@ -10,6 +10,8 @@ Typed requests use the existing sender-validated bridge. They never enter the Gi
 
 The native package remains external to the bundle. Packaging includes its runtime dependencies and unpacks the package's native libraries and helper executables alongside the existing authentication helper. Linux source builds require a C++ compiler. Platform-specific runtime acceptance remains necessary.
 
+The xterm panel loads on demand below the graph. Hiding it preserves the session and scrollback; closing a live shell requires confirmation. F6 moves focus to terminal controls, and the toolbar command focuses an existing terminal. Screen-reader support is enabled. Theme subscriptions update the existing terminal without restarting it. A live session participates in the window's existing close/reload confirmation. Application menu and editor behaviors retain their existing paths.
+
 ## References
 
 - [Electron utility processes](https://www.electronjs.org/docs/latest/api/utility-process)
@@ -19,4 +21,4 @@ The native package remains external to the bundle. Packaging includes its runtim
 
 ## Verification
 
-Real Electron acceptance opens a fixture repository, verifies separate Git and terminal utility processes, sends shell input, observes the repository working directory, resizes the native terminal, reads its exit code, and rejects a stale session or unknown repository. Contract tests reject arbitrary paths, shell settings, malformed sessions and oversized input/dimensions. UI, packaging, lifecycle and shell-integration acceptance will be added with their implementation slices.
+Real Electron acceptance opens a fixture repository, verifies separate Git and terminal utility processes, sends shell input, observes the repository working directory, resizes the native terminal, reads its exit code, and rejects a stale session or unknown repository. Contract tests reject arbitrary paths, shell settings, malformed sessions and oversized input/dimensions. UI acceptance covers rendering, retained hidden sessions, F6 and toolbar focus, close/cancel, and utility cleanup. A native window Ctrl+P reaches a raw terminal as byte 16 with the command menu enabled; browser-only keyboard input is insufficient to establish that behavior. Command-menu, appearance and working-editor regressions pass together. Packaging, sustained-output lifecycle and OSC 133 acceptance remain subsequent slices.

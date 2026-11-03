@@ -216,8 +216,8 @@ function createWindow() {
       defaultId: 0,
       cancelId: 0,
       title: 'Unsaved changes',
-      message: 'Discard unsaved changes?',
-      detail: 'Your editor draft has not been saved to disk.',
+      message: 'Discard unsaved changes and close active sessions?',
+      detail: 'Editor drafts may be unsaved, or a terminal session may still be running.',
       noLink: true,
     });
     if (choice === 1) event.preventDefault();
