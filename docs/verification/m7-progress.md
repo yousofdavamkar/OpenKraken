@@ -1,6 +1,6 @@
 # M7 progress — productivity and polish
 
-M7 is in progress as of 2026-11-02 at implementation checkpoint `2e48cb0`. M6 continues to have the gaps recorded in [M6 progress](m6-progress.md); M7 and M8 are not complete. React 19.3.1 and TypeScript 7.0.2 remain pinned.
+M7 is in progress as of 2026-11-02 at implementation checkpoint `4a363c7`. M6 continues to have the gaps recorded in [M6 progress](m6-progress.md); M7 and M8 are not complete. React 19.3.1 and TypeScript 7.0.2 remain pinned.
 
 ## Implemented
 
@@ -16,18 +16,21 @@ M7 is in progress as of 2026-11-02 at implementation checkpoint `2e48cb0`. M6 co
 - Shared tokens recolor application surfaces, Canvas lanes, syntax, and CodeMirror views. System changes update open editors in place, retaining drafts, focus and undo history. Toolbar controls wrap within the window. Custom themes inherit a light/dark base and accept only known tokens with CSS hex values; invalid input or failed writes retain the active theme. Electron receives explicit RGBA values to preserve CSS alpha color channel order.
 - An on-demand xterm panel starts the user's default shell in the opened repository through a dedicated `node-pty` utility process. Main owns the working directory and accepts only session-scoped, bounded input, sizing and acknowledgment messages. Output backpressure pauses the PTY until rendering catches up. Hiding preserves the session; F6 reaches controls; the toolbar restores focus. Closing a live session requires confirmation, and reload/window closure ends the utility. A missing shell reports a recoverable error. Renderer isolation and the existing Git service remain in place.
 - OSC 133 markers show prompt, command-running and reported exit-code state without granting any authority to shell output. Bash 5.1+ receives a bundled rcfile that first sources the user's `.bashrc` and preserves scalar/array prompt hooks, PS0, dynamic PS1, DEBUG traps, `$?` and PIPESTATUS. Older Bash or incompatible prompt settings keep the normal terminal. Other shells can provide their own standard markers; automatic integration for those shells remains open.
+- Worktrees are listed with main/current, branch/detached, commit, dirty-file, lock and missing-folder state. A registered checkout can be opened by a validated ID and inventory revision. Creation supports a new branch, an unused existing local branch or detached HEAD at an explicit commit, with an empty destination chosen through the native folder picker. Shared-repository writes use the existing queue and watcher suppression. Creation keeps the current checkout unchanged; cancellation/errors retain form choices. Newline-containing repository metadata uses an unambiguous fallback read.
 
 - History pages use a typed JSON response format, serialized in main after validation, to avoid copying thousands of nested objects through renderer IPC and the isolated-world bridge. Existing request validation, cancellation, cursor checks, append-only layout and performance budgets remain in place.
 
 ## Verification
 
-The latest OSC 133 increment (`2e48cb0`) passed **all 10 terminal acceptance tests**, **509 unit tests across 67 files**, typechecking, build, full ESLint/Prettier checks, Linux packaging/fuse checks and the packaged native terminal smoke check. The packaged screenshot was visually inspected. No broader desktop suite or performance rerun was performed for this terminal-only increment.
+The latest worktree increment (`4a363c7`) passed **20 targeted desktop tests** covering worktrees, command menus, command preferences and the graph, including all six visual goldens. Paging measured **142.9 ms** and scrolling frame p95 **16.8 ms**. **515 unit tests across 68 files passed on a full rerun**. The first full run had one GitLab stale-file fixture failure (`PROVIDER_REQUEST` instead of `STALE_PROVIDER_MERGE`); its isolated nine-test suite and the subsequent full run passed. This resembles the previously recorded GitLab fixture failure, but its cause remains unconfirmed. No test timeout or performance threshold was relaxed. Typechecking, build, full ESLint/Prettier checks passed, and the worktree dialog screenshot was visually inspected. Packaging and the complete desktop suite were not rerun for this increment.
+
+The preceding OSC 133 increment (`2e48cb0`) passed **all 10 terminal acceptance tests**, **509 unit tests across 67 files**, typechecking, build, full ESLint/Prettier checks, Linux packaging/fuse checks and the packaged native terminal smoke check. The packaged screenshot was visually inspected. No broader desktop suite or performance rerun was performed for that terminal-only increment.
 
 At the preceding full-suite checkpoint (`8c68b88`), **117 desktop tests passed and one opt-in real-repository benchmark was skipped**, exit 0, with Gitea enabled. That run covers command availability, fuzzy search, keyboard remapping, native menus, modal suppression, restart persistence, corrupt-file recovery, serialized IPC, escaped-keymap repair, all six appearance acceptance tests, and the four terminal foundation acceptance tests.
 
 Targeted terminal acceptance passed alongside appearance, native command-menu and working-editor regressions. Four terminal tests cover native shell input and sizing, UI focus and session preservation, missing-shell recovery, bounded output and session cleanup. The existing serialized IPC and escaped-keymap regressions continue to pass in the full run.
 
-`pnpm test`: **509 tests passed across 67 files** on both checkpoints. The latest unit run passed on its first attempt. The earlier theme checkpoint had one GitLab fixture request failure, followed by passing isolated and full reruns; its cause remains unconfirmed. TypeScript project checking, build, full ESLint and repository Prettier checks passed. Linux packaging and fuse verification passed. Packaged ASAR smoke acceptance passed, including renderer isolation, native askpass/editor helpers, the real Linux directory picker, and the packaged terminal.
+`pnpm test`: **509 tests passed across 67 files** on both terminal checkpoints, on their first full attempts. The earlier theme checkpoint had one GitLab fixture request failure, followed by passing isolated and full reruns; its cause remains unconfirmed, as does the latest worktree-run failure described above. TypeScript project checking, build, full ESLint and repository Prettier checks passed. Linux packaging and fuse verification passed at the terminal checkpoints. Packaged ASAR smoke acceptance passed, including renderer isolation, native askpass/editor helpers, the real Linux directory picker, and the packaged terminal.
 
 The full desktop run at `8c68b88` measured:
 
@@ -38,6 +41,12 @@ The full desktop run at `8c68b88` measured:
 | 12,000-row scrolling, frame p95                |  16.8 ms | 60 fps target |
 | 50,000-line comparison opening                 | 346.8 ms |    < 1,000 ms |
 | 10,000-line blame, first screen                | 132.2 ms |      < 300 ms |
+
+### Worktree acceptance
+
+Five native Git tests exercise main/current, locked, missing, dirty, detached, bare and unborn checkouts; Unicode/newline paths; unknown/stale selection refusal; and a registered directory replaced by an unrelated repository. Creation tests check empty destinations, explicit commits, new/existing/detached modes, moved branch tips, duplicate branch checkout refusal, unchanged original HEAD and cancellation. IPC coverage rejects renderer paths, force fields, malformed IDs and symbolic revision expressions. Three Electron tests cover stale-list recovery, explicit opening, creation in all three modes, native picker cancellation and nonempty-folder recovery with retained choices. Existing graph, command-palette and native-menu acceptance passes alongside them.
+
+This proves list/create/open behavior on Linux. It does not prove worktree lock/remove/prune controls, graph WIP rows, other-checkout watching, non-UTF-8 worktree paths or macOS/Windows runtime acceptance.
 
 ### Terminal acceptance
 
@@ -59,7 +68,9 @@ Serializing in preload initially passed at 212, 206 and 203 ms, but a later run 
 
 These are Linux fixture measurements. CPU contention still affects timings, the dedicated real-repository benchmark was not run, and cross-platform performance remains unverified. The earlier diff/blame timing failures and investigations remain in the previous checkpoint logs; this clean full-suite result does not replace broader M8 regression requirements.
 
-Latest terminal integration logs are `/tmp/openkraken-osc-bash-final.log`, `/tmp/openkraken-osc-bash-fallback-build.log` and `/tmp/openkraken-osc-final-{unit,lint,package,smoke}.log`. Red/green evidence for split markers, exported prompt arrays and errexit-compatible fallback remains under `/tmp/openkraken-osc-*.log`.
+Latest worktree logs are `/tmp/openkraken-worktrees-final-{unit,unit-recheck,lint,build,e2e}.log`; the isolated GitLab rerun is `/tmp/openkraken-worktrees-gitlab-recheck.log`. Focused core, UI, newline-path and creation red/green evidence remains under `/tmp/openkraken-worktrees-*.log`. One UI test initially used a label selector containing dropdown option text; selecting the accessible combobox fixed the test without changing application behavior.
+
+Terminal integration logs are `/tmp/openkraken-osc-bash-final.log`, `/tmp/openkraken-osc-bash-fallback-build.log` and `/tmp/openkraken-osc-final-{unit,lint,package,smoke}.log`. Red/green evidence for split markers, exported prompt arrays and errexit-compatible fallback remains under `/tmp/openkraken-osc-*.log`.
 
 Logs for the preceding full-suite checkpoint are `/tmp/openkraken-terminal-final-{unit,typecheck,lint,e2e,package,smoke}.log`. Focused terminal logs remain under `/tmp/openkraken-terminal-*.log`. The prior theme checkpoint is recorded in `/tmp/openkraken-theme-final-{unit,unit-recheck,typecheck,lint,e2e,package,smoke}.log`. Theme-specific logs are `/tmp/openkraken-custom-theme-*.log` and `/tmp/openkraken-appearance-*.log`. Prior paging/settings checkpoint logs remain at `/tmp/openkraken-paging-settings-{unit,lint,package,smoke,full-e2e}.log`. Targeted and diagnostic logs remain under `/tmp/openkraken-serialized-*.log`, `/tmp/openkraken-paging-*.log`, and `/tmp/openkraken-settings-escaped-*.log`. Previous native command logs remain under `/tmp/openkraken-command-{settings,menu,native}-*.log`.
 
@@ -67,7 +78,7 @@ Logs for the preceding full-suite checkpoint are `/tmp/openkraken-terminal-final
 
 - Broader command coverage, including dynamic branch/file domains and contextual commands. Native accelerators are implemented; this is not an Atom selector keymap interpreter. Other older preferences (for example graph view settings) still need consolidation into the main settings store.
 - Automatic shell integration for zsh, fish and PowerShell, plus terminal runtime acceptance on macOS/Windows. Standard OSC 133 consumption and automatic Bash 5.1+ integration are implemented. The initial terminal supports one session; broader terminal workflows remain future work.
-- Worktree/submodule UI and LFS awareness.
+- Worktree lock/unlock, safe removal and prune review; graph worktree WIP rows and other-checkout watch integration. List/create/open are implemented for UTF-8 paths; non-UTF-8 worktree paths and cross-platform runtime acceptance remain open. Submodule UI and LFS awareness remain open.
 - Onboarding, activity log, toasts, a complete accessibility pass, and i18n scaffolding.
 - Optional git-flow and consent-gated BYO-key AI remain optional, not implemented.
 
@@ -83,3 +94,4 @@ Cross-platform keyboard execution and packaging remain unverified on macOS/Windo
 - [0064 — Application appearance](../decisions/0064-application-appearance.md)
 - [0065 — Integrated terminal](../decisions/0065-integrated-terminal.md)
 - [0066 — Terminal shell integration](../decisions/0066-terminal-shell-integration.md)
+- [0067 — Worktree management](../decisions/0067-worktree-management.md)
