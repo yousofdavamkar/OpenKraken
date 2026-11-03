@@ -22,6 +22,8 @@ let completed = false;
 let launchOutput = '';
 const marker = join(root, 'started.json');
 const failStartup = process.argv.includes('--failed-startup');
+const helperUnavailable = process.argv.includes('--helper-unavailable');
+assert.ok(!(failStartup && helperUnavailable), 'Select one failure scenario');
 const failedMarker = join(root, 'failed-startup');
 async function waitForFile(path, timeout = 30000) {
   const deadline = Date.now() + timeout;
@@ -87,6 +89,12 @@ try {
     // Production has no TLS bypass, test key or runtime test switch.
     const banner = `
       const fixtureElectron = require('electron');
+      if (${helperUnavailable}) {
+        const fixtureChildProcess = require('node:child_process');
+        const fixtureSpawn = fixtureChildProcess.spawn;
+        fixtureChildProcess.spawn = (file, ...args) => fixtureSpawn(
+          require('node:path').basename(file) === 'restart-helper' ? file + '.missing' : file, ...args);
+      }
       const fixtureBootsPath = ${JSON.stringify(join(root, 'boot.json'))};
       const fixtureBoots = require('node:fs').existsSync(fixtureBootsPath) ? JSON.parse(require('node:fs').readFileSync(fixtureBootsPath, 'utf8')) : [];
       fixtureBoots.push(${JSON.stringify(version)});
@@ -105,9 +113,15 @@ try {
       fixtureElectron.dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
       fixtureElectron.dialog.showMessageBoxSync = () => 0;
       fixtureElectron.dialog.showErrorBox = (title) => require('node:fs').writeFileSync(${JSON.stringify(join(root, 'install-error'))}, title);
+      let fixtureCancelBeforeQuit = ${!helperUnavailable && version === '0.1.0'} && !fixtureReturning;
       const fixtureHandle = fixtureElectron.ipcMain.handle.bind(fixtureElectron.ipcMain);
       fixtureElectron.ipcMain.handle = (channel, listener) => fixtureHandle(channel, async (...args) => {
-        const result = await listener(...args);
+        let result = await listener(...args);
+        if (fixtureCancelBeforeQuit && args[1]?.method === 'updatesInstall' && result.state?.phase === 'restart-ready') {
+          fixtureCancelBeforeQuit = false;
+          // Deliver cancellation in the microtask before the queued quit can run.
+          result = await listener(args[0], { id: require('node:crypto').randomUUID(), method: 'updatesCancel' }, ...args.slice(2));
+        }
         if ((${!failStartup && version === '0.2.0'} || fixtureReturning) && args[1]?.method === 'updatesStarted') {
           require('node:fs').writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ version: fixtureElectron.app.getVersion(), pid: process.pid, state: result }));
           if (!fixtureReturning) setTimeout(() => fixtureElectron.app.quit(), 100);
@@ -236,81 +250,136 @@ try {
   await expect(
     dialog.getByRole('button', { name: 'Install and restart', exact: true }),
   ).toBeVisible({ timeout: 30000 });
-  const first = await page.evaluate(() =>
+  let first = await page.evaluate(() =>
     window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesRead' }),
   );
   assert.ok(first.state.installId);
-  await page.evaluate(() => {
-    const prevent = (event) => {
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    Reflect.set(window, 'fixtureUnload', prevent);
-    window.addEventListener('beforeunload', prevent);
-  });
-  await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
-  await expect
-    .poll(
-      async () => {
-        const state = await page.evaluate(() =>
-          window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesRead' }),
-        );
-        return (
-          state.state.phase === 'verified' &&
-          !!state.state.installId &&
-          state.state.installId !== first.state.installId
-        );
-      },
+  if (helperUnavailable) {
+    await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
+    await expect(dialog.getByRole('alert')).toHaveText(
+      'The update could not be prepared for restart.',
       { timeout: 30000 },
-    )
-    .toBe(true);
-  await expect(
-    dialog.getByRole('button', { name: 'Install and restart', exact: true }),
-  ).toBeVisible({ timeout: 30000 });
-  assert.equal(await sha256(target), originalDigest);
-  await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
-  console.log('Cancelled restart preserved the original AppImage and removed staging.');
-  await page.evaluate(() =>
-    window.removeEventListener('beforeunload', Reflect.get(window, 'fixtureUnload')),
-  );
-  await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
-  const started = JSON.parse(await waitForFile(marker));
-  assert.equal(started.version, failStartup ? '0.1.0' : '0.2.0');
-  assert.equal(started.state.kind, 'updates');
-  assert.equal(started.state.state.error, null);
-  assert.equal(await sha256(target), failStartup ? originalDigest : await sha256(artifact));
-  assert.deepEqual(
-    JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')),
-    failStartup ? ['0.1.0', '0.2.0', '0.1.0'] : ['0.1.0', '0.2.0'],
-  );
-  assert.equal(
-    JSON.parse(await readFile(join(profile, 'updates/trusted-release.json'), 'utf8')).sequence,
-    1,
-  );
-  await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
-  if (failStartup) {
-    assert.equal(started.state.state.recovery, 'restored');
-    await browser.close().catch(() => {});
-    const port = (await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0];
-    assert.match(port, /^\d+$/);
-    browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
-    const restoredPage = browser.contexts()[0].pages()[0];
-    await restoredPage.getByRole('button', { name: 'Updates', exact: true }).click();
-    const restoredDialog = restoredPage.getByRole('dialog', { name: 'App updates' });
-    await expect(restoredDialog.getByRole('alert')).toHaveText(
-      'An update failed to start and the previous version was restored.',
     );
-    await restoredPage.screenshot({ path: 'test-results/appimage-recovery-notice.png' });
-    await restoredDialog.getByRole('button', { name: 'Dismiss recovery notice' }).click();
-    await expect(restoredDialog.getByRole('alert')).toHaveCount(0);
-    await assert.rejects(stat(join(profile, 'updates/rollback-notice.json')), { code: 'ENOENT' });
+    const current = await page.evaluate(() =>
+      window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesRead' }),
+    );
+    assert.equal(current.state.phase, 'verified');
+    await assert.rejects(stat(join(root, 'install-error')), { code: 'ENOENT' });
+    assert.ok(current.state.installId && current.state.installId !== first.state.installId);
+    assert.equal(await sha256(target), originalDigest);
+    await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
+    assert.deepEqual(JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')), ['0.1.0']);
+    // A second install reaches preparation again instead of retaining the admission lock.
+    const retried = await page.evaluate(
+      (installId) =>
+        window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesInstall', installId }),
+      current.state.installId,
+    );
+    assert.equal(retried.code, 'UPDATE_INSTALL');
+    assert.equal(await sha256(target), originalDigest);
+    await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
+    await expect(page.getByRole('button', { name: 'Updates', exact: true })).toBeVisible();
+    console.log(
+      'Packaged AppImage: unavailable restart helper preserved the open application and original image, discarded staging and released installation admission.',
+    );
+  } else {
+    const cancelledBeforeQuit = await page.evaluate(
+      (installId) =>
+        window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesInstall', installId }),
+      first.state.installId,
+    );
+    assert.equal(cancelledBeforeQuit.state.phase, 'verified');
+    assert.notEqual(cancelledBeforeQuit.state.installId, first.state.installId);
+    await delay(100);
+    const admitted = await page.evaluate(() =>
+      window.openkraken.request({ id: crypto.randomUUID(), method: 'diagnosticsRead' }),
+    );
+    assert.equal(admitted.kind, 'diagnostics');
+    assert.equal(await sha256(target), originalDigest);
+    await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
+    first = cancelledBeforeQuit;
+    console.log(
+      'Cancellation before queued quit preserved the open app and released installation admission.',
+    );
+    // The first cancellation was injected through IPC. Reopen so the UI reads
+    // its fresh installation identity without depending on the polling interval.
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.getByRole('button', { name: 'Updates', exact: true }).click();
+    await expect(
+      dialog.getByRole('button', { name: 'Install and restart', exact: true }),
+    ).toBeEnabled();
+    await page.evaluate(() => {
+      const prevent = (event) => {
+        event.preventDefault();
+        event.returnValue = '';
+      };
+      Reflect.set(window, 'fixtureUnload', prevent);
+      window.addEventListener('beforeunload', prevent);
+    });
+    await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
+    await expect
+      .poll(
+        async () => {
+          const state = await page.evaluate(() =>
+            window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesRead' }),
+          );
+          return (
+            state.state.phase === 'verified' &&
+            !!state.state.installId &&
+            state.state.installId !== first.state.installId
+          );
+        },
+        { timeout: 30000 },
+      )
+      .toBe(true);
+    await expect(
+      dialog.getByRole('button', { name: 'Install and restart', exact: true }),
+    ).toBeVisible({ timeout: 30000 });
+    assert.equal(await sha256(target), originalDigest);
+    await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
+    console.log('Cancelled restart preserved the original AppImage and removed staging.');
+    await page.evaluate(() =>
+      window.removeEventListener('beforeunload', Reflect.get(window, 'fixtureUnload')),
+    );
+    await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
+    const started = JSON.parse(await waitForFile(marker));
+    assert.equal(started.version, failStartup ? '0.1.0' : '0.2.0');
+    assert.equal(started.state.kind, 'updates');
+    assert.equal(started.state.state.error, null);
+    assert.equal(await sha256(target), failStartup ? originalDigest : await sha256(artifact));
+    assert.deepEqual(
+      JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')),
+      failStartup ? ['0.1.0', '0.2.0', '0.1.0'] : ['0.1.0', '0.2.0'],
+    );
+    assert.equal(
+      JSON.parse(await readFile(join(profile, 'updates/trusted-release.json'), 'utf8')).sequence,
+      1,
+    );
+    await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
+    if (failStartup) {
+      assert.equal(started.state.state.recovery, 'restored');
+      await browser.close().catch(() => {});
+      const port = (await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0];
+      assert.match(port, /^\d+$/);
+      browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+      const restoredPage = browser.contexts()[0].pages()[0];
+      await restoredPage.getByRole('button', { name: 'Updates', exact: true }).click();
+      const restoredDialog = restoredPage.getByRole('dialog', { name: 'App updates' });
+      await expect(restoredDialog.getByRole('alert')).toHaveText(
+        'An update failed to start and the previous version was restored.',
+      );
+      await restoredPage.screenshot({ path: 'test-results/appimage-recovery-notice.png' });
+      await restoredDialog.getByRole('button', { name: 'Dismiss recovery notice' }).click();
+      await expect(restoredDialog.getByRole('alert')).toHaveCount(0);
+      await assert.rejects(stat(join(profile, 'updates/rollback-notice.json')), { code: 'ENOENT' });
+    }
+    await delay(500);
+    console.log(
+      failStartup
+        ? 'Packaged AppImage: failed replacement startup restored and launched the exact predecessor; startup cleanup and release watermark retention passed.'
+        : 'Packaged AppImage: signed HTTPS download, cancelled unsaved-work restart, accepted install, new-version launch and recovery acknowledgement passed.',
+    );
   }
-  await delay(500);
-  console.log(
-    failStartup
-      ? 'Packaged AppImage: failed replacement startup restored and launched the exact predecessor; startup cleanup and release watermark retention passed.'
-      : 'Packaged AppImage: signed HTTPS download, cancelled unsaved-work restart, accepted install, new-version launch and recovery acknowledgement passed.',
-  );
   completed = true;
 } catch (error) {
   console.error('Fixture launch diagnostics:', launchOutput);

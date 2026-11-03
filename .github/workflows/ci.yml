@@ -56,12 +56,14 @@ jobs:
           node scripts/check-installer-guards.mjs release/installers/linux-x64/test/AppImage/manifest.json
           node scripts/verify-appimage-update.mjs
       - if: runner.os == 'Linux'
-        name: Signed AppImage download, cancelled restart and new-version acknowledgement
+        name: AppImage preflight, cancellation, restart and startup recovery
         run: |
           xvfb-run -a node scripts/verify-update-restart.mjs
           xvfb-run -a node scripts/verify-update-restart.mjs --failed-startup
+          xvfb-run -a node scripts/verify-update-restart.mjs --helper-unavailable
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --failed-startup
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --helper-unavailable
       - if: runner.os == 'Linux'
         name: Verify extracted installer payloads and desktop behavior
         env:
