@@ -9,6 +9,7 @@ import {
   RepositoryService,
   RepositoryWatcher,
   AskpassBroker,
+  redactGitMessage,
 } from '@openkraken/git-core';
 const parent = process.parentPort;
 if (!parent) throw new Error('Git service requires a parent port');
@@ -667,7 +668,7 @@ parent.on('message', (event) => {
           type: 'transportProblem',
           id: request.id,
           code: error.code,
-          message: error.message.slice(0, 8192),
+          message: redactGitMessage(error.message).slice(0, 8192),
         });
       const result: Result =
         error instanceof GitError && error.code === 'CANCELLED'
@@ -682,9 +683,7 @@ parent.on('message', (event) => {
                       error,
                       request.method === 'providerGit' ? request.operation.method : 'clone',
                     )
-                  : error instanceof Error
-                    ? error.message
-                    : String(error),
+                  : redactGitMessage(error instanceof Error ? error.message : String(error)),
             };
       parent.postMessage({ id: request.id, result });
     })

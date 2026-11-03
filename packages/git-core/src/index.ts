@@ -8,3 +8,4 @@ export * from './history.js';
 export * from './watcher.js';
 
 export * from './askpass.js';
+export { redactGitMessage } from './progress.js';
