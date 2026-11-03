@@ -110,6 +110,7 @@ test
     'unknown-file',
     'confirmed',
     'live-descendant',
+    'delayed-descendant',
     'unconfirmed-running',
   ])(
   'native restart recovery: %s',
@@ -129,8 +130,8 @@ test
           ? '#!/bin/sh\nprintf changed > "$0"\nexit 9\n'
           : scenario === 'confirmed'
             ? '#!/bin/sh\nrm "$0.openkraken-update/previous.AppImage" "$0.openkraken-update/transaction.json"\nrmdir "$0.openkraken-update"\nexit 0\n'
-            : scenario === 'live-descendant'
-              ? '#!/bin/sh\nsleep 3 &\nprintf "%s" "$!" > "$0.child"\nexit 9\n'
+            : ['live-descendant', 'delayed-descendant'].includes(scenario)
+              ? `#!/bin/sh\nsleep ${scenario === 'live-descendant' ? 62 : 3} &\nprintf "%s" "$!" > "$0.child"\nexit 9\n`
               : scenario === 'unconfirmed-running'
                 ? '#!/bin/sh\nprintf "%s" "$$" > "$0.child"\nexec sleep 62\n'
                 : '#!/bin/sh\nexit 9\n';
@@ -153,6 +154,7 @@ test
     if (scenario === 'changed-backup') await writeFile(recovery + '/previous.AppImage', 'changed');
     if (scenario === 'changed-journal') await writeFile(recovery + '/transaction.json', '{}');
     if (scenario === 'unknown-file') await writeFile(recovery + '/unexpected', 'preserve');
+    const supervisionStarted = performance.now();
     const parent = spawn(
       process.execPath,
       [
@@ -183,10 +185,12 @@ test
       expect(helperPid).toBeGreaterThan(1);
       await expect
         .poll(() => stopped(helperPid), {
-          timeout: scenario === 'unconfirmed-running' ? 65000 : 5000,
+          timeout: ['unconfirmed-running', 'live-descendant'].includes(scenario) ? 65000 : 5000,
         })
         .toBe(true);
-      if (scenario === 'exited' || scenario === 'not-executable') {
+      if (['unconfirmed-running', 'live-descendant'].includes(scenario))
+        expect(performance.now() - supervisionStarted).toBeGreaterThanOrEqual(59000);
+      if (['exited', 'not-executable', 'delayed-descendant'].includes(scenario)) {
         await expect
           .poll(() => readFile(target + '.restored', 'utf8'))
           .toBe(`--user-data-dir=${root}`);
@@ -202,13 +206,13 @@ test
         );
         if (scenario === 'unknown-file')
           expect(await readFile(recovery + '/unexpected', 'utf8')).toBe('preserve');
-        if (scenario === 'unconfirmed-running')
+        if (['unconfirmed-running', 'live-descendant'].includes(scenario))
           expect(await stopped(Number(await readFile(target + '.child', 'utf8')))).toBe(false);
       }
     } finally {
       parent.kill('SIGKILL');
       await exited;
-      if (['live-descendant', 'unconfirmed-running'].includes(scenario)) {
+      if (['live-descendant', 'delayed-descendant', 'unconfirmed-running'].includes(scenario)) {
         const childPid = Number(await readFile(target + '.child', 'utf8'));
         await expect.poll(() => stopped(childPid), { timeout: 70000 }).toBe(true);
       }

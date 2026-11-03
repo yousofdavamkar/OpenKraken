@@ -61,8 +61,10 @@ func runRelaunch(args []string) int {
 	if commandToRun.Start() != nil {
 		return restoreFailedRestart(args[1], args[2], args[3], size, args[5], previousSize, args[7])
 	}
-	exited := make(chan struct{})
-	go func() { _ = commandToRun.Wait(); close(exited) }()
+	finished := make(chan struct{})
+	var exited <-chan struct{} = finished
+	go func() { _ = commandToRun.Wait(); close(finished) }()
+	launcherExited := false
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	timeout := time.NewTimer(60 * time.Second)
@@ -70,26 +72,20 @@ func runRelaunch(args []string) int {
 	for {
 		select {
 		case <-ticker.C:
-			if restartConfirmed(args[1]) {
-				return 0
-			}
 		case <-timeout.C:
 			// A running, unconfirmed application is not safe to replace.
 			return 125
 		case <-exited:
-			if restartConfirmed(args[1]) {
-				return 0
-			}
-			until := time.Now().Add(2 * time.Second)
-			for !restartGroupIdle() {
-				if restartConfirmed(args[1]) {
-					return 0
-				}
-				if time.Now().After(until) {
-					return 125
-				}
-				time.Sleep(25 * time.Millisecond)
-			}
+			launcherExited = true
+			exited = nil
+		}
+		if restartConfirmed(args[1]) {
+			return 0
+		}
+		// A launcher can exit before its ordinary descendants. Keep the group
+		// identity reserved for the existing supervision window; restore only
+		// after the group is idle, without terminating a running application.
+		if launcherExited && restartGroupIdle() {
 			return restoreFailedRestart(args[1], args[2], args[3], size, args[5], previousSize, args[7])
 		}
 	}
