@@ -95,9 +95,9 @@ test('reviewed merge and mainline revert update native history', async () => {
       .getByRole('spinbutton', { name: 'Mainline parent (merge commits only)' })
       .fill('1');
     await dialog.getByRole('button', { name: 'Start revert', exact: true }).click();
-    await expect
-      .poll(async () => ((await dialog.count()) ? await dialog.innerText() : 'closed'))
-      .toBe('closed');
+    // The dialog can disappear between count() and innerText(); keep absence
+    // checking inside Playwright's retrying locator assertion.
+    await expect(dialog).toHaveCount(0);
     expect(fixtureGit(path, ['rev-parse', 'HEAD^{tree}'])).toBe(
       fixtureGit(path, ['rev-parse', `${parents[1]}^{tree}`]),
     );
