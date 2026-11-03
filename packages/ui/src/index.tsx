@@ -15,7 +15,7 @@ import { reportRendererFailure } from './report-failure.js';
 import { RepositorySync } from './repository-sync.js';
 import { WorkingTreePanel } from './working-tree.js';
 import { History } from './history.js';
-import { NewReferences, ReferenceActions } from './references.js';
+import { NewReferences } from './references.js';
 import { GitProgress } from './git-progress.js';
 import { Clone } from './clone.js';
 import { Issues } from './issues.js';
@@ -34,8 +34,8 @@ import { InteractiveRebaseControl } from './interactive-rebase.js';
 import { CommitFilesPanel } from './commit-files.js';
 import { Pull } from './pull.js';
 import { ManageRemotes } from './remotes.js';
-import { ReferenceDropActions, referenceDragProps } from './reference-drop.js';
-import { RefControls } from './ref-controls.js';
+import { ReferenceDropActions } from './reference-drop.js';
+import { ReferenceSidebar } from './reference-sidebar.js';
 import { useRepository } from './store.js';
 import './style.css';
 function App() {
@@ -55,7 +55,6 @@ function App() {
     error,
     run,
     cancel,
-    setView,
   } = useRepository();
   const busy = syncing ? undefined : active;
   const [init, setInit] = useState(false);
@@ -184,67 +183,7 @@ function App() {
           </div>
           <RepositorySync />
           <main>
-            <aside className="refs">
-              <h2>
-                References <span>{snapshot.refs.length}</span>
-              </h2>
-              {(snapshot.view.hiddenRefs.length > 0 ||
-                snapshot.view.soloRef ||
-                snapshot.view.pinnedRef) && (
-                <div className="view-summary" aria-label="Active graph view">
-                  {snapshot.view.hiddenRefs.length > 0 && (
-                    <p>{snapshot.view.hiddenRefs.length} hidden refs</p>
-                  )}
-                  {snapshot.view.soloRef && <p>Solo: {snapshot.view.soloRef}</p>}
-                  {snapshot.view.pinnedRef && <p>Pinned: {snapshot.view.pinnedRef}</p>}
-                  <button disabled={!!busy} onClick={() => void setView({ hiddenRefs: [] })}>
-                    Reset graph view
-                  </button>
-                </div>
-              )}
-              {(['local', 'remote', 'tag', 'stash', 'other'] as const).map((kind) => {
-                const refs = snapshot.refs.filter((r) => r.kind === kind);
-                return refs.length ? (
-                  <section key={kind}>
-                    <h3>
-                      {
-                        {
-                          local: 'Branches',
-                          remote: 'Remotes',
-                          tag: 'Tags',
-                          stash: 'Stashes',
-                          other: 'Other refs',
-                        }[kind]
-                      }
-                    </h3>
-                    {refs.map((ref) => (
-                      <div
-                        className={`ref ${ref.isHead ? 'current' : ''} ${snapshot.view.hiddenRefs.includes(ref.name) ? 'hidden-ref' : ''}`}
-                        key={ref.name}
-                        {...referenceDragProps(ref, snapshot.repository.id, !!busy)}
-                        title={`${ref.name}\n${ref.target}`}
-                      >
-                        <div className="ref-label">
-                          <span>
-                            {ref.isHead ? '● ' : ''}
-                            {ref.shortName}
-                          </span>
-                          {ref.upstream && (
-                            <small>
-                              {ref.upstream.gone
-                                ? 'gone'
-                                : `↑${ref.upstream.ahead} ↓${ref.upstream.behind}`}
-                            </small>
-                          )}
-                        </div>
-                        <RefControls reference={ref} />
-                        <ReferenceActions reference={ref} />
-                      </div>
-                    ))}
-                  </section>
-                ) : null;
-              })}
-            </aside>
+            <ReferenceSidebar />
             <section className="history">
               <div className="panel-title">
                 <h2>History</h2>
