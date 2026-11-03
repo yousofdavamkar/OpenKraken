@@ -35,12 +35,15 @@ export function RepositorySync() {
         schedule();
         return;
       }
-      const full = [...domains].some((domain) => domain !== 'status');
+      const full = [...domains].some(
+        (domain) => domain !== 'status' && domain !== 'worktreeStatus',
+      );
+      const updateWorktrees = domains.has('worktreeStatus');
       domains.clear();
       running = true;
       try {
         if (full) await state.run({ id: crypto.randomUUID(), method: 'refresh', repoId }, true);
-        else await state.refreshStatus();
+        else await state.refreshStatus(true, updateWorktrees);
       } finally {
         running = false;
         if (domains.size) schedule();

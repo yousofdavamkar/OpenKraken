@@ -27,7 +27,7 @@ interface State {
   snapshot?: Snapshot;
   workingState?: WorkingState;
   watcherMode?: 'native' | 'polling';
-  refreshStatus: (background?: boolean) => Promise<void>;
+  refreshStatus: (background?: boolean, updateWorktrees?: boolean) => Promise<void>;
   rows: DisplayCommit[];
   layout: GraphRow[];
   passages: GraphPassage[];
@@ -62,7 +62,7 @@ export const useRepository = create<State>()(
     query: '',
     searchTruncated: false,
     selection: { selected: [] },
-    refreshStatus: async (background = true) => {
+    refreshStatus: async (background = true, updateWorktrees = false) => {
       const previous = get(),
         snapshot = previous.snapshot;
       if (!snapshot || previous.busy || previous.paging) return;
@@ -73,25 +73,43 @@ export const useRepository = create<State>()(
       });
       let fullRefresh = false;
       try {
-        const result = await window.openkraken.request({
-          id,
-          method: 'workingState',
-          repoId: snapshot.repository.id,
-        });
+        const [result, worktreeResult] = await Promise.all([
+          window.openkraken.request({
+            id,
+            method: 'workingState',
+            repoId: snapshot.repository.id,
+          }),
+          updateWorktrees
+            ? window.openkraken.request({
+                id: crypto.randomUUID(),
+                method: 'worktrees',
+                repoId: snapshot.repository.id,
+              })
+            : undefined,
+        ]);
         if (get().busy !== id || get().snapshot?.cursor !== snapshot.cursor) return;
         if (result.kind === 'error') throw new Error(result.message);
+        if (worktreeResult?.kind === 'error') throw new Error(worktreeResult.message);
         if (result.kind !== 'workingState') return;
-        if (JSON.stringify(snapshot.repository.head) !== JSON.stringify(result.state.head)) {
+        const worktrees =
+          worktreeResult?.kind === 'worktrees' ? worktreeResult.state : snapshot.worktrees;
+        if (
+          JSON.stringify(snapshot.repository.head) !== JSON.stringify(result.state.head) ||
+          worktrees?.revision !== snapshot.worktrees?.revision
+        ) {
           fullRefresh = true;
           return;
         }
-        if (JSON.stringify(snapshot.status) === JSON.stringify(result.state.status)) {
+        if (
+          JSON.stringify(snapshot.status) === JSON.stringify(result.state.status) &&
+          JSON.stringify(snapshot.worktrees) === JSON.stringify(worktrees)
+        ) {
           set((s) => {
             s.workingState = result.state;
           });
           return;
         }
-        const next = { ...snapshot, status: result.state.status };
+        const next = { ...snapshot, status: result.state.status, worktrees };
         const rows = projectCommits(next.commits, next, true);
         const layout = await graph().request({
           method: 'refresh',
@@ -121,6 +139,8 @@ export const useRepository = create<State>()(
           s.snapshot = next;
           s.workingState = result.state;
           s.rows = rows;
+          if (s.detail && 'kind' in s.detail && s.detail.kind !== 'commit')
+            s.detail = rows.find((row) => row.oid === s.detail?.oid);
           s.layout = nextLayout;
           s.passages = passages;
           s.maxColumns = layout.maxColumns;

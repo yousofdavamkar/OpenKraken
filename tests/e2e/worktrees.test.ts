@@ -4,6 +4,74 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createFixture, fixtureGit } from '../../packages/test-fixtures/src/index.js';
 
+test('external worktree edits refresh graph status while preserving loaded pages and selection', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-worktree-watch-ui-'));
+  const path = createFixture(join(root, 'source'), 'linear', 2200);
+  const linked = join(root, 'live-checkout');
+  fixtureGit(path, ['worktree', 'add', '-b', 'live-topic', linked]);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, path);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByLabel('Refresh on focus', { exact: true }).uncheck();
+    await expect(page.getByText('Watching for changes', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Load more commits', exact: true }).click();
+    await expect(page.getByTestId('commit-count')).toHaveText('2,200 commits');
+    const grid = page.getByRole('grid');
+    const row = grid.getByRole('row').filter({ hasText: linked });
+    await row.click();
+    await expect(row).toContainText('Clean');
+    await grid.press('Enter');
+    const details = page.getByRole('region', { name: 'Commit details' });
+    await expect(details).toContainText('Clean');
+    const before = await grid
+      .getByRole('row')
+      .evaluateAll((rows) =>
+        rows
+          .slice(0, 10)
+          .map((row) => [
+            row.getAttribute('data-oid'),
+            row.getAttribute('data-column'),
+            row.getAttribute('style'),
+          ]),
+      );
+    writeFileSync(join(linked, 'draft.txt'), 'external checkout edit');
+    await expect(row).toContainText('1 uncommitted change', { timeout: 1500 });
+    await expect(details).toContainText('1 uncommitted change');
+    await expect(page.getByTestId('commit-count')).toHaveText('2,200 commits');
+    await expect(row).toHaveAttribute('aria-selected', 'true');
+    expect(
+      await grid
+        .getByRole('row')
+        .evaluateAll((rows) =>
+          rows
+            .slice(0, 10)
+            .map((row) => [
+              row.getAttribute('data-oid'),
+              row.getAttribute('data-column'),
+              row.getAttribute('style'),
+            ]),
+        ),
+    ).toEqual(before);
+    rmSync(join(linked, 'draft.txt'));
+    await expect(row).toContainText('Clean', { timeout: 1500 });
+    await expect(page.getByTestId('commit-count')).toHaveText('2,200 commits');
+    fixtureGit(linked, ['commit', '--allow-empty', '-m', 'Other checkout advanced']);
+    await expect(grid.getByRole('row').filter({ hasText: 'Other checkout advanced' })).toBeVisible({
+      timeout: 1500,
+    });
+    await expect(page.getByRole('heading', { name: 'source', exact: true })).toBeVisible();
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('worktree rows arrive with their parent page without moving prior graph lanes', async () => {
   const root = mkdtempSync(join(tmpdir(), 'openkraken-worktree-page-ui-'));
   const path = createFixture(join(root, 'source'), 'linear', 2200);
