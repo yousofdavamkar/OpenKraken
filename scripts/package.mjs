@@ -1,6 +1,6 @@
 import { packager } from '@electron/packager';
 import { flipFuses, FuseVersion } from '@electron/fuses';
-import { packageFuses, verifyFuses } from './package-security.mjs';
+import { packageFuses, payloadManifest, verifyFuses } from './package-security.mjs';
 import { buildLinuxNative } from './linux-native.mjs';
 import { cp, mkdir, readFile, writeFile, rm, lstat, readdir, chmod } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -57,5 +57,6 @@ for (const output of outputs) {
     ...packageFuses,
   });
   await verifyFuses(binary);
+  if (process.platform === 'win32') await payloadManifest(output);
   console.log(`Packaged and verified fuses: ${output}`);
 }
