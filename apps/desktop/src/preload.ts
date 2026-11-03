@@ -7,8 +7,14 @@ import {
   requestSchema,
   cancelSchema,
 } from '@openkraken/ipc-contract';
-import type { DesktopApi, Result } from '@openkraken/ipc-contract';
+import type { DesktopApi, Request, Result } from '@openkraken/ipc-contract';
 // Main validates utility responses before IPC; do not deep-clone large pages again here.
+async function request(input: Request, format: 'json'): Promise<string>;
+async function request(input: Request): Promise<Result>;
+async function request(input: Request, format?: 'json'): Promise<Result | string> {
+  if (format !== undefined && format !== 'json') throw new Error('Invalid response format');
+  return ipcRenderer.invoke(CHANNEL, requestSchema.parse(input), format);
+}
 const api: DesktopApi = {
   subscribe: (listener) => {
     const handler = (_event: unknown, data: unknown) => {
@@ -18,8 +24,7 @@ const api: DesktopApi = {
     ipcRenderer.on(EVENT_CHANNEL, handler);
     return () => ipcRenderer.removeListener(EVENT_CHANNEL, handler);
   },
-  request: async (request) =>
-    (await ipcRenderer.invoke(CHANNEL, requestSchema.parse(request))) as Result,
+  request,
   cancel: async (id) => {
     await ipcRenderer.invoke(CANCEL_CHANNEL, cancelSchema.parse({ id }));
   },

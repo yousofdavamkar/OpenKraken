@@ -219,8 +219,7 @@ else {
         cancel: !details.url.startsWith(pathToFileURL(join(__dirname, 'renderer') + '/').href),
       });
     });
-    ipcMain.handle(CHANNEL, async (event, raw): Promise<Result> => {
-      validateSender(event);
+    const handleRequest = async (raw: unknown): Promise<Result> => {
       const request = requestSchema.parse(raw);
       if (inFlight.has(request.id))
         return { kind: 'error', code: 'DUPLICATE_REQUEST', message: 'Request is already running' };
@@ -961,6 +960,13 @@ else {
         inFlight.delete(request.id);
         cancelled.delete(request.id);
       }
+    };
+    ipcMain.handle(CHANNEL, async (event, raw, format: unknown): Promise<Result | string> => {
+      validateSender(event);
+      if (format !== undefined && format !== 'json') throw new Error('Invalid response format');
+      const result = await handleRequest(raw);
+      // Serialize after validation and before both renderer IPC and isolated-world copying.
+      return format === 'json' ? JSON.stringify(result) : result;
     });
     ipcMain.handle(CANCEL_CHANNEL, (event, raw) => {
       validateSender(event);

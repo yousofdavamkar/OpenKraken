@@ -57,7 +57,15 @@ const request = vi.fn<(request: unknown) => Promise<Result>>();
 beforeEach(() => {
   useRepository.setState(useRepository.getInitialState(), true);
   request.mockReset();
-  vi.stubGlobal('window', { openkraken: { request, cancel: vi.fn(async () => {}) } });
+  vi.stubGlobal('window', {
+    openkraken: {
+      request: async (input: unknown, format?: 'json') => {
+        const result = await request(input);
+        return format === 'json' ? JSON.stringify(result) : result;
+      },
+      cancel: vi.fn(async () => {}),
+    },
+  });
 });
 afterEach(() => vi.unstubAllGlobals());
 async function open(snapshot: Snapshot) {

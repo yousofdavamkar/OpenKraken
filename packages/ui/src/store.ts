@@ -6,6 +6,7 @@ import type {
   DesktopApi,
   GraphView,
   Request,
+  Result,
   Snapshot,
   WorkingState,
 } from '@openkraken/ipc-contract';
@@ -288,14 +289,12 @@ export const useRepository = create<State>()(
       });
       performance.mark('history-page-start');
       try {
-        const result = await window.openkraken.request({
-          id,
-          method: 'page',
-          repoId: snapshot.repository.id,
-          cursor,
-          offset,
-          count,
-        });
+        const result: Result = JSON.parse(
+          await window.openkraken.request(
+            { id, method: 'page', repoId: snapshot.repository.id, cursor, offset, count },
+            'json',
+          ),
+        );
         performance.mark('history-page-response');
         if (get().snapshot?.cursor !== cursor || get().busy) return;
         if (result.kind === 'error') throw new Error(result.message);

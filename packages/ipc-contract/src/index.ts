@@ -2031,6 +2031,8 @@ export type Request = z.infer<typeof requestSchema>;
 export type ServiceRequest = z.infer<typeof serviceRequestSchema>;
 export type Result = z.infer<typeof resultSchema>;
 export interface DesktopApi {
+  /** Main-validated result as JSON, avoiding nested object copies across contextBridge. */
+  request(request: Request, format: 'json'): Promise<string>;
   request(request: Request): Promise<Result>;
   cancel(id: string): Promise<void>;
   subscribe(listener: (event: DesktopEvent) => void): () => void;
