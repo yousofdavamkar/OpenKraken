@@ -61,6 +61,7 @@ export class Updates {
   private schedulingReady = false;
   private checkingAutomatically = false;
   private recoveryNotice: string | null = null;
+  private abandonment: Promise<UpdateState> | null = null;
   constructor(
     private directory: string,
     configuration: unknown,
@@ -382,7 +383,8 @@ export class Updates {
     timeout: number,
     action: (signal: AbortSignal) => Promise<void>,
   ): Promise<UpdateState> {
-    if (this.work || this.closed || !this.config || this.installation) return this.read();
+    if (this.work || this.closed || !this.config || this.installation || this.abandonment)
+      return this.read();
     const controller = new AbortController();
     this.controller = controller;
     this.state.phase = phase;
@@ -433,7 +435,8 @@ export class Updates {
     return response;
   }
   check(automatic = false): Promise<UpdateState> {
-    if (this.work || this.closed || !this.config || this.installation) return this.read();
+    if (this.work || this.closed || !this.config || this.installation || this.abandonment)
+      return this.read();
     this.checkingAutomatically = automatic;
     return this.start('checking', 30_000, async (signal) => {
       if (!automatic && this.automatic?.enabled) {
@@ -585,6 +588,7 @@ export class Updates {
   }
   prepareInstall(installId: string) {
     if (
+      this.abandonment ||
       this.work ||
       this.closed ||
       this.state.phase !== 'verified' ||
@@ -635,7 +639,14 @@ export class Updates {
       }
     });
   }
-  async abandonInstall() {
+  abandonInstall(): Promise<UpdateState> {
+    if (this.abandonment) return this.abandonment;
+    this.abandonment = this.discardInstallation().finally(() => {
+      this.abandonment = null;
+    });
+    return this.abandonment;
+  }
+  private async discardInstallation() {
     this.cancel();
     await this.work;
     if (!this.installation) return this.read();
@@ -651,34 +662,40 @@ export class Updates {
     this.installController = null;
     return this.read();
   }
-  async commitInstall(): Promise<InstalledUpdate | null> {
+  restartPlan(): InstalledUpdate | null {
     if (
       !this.installation ||
       this.state.phase !== 'restart-ready' ||
       !this.release ||
-      !this.runtime.appImage
+      !this.runtime.appImage ||
+      this.abandonment
     )
       return null;
+    const artifact = this.release.artifacts.find(
+      (a) =>
+        a.format === 'AppImage' &&
+        a.platform === this.runtime.platform &&
+        a.arch === this.runtime.arch,
+    )!;
+    return structuredClone({
+      target: this.runtime.appImage,
+      size: artifact.size,
+      sha256: artifact.sha256,
+      recovery: this.installation.recovery,
+    });
+  }
+  async commitInstall(): Promise<InstalledUpdate | null> {
+    const plan = this.restartPlan();
+    const installation = this.installation;
+    if (!plan || !installation || !this.release) return null;
     try {
       await this.checkStorage();
       validateUpdateRelease(this.release, this.now());
-      await this.installation.commit();
-      const recovery = this.installation.recovery;
+      await installation.commit();
       this.state.phase = 'installed';
       this.installation = null;
       this.installController = null;
-      const artifact = this.release.artifacts.find(
-        (a) =>
-          a.format === 'AppImage' &&
-          a.platform === this.runtime.platform &&
-          a.arch === this.runtime.arch,
-      )!;
-      return {
-        target: this.runtime.appImage,
-        size: artifact.size,
-        sha256: artifact.sha256,
-        recovery,
-      };
+      return plan;
     } catch {
       await this.installation?.discard().catch(() => {});
       this.installation = null;
@@ -696,6 +713,7 @@ export class Updates {
     this.cancel();
     await this.work;
     await this.ready;
+    await this.abandonment;
     await this.preferences.catch(() => {});
   }
 }

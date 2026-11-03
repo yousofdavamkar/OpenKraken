@@ -13,8 +13,9 @@ import (
 	"time"
 )
 
-// This mode is launched only after accepted shutdown. It runs from the private
-// profile, outside the retiring AppImage mount, and never interprets a shell command.
+// This mode proves readiness before shutdown, then waits for explicit arming.
+// It runs from the private profile, outside the retiring AppImage mount, and
+// never interprets a shell command.
 func runRelaunch(args []string) int {
 	if len(args) != 8 {
 		return 125

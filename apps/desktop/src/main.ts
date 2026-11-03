@@ -2,7 +2,11 @@ import { ActivityLog } from './activity-log.js';
 import { Diagnostics } from './diagnostics.js';
 import { Updates } from './updates.js';
 import { appImageTarget } from './appimage-target.js';
-import { prepareUpdateRestart, launchUpdateAfterExit } from './update-restart.js';
+import {
+  prepareUpdateRestart,
+  prepareUpdateLaunch,
+  type PreparedUpdateLaunch,
+} from './update-restart.js';
 import { updatesStateSchema } from '@openkraken/ipc-contract';
 import { RepositoryLinks } from './repository-links.js';
 import { CommitDrafts } from './commit-drafts.js';
@@ -65,7 +69,15 @@ declare const __OPENKRAKEN_UPDATE_CONFIG__: unknown;
 let updates: Updates | undefined;
 let updateHandoff = false;
 let installOnQuit = false;
-let restartHelper: string | undefined;
+let restartLaunch: PreparedUpdateLaunch | undefined;
+let restartPreparation: AbortController | undefined;
+async function cancelPreparedRestart() {
+  restartPreparation?.abort();
+  restartPreparation = undefined;
+  const launch = restartLaunch;
+  restartLaunch = undefined;
+  await launch?.cancel();
+}
 let crashReports: CrashReports | undefined;
 let diagnostics: Diagnostics | undefined;
 const documentUrl = pathToFileURL(htmlPath).href;
@@ -270,9 +282,11 @@ function createWindow() {
     if (choice === 1) event.preventDefault();
     else if (updateHandoff) {
       installOnQuit = false;
-      void updates?.abandonInstall().finally(() => {
-        updateHandoff = false;
-      });
+      void cancelPreparedRestart()
+        .then(() => updates?.abandonInstall())
+        .finally(() => {
+          updateHandoff = false;
+        });
     }
   });
   const cancelProviderSignIn = () => {
@@ -427,7 +441,7 @@ else {
             noLink: true,
           });
           if (choice.response !== 1) return { kind: 'updates', state: await updates!.read() };
-          restartHelper = await prepareUpdateRestart(
+          const restartHelper = await prepareUpdateRestart(
             join(app.getPath('userData'), 'updates'),
             join(
               __dirname.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'),
@@ -437,11 +451,31 @@ else {
           );
           const prepared = await updates!.prepareInstall(request.installId);
           if (prepared.phase === 'restart-ready') {
+            const plan = updates!.restartPlan();
+            if (!plan) return { kind: 'updates', state: await updates!.read() };
+            const preparation = new AbortController();
+            restartPreparation = preparation;
+            const launch = await prepareUpdateLaunch(
+              restartHelper,
+              plan,
+              app.getPath('userData'),
+              preparation.signal,
+            );
+            if (preparation.signal.aborted || quitting || !updates!.restartPlan()) {
+              await launch.cancel();
+              return { kind: 'updates', state: await updates!.read() };
+            }
+            restartLaunch = launch;
             installOnQuit = true;
-            setImmediate(() => app.quit());
+            setImmediate(() => {
+              if (installOnQuit && restartLaunch === launch && !preparation.signal.aborted)
+                app.quit();
+            });
           }
           return { kind: 'updates', state: prepared };
         } catch {
+          await cancelPreparedRestart();
+          await updates!.abandonInstall();
           return {
             kind: 'error',
             code: 'UPDATE_INSTALL',
@@ -460,8 +494,13 @@ else {
         if (request.method === 'updatesCheck') void updates!.check();
         if (request.method === 'updatesDownload') void updates!.download(request.format);
         if (request.method === 'updatesCancel') {
+          const readyLaunch = restartLaunch;
           installOnQuit = false;
+          await cancelPreparedRestart();
           await updates!.abandonInstall();
+          // A ready launch has already returned from updatesInstall. Otherwise
+          // that request still owns admission and releases it in its finally.
+          if (readyLaunch) updateHandoff = false;
         }
         return { kind: 'updates', state: updatesStateSchema.parse(await updates!.read()) };
       }
@@ -1405,7 +1444,26 @@ else {
   app.on('will-quit', (event) => {
     const installing = installOnQuit;
     installOnQuit = false;
-    const installed = installing ? updates!.commitInstall() : Promise.resolve(null);
+    const launch = installing ? restartLaunch : undefined;
+    if (installing) {
+      restartLaunch = undefined;
+      restartPreparation = undefined;
+    } else void cancelPreparedRestart();
+    const installed = installing
+      ? (async () => {
+          try {
+            if (!launch) throw new Error('Restart was not prepared');
+            await launch.arm();
+            const target = await updates!.commitInstall();
+            if (!target) await launch.cancel();
+            return target;
+          } catch {
+            await launch?.cancel();
+            await updates!.abandonInstall();
+            return null;
+          }
+        })()
+      : Promise.resolve(null);
     const updatesClosed = installed.then(() => updates?.close());
     void diagnostics?.close();
     crashReports?.close();
@@ -1441,9 +1499,7 @@ else {
     ])
       .then(async ([target]) => {
         await activity?.idle();
-        if (target && restartHelper)
-          await launchUpdateAfterExit(restartHelper, target, app.getPath('userData'));
-        else if (installing)
+        if (!target && installing)
           dialog.showErrorBox(
             'Update could not be installed',
             'The update was not completed. Retained update files have been left for recovery.',
@@ -1452,8 +1508,8 @@ else {
       .catch(() => {
         if (installing)
           dialog.showErrorBox(
-            'Update restart failed',
-            'The replacement and recovery files are retained. OpenKraken could not arrange the restart.',
+            'Update shutdown did not finish cleanly',
+            'OpenKraken could not finish all shutdown work. Retained update files remain available for recovery.',
           );
       })
       .finally(() => {

@@ -4,7 +4,100 @@ import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { prepareUpdateRestart } from './src/update-restart.js';
+import {
+  prepareUpdateRestart,
+  prepareUpdateLaunch,
+  type InstalledUpdate,
+} from './src/update-restart.js';
+
+test.skipIf(process.platform !== 'linux')(
+  'restart preparation proves helper readiness and can be cancelled before shutdown',
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-restart-preflight-'));
+    const helper = await prepareUpdateRestart(
+      root,
+      resolve('apps/desktop/dist/helpers/openkraken-askpass'),
+    );
+    const target = join(root, 'image');
+    const bytes = '#!/bin/sh\nprintf launched > "$0.started"\n';
+    await writeFile(target, bytes, { mode: 0o700 });
+    const plan: InstalledUpdate = {
+      target,
+      size: Buffer.byteLength(bytes),
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      recovery: { previous: { sha256: '0'.repeat(64), size: 64 }, journalSha256: '0'.repeat(64) },
+    };
+    const launches: Awaited<ReturnType<typeof prepareUpdateLaunch>>[] = [];
+    try {
+      await expect(prepareUpdateLaunch(helper + '.missing', plan, root)).rejects.toThrow('helper');
+      const ready = await prepareUpdateLaunch(helper, plan, root);
+      launches.push(ready);
+      await expect(readFile(target + '.started')).rejects.toMatchObject({ code: 'ENOENT' });
+      await ready.cancel();
+      await expect(ready.arm()).rejects.toThrow();
+      const controller = new AbortController();
+      const abortable = await prepareUpdateLaunch(helper, plan, root, controller.signal);
+      launches.push(abortable);
+      controller.abort();
+      await expect(abortable.arm()).rejects.toThrow('cancelled');
+      await abortable.cancel();
+      await expect(prepareUpdateLaunch(helper, plan, root, controller.signal)).rejects.toThrow(
+        'cancelled',
+      );
+      const armed = await prepareUpdateLaunch(helper, plan, root);
+      launches.push(armed);
+      await armed.arm();
+      await expect(readFile(target + '.started')).rejects.toMatchObject({ code: 'ENOENT' });
+      await armed.cancel();
+      expect(await readFile(target, 'utf8')).toBe(bytes);
+    } finally {
+      await Promise.all(launches.map((launch) => launch.cancel()));
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(process.platform !== 'linux').each(['silent', 'malformed', 'unarmed', 'exited'])(
+  'restart preparation stops a %s helper without launching an application',
+  async (scenario) => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-restart-protocol-'));
+    const helper = join(root, 'helper');
+    const output = scenario === 'malformed' ? 'invalid' : scenario !== 'silent' ? 'ready\\n' : '';
+    await writeFile(
+      helper,
+      `#!/bin/sh\nprintf '%s' "$$" > "$0.pid"\nprintf '${output}'\n${scenario === 'exited' ? 'exit 1' : 'exec sleep 5'}\n`,
+      { mode: 0o700 },
+    );
+    const plan: InstalledUpdate = {
+      target: join(root, 'untouched'),
+      size: 64,
+      sha256: '0'.repeat(64),
+      recovery: { previous: { size: 64, sha256: '0'.repeat(64) }, journalSha256: '0'.repeat(64) },
+    };
+    try {
+      if (scenario === 'unarmed' || scenario === 'exited') {
+        const ready = await prepareUpdateLaunch(helper, plan, root);
+        try {
+          if (scenario === 'exited') {
+            const pid = Number(await readFile(helper + '.pid', 'utf8'));
+            await expect.poll(() => stopped(pid)).toBe(true);
+            await expect(ready.arm()).rejects.toThrow('helper');
+          } else await expect(ready.arm()).rejects.toThrow('did not arm');
+        } finally {
+          await ready.cancel();
+        }
+      } else {
+        await expect(prepareUpdateLaunch(helper, plan, root)).rejects.toThrow(
+          scenario === 'silent' ? 'did not become ready' : 'Invalid restart helper response',
+        );
+      }
+      const pid = Number(await readFile(helper + '.pid', 'utf8'));
+      await expect.poll(() => stopped(pid)).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test
   .skipIf(process.platform !== 'linux')

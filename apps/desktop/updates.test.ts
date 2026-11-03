@@ -489,11 +489,36 @@ test.skipIf(process.platform !== 'linux')(
       await updater.check();
       verified = await updater.download('AppImage');
       expect(verified.installId).toBeTruthy();
+      expect(updater.restartPlan()).toBeNull();
       expect((await updater.prepareInstall(crypto.randomUUID())).phase).toBe('verified');
       expect((await updater.prepareInstall(verified.installId!)).phase).toBe('restart-ready');
       expect(await readFile(target)).toEqual(oldImage);
+      const plan = updater.restartPlan()!;
+      expect(plan).toEqual({
+        target,
+        size: nextImage.length,
+        sha256: metadata.artifacts[0]!.sha256,
+        recovery: {
+          previous: {
+            size: oldImage.length,
+            sha256: createHash('sha256').update(oldImage).digest('hex'),
+          },
+          journalSha256: createHash('sha256')
+            .update(await readFile(target + '.openkraken-update/transaction.json'))
+            .digest('hex'),
+        },
+      });
+      plan.recovery.previous.sha256 = '0'.repeat(64);
+      expect(updater.restartPlan()!.recovery.previous.sha256).not.toBe(
+        plan.recovery.previous.sha256,
+      );
       await updater.started(); // Renderer remount cannot clean an active install transaction.
-      const cancelled = await updater.abandonInstall();
+      const [cancelled, concurrentCancel] = await Promise.all([
+        updater.abandonInstall(),
+        updater.abandonInstall(),
+      ]);
+      expect(concurrentCancel).toEqual(cancelled);
+      expect(updater.restartPlan()).toBeNull();
       expect(cancelled.phase).toBe('verified');
       expect(cancelled.installId).not.toBe(verified.installId);
       expect((await updater.prepareInstall(verified.installId!)).phase).toBe('verified');
