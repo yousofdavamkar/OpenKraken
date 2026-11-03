@@ -1,0 +1,50 @@
+# M8 large-history and watcher-warm status checkpoint
+
+The Linux x64 synthetic scale gates pass after removing a duplicate index fingerprint from working-state reads. **M8 remains incomplete:** the separate 50,000-ref first-paint gate still fails, and cross-platform/release acceptance remains open. All measurements below are retained in [m8-scale-performance.json](m8-scale-performance.json).
+
+## Fixture and measurement boundaries
+
+The disposable fixture has **2,000,000 reachable commits, 100,000 tracked files, 1,999 genuine merges and two branch tips**, with a complete checkout and native commit graph. HEAD is `606403fd8ea711764e0ca26ada7fc10bbbde974a`. HEAD alone reaches 1,999,999 commits; the final topic tip supplies the remaining commit and is included in the app's history roots. The graph harness records the HEAD-only count, while the generator manifest records `--all`.
+
+This is a history/path-count scale fixture, not Chromium contents or its topology. Most commits reuse a tree. Files share a five-byte blob except one probe updated every thousand commits. It does not model large blobs, extensive ignored trees, submodules or real Chromium checkout cost. See [ADR 0100](../decisions/0100-large-history-and-warm-status-gates.md).
+
+Measurements used Git 2.53.0, Linux x64 and an Intel Core i7-9750H. Each app used a fresh profile; OS caches were not cleared. Runs were sequential, with no concurrent build or test suite. The status benchmark waits for native watcher readiness and records one explicit warm-up separately. It retains all five clean and five dirty samples per profile, measuring renderer request through validated working-state response, including revision/operation/commit metadata and IPC. Debounce and UI paint are measured separately through external edit to enabled staging controls.
+
+## Results
+
+| Gate                                     |      Before fingerprint reuse |                   Final build |                    Budget |
+| ---------------------------------------- | ----------------------------: | ----------------------------: | ------------------------: |
+| Graph first paint, three profiles        |                447.0–464.5 ms |                439.7–447.7 ms |                   <500 ms |
+| 5,000-commit pages, nine samples         |                116.4–163.0 ms |                113.2–167.8 ms |                   <300 ms |
+| Scroll frame p95                         |                       16.8 ms |                  16.7–16.8 ms | Existing 60 fps tolerance |
+| Warm status, 30 clean/dirty samples      | **323.8–517.8 ms (all fail)** | **200.9–249.3 ms (all pass)** |                   <300 ms |
+| External edit to visible staging control |              872.4–1,384.9 ms |                900.1–921.1 ms |                 <1,500 ms |
+
+Each graph run passed every existing first-paint/page/scroll/mounted-row assertion. Each final status run passed all ten response-time assertions, native status/HEAD checks, preserved commit-count check and observer latency assertion. The fixture was restored and verified clean after every status run. No measured sample was discarded, threshold increased or native metadata omitted.
+
+A supervised native profile found two identical index/HEAD fingerprints per working-state read, each costing about **74–96 ms**. The response now reuses one fingerprint for its revision and operation token; operation metadata/conflict images remain fresh, and mutation checks still reread native state. The bare-repository path retains its existing separate operation inspection. See [ADR 0101](../decisions/0101-one-fingerprint-per-working-state.md). The original warm-status benchmark, rather than the isolated profile, establishes the complete request improvement.
+
+Raw record groups are `m8-synthetic-graph`, `m8-warm-status`, `m8-warm-status-single-fingerprint` and `m8-synthetic-graph-final`. Logs are `/tmp/openkraken-m8-{synthetic-graph,warm-status,warm-status-single-fingerprint,synthetic-graph-final}.log`; artifacts are under the matching `test-results/` directories. The three baseline status runs exited 1. Both graph cohorts and the three final status runs exited 0. The isolated profile is `/tmp/openkraken-m8-status-fingerprint-profile.log`; its temporary instrumentation was removed before the final build.
+
+## Regression verification
+
+The final increment passed **792 native/unit tests in 99 files** with Git LFS enabled and 14 platform/tool-dependent skips, **56 focused native tests on Git 2.38.0**, and **33 selected Electron tests**. Six graph goldens passed unchanged. Typechecking/build and full ESLint/Prettier passed. Native rebase tests exercise working-state tokens, stale-review rejection and continuation; the bare-token regression first exposed and then verified the compatibility correction. The initial build failure on optional operation fields was corrected with explicit test guards.
+
+Logs: `/tmp/openkraken-m8-scale-{unit,git238,final-lint,e2e}.log` and `/tmp/openkraken-m8-status-{bare-red,fingerprint-verified,fingerprint-build,fingerprint-build-verified}.log`. Package/installer artifacts, the complete desktop suite, Windows/macOS/ARM64 runtime checks and remote CI were not rerun. The synthetic passes do not close the outstanding release or other milestone scope.
+
+## Reproduce
+
+Generate a new, nonexisting directory. The generator refuses existing destinations and does not modify a real repository:
+
+```bash
+node scripts/create-performance-fixture.mjs /absolute/new/openkraken-scale
+pnpm build
+OPENKRAKEN_BENCH_REPO=/absolute/new/openkraken-scale/repository GIT_NO_LAZY_FETCH=1 \
+  xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts \
+  --repeat-each=3 --reporter=list --output=test-results/scale-graph
+OPENKRAKEN_STATUS_BENCH_FIXTURE=/absolute/new/openkraken-scale/fixture.json \
+  xvfb-run -a pnpm exec playwright test tests/e2e/status-benchmark.test.ts \
+  --repeat-each=3 --reporter=list --output=test-results/scale-status
+```
+
+Use the project's configured Go toolchain for the helper build. The generator accepts optional commit/file counts for development tests; the acceptance defaults remain two million commits and 100,000 files. The CI scale-performance job uses these defaults, builds once, runs both gates sequentially and retains logs/metrics even on failure. Remote CI execution is not verified by this local result.

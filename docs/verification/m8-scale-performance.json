@@ -1,0 +1,583 @@
+{
+  "fixture": {
+    "format": 1,
+    "kind": "openkraken-synthetic-scale",
+    "repository": "/home/yousof/Projects/OpenKraken/.test-fixtures/synthetic-2m-100k/repository",
+    "commits": 2000000,
+    "files": 100000,
+    "merges": 1999,
+    "head": "606403fd8ea711764e0ca26ada7fc10bbbde974a",
+    "refs": ["refs/heads/main", "refs/heads/topic"],
+    "git": "git version 2.53.0",
+    "statusProbe": "status-probe.txt",
+    "topology": "One side commit every 1000 commits, merged by the next main commit; all other commits are linear.",
+    "content": "All paths share a five-byte blob except one probe changed every 1000 commits; this is a scale fixture, not Chromium content."
+  },
+  "m8-synthetic-graph": [
+    {
+      "repository": "/home/yousof/Projects/OpenKraken/.test-fixtures/synthetic-2m-100k/repository",
+      "head": "606403fd8ea711764e0ca26ada7fc10bbbde974a",
+      "commits": 1999999,
+      "refs": 2,
+      "shallow": "false",
+      "git": "git version 2.53.0",
+      "platform": "linux x64 7.0.0-42-generic",
+      "cpu": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+      "firstPaintMs": 459,
+      "firstPaintPhases": {
+        "serviceMs": 365.69999998807907,
+        "snapshotMs": 162.735952,
+        "workerMs": 36.30000001192093,
+        "publishMs": 9.5,
+        "paintMs": 47.5
+      },
+      "page5000Ms": [155.19999998807907, 163, 116.40000000596046],
+      "pagingPhases": [
+        {
+          "serviceMs": 70,
+          "workerMs": 57.5,
+          "publishMs": 27.69999998807907
+        },
+        {
+          "serviceMs": 53.20000001788139,
+          "workerMs": 80.39999997615814,
+          "publishMs": 29.400000005960464
+        },
+        {
+          "serviceMs": 58,
+          "workerMs": 39.60000002384186,
+          "publishMs": 18.799999982118607
+        }
+      ],
+      "scrollingRows": 12000,
+      "p95FrameMs": 16.799999999999727,
+      "mountedRows": 31,
+      "mountedReferences": 2,
+      "electronMemory": [
+        {
+          "type": "Browser",
+          "workingSetKiB": 292612
+        },
+        {
+          "type": "GPU",
+          "workingSetKiB": 194048
+        },
+        {
+          "type": "Utility",
+          "workingSetKiB": 91900
+        },
+        {
+          "type": "Tab",
+          "workingSetKiB": 365988
+        },
+        {
+          "type": "Utility",
+          "workingSetKiB": 231464
+        }
+      ],
+      "cache": {
+        "os": "Not cleared",
+        "profile": "Fresh profile",
+        "gitCommitGraph": true
+      }
+    },
+    {
+      "repository": "/home/yousof/Projects/OpenKraken/.test-fixtures/synthetic-2m-100k/repository",
+      "head": "606403fd8ea711764e0ca26ada7fc10bbbde974a",
+      "commits": 1999999,
+      "refs": 2,
+      "shallow": "false",
+      "git": "git version 2.53.0",
+      "platform": "linux x64 7.0.0-42-generic",
+      "cpu": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+      "firstPaintMs": 464.5,
+      "firstPaintPhases": {
+        "serviceMs": 375.19999998807907,
+        "snapshotMs": 166.42452000000003,
+        "workerMs": 34.70000001788139,
+        "publishMs": 7.399999976158142,
+        "paintMs": 47.20000001788139
+      },
+      "page5000Ms": [159.39999997615814, 157.39999997615814, 135.09999999403954],
+      "pagingPhases": [
+        {
+          "serviceMs": 68.2999999821186,
+          "workerMs": 53.599999994039536,
+          "publishMs": 37.5
+        },
+        {
+          "serviceMs": 60.599999994039536,
+          "workerMs": 73.5,
+          "publishMs": 23.299999982118607
+        },
+        {
+          "serviceMs": 65.2999999821186,
+          "workerMs": 48,
+          "publishMs": 21.80000001192093
+        }
+      ],
+      "scrollingRows": 12000,
+      "p95FrameMs": 16.799999999999727,
+      "mountedRows": 31,
+      "mountedReferences": 2,
+      "electronMemory": [
+        {
+          "type": "Browser",
+          "workingSetKiB": 281820
+        },
+        {
+          "type": "GPU",
+          "workingSetKiB": 195100
+        },
+        {
+          "type": "Utility",
+          "workingSetKiB": 89072
+        },
+        {
+          "type": "Tab",
+          "workingSetKiB": 357872
+        },
+        {
+          "type": "Utility",
+          "workingSetKiB": 231448
+        }
+      ],
+      "cache": {
+        "os": "Not cleared",
+        "profile": "Fresh profile",
+        "gitCommitGraph": true
+      }
+    },
+    {
+      "repository": "/home/yousof/Projects/OpenKraken/.test-fixtures/synthetic-2m-100k/repository",
+      "head": "606403fd8ea711764e0ca26ada7fc10bbbde974a",
+      "commits": 1999999,
+      "refs": 2,
+      "shallow": "false",
+      "git": "git version 2.53.0",
+      "platform": "linux x64 7.0.0-42-generic",
+      "cpu": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+      "firstPaintMs": 447,
+      "firstPaintPhases": {
+        "serviceMs": 353.39999997615814,
+        "snapshotMs": 150.159537,
+        "workerMs": 38.10000002384186,
+        "publishMs": 8.799999982118607,
+        "paintMs": 46.70000001788139
+      },
+      "page5000Ms": [161, 144.69999998807907, 117.69999998807907],
+      "pagingPhases": [
+        {
+          "serviceMs": 84.69999998807907,
+          "workerMs": 52.400000005960464,
+          "publishMs": 23.900000005960464
+        },
+        {
+          "serviceMs": 71.59999999403954,
+          "workerMs": 52.70000001788139,
+          "publishMs": 20.399999976158142
+        },
+        {
+          "serviceMs": 56.69999998807907,
+          "workerMs": 41.10000002384186,
+          "publishMs": 19.899999976158142
+        }
+      ],
+      "scrollingRows": 12000,
+      "p95FrameMs": 16.799999999999727,
+      "mountedRows": 31,
+      "mountedReferences": 2,
+      "electronMemory": [
+        {
+          "type": "Browser",
+          "workingSetKiB": 292492
+        },
+        {
+          "type": "GPU",
+          "workingSetKiB": 194460
+        },
+        {
+          "type": "Utility",
+          "workingSetKiB": 91668
+        },
+        {
+          "type": "Tab",
+          "workingSetKiB": 359212
+        },
+        {
+          "type": "Utility",
+          "workingSetKiB": 230944
+        }
+      ],
+      "cache": {
+        "os": "Not cleared",
+        "profile": "Fresh profile",
+        "gitCommitGraph": true
+      }
+    }
+  ],
+  "m8-warm-status": [
+    {
+      "repository": "/home/yousof/Projects/OpenKraken/.test-fixtures/synthetic-2m-100k/repository",
+      "head": "606403fd8ea711764e0ca26ada7fc10bbbde974a",
+      "commits": 2000000,
+      "files": 100000,
+      "git": "git version 2.53.0",
+      "platform": "linux x64 7.0.0-42-generic",
+      "cpu": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+      "watcher": "native",
+      "boundary": "Renderer request to validated workingState response, including native status, revision, commit and operation metadata; excludes watcher debounce and UI paint.",
+      "warmupMs": 350.80000001192093,
+      "cleanMs": [
+        332, 377.09999999403954, 382.30000001192093, 403.7999999821186, 401.59999999403954
+      ],
+      "dirtyMs": [347.5, 386.40000000596046, 374.09999999403954, 340, 344.09999999403954],
+      "editToVisibleMs": 889.6612219999997,
+      "budgetMs": 300,
+      "externalEditBudgetMs": 1500,
+      "cache": {
+        "os": "Not cleared",
+        "profile": "Fresh profile",
+        "workingState": "One explicit warm-up after native watcher readiness"
+      }
+    },
+    {
+      "repository": "/home/yousof/Projects/OpenKraken/.test-fixtures/synthetic-2m-100k/repository",
+      "head": "606403fd8ea711764e0ca26ada7fc10bbbde974a",
+      "commits": 2000000,
+      "files": 100000,
+      "git": "git version 2.53.0",
+      "platform": "linux x64 7.0.0-42-generic",
+      "cpu": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+      "watcher": "native",
+      "boundary": "Renderer request to validated workingState response, including native status, revision, commit and operation metadata; excludes watcher debounce and UI paint.",
+      "warmupMs": 333.40000000596046,
+      "cleanMs": [
+        345.19999998807907, 357.90000000596046, 343.2000000178814, 411.40000000596046,
+        392.09999999403954
+      ],
+      "dirtyMs": [
+        387.09999999403954, 367.09999999403954, 368.7000000178814, 407.09999999403954, 372.5
+      ],
+      "editToVisibleMs": 872.4308929999997,
+      "budgetMs": 300,
+      "externalEditBudgetMs": 1500,
+      "cache": {
+        "os": "Not cleared",
+        "profile": "Fresh profile",
+        "workingState": "One explicit warm-up after native watcher readiness"
+      }
+    },
+    {
+      "repository": "/home/yousof/Projects/OpenKraken/.test-fixtures/synthetic-2m-100k/repository",
+      "head": "606403fd8ea711764e0ca26ada7fc10bbbde974a",
+      "commits": 2000000,
+      "files": 100000,
+      "git": "git version 2.53.0",
+      "platform": "linux x64 7.0.0-42-generic",
+      "cpu": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+      "watcher": "native",
+      "boundary": "Renderer request to validated workingState response, including native status, revision, commit and operation metadata; excludes watcher debounce and UI paint.",
+      "warmupMs": 322.7999999821186,
+      "cleanMs": [
+        350.90000000596046, 356.5, 347.7999999821186, 342.09999999403954, 338.30000001192093
+      ],
+      "dirtyMs": [
+        400.40000000596046, 517.7999999821186, 359.80000001192093, 340, 323.80000001192093
+      ],
+      "editToVisibleMs": 1384.9211680000008,
+      "budgetMs": 300,
+      "externalEditBudgetMs": 1500,
+      "cache": {
+        "os": "Not cleared",
+        "profile": "Fresh profile",
+        "workingState": "One explicit warm-up after native watcher readiness"
+      }
+    }
+  ],
+  "m8-warm-status-single-fingerprint": [
+    {
+      "repository": "/home/yousof/Projects/OpenKraken/.test-fixtures/synthetic-2m-100k/repository",
+      "head": "606403fd8ea711764e0ca26ada7fc10bbbde974a",
+      "commits": 2000000,
+      "files": 100000,
+      "git": "git version 2.53.0",
+      "platform": "linux x64 7.0.0-42-generic",
+      "cpu": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+      "watcher": "native",
+      "boundary": "Renderer request to validated workingState response, including native status, revision, commit and operation metadata; excludes watcher debounce and UI paint.",
+      "warmupMs": 271.80000001192093,
+      "cleanMs": [
+        235.69999998807907, 220.40000000596046, 221.7000000178814, 210.7999999821186,
+        223.90000000596046
+      ],
+      "dirtyMs": [
+        232, 221.89999997615814, 206.59999999403954, 232.40000000596046, 224.10000002384186
+      ],
+      "editToVisibleMs": 900.0784430000003,
+      "budgetMs": 300,
+      "externalEditBudgetMs": 1500,
+      "cache": {
+        "os": "Not cleared",
+        "profile": "Fresh profile",
+        "workingState": "One explicit warm-up after native watcher readiness"
+      }
+    },
+    {
+      "repository": "/home/yousof/Projects/OpenKraken/.test-fixtures/synthetic-2m-100k/repository",
+      "head": "606403fd8ea711764e0ca26ada7fc10bbbde974a",
+      "commits": 2000000,
+      "files": 100000,
+      "git": "git version 2.53.0",
+      "platform": "linux x64 7.0.0-42-generic",
+      "cpu": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+      "watcher": "native",
+      "boundary": "Renderer request to validated workingState response, including native status, revision, commit and operation metadata; excludes watcher debounce and UI paint.",
+      "warmupMs": 245.19999998807907,
+      "cleanMs": [
+        224.80000001192093, 224.89999997615814, 209.40000000596046, 210.7999999821186, 214.5
+      ],
+      "dirtyMs": [
+        244.80000001192093, 214.7999999821186, 241.69999998807907, 201, 223.60000002384186
+      ],
+      "editToVisibleMs": 902.443354,
+      "budgetMs": 300,
+      "externalEditBudgetMs": 1500,
+      "cache": {
+        "os": "Not cleared",
+        "profile": "Fresh profile",
+        "workingState": "One explicit warm-up after native watcher readiness"
+      }
+    },
+    {
+      "repository": "/home/yousof/Projects/OpenKraken/.test-fixtures/synthetic-2m-100k/repository",
+      "head": "606403fd8ea711764e0ca26ada7fc10bbbde974a",
+      "commits": 2000000,
+      "files": 100000,
+      "git": "git version 2.53.0",
+      "platform": "linux x64 7.0.0-42-generic",
+      "cpu": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+      "watcher": "native",
+      "boundary": "Renderer request to validated workingState response, including native status, revision, commit and operation metadata; excludes watcher debounce and UI paint.",
+      "warmupMs": 260.90000000596046,
+      "cleanMs": [
+        220.69999998807907, 200.90000000596046, 207.59999999403954, 235, 240.40000000596046
+      ],
+      "dirtyMs": [
+        249.2999999821186, 211.69999998807907, 213.30000001192093, 227.90000000596046,
+        221.2000000178814
+      ],
+      "editToVisibleMs": 921.1159550000002,
+      "budgetMs": 300,
+      "externalEditBudgetMs": 1500,
+      "cache": {
+        "os": "Not cleared",
+        "profile": "Fresh profile",
+        "workingState": "One explicit warm-up after native watcher readiness"
+      }
+    }
+  ],
+  "m8-synthetic-graph-final": [
+    {
+      "repository": "/home/yousof/Projects/OpenKraken/.test-fixtures/synthetic-2m-100k/repository",
+      "head": "606403fd8ea711764e0ca26ada7fc10bbbde974a",
+      "commits": 1999999,
+      "refs": 2,
+      "shallow": "false",
+      "git": "git version 2.53.0",
+      "platform": "linux x64 7.0.0-42-generic",
+      "cpu": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+      "firstPaintMs": 446.69999998807907,
+      "firstPaintPhases": {
+        "serviceMs": 354.30000001192093,
+        "snapshotMs": 154.71674500000006,
+        "workerMs": 32.5,
+        "publishMs": 9,
+        "paintMs": 50.89999997615814
+      },
+      "page5000Ms": [146.5, 142.2000000178814, 133],
+      "pagingPhases": [
+        {
+          "serviceMs": 63.69999998807907,
+          "workerMs": 52.10000002384186,
+          "publishMs": 30.69999998807907
+        },
+        {
+          "serviceMs": 65.30000001192093,
+          "workerMs": 53.099999994039536,
+          "publishMs": 23.80000001192093
+        },
+        {
+          "serviceMs": 77.60000002384186,
+          "workerMs": 35.89999997615814,
+          "publishMs": 19.5
+        }
+      ],
+      "scrollingRows": 12000,
+      "p95FrameMs": 16.700000000000273,
+      "mountedRows": 31,
+      "mountedReferences": 2,
+      "electronMemory": [
+        {
+          "type": "Browser",
+          "workingSetKiB": 292432
+        },
+        {
+          "type": "GPU",
+          "workingSetKiB": 194092
+        },
+        {
+          "type": "Utility",
+          "workingSetKiB": 92528
+        },
+        {
+          "type": "Tab",
+          "workingSetKiB": 358952
+        },
+        {
+          "type": "Utility",
+          "workingSetKiB": 208124
+        }
+      ],
+      "cache": {
+        "os": "Not cleared",
+        "profile": "Fresh profile",
+        "gitCommitGraph": true
+      }
+    },
+    {
+      "repository": "/home/yousof/Projects/OpenKraken/.test-fixtures/synthetic-2m-100k/repository",
+      "head": "606403fd8ea711764e0ca26ada7fc10bbbde974a",
+      "commits": 1999999,
+      "refs": 2,
+      "shallow": "false",
+      "git": "git version 2.53.0",
+      "platform": "linux x64 7.0.0-42-generic",
+      "cpu": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+      "firstPaintMs": 447.69999998807907,
+      "firstPaintPhases": {
+        "serviceMs": 358.7999999821186,
+        "snapshotMs": 165.058767,
+        "workerMs": 36.70000001788139,
+        "publishMs": 8.400000005960464,
+        "paintMs": 43.79999998211861
+      },
+      "page5000Ms": [150, 145.7999999821186, 113.2000000178814],
+      "pagingPhases": [
+        {
+          "serviceMs": 75.5,
+          "workerMs": 51.900000005960464,
+          "publishMs": 22.599999994039536
+        },
+        {
+          "serviceMs": 68.09999999403954,
+          "workerMs": 57.19999998807907,
+          "publishMs": 20.5
+        },
+        {
+          "serviceMs": 49.70000001788139,
+          "workerMs": 43.69999998807907,
+          "publishMs": 19.80000001192093
+        }
+      ],
+      "scrollingRows": 12000,
+      "p95FrameMs": 16.700000000000273,
+      "mountedRows": 31,
+      "mountedReferences": 2,
+      "electronMemory": [
+        {
+          "type": "Browser",
+          "workingSetKiB": 283152
+        },
+        {
+          "type": "GPU",
+          "workingSetKiB": 194552
+        },
+        {
+          "type": "Utility",
+          "workingSetKiB": 91396
+        },
+        {
+          "type": "Tab",
+          "workingSetKiB": 365640
+        },
+        {
+          "type": "Utility",
+          "workingSetKiB": 205448
+        }
+      ],
+      "cache": {
+        "os": "Not cleared",
+        "profile": "Fresh profile",
+        "gitCommitGraph": true
+      }
+    },
+    {
+      "repository": "/home/yousof/Projects/OpenKraken/.test-fixtures/synthetic-2m-100k/repository",
+      "head": "606403fd8ea711764e0ca26ada7fc10bbbde974a",
+      "commits": 1999999,
+      "refs": 2,
+      "shallow": "false",
+      "git": "git version 2.53.0",
+      "platform": "linux x64 7.0.0-42-generic",
+      "cpu": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+      "firstPaintMs": 439.7000000178814,
+      "firstPaintPhases": {
+        "serviceMs": 339.2000000178814,
+        "snapshotMs": 153.50762299999997,
+        "workerMs": 35.79999998211861,
+        "publishMs": 8.800000011920929,
+        "paintMs": 55.900000005960464
+      },
+      "page5000Ms": [167.80000001192093, 136.69999998807907, 134],
+      "pagingPhases": [
+        {
+          "serviceMs": 81.30000001192093,
+          "workerMs": 63.900000005960464,
+          "publishMs": 22.599999994039536
+        },
+        {
+          "serviceMs": 64.09999999403954,
+          "workerMs": 49.80000001192093,
+          "publishMs": 22.799999982118607
+        },
+        {
+          "serviceMs": 64.2000000178814,
+          "workerMs": 49.599999994039536,
+          "publishMs": 20.19999998807907
+        }
+      ],
+      "scrollingRows": 12000,
+      "p95FrameMs": 16.799999999999955,
+      "mountedRows": 31,
+      "mountedReferences": 2,
+      "electronMemory": [
+        {
+          "type": "Browser",
+          "workingSetKiB": 292000
+        },
+        {
+          "type": "GPU",
+          "workingSetKiB": 194124
+        },
+        {
+          "type": "Utility",
+          "workingSetKiB": 92072
+        },
+        {
+          "type": "Tab",
+          "workingSetKiB": 357064
+        },
+        {
+          "type": "Utility",
+          "workingSetKiB": 204224
+        }
+      ],
+      "cache": {
+        "os": "Not cleared",
+        "profile": "Fresh profile",
+        "gitCommitGraph": true
+      }
+    }
+  ]
+}

@@ -1676,5 +1676,74 @@
         "gitCommitGraph": true
       }
     }
+  ],
+  "m8-utility-json-probe": [
+    {
+      "repository": "/home/yousof/Projects/OpenKraken/.test-fixtures/refs-50000-zp85PL/repository.git",
+      "head": "46fec1c3029b552ec63b2d01af9d43a386f043ea",
+      "commits": 1505199,
+      "refs": 50000,
+      "shallow": "false",
+      "git": "git version 2.53.0",
+      "platform": "linux x64 7.0.0-42-generic",
+      "cpu": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+      "firstPaintMs": 1250.4000000059605,
+      "firstPaintPhases": {
+        "serviceMs": 972.4000000059605,
+        "snapshotMs": 441.6154909999999,
+        "workerMs": 50.5,
+        "publishMs": 45.900000005960464,
+        "paintMs": 181.59999999403954
+      },
+      "page5000Ms": [258, 219.09999999403954, 206.5],
+      "pagingPhases": [
+        {
+          "serviceMs": 157.09999999403954,
+          "workerMs": 71.30000001192093,
+          "publishMs": 29.599999994039536
+        },
+        {
+          "serviceMs": 147.09999999403954,
+          "workerMs": 55.30000001192093,
+          "publishMs": 16.69999998807907
+        },
+        {
+          "serviceMs": 128,
+          "workerMs": 61,
+          "publishMs": 17.5
+        }
+      ],
+      "scrollingRows": 12000,
+      "p95FrameMs": 16.700000000000728,
+      "mountedRows": 32,
+      "mountedReferences": 7,
+      "electronMemory": [
+        {
+          "type": "Browser",
+          "workingSetKiB": 413676
+        },
+        {
+          "type": "GPU",
+          "workingSetKiB": 194648
+        },
+        {
+          "type": "Utility",
+          "workingSetKiB": 91612
+        },
+        {
+          "type": "Tab",
+          "workingSetKiB": 572996
+        },
+        {
+          "type": "Utility",
+          "workingSetKiB": 283060
+        }
+      ],
+      "cache": {
+        "os": "Not cleared",
+        "profile": "Fresh profile",
+        "gitCommitGraph": true
+      }
+    }
   ]
 }
