@@ -1,3 +1,4 @@
+import { StringDecoder } from 'node:string_decoder';
 import type { Commit, Ref, Status, StatusEntry } from '@openkraken/ipc-contract';
 
 /** Buffer fields until NUL, not strings: UTF-8 codepoints can straddle chunks. */
@@ -28,6 +29,45 @@ export class NulDecoder {
   finish(allowFinalNewline = false) {
     if (allowFinalNewline && Buffer.concat(this.chunks, this.size).equals(Buffer.from('\n'))) {
       this.chunks = [];
+      this.size = 0;
+    }
+    if (this.size) throw new Error('Truncated NUL record');
+  }
+}
+/** UTF-8 records with byte limits; decode each read once instead of each field. */
+export class TextNulDecoder {
+  private utf8 = new StringDecoder('utf8');
+  private pending = '';
+  private size = 0;
+  constructor(
+    private accept: (field: string) => void,
+    private maxFieldBytes = 2 * 1024 * 1024,
+  ) {}
+  push(chunk: Buffer) {
+    const first = chunk.indexOf(0);
+    if (first < 0) {
+      this.size += chunk.length;
+      if (this.size > this.maxFieldBytes) throw new Error('NUL field exceeds limit');
+    } else {
+      if (this.size + first > this.maxFieldBytes) throw new Error('NUL field exceeds limit');
+      // Ordinary process reads fit below the field limit. Larger caller-supplied
+      // chunks need each intervening field checked as well as the final tail.
+      let start = first + 1;
+      while (chunk.length - start > this.maxFieldBytes) {
+        const end = chunk.indexOf(0, start);
+        if (end < 0 || end - start > this.maxFieldBytes) throw new Error('NUL field exceeds limit');
+        start = end + 1;
+      }
+      this.size = chunk.length - chunk.lastIndexOf(0) - 1;
+    }
+    const fields = this.utf8.write(chunk).split('\0');
+    fields[0] = this.pending + fields[0]!;
+    this.pending = fields.pop()!;
+    for (const field of fields) this.accept(field);
+  }
+  finish(allowFinalNewline = false) {
+    if (allowFinalNewline && this.size === 1 && this.pending === '\n') {
+      this.pending = '';
       this.size = 0;
     }
     if (this.size) throw new Error('Truncated NUL record');
@@ -112,8 +152,8 @@ const oid = (value: string) => {
 export class RefsParser {
   readonly value: Ref[] = [];
   private fields: string[] = [];
-  private decoder = new NulDecoder((field) => {
-    this.fields.push(field.toString('utf8'));
+  private decoder = new TextNulDecoder((field) => {
+    this.fields.push(field);
     if (this.fields.length !== 9) return;
     const [rawName, target, objectType, peeled, peeledType, upstream, track, head, subject] = this
       .fields as [string, string, string, string, string, string, string, string, string];

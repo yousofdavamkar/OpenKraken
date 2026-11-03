@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'vitest';
 import fc from 'fast-check';
-import { HistoryParser, RefsParser, StatusParser, NulDecoder } from './src/parsers.js';
+import {
+  HistoryParser,
+  RefsParser,
+  StatusParser,
+  NulDecoder,
+  TextNulDecoder,
+} from './src/parsers.js';
 const hash = 'a'.repeat(40);
 function feed<T extends { push(b: Buffer): void; finish(): unknown }>(
   parser: T,
@@ -12,6 +18,61 @@ function feed<T extends { push(b: Buffer): void; finish(): unknown }>(
 }
 const path = fc.string({ minLength: 1, maxLength: 100 }).filter((s) => !s.includes('\0'));
 describe('stream parsers', () => {
+  test('NUL decoding preserves binary fields across arbitrary chunk boundaries', () => {
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.uint8Array({ maxLength: 400 }).filter((field) => !field.includes(0)),
+          { minLength: 1, maxLength: 30 },
+        ),
+        fc.integer({ min: 1, max: 1024 }),
+        (fields, size) => {
+          const records: Buffer[] = [];
+          const decoder = new NulDecoder((field) => records.push(field), 400);
+          const data = Buffer.concat(
+            fields.flatMap((field) => [Buffer.from(field), Buffer.from([0])]),
+          );
+          feed(decoder, data, size);
+          const text: string[] = [];
+          feed(new TextNulDecoder((field) => text.push(field), 400), data, size);
+          expect(text).toEqual(fields.map((field) => Buffer.from(field).toString('utf8')));
+          // Completed fields are owned buffers; retained rename paths must not
+          // alias a subsequently reused input chunk.
+          data.fill(0xff);
+          expect(records).toEqual(fields.map((field) => Buffer.from(field)));
+        },
+      ),
+      { seed: 94095, numRuns: 500 },
+    );
+  });
+  test('NUL limits include fragments and permit only the optional final newline', () => {
+    const records: Buffer[] = [];
+    const exact = new NulDecoder((field) => records.push(field), 3);
+    exact.push(Buffer.from('ab'));
+    exact.push(Buffer.from('c\0\0\n'));
+    exact.finish(true);
+    expect(records).toEqual([Buffer.from('abc'), Buffer.alloc(0)]);
+    const texts: string[] = [];
+    const text = new TextNulDecoder((field) => texts.push(field), 3);
+    feed(text, Buffer.from('abc\0\0'), 2);
+    text.push(Buffer.from('\n'));
+    text.finish(true);
+    expect(texts).toEqual(['abc', '']);
+    for (const Decoder of [NulDecoder, TextNulDecoder]) {
+      for (const chunks of [['abcd\0'], ['ab', 'cd\0'], ['abc', 'd'], ['a\0bbbb\0c\0'], ['😀\0']]) {
+        const decoder = new Decoder(() => {}, 3);
+        expect(() => chunks.forEach((chunk) => decoder.push(Buffer.from(chunk)))).toThrow('limit');
+      }
+      for (const trailing of ['\n\n', 'x', '\r\n', '\ufffd']) {
+        const decoder = new Decoder(() => {});
+        decoder.push(Buffer.from(`ok\0${trailing}`));
+        expect(() => decoder.finish(true)).toThrow('Truncated');
+      }
+      const strict = new Decoder(() => {});
+      strict.push(Buffer.from('\n'));
+      expect(() => strict.finish()).toThrow('Truncated');
+    }
+  });
   test('status preserves arbitrary path bytes and rename boundaries', () => {
     fc.assert(
       fc.property(
