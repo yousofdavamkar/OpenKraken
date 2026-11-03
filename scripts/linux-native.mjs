@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile, rm } from 'node:fs/promises';
+import { readFile, realpath, rm } from 'node:fs/promises';
 import { basename, join, relative, resolve } from 'node:path';
 
 const execute = promisify(execFile);
@@ -55,7 +55,7 @@ export async function buildLinuxNative(staging) {
     throw new Error('Invalid native build image identity');
   const native = join(staging, 'dist/node_modules/node-pty');
   await rm(join(native, 'build'), { recursive: true, force: true });
-  const modules = resolve('node_modules');
+  const modules = await realpath('node_modules');
   const gyp = relative(modules, require.resolve('node-gyp/bin/node-gyp.js'));
   if (gyp.startsWith('..')) throw new Error('node-gyp must be installed in the workspace');
   await run(engine, [

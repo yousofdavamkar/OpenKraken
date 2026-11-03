@@ -2,9 +2,10 @@ import { packager } from '@electron/packager';
 import { flipFuses, FuseVersion } from '@electron/fuses';
 import { packageFuses, verifyFuses } from './package-security.mjs';
 import { buildLinuxNative } from './linux-native.mjs';
-import { cp, mkdir, writeFile, rm, lstat, readdir, chmod } from 'node:fs/promises';
+import { cp, mkdir, readFile, writeFile, rm, lstat, readdir, chmod } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 const staging = resolve('release/staging');
+const { version } = JSON.parse(await readFile('package.json', 'utf8'));
 await rm(staging, { recursive: true, force: true });
 await mkdir(staging, { recursive: true });
 await cp('apps/desktop/dist', join(staging, 'dist'), { recursive: true });
@@ -14,7 +15,7 @@ await writeFile(
   JSON.stringify({
     name: 'openkraken',
     productName: 'OpenKraken',
-    version: '0.1.0',
+    version,
     main: 'dist/main.cjs',
     desktopName: 'openkraken.desktop',
   }),
