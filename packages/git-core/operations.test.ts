@@ -52,7 +52,9 @@ test('resolved rebase continues through native Git and stale reviews leave edits
   const { path, service, repo } = await divergent('continue-rebase');
   try {
     expect(() => fixtureGit(path, ['rebase', '--merge', 'incoming'])).toThrow();
-    const paused = await service.operationState(repo.id);
+    const paused = (await service.workingState(repo.id)).operation;
+    if (!paused) throw new Error('Working state omitted operation controls');
+    expect(paused).toEqual(await service.operationState(repo.id));
     await expect(
       service.operationAction(repo.id, { action: 'continue', token: paused.token }),
     ).rejects.toMatchObject({ code: 'UNRESOLVED_CONFLICTS' });
@@ -62,7 +64,9 @@ test('resolved rebase continues through native Git and stale reviews leave edits
     ).rejects.toMatchObject({ code: 'STALE_OPERATION' });
     expect(fixtureGit(path, ['status', '--porcelain'])).toContain('UU tracked.txt');
     fixtureGit(path, ['add', 'tracked.txt']);
-    const reviewed = await service.operationState(repo.id);
+    const reviewed = (await service.workingState(repo.id)).operation;
+    if (!reviewed) throw new Error('Working state omitted operation controls');
+    expect(reviewed).toEqual(await service.operationState(repo.id));
     await service.operationAction(repo.id, { action: 'continue', token: reviewed.token });
     expect((await service.operationState(repo.id)).kind).toBe('none');
     expect(fixtureGit(path, ['show', 'HEAD:tracked.txt'])).toBe('resolved version');

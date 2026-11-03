@@ -207,7 +207,13 @@ export class WorkingTree {
           commitWarning: error instanceof Error ? error.message : String(error),
         }));
     return {
-      operation: await this.operationState(signal),
+      operation: this.repo.isBare
+        ? await this.operationState(signal)
+        : await this.operationSnapshot(
+            await inspectOperation(this.repo.gitDir),
+            fingerprint,
+            signal,
+          ),
       status: parser.finish(),
       head: fingerprint.head,
       revision: this.revision(fingerprint),
@@ -409,7 +415,14 @@ export class WorkingTree {
   }
   async operationState(signal?: AbortSignal, indexFile?: string): Promise<OperationState> {
     const metadata = await inspectOperation(this.repo.gitDir);
-    const fingerprint = await this.fingerprint(indexFile);
+    return this.operationSnapshot(metadata, await this.fingerprint(indexFile), signal, indexFile);
+  }
+  private async operationSnapshot(
+    metadata: Awaited<ReturnType<typeof inspectOperation>>,
+    fingerprint: { head: Repository['head']; signature: string },
+    signal?: AbortSignal,
+    indexFile?: string,
+  ): Promise<OperationState> {
     let images: FileImage[] = [];
     let conflicts = 0;
     if (metadata.details.kind !== 'none' && !this.repo.isBare) {

@@ -598,3 +598,17 @@ test('branch deletion checks mergedness and worktree use, with atomic guarded re
     work.reference({ action: 'deleteBranch', name: 'unmerged', expected, force: true }),
   ).rejects.toMatchObject({ code: 'STALE_REF' });
 });
+
+test('bare working-state operation tokens agree with a fresh operation inspection', async () => {
+  const { path } = await setup('bare-state-source');
+  const bare = join(root, 'bare-state.git');
+  fixtureGit(path, ['clone', '--bare', '.', bare]);
+  const service = new RepositoryService('git');
+  try {
+    const repository = await service.open(bare);
+    const work = new WorkingTree('git', repository, join(root, 'bare-profile'));
+    expect((await work.state()).operation).toEqual(await work.operationState());
+  } finally {
+    await service.dispose();
+  }
+});
