@@ -4,7 +4,7 @@ import { UpdatesControl } from './updates.js';
 import { RepositoryLinkControl } from './repository-link.js';
 import { themeReady } from './theme.js';
 import { CommandButton, CommandControls, CommandProvider } from './commands.js';
-import React, { lazy, Suspense, useRef, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { TerminalHandle, TerminalSession } from './terminal.js';
 const TerminalPanel = lazy(() => import('./terminal.js'));
 import { createRoot } from 'react-dom/client';
@@ -39,6 +39,11 @@ import { RefControls } from './ref-controls.js';
 import { useRepository } from './store.js';
 import './style.css';
 function App() {
+  useEffect(() => {
+    void window.openkraken
+      .request({ id: crypto.randomUUID(), method: 'updatesStarted' })
+      .catch(() => {});
+  }, []);
   const {
     snapshot,
     busy: active,

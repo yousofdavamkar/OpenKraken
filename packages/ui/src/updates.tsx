@@ -9,6 +9,8 @@ const failures: Record<NonNullable<UpdateState['error']>, string> = {
   integrity: 'The download did not match the signed release. The incomplete file was discarded.',
   cancelled: 'Update transfer cancelled.',
   timeout: 'The update transfer timed out. Try checking again.',
+  installation:
+    'The update could not be prepared or confirmed. Existing recovery files were retained.',
 };
 
 function UpdatesDialog({ onClose }: { onClose: () => void }) {
@@ -29,7 +31,6 @@ function UpdatesDialog({ onClose }: { onClose: () => void }) {
         if (result.kind !== 'updates') throw new Error('Unavailable');
         if (!stopped) {
           setState(result.state);
-          setError('');
         }
       } catch {
         if (!stopped) setError('Update status is unavailable.');
@@ -43,19 +44,29 @@ function UpdatesDialog({ onClose }: { onClose: () => void }) {
     };
   }, []);
   const act = async (
-    method: 'updatesCheck' | 'updatesCancel' | 'updatesDownload',
+    method: 'updatesCheck' | 'updatesCancel' | 'updatesDownload' | 'updatesInstall',
     format?: UpdateState['selected'],
   ) => {
     setDispatching(true);
     setError('');
     try {
       const result =
-        method === 'updatesDownload' && format
-          ? await window.openkraken.request({ id: crypto.randomUUID(), method, format })
-          : await window.openkraken.request({
+        method === 'updatesInstall' && state?.installId
+          ? await window.openkraken.request({
               id: crypto.randomUUID(),
-              method: method === 'updatesCancel' ? method : 'updatesCheck',
-            });
+              method,
+              installId: state.installId,
+            })
+          : method === 'updatesDownload' && format
+            ? await window.openkraken.request({ id: crypto.randomUUID(), method, format })
+            : await window.openkraken.request({
+                id: crypto.randomUUID(),
+                method: method === 'updatesCancel' ? method : 'updatesCheck',
+              });
+      if (result.kind === 'error') {
+        setError(result.message);
+        return;
+      }
       if (result.kind !== 'updates') throw new Error('Unavailable');
       setState(result.state);
     } catch {
@@ -64,26 +75,33 @@ function UpdatesDialog({ onClose }: { onClose: () => void }) {
       setDispatching(false);
     }
   };
-  const running = state?.phase === 'checking' || state?.phase === 'downloading';
+  const running =
+    state?.phase === 'checking' || state?.phase === 'downloading' || state?.phase === 'preparing';
   const status = !state
     ? 'Loading update status…'
-    : state.phase === 'disabled'
-      ? 'This build has no update feed configured.'
-      : state.phase === 'checking'
-        ? 'Checking the release signature…'
-        : state.phase === 'current'
-          ? 'You are up to date with the signed release feed.'
-          : state.phase === 'unsupported'
-            ? `Version ${state.version} has no download for this platform.`
-            : state.phase === 'available'
-              ? `Version ${state.version} is available.`
-              : state.phase === 'downloading'
-                ? `Downloading version ${state.version}…`
-                : state.phase === 'verified'
-                  ? `Version ${state.version} download verified. Installation is not available in this build.`
-                  : state.phase === 'error'
-                    ? failures[state.error ?? 'network']
-                    : 'Check for a newer signed release.';
+    : state.phase === 'preparing'
+      ? 'Verifying and preparing the update…'
+      : state.phase === 'restart-ready'
+        ? 'The update is ready. Waiting for restart approval…'
+        : state.phase === 'installed'
+          ? 'Update installed. Restarting…'
+          : state.phase === 'disabled'
+            ? 'This build has no update feed configured.'
+            : state.phase === 'checking'
+              ? 'Checking the release signature…'
+              : state.phase === 'current'
+                ? 'You are up to date with the signed release feed.'
+                : state.phase === 'unsupported'
+                  ? `Version ${state.version} has no download for this platform.`
+                  : state.phase === 'available'
+                    ? `Version ${state.version} is available.`
+                    : state.phase === 'downloading'
+                      ? `Downloading version ${state.version}…`
+                      : state.phase === 'verified'
+                        ? `Version ${state.version} download verified. ${state.installId ? 'Ready to install and restart.' : 'Installation is not available in this build.'}`
+                        : state.phase === 'error'
+                          ? failures[state.error ?? 'network']
+                          : 'Check for a newer signed release.';
   return (
     <dialog
       ref={dialog}
@@ -107,6 +125,11 @@ function UpdatesDialog({ onClose }: { onClose: () => void }) {
       )}
       {running && <p>Transfers continue while this dialog is closed.</p>}
       <div className="dialog-actions">
+        {state?.phase === 'verified' && state.installId && (
+          <button disabled={dispatching} onClick={() => void act('updatesInstall')}>
+            Install and restart
+          </button>
+        )}
         {state?.phase === 'available' &&
           state.artifacts.map((artifact) => (
             <button
@@ -118,13 +141,19 @@ function UpdatesDialog({ onClose }: { onClose: () => void }) {
             </button>
           ))}
         {running ? (
-          <button disabled={dispatching} onClick={() => void act('updatesCancel')}>
+          <button
+            disabled={dispatching && state?.phase !== 'preparing'}
+            onClick={() => void act('updatesCancel')}
+          >
             Cancel transfer
           </button>
         ) : (
           <button
             disabled={
-              dispatching || !state || state.phase === 'disabled' || state.error === 'storage'
+              dispatching ||
+              !state ||
+              ['disabled', 'restart-ready', 'installed'].includes(state.phase) ||
+              state.error === 'storage'
             }
             onClick={() => void act('updatesCheck')}
           >

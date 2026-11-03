@@ -1,10 +1,11 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
 import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { gt, valid } from 'semver';
 import { z } from 'zod';
 import type { UpdateState } from '@openkraken/ipc-contract';
+import { stageAppImageUpdate, recoverAppImageUpdate } from './appimage-install.js';
 import {
   updateConfiguration,
   updateEnvelopeLimit,
@@ -41,10 +42,13 @@ export class Updates {
   private controller: AbortController | null = null;
   private work: Promise<UpdateState> | null = null;
   private closed = false;
+  private installation: Awaited<ReturnType<typeof stageAppImageUpdate>> | null = null;
+  private installController: AbortController | null = null;
+  private startup: Promise<void> | null = null;
   constructor(
     private directory: string,
     configuration: unknown,
-    private runtime: { version: string; platform: string; arch: string },
+    private runtime: { version: string; platform: string; arch: string; appImage?: string },
     private send: typeof fetch = fetch,
     private now: () => number = Date.now,
   ) {
@@ -58,7 +62,15 @@ export class Updates {
       : Promise.resolve();
   }
   private empty(phase: UpdateState['phase']): UpdateState {
-    return { phase, version: null, artifacts: [], selected: null, downloaded: 0, error: null };
+    return {
+      phase,
+      version: null,
+      artifacts: [],
+      selected: null,
+      downloaded: 0,
+      installId: null,
+      error: null,
+    };
   }
   private file(name: string) {
     return join(this.directory, name);
@@ -191,11 +203,11 @@ export class Updates {
     return structuredClone(this.state);
   }
   private start(
-    phase: 'checking' | 'downloading',
+    phase: 'checking' | 'downloading' | 'preparing',
     timeout: number,
     action: (signal: AbortSignal) => Promise<void>,
   ): Promise<UpdateState> {
-    if (this.work || this.closed || !this.config) return this.read();
+    if (this.work || this.closed || !this.config || this.installation) return this.read();
     const controller = new AbortController();
     this.controller = controller;
     this.state.phase = phase;
@@ -204,6 +216,7 @@ export class Updates {
     this.work = (async () => {
       try {
         await this.ready;
+        await this.startup;
         controller.signal.throwIfAborted();
         await this.checkStorage();
         await action(controller.signal);
@@ -353,10 +366,127 @@ export class Updates {
         });
         created = false;
         this.state.phase = 'verified';
+        this.state.installId =
+          artifact.format === 'AppImage' && this.runtime.appImage ? randomUUID() : null;
       } finally {
         if (created) await this.removeOwned('artifact.part', 2 * 1024 ** 3);
       }
     });
+  }
+  async started() {
+    if (!this.startup) {
+      this.startup = (async () => {
+        await this.ready;
+        if (this.runtime.appImage) {
+          try {
+            await recoverAppImageUpdate(this.runtime.appImage, this.runtime.version);
+          } catch {
+            this.runtime.appImage = undefined;
+            this.state = { ...this.empty('error'), error: 'installation' };
+          }
+        }
+      })();
+    }
+    await this.startup;
+    return this.read();
+  }
+  prepareInstall(installId: string) {
+    if (
+      this.work ||
+      this.closed ||
+      this.state.phase !== 'verified' ||
+      this.state.installId !== installId ||
+      !this.release ||
+      !this.runtime.appImage ||
+      !['x64', 'arm64'].includes(this.runtime.arch)
+    )
+      return this.read();
+    const release = this.release;
+    const artifact = release.artifacts.find(
+      (a) =>
+        a.format === 'AppImage' &&
+        a.platform === this.runtime.platform &&
+        a.arch === this.runtime.arch,
+    )!;
+    this.state.installId = null;
+    const installController = new AbortController();
+    this.installController = installController;
+    return this.start('preparing', 10 * 60_000, async (signal) => {
+      const abort = () => installController.abort(signal.reason);
+      signal.addEventListener('abort', abort, { once: true });
+      try {
+        validateUpdateRelease(release, this.now());
+        this.installation = await stageAppImageUpdate(
+          {
+            target: this.runtime.appImage!,
+            source: this.file('artifact.ready'),
+            artifact: { size: artifact.size, sha256: artifact.sha256 },
+            version: release.version,
+            arch: this.runtime.arch as 'x64' | 'arm64',
+          },
+          installController.signal,
+        );
+        await this.installation.arm();
+        await this.checkStorage();
+        validateUpdateRelease(release, this.now());
+        signal.throwIfAborted();
+        this.state.phase = 'restart-ready';
+      } catch (error) {
+        await this.installation?.discard().catch(() => {});
+        this.installation = null;
+        this.installController = null;
+        if (signal.aborted) throw error;
+        throw new UpdateFailure('installation');
+      } finally {
+        signal.removeEventListener('abort', abort);
+      }
+    });
+  }
+  async abandonInstall() {
+    this.cancel();
+    await this.work;
+    if (!this.installation) return this.read();
+    try {
+      await this.installation.discard();
+      this.state.phase = 'verified';
+      this.state.installId = randomUUID();
+    } catch {
+      this.state = { ...this.empty('error'), error: 'installation' };
+      this.release = null;
+    }
+    this.installation = null;
+    this.installController = null;
+    return this.read();
+  }
+  async commitInstall(): Promise<{ target: string; size: number; sha256: string } | null> {
+    if (
+      !this.installation ||
+      this.state.phase !== 'restart-ready' ||
+      !this.release ||
+      !this.runtime.appImage
+    )
+      return null;
+    try {
+      await this.checkStorage();
+      validateUpdateRelease(this.release, this.now());
+      await this.installation.commit();
+      this.state.phase = 'installed';
+      this.installation = null;
+      this.installController = null;
+      const artifact = this.release.artifacts.find(
+        (a) =>
+          a.format === 'AppImage' &&
+          a.platform === this.runtime.platform &&
+          a.arch === this.runtime.arch,
+      )!;
+      return { target: this.runtime.appImage, size: artifact.size, sha256: artifact.sha256 };
+    } catch {
+      await this.installation?.discard().catch(() => {});
+      this.installation = null;
+      this.installController = null;
+      this.state = { ...this.empty('error'), error: 'installation' };
+      return null;
+    }
   }
   cancel() {
     this.controller?.abort(new UpdateFailure('cancelled'));

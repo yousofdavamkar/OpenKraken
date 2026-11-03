@@ -1,6 +1,8 @@
 import { ActivityLog } from './activity-log.js';
 import { Diagnostics } from './diagnostics.js';
 import { Updates } from './updates.js';
+import { appImageTarget } from './appimage-target.js';
+import { prepareUpdateRestart, launchUpdateAfterExit } from './update-restart.js';
 import { updatesStateSchema } from '@openkraken/ipc-contract';
 import { RepositoryLinks } from './repository-links.js';
 import { CommitDrafts } from './commit-drafts.js';
@@ -61,6 +63,9 @@ const htmlPath = join(__dirname, 'renderer', 'index.html');
 declare const __OPENKRAKEN_SENTRY_DSN__: string | null;
 declare const __OPENKRAKEN_UPDATE_CONFIG__: unknown;
 let updates: Updates | undefined;
+let updateHandoff = false;
+let installOnQuit = false;
+let restartHelper: string | undefined;
 let crashReports: CrashReports | undefined;
 let diagnostics: Diagnostics | undefined;
 const documentUrl = pathToFileURL(htmlPath).href;
@@ -263,6 +268,12 @@ function createWindow() {
       noLink: true,
     });
     if (choice === 1) event.preventDefault();
+    else if (updateHandoff) {
+      installOnQuit = false;
+      void updates?.abandonInstall().finally(() => {
+        updateHandoff = false;
+      });
+    }
   });
   const cancelProviderSignIn = () => {
     terminalRepository = undefined;
@@ -294,11 +305,6 @@ function createWindow() {
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  updates = new Updates(join(app.getPath('userData'), 'updates'), __OPENKRAKEN_UPDATE_CONFIG__, {
-    version: app.getVersion(),
-    platform: process.platform,
-    arch: process.arch,
-  });
   diagnostics = new Diagnostics(join(app.getPath('userData'), 'diagnostics'), {
     version: app.getVersion(),
     platform: process.platform,
@@ -334,6 +340,20 @@ else {
     focusForLink();
   });
   app.whenReady().then(async () => {
+    const target = await appImageTarget({
+      packaged: app.isPackaged,
+      platform: process.platform,
+      version: app.getVersion(),
+      executable: process.execPath,
+      image: process.env.APPIMAGE,
+      appdir: process.env.APPDIR,
+    });
+    updates = new Updates(join(app.getPath('userData'), 'updates'), __OPENKRAKEN_UPDATE_CONFIG__, {
+      version: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+      ...(target ? { appImage: target } : {}),
+    });
     await reportingReady;
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) =>
       callback(false),
@@ -345,6 +365,61 @@ else {
       });
     });
     const executeRequest = async (request: DesktopRequest): Promise<Result> => {
+      if (request.method === 'updatesStarted')
+        return { kind: 'updates', state: updatesStateSchema.parse(await updates!.started()) };
+      if (request.method === 'updatesInstall') {
+        const state = await updates!.read();
+        if (
+          updateHandoff ||
+          inFlight.size > 1 ||
+          pending.size ||
+          providerRequests.size ||
+          terminals.running
+        )
+          return {
+            kind: 'error',
+            code: 'BUSY',
+            message: 'Finish active operations and close the terminal before installing an update.',
+          };
+        if (!state.installId || request.installId !== state.installId || !window)
+          return { kind: 'updates', state };
+        updateHandoff = true;
+        try {
+          const choice = await dialog.showMessageBox(window, {
+            type: 'question',
+            title: 'Install update',
+            message: `Install OpenKraken ${state.version} and restart?`,
+            detail: 'Save your work first. Unsaved editor changes can still prevent the restart.',
+            buttons: ['Cancel', 'Install and restart'],
+            defaultId: 0,
+            cancelId: 0,
+            noLink: true,
+          });
+          if (choice.response !== 1) return { kind: 'updates', state: await updates!.read() };
+          restartHelper = await prepareUpdateRestart(
+            join(app.getPath('userData'), 'updates'),
+            join(
+              __dirname.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'),
+              'helpers',
+              'openkraken-askpass',
+            ),
+          );
+          const prepared = await updates!.prepareInstall(request.installId);
+          if (prepared.phase === 'restart-ready') {
+            installOnQuit = true;
+            setImmediate(() => app.quit());
+          }
+          return { kind: 'updates', state: prepared };
+        } catch {
+          return {
+            kind: 'error',
+            code: 'UPDATE_INSTALL',
+            message: 'The update could not be prepared for restart.',
+          };
+        } finally {
+          if (!installOnQuit) updateHandoff = false;
+        }
+      }
       if (
         request.method === 'updatesRead' ||
         request.method === 'updatesCheck' ||
@@ -353,7 +428,10 @@ else {
       ) {
         if (request.method === 'updatesCheck') void updates!.check();
         if (request.method === 'updatesDownload') void updates!.download(request.format);
-        if (request.method === 'updatesCancel') updates!.cancel();
+        if (request.method === 'updatesCancel') {
+          installOnQuit = false;
+          await updates!.abandonInstall();
+        }
         return { kind: 'updates', state: updatesStateSchema.parse(await updates!.read()) };
       }
       if (request.method === 'diagnosticsRead' || request.method === 'diagnosticsClear')
@@ -1199,6 +1277,21 @@ else {
     };
     const handleRequest = async (request: DesktopRequest): Promise<Result> => {
       if (
+        updateHandoff &&
+        ![
+          'updatesRead',
+          'updatesCancel',
+          'commitDraftSave',
+          'terminalAck',
+          'rendererFailure',
+        ].includes(request.method)
+      )
+        return {
+          kind: 'error',
+          code: 'BUSY',
+          message: 'An update is preparing to restart the app.',
+        };
+      if (
         request.method === 'terminalOpen' ||
         request.method === 'terminalInput' ||
         request.method === 'terminalResize' ||
@@ -1279,7 +1372,10 @@ else {
   let quitting = false;
   // Keep the service and caches alive if a renderer cancels the window close.
   app.on('will-quit', (event) => {
-    const updatesClosed = updates?.close();
+    const installing = installOnQuit;
+    installOnQuit = false;
+    const installed = installing ? updates!.commitInstall() : Promise.resolve(null);
+    const updatesClosed = installed.then(() => updates?.close());
     void diagnostics?.close();
     crashReports?.close();
     avatars?.close();
@@ -1302,6 +1398,7 @@ else {
       ? new Promise<void>((resolve) => child.once('exit', () => resolve()))
       : Promise.resolve();
     void Promise.all([
+      installed,
       updatesClosed,
       stopped,
       providers?.idle(),
@@ -1311,7 +1408,23 @@ else {
       commitDrafts?.idle(),
       terminals.close(),
     ])
-      .then(() => activity?.idle())
+      .then(async ([target]) => {
+        await activity?.idle();
+        if (target && restartHelper)
+          await launchUpdateAfterExit(restartHelper, target, app.getPath('userData'));
+        else if (installing)
+          dialog.showErrorBox(
+            'Update could not be installed',
+            'The update was not completed. Retained update files have been left for recovery.',
+          );
+      })
+      .catch(() => {
+        if (installing)
+          dialog.showErrorBox(
+            'Update restart failed',
+            'The replacement and recovery files are retained. OpenKraken could not arrange the restart.',
+          );
+      })
       .finally(() => {
         clearTimeout(deadline);
         // With no live service, cleanup can finish in the original will-quit microtask.

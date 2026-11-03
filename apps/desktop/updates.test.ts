@@ -1,5 +1,5 @@
 import { expect, test, vi } from 'vitest';
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -246,6 +246,73 @@ test('a stalled metadata request has a deadline and reports no remote error deta
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test.skipIf(process.platform !== 'linux')(
+  'install consent binds a verified download and replacement waits for accepted shutdown',
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-install-flow-'));
+    const target = join(root, 'OpenKraken.AppImage');
+    const header = Buffer.alloc(64);
+    header.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]);
+    header.set([0x41, 0x49, 2], 8);
+    header.writeUInt16LE(62, 18);
+    const oldImage = Buffer.concat([header, Buffer.from('old')]);
+    const nextImage = Buffer.concat([header, Buffer.from('new')]);
+    const metadata = release();
+    metadata.artifacts[0]!.size = nextImage.length;
+    metadata.artifacts[0]!.sha256 = createHash('sha256').update(nextImage).digest('hex');
+    let installClock = now;
+    const updater = new Updates(
+      join(root, 'updates'),
+      configuration,
+      { ...runtime, appImage: target },
+      async (url) => new Response(String(url).endsWith('.json') ? signed(metadata) : nextImage),
+      () => installClock,
+    );
+    try {
+      await writeFile(target, oldImage, { mode: 0o700 });
+      await updater.started();
+      await updater.check();
+      let verified = await updater.download('AppImage');
+      await writeFile(join(root, 'updates/artifact.ready'), 'tampered cache');
+      expect((await updater.prepareInstall(verified.installId!)).error).toBe('installation');
+      expect(await readFile(target)).toEqual(oldImage);
+      await updater.check();
+      verified = await updater.download('AppImage');
+      expect(verified.installId).toBeTruthy();
+      expect((await updater.prepareInstall(crypto.randomUUID())).phase).toBe('verified');
+      expect((await updater.prepareInstall(verified.installId!)).phase).toBe('restart-ready');
+      expect(await readFile(target)).toEqual(oldImage);
+      await updater.started(); // Renderer remount cannot clean an active install transaction.
+      const cancelled = await updater.abandonInstall();
+      expect(cancelled.phase).toBe('verified');
+      expect(cancelled.installId).not.toBe(verified.installId);
+      expect((await updater.prepareInstall(verified.installId!)).phase).toBe('verified');
+      expect((await updater.prepareInstall(cancelled.installId!)).phase).toBe('restart-ready');
+      installClock = now + 2 * 86400000;
+      expect(await updater.commitInstall()).toBeNull();
+      expect(await readFile(target)).toEqual(oldImage);
+      installClock = now;
+      await updater.check();
+      verified = await updater.download('AppImage');
+      expect((await updater.prepareInstall(verified.installId!)).phase).toBe('restart-ready');
+      expect(await updater.commitInstall()).toMatchObject({ target });
+      expect(await readFile(target)).toEqual(nextImage);
+      await updater.close();
+      const restarted = new Updates(join(root, 'updates'), configuration, {
+        ...runtime,
+        version: '0.2.0',
+        appImage: target,
+      });
+      await restarted.started();
+      await expect(stat(target + '.openkraken-update')).rejects.toMatchObject({ code: 'ENOENT' });
+      await restarted.close();
+    } finally {
+      await updater.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 function signed(value: unknown) {
   const payload = Buffer.from(JSON.stringify(value));
   return JSON.stringify({

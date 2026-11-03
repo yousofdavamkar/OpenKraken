@@ -11,6 +11,9 @@ export const updatesStateSchema = z.strictObject({
     'available',
     'downloading',
     'verified',
+    'preparing',
+    'restart-ready',
+    'installed',
     'error',
   ]),
   version: z.string().max(100).nullable(),
@@ -32,6 +35,7 @@ export const updatesStateSchema = z.strictObject({
     .int()
     .min(0)
     .max(2 * 1024 ** 3),
+  installId: z.uuid().nullable().default(null),
   error: z
     .enum([
       'network',
@@ -41,11 +45,14 @@ export const updatesStateSchema = z.strictObject({
       'integrity',
       'cancelled',
       'timeout',
+      'installation',
     ])
     .nullable(),
 });
 export type UpdateState = z.infer<typeof updatesStateSchema>;
 export const updatesRequests = [
+  z.strictObject({ id: z.uuid(), method: z.literal('updatesStarted') }),
+  z.strictObject({ id: z.uuid(), method: z.literal('updatesInstall'), installId: z.uuid() }),
   z.strictObject({ id: z.uuid(), method: z.literal('updatesRead') }),
   z.strictObject({ id: z.uuid(), method: z.literal('updatesCheck') }),
   z.strictObject({ id: z.uuid(), method: z.literal('updatesCancel') }),

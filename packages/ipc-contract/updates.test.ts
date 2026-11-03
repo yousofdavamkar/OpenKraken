@@ -2,11 +2,19 @@ import { expect, test } from 'vitest';
 import { requestSchema, resultSchema, serviceRequestSchema } from './src/index.js';
 
 test('updates stay in main and renderer requests cannot choose trust or download destinations', () => {
-  for (const method of ['updatesRead', 'updatesCheck', 'updatesCancel', 'updatesDownload']) {
+  for (const method of [
+    'updatesRead',
+    'updatesCheck',
+    'updatesCancel',
+    'updatesDownload',
+    'updatesStarted',
+    'updatesInstall',
+  ]) {
     const request = {
       id: crypto.randomUUID(),
       method,
       ...(method === 'updatesDownload' ? { format: 'AppImage' } : {}),
+      ...(method === 'updatesInstall' ? { installId: crypto.randomUUID() } : {}),
     };
     expect(requestSchema.safeParse(request).success).toBe(true);
     expect(serviceRequestSchema.safeParse(request).success).toBe(false);

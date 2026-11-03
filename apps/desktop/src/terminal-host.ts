@@ -17,6 +17,9 @@ interface Session {
 }
 export class TerminalHost {
   private active?: Session;
+  get running() {
+    return !!this.active && !this.active.ended;
+  }
   constructor(private emit: (event: TerminalEvent) => void) {}
   async request(
     request: TerminalRequest,
