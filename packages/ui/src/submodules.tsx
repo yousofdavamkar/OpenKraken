@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import type { SubmoduleState, SubmoduleUpdatePreview } from '@openkraken/ipc-contract';
+import type {
+  SubmoduleState,
+  SubmoduleUpdatePreview,
+  SubmoduleSyncPreview,
+} from '@openkraken/ipc-contract';
 import { CommandButton } from './commands.js';
 import { useRepository, waitForBackground } from './store.js';
 
@@ -18,6 +22,11 @@ function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void 
   const updateId = useRef<string | undefined>(undefined);
   const reviewed = useRef(false);
   const [review, setReview] = useState<SubmoduleUpdatePreview>();
+  const [syncReview, setSyncReview] = useState<SubmoduleSyncPreview>();
+  const [synchronizing, setSynchronizing] = useState(false);
+  const syncButton = useRef<HTMLButtonElement>(null);
+  const cancelSync = useRef<HTMLButtonElement>(null);
+  const syncReviewed = useRef(false);
   const [allowLocal, setAllowLocal] = useState(false);
   const [notice, setNotice] = useState('');
   const [progress, setProgress] = useState('');
@@ -37,7 +46,14 @@ function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void 
     if (review) cancelReview.current?.focus();
     else if (reviewed.current) updateButton.current?.focus();
   }, [review, pending]);
+  useEffect(() => {
+    if (pending || !syncReviewed.current) return;
+    if (syncReview) cancelSync.current?.focus();
+    else syncButton.current?.focus();
+  }, [syncReview, pending]);
   const load = async () => {
+    syncReviewed.current = false;
+    setSyncReview(undefined);
     setReview(undefined);
     setNotice('');
     setPending(true);
@@ -78,6 +94,7 @@ function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void 
     }
   };
   const reviewUpdate = async () => {
+    syncReviewed.current = false;
     setPending(true);
     setError('');
     setNotice('');
@@ -95,6 +112,68 @@ function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void 
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
     } finally {
+      setPending(false);
+    }
+  };
+  const reviewSync = async () => {
+    setPending(true);
+    setError('');
+    setNotice('');
+    setSyncReview(undefined);
+    reviewed.current = false;
+    syncReviewed.current = true;
+    try {
+      const result = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'submoduleSyncPreview',
+        repoId,
+      });
+      if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'submoduleSyncPreview') setSyncReview(result.preview);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPending(false);
+    }
+  };
+  const synchronize = async () => {
+    if (!syncReview) return;
+    setPending(true);
+    setError('');
+    setNotice('');
+    try {
+      if (useRepository.getState().syncing) await waitForBackground();
+      if (useRepository.getState().snapshot?.repository.id !== repoId) return;
+      if (useRepository.getState().busy)
+        throw new Error('Wait for the current operation to finish');
+      const id = crypto.randomUUID();
+      updateId.current = id;
+      useRepository.setState({ busy: id });
+      setSynchronizing(true);
+      const result = await window.openkraken.request({
+        id,
+        method: 'syncSubmodules',
+        repoId,
+        token: syncReview.token,
+      });
+      if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'cancelled') throw new Error('URL synchronization cancelled.');
+      if (result.kind === 'submodules') {
+        setState(result.state);
+        setNotice('Submodule URLs synchronized. Files and checked-out commits were retained.');
+      }
+    } catch (error) {
+      setError(
+        `${error instanceof Error ? error.message : String(error)} Some URL settings may already have changed. Review again before retrying.`,
+      );
+    } finally {
+      const id = updateId.current;
+      updateId.current = undefined;
+      setSynchronizing(false);
+      setSyncReview(undefined);
+      if (id && useRepository.getState().busy === id) useRepository.setState({ busy: undefined });
+      if (id && useRepository.getState().snapshot?.repository.id === repoId)
+        await useRepository.getState().run({ id: crypto.randomUUID(), method: 'refresh', repoId });
       setPending(false);
     }
   };
@@ -149,7 +228,8 @@ function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void 
       onCancel={(event) => {
         event.preventDefault();
         if (!pending) {
-          if (review) setReview(undefined);
+          if (syncReview) setSyncReview(undefined);
+          else if (review) setReview(undefined);
           else close();
         }
       }}
@@ -161,6 +241,62 @@ function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void 
       </p>
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
+      {synchronizing && (
+        <div>
+          <p role="status">Synchronizing submodule URLs…</p>
+          <button onClick={() => void useRepository.getState().cancel()}>
+            Cancel synchronization
+          </button>
+        </div>
+      )}
+      {syncReview && (
+        <fieldset disabled={pending}>
+          <legend>Review submodule URL synchronization</legend>
+          <p>
+            Copy URLs from each working checkout’s .gitmodules into registered submodule settings
+            and their selected remotes, recursively. This replaces local URL overrides and can
+            affect linked worktrees that share configuration.
+          </p>
+          <p>
+            Relative URLs are resolved by Git using each parent’s default remote. Unregistered
+            submodules are skipped. This action does not fetch, initialize, stage files or change
+            checked-out commits. It has no Undo; cancellation or failure can leave partial URL
+            changes.
+          </p>
+          <ul aria-label="Reviewed submodule URLs">
+            {syncReview.entries.map((entry) => (
+              <li key={entry.path}>
+                <h4>{entry.path}</h4>
+                <p className="submodule-path">URL in .gitmodules: {entry.declaredUrl}</p>
+                <p className="submodule-path">
+                  {entry.registered
+                    ? `Current local URL: ${entry.configuredUrl ?? ''}`
+                    : 'Not registered locally; skipped'}
+                </p>
+              </li>
+            ))}
+          </ul>
+          <details>
+            <summary>Current URL settings and relative-URL context</summary>
+            <ul>
+              {syncReview.sources.map((source, index) => (
+                <li key={`${source.repository}:${source.setting}:${index}`}>
+                  <p className="submodule-path">{source.repository}</p>
+                  <p className="submodule-path">
+                    {source.setting}: {source.value}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </details>
+          <div className="dialog-actions">
+            <button onClick={() => void synchronize()}>Synchronize URLs</button>
+            <button ref={cancelSync} onClick={() => setSyncReview(undefined)}>
+              Cancel URL review
+            </button>
+          </div>
+        </fieldset>
+      )}
       {updating && (
         <div>
           <p role="status">{progress}</p>
@@ -254,7 +390,7 @@ function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void 
             {entry.url && <p className="submodule-path">Configured URL: {entry.url}</p>}
             {entry.problem && <p>{entry.problem}</p>}
             <button
-              disabled={pending || !!review || !entry.available}
+              disabled={pending || !!review || !!syncReview || !entry.available}
               onClick={() => void open(entry.id)}
             >
               Open submodule
@@ -264,13 +400,20 @@ function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void 
       </ul>
       <div className="dialog-actions">
         <button
+          ref={syncButton}
+          disabled={pending || !!review || !!syncReview || !state?.entries.length}
+          onClick={() => void reviewSync()}
+        >
+          Review URL sync
+        </button>
+        <button
           ref={updateButton}
-          disabled={pending || !!review || !state?.entries.length}
+          disabled={pending || !!review || !!syncReview || !state?.entries.length}
           onClick={() => void reviewUpdate()}
         >
           Review update
         </button>
-        <button disabled={pending || !!review} onClick={() => void load()}>
+        <button disabled={pending || !!review || !!syncReview} onClick={() => void load()}>
           Refresh submodules
         </button>
         <button disabled={pending} onClick={close}>
