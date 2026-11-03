@@ -1,6 +1,56 @@
 name: CI
 on: [push, pull_request]
 jobs:
+  minimum-git:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      OPENKRAKEN_LFS_TEST: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Build the minimum supported Git in an isolated prefix
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl xz-utils libcurl4-openssl-dev libexpat1-dev zlib1g-dev git-lfs xvfb
+          bash scripts/build-minimum-git.sh "$RUNNER_TEMP/git-2.38.0"
+          echo "$RUNNER_TEMP/git-2.38.0/bin" >> "$GITHUB_PATH"
+          echo "OPENKRAKEN_GIT=$RUNNER_TEMP/git-2.38.0/bin/git" >> "$GITHUB_ENV"
+      - name: Verify selected Git and LFS
+        run: |
+          test "$(git --version)" = 'git version 2.38.0'
+          test "$(command -v git)" = "$OPENKRAKEN_GIT"
+          mkdir -p test-results
+          git --version | tee test-results/minimum-git-version.log
+          git lfs version | tee -a test-results/minimum-git-version.log
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test | tee test-results/minimum-git-unit.log
+      - run: pnpm build
+      - name: Minimum Git desktop acceptance
+        run: >-
+          xvfb-run -a pnpm exec playwright test
+          tests/e2e/desktop.test.ts tests/e2e/graph.test.ts
+          tests/e2e/references.test.ts tests/e2e/reference-sidebar.test.ts
+          tests/e2e/operations.test.ts tests/e2e/submodules.test.ts
+          tests/e2e/worktrees.test.ts tests/e2e/security.test.ts
+          tests/e2e/serialized-ipc.test.ts
+          --output=test-results/minimum-git
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence-minimum-git-linux
+          path: test-results/
   verify:
     env:
       OPENKRAKEN_LFS_TEST: '1'

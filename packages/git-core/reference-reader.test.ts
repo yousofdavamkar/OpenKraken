@@ -84,6 +84,26 @@ test('older Git falls back once and retains complete native records', async () =
   expect(pages).toBe(0);
 });
 
+test('native capability detection preserves complete records across repeated reads', async () => {
+  const probeResults: number[] = [];
+  let pages = 0;
+  let fullReads = 0;
+  const reader = new ReferenceReader(async (args, options) => {
+    if (paged(args)) pages++;
+    if (args.includes(`--format=${REF_FORMAT}`) && !paged(args)) fullReads++;
+    const result = await runGit(git.path, args, options);
+    if (args.includes('--start-after=') && args.includes('--count=1'))
+      probeResults.push(result.exitCode);
+    return result;
+  });
+  const expected = await nativeRefs();
+  expect(await reader.read(repository)).toEqual(expected);
+  expect(await reader.read(repository)).toEqual(expected);
+  expect(probeResults).toEqual([modern ? 0 : 129]);
+  expect(pages).toBe(modern ? 6 : 0);
+  expect(fullReads).toBe(modern ? 0 : 2);
+});
+
 test
   .skipIf(!modern)
   .each(['create', 'delete', 'move', 'head', 'upstream', 'tracking-tip'] as const)(
