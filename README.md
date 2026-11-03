@@ -221,7 +221,9 @@ Choose **Submodules** from the toolbar or command palette to inspect registered 
 
 Choose **Review update** to initialize missing checkouts and recursively check out recorded commits. Review the paths and configured sources, then explicitly enable local-file sources only when trusted. The service rechecks the review and protects changed, ignored, untracked, staged and unreferenced submodule work. Updates show progress and support cancellation; failures can leave partial changes, so refresh before retrying. There is no Undo for this action.
 
-Linux fixtures cover discovery, opening and recursive initialization/update with UTF-8 paths. Add/remove/sync controls, live authenticated transport acceptance and cross-platform verification remain open; M7 is not complete.
+Choose **Review URL sync** to copy changed `.gitmodules` URLs into registered submodules and their selected remotes recursively. Review the current overrides before replacing them. Git resolves relative URLs using the parent’s default remote. This preserves local edits and checked-out commits without fetching or initializing modules. Failures can leave partial URL changes; review again before retrying. There is no Undo.
+
+Linux fixtures cover discovery, opening, recursive initialization/update and URL synchronization with UTF-8 paths. Add/remove controls, live authenticated transport acceptance and cross-platform verification remain open; M7 is not complete.
 
 On Linux, install `xdotool` and run `OPENKRAKEN_XDOTOOL=xdotool xvfb-run -a pnpm smoke:package` after packaging to test the native folder picker and packaged terminal in addition to renderer isolation and authentication/editor helpers. Linux CI runs this check.
 

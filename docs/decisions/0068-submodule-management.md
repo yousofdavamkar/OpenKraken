@@ -26,13 +26,23 @@ Git configuration reads include effective native includes and URL rewrites for t
 
 The dialog focuses Cancel review, restores the update button on dismissal, disables conflicting controls during mutation, permits cancellation of a running update, and refreshes the repository snapshot afterward. Errors and cancellation explicitly tell the user to refresh before retrying because some modules may already have changed. The inventory itself is refreshed on successful completion or through **Refresh submodules**.
 
+## Reviewed recursive URL synchronization
+
+**Review URL sync** lists declared URLs, current registered overrides and the effective remote/URL-rewrite context. Confirmation runs native `git submodule sync --recursive` with literal top-level index paths. Git resolves relative declarations and selects child remotes from native branch configuration. Unregistered modules are skipped. This configuration-only action retains dirty files, staged content and checked-out commits, and does not fetch or initialize repositories. Transport protocols are disabled during the command.
+
+A repository-bound, single-use token expires after ten minutes. The fingerprint covers recursive inventory, canonical Git/common directories, branch context, effective configuration and metadata for the local configuration, worktree configuration and `.gitmodules` files. Confirmation rechecks under the parent repository write queue and consumes the token before inspection/mutation. Leaf configuration symlinks and files over 1 MiB are refused; effective configuration output is bounded to 2 MiB per repository and review sources to 2,048 entries. These checks are optimistic and do not exclude concurrent external writers or make recursive writes atomic.
+
+The dialog explains replacement of local overrides, configuration shared by linked worktrees, native relative-URL resolution, and possible partial writes on failure or cancellation. Cancel review receives focus; dismissal and completion restore the review button. A failed command requires a new review, and no Undo is offered. The service refreshes inventory after success and the renderer refreshes the repository snapshot after mutation.
+
 ## Scope and verification
 
-Recursive discovery, status, guarded opening and reviewed recursive initialization/update are implemented for Linux fixtures. Feature 1.8’s recursive init/update fixture is covered; this does not establish cross-platform or live authenticated-provider acceptance. Add/remove/sync controls, automatic refresh of this dialog, non-UTF-8 paths and cross-platform runtime acceptance also remain open.
+Recursive discovery, status, guarded opening, reviewed recursive initialization/update and URL synchronization are implemented for Linux fixtures. Feature 1.8’s recursive init/update fixture is covered; this does not establish cross-platform or live authenticated-provider acceptance. Add/remove controls, automatic refresh of this dialog, non-UTF-8 paths and cross-platform runtime acceptance also remain open.
 
 Native Git tests cover initialized and uninitialized nested modules, dirty/out-of-date checkouts, stale and unknown selections, Unicode/newline paths, configuration-only paths, symlink refusal, parent-directory cycles, conflict stages, cancellation, bare-repository refusal, duplicate/redirected configuration and the inventory count bound. Typed IPC tests reject caller paths, URLs, force/recursive options and malformed identities. Electron acceptance lists a nested uninitialized module, refuses an old selection after an external edit, refreshes its dirty count and opens the reviewed child with its draft intact.
 
 Additional native tests cover exact recorded commits, fetching newer recorded objects, literal wildcard paths, replay and stale-configuration refusal, dirty/ignored/hidden-index/detached work, preserved staged data in missing checkouts, local transport opt-in, TLS certificate rejection and blocked external-helper rewrites. Typed IPC tests reject arbitrary update paths/URLs/options and missing transport consent. Electron tests cover review dismissal/focus, stale reviews, nested initialization and cancellation of a stalled HTTP fetch. Live authenticated providers, platform-specific credential prompts and packaged update flows remain unverified.
+
+Seven native synchronization tests cover recursive updates with dirty/staged work retained, relative URLs and branch-selected remotes, skipped unregistered modules, credential redaction, stale declarations/remotes/branches, foreign/replayed tokens, native config-lock failure/retry and configuration symlink refusal. Strict IPC rejects caller paths/URLs/options. Electron acceptance covers review dismissal/focus, stale reviews, write failure/retry, unchanged HEAD/index/local edits and zero requests to the declared HTTP endpoint. These fixtures do not establish cross-platform or packaged acceptance.
 
 ## References
 
