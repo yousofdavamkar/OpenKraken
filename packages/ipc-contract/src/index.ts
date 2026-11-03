@@ -1,4 +1,6 @@
 import { commandIdSchema, commandUsageSchema, commandPreferencesSchema } from './commands.js';
+import { terminalRequests, terminalEvents } from './terminal.js';
+export * from './terminal.js';
 import {
   appearanceModeSchema,
   appearancePreferencesSchema,
@@ -1202,6 +1204,7 @@ const workingRequests = [
     .strict(),
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  ...terminalRequests,
   z
     .object({
       id: requestId,
@@ -1777,6 +1780,14 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('terminalOpened'),
+      sessionId: z.string().uuid(),
+      shell: z.string().min(1).max(1024),
+    })
+    .strict(),
+  z.object({ kind: z.literal('terminalAck') }).strict(),
   z.object({ kind: z.literal('commandContext') }).strict(),
   z.object({ kind: z.literal('commandPreferences'), state: commandPreferencesSchema }).strict(),
   z
@@ -2111,6 +2122,7 @@ export const gitProgressEventSchema = z
   .object({ type: z.literal('gitProgress'), id: requestId, text: z.string().max(4096) })
   .strict();
 export const desktopEventSchema = z.discriminatedUnion('type', [
+  ...terminalEvents,
   z.object({ type: z.literal('appearanceChanged'), state: appearancePreferencesSchema }).strict(),
   z
     .object({

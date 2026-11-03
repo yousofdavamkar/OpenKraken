@@ -7,6 +7,52 @@ import {
   resultSchema,
   parseUserTheme,
 } from '../../packages/ipc-contract/src/index.js';
+test('terminal IPC is bounded, session-scoped and excluded from the Git service', () => {
+  const id = '00000000-0000-4000-8000-000000000000';
+  const sessionId = '00000000-0000-4000-8000-000000000001';
+  const open = {
+    id,
+    sessionId,
+    method: 'terminalOpen',
+    repoId: 'a'.repeat(64),
+    cols: 80,
+    rows: 24,
+  };
+  for (const request of [
+    open,
+    { id, sessionId, method: 'terminalInput', data: 'git status\r' },
+    { id, sessionId, method: 'terminalAck', sequence: 1 },
+    { id, sessionId, method: 'terminalResize', cols: 91, rows: 27 },
+    { id, sessionId, method: 'terminalClose' },
+  ]) {
+    expect(requestSchema.safeParse(request).success).toBe(true);
+    expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  }
+  for (const fields of [
+    { cwd: '/tmp' },
+    { shell: '/bin/sh' },
+    { args: ['-c', 'echo injected'] },
+    { env: { TOKEN: 'secret' } },
+    { repoId: '../repository' },
+    { sessionId: 'unbound' },
+    { cols: 0 },
+    { rows: 501 },
+    { cols: 80.5 },
+  ])
+    expect(requestSchema.safeParse({ ...open, ...fields }).success).toBe(false);
+  expect(
+    requestSchema.safeParse({ id, sessionId, method: 'terminalInput', data: 'x'.repeat(8193) })
+      .success,
+  ).toBe(false);
+  expect(
+    requestSchema.safeParse({
+      id,
+      sessionId,
+      method: 'terminalAck',
+      sequence: Number.MAX_SAFE_INTEGER + 1,
+    }).success,
+  ).toBe(false);
+});
 test('custom themes accept bounded named hex tokens and reject CSS, unknown fields and incomplete selections', () => {
   const custom = {
     version: 1,

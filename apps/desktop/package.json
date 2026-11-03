@@ -10,6 +10,7 @@
     "@octokit/rest": "22.0.1",
     "@openkraken/git-core": "workspace:*",
     "@openkraken/ipc-contract": "workspace:*",
+    "node-pty": "1.1.0",
     "zod": "4.6.7"
   }
 }

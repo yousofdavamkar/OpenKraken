@@ -8,6 +8,8 @@ M0's secure shell and Git service now support a Canvas commit graph with worker-
 
 Requires Node.js 24+, pnpm 11.25.0, Git 2.38+ and Go 1.27.3+ to build the small native authentication helper. Go is not required to run a packaged app. `OPENKRAKEN_GO` can select the build compiler.
 
+The terminal uses the native `node-pty` module. Building it from source requires Python, Make and a C++ compiler on Linux (for example `python3` and `build-essential`). These build tools are not needed by packaged apps. Its install scripts are explicitly allowed in `pnpm-workspace.yaml`.
+
 ```sh
 pnpm install --frozen-lockfile
 pnpm start

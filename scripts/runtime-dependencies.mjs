@@ -29,4 +29,6 @@ export async function copyRuntimeDependencies(target) {
   }
   if (!(await copy('@parcel/watcher', resolve('packages/git-core'), target)))
     throw new Error('Missing native watcher package');
+  if (!(await copy('node-pty', resolve('apps/desktop'), target)))
+    throw new Error('Missing native terminal package');
 }

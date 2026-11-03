@@ -1,4 +1,5 @@
 import { CommandMenu } from './command-menu.js';
+import { TerminalHost } from './terminal-host.js';
 import { AppSettings } from './app-settings.js';
 import { BitbucketProvider } from './bitbucket-provider.js';
 import {
@@ -46,6 +47,10 @@ import {
 const htmlPath = join(__dirname, 'renderer', 'index.html');
 const documentUrl = pathToFileURL(htmlPath).href;
 let window: BrowserWindow | undefined;
+let terminalRepository: { id: string; path: string } | undefined;
+const terminals = new TerminalHost((event) => {
+  if (window && !window.isDestroyed()) window.webContents.send(EVENT_CHANNEL, event);
+});
 let service: UtilityProcess | undefined;
 let avatars: AvatarCache | undefined;
 let appSettings: AppSettings | undefined;
@@ -109,7 +114,13 @@ function startService() {
     const event = desktopEventSchema.safeParse(message);
     if (event.success) {
       // Native commands can originate only in main, never in the Git utility process.
-      if (event.data.type === 'commandExecute' || event.data.type === 'appearanceChanged') return;
+      if (
+        event.data.type === 'commandExecute' ||
+        event.data.type === 'appearanceChanged' ||
+        event.data.type === 'terminalData' ||
+        event.data.type === 'terminalExit'
+      )
+        return;
       if (event.data.type !== 'repositoryChanged' && !pending.has(event.data.id)) return;
       if (service === child && window && !window.isDestroyed())
         window.webContents.send(EVENT_CHANNEL, event.data);
@@ -212,6 +223,8 @@ function createWindow() {
     if (choice === 1) event.preventDefault();
   });
   const cancelProviderSignIn = () => {
+    terminalRepository = undefined;
+    void terminals.close();
     for (const controller of providerRequests.values()) controller.abort();
     providers?.deviceCancel();
     providers?.gitlabCancel();
@@ -223,6 +236,8 @@ function createWindow() {
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   window.on('closed', () => {
+    terminalRepository = undefined;
+    void terminals.close();
     window = undefined;
     for (const id of pending.keys()) service?.postMessage({ id });
     for (const controller of providerRequests.values()) controller.abort();
@@ -249,6 +264,15 @@ else {
     });
     const handleRequest = async (raw: unknown): Promise<Result> => {
       const request = requestSchema.parse(raw);
+      // PTY acknowledgments must remain available while Git/provider requests are pending.
+      if (
+        request.method === 'terminalOpen' ||
+        request.method === 'terminalInput' ||
+        request.method === 'terminalResize' ||
+        request.method === 'terminalAck' ||
+        request.method === 'terminalClose'
+      )
+        return await terminals.request(request, terminalRepository);
       if (inFlight.has(request.id))
         return { kind: 'error', code: 'DUPLICATE_REQUEST', message: 'Request is already running' };
       if (inFlight.size >= 8)
@@ -1013,6 +1037,7 @@ else {
       validateSender(event);
       if (format !== undefined && format !== 'json') throw new Error('Invalid response format');
       const result = await handleRequest(raw);
+      if (result.kind === 'snapshot') terminalRepository = result.snapshot.repository;
       // Serialize after validation and before both renderer IPC and isolated-world copying.
       return format === 'json' ? JSON.stringify(result) : result;
     });
@@ -1055,10 +1080,12 @@ else {
     const stopped = child
       ? new Promise<void>((resolve) => child.once('exit', () => resolve()))
       : Promise.resolve();
-    void Promise.all([stopped, providers?.idle(), appSettings?.idle()]).finally(() => {
-      clearTimeout(deadline);
-      app.quit();
-    });
+    void Promise.all([stopped, providers?.idle(), appSettings?.idle(), terminals.close()]).finally(
+      () => {
+        clearTimeout(deadline);
+        app.quit();
+      },
+    );
     child?.postMessage({ shutdown: true });
   });
 }
