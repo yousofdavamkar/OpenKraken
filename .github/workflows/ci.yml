@@ -89,7 +89,7 @@ jobs:
           tests/e2e/references.test.ts tests/e2e/reference-sidebar.test.ts
           tests/e2e/operations.test.ts tests/e2e/submodules.test.ts
           tests/e2e/worktrees.test.ts tests/e2e/security.test.ts
-          tests/e2e/serialized-ipc.test.ts
+          tests/e2e/serialized-ipc.test.ts tests/e2e/watcher-startup.test.ts
           --output=test-results/minimum-git
       - uses: actions/upload-artifact@v4
         if: always()

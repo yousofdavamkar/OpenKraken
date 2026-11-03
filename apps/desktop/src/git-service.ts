@@ -51,14 +51,11 @@ let service: Promise<RepositoryService> | undefined;
 let gitPath = '';
 let watcher: RepositoryWatcher | undefined;
 let watchStart: ReturnType<typeof setTimeout> | undefined;
-async function prepareWatcher(repo: Repository) {
+function prepareWatcher(repo: Repository) {
   if (watcher?.repo.id === repo.id) return;
-  clearTimeout(watchStart);
-  await watcher?.close();
-  watcher = new RepositoryWatcher(gitPath, repo, (event) =>
+  return new RepositoryWatcher(gitPath, repo, (event) =>
     parent!.postMessage({ type: 'repositoryChanged', ...event }),
   );
-  return watcher;
 }
 
 function getService() {
@@ -583,7 +580,7 @@ async function executeGit(
             : request.method === 'init'
               ? await git.init(request.path, request.branch, signal)
               : await git.open(request.path, signal);
-  const initialWatcher = 'path' in repo ? await prepareWatcher(repo) : undefined;
+  const initialWatcher = 'path' in repo ? prepareWatcher(repo) : undefined;
   const readSnapshot = () =>
     git.snapshot(
       repo.id,
@@ -592,15 +589,21 @@ async function executeGit(
       request.method === 'refresh' ? request.view : undefined,
     );
   try {
+    const snapshot = await (initialWatcher
+      ? initialWatcher.primeSnapshot(readSnapshot)
+      : readSnapshot());
+    if (initialWatcher) {
+      const previous = watcher;
+      clearTimeout(watchStart);
+      watcher = initialWatcher;
+      await previous?.close();
+    }
     return {
       kind: 'snapshot',
-      snapshot: await (initialWatcher
-        ? initialWatcher.primeSnapshot(readSnapshot)
-        : readSnapshot()),
+      snapshot,
     };
   } catch (error) {
     if (initialWatcher) {
-      if (watcher === initialWatcher) watcher = undefined;
       await initialWatcher.close();
     }
     throw error;

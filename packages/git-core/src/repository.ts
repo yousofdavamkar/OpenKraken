@@ -69,6 +69,7 @@ export class RepositoryService {
   private repositories = new Map<string, Repository>();
   private queues = new Map<string, RepositoryQueue>();
   private histories = new Map<string, HistoryCursor>();
+  private snapshotQueue = new RepositoryQueue(1);
   private lfsPullPlans = new Map<string, LfsPullPlan>();
   private lfsSetupPlans = new Map<string, LfsSetupPlan>();
   private submoduleUpdates = new Map<string, SubmoduleUpdatePlan>();
@@ -274,9 +275,22 @@ export class RepositoryService {
     refresh = true,
     requestedView?: GraphView,
   ): Promise<Snapshot> {
+    const start = performance.now();
+    return this.snapshotQueue.run(
+      false,
+      () => this.prepareSnapshot(id, signal, refresh, requestedView, start),
+      signal,
+    );
+  }
+  private async prepareSnapshot(
+    id: string,
+    signal: AbortSignal | undefined,
+    refresh: boolean,
+    requestedView: GraphView | undefined,
+    start: number,
+  ): Promise<Snapshot> {
     const known = this.repositories.get(id);
     if (!known) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
-    const start = performance.now();
     return this.queue(known.commonDir).run(
       false,
       async () => {
@@ -350,15 +364,8 @@ export class RepositoryService {
             .map((c) => ({ ...c, parents: c.parents.slice(0, 1), isStash: true }));
           for (const stash of stashCommits) if (stash.parents[0]) starts.add(stash.parents[0]);
         }
-        await this.histories.get(id)?.close();
-        // The current UI owns one active repository. Release inactive cursors on a switch.
-        for (const [key, cursor] of this.histories)
-          if (key !== id) {
-            await cursor.close();
-            this.histories.delete(key);
-          }
         await this.cache?.flush();
-        this.cache = undefined;
+        let cache: HistoryCache | undefined;
         if (
           this.dataDir &&
           !process.env.GIT_SHALLOW_FILE &&
@@ -393,9 +400,9 @@ export class RepositoryService {
               }),
             )
             .digest('hex');
-          this.cache = new HistoryCache(this.dataDir, id, key);
+          cache = new HistoryCache(this.dataDir, id, key);
         }
-        const seed = await this.cache?.load();
+        const seed = await cache?.load();
         const history = new HistoryCursor(
           this.git,
           repository.path,
@@ -403,10 +410,23 @@ export class RepositoryService {
           stashCommits,
           seed,
         );
+        let page: Awaited<ReturnType<HistoryCursor['page']>>;
+        try {
+          page = await history.page(0, 2000, signal);
+          if (requestedView) await this.preferences.save(id, requestedView);
+          if (signal?.aborted) throw new GitError('CANCELLED', 'Snapshot loading cancelled');
+        } catch (error) {
+          await history.close();
+          throw error;
+        }
+        // Commit the prepared snapshot only after all fallible reads complete.
+        // Keep the displayed cursor and its cache usable on failure/cancellation.
+        for (const cursor of this.histories.values()) await cursor.close();
+        await this.cache?.flush();
+        this.histories.clear();
         this.histories.set(id, history);
-        const page = await history.page(0, 2000, signal);
-        this.cache?.record(0, page.commits, page.hasMore);
-        if (requestedView) await this.preferences.save(id, requestedView);
+        this.cache = cache;
+        cache?.record(0, page.commits, page.hasMore);
         return {
           repository,
           view,
