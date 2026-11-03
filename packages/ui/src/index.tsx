@@ -79,9 +79,9 @@ function App() {
           <Reset />
           <Push />
           <Stashes />
-          <WorktreesControl key={snapshot?.repository.id} />
-          <SubmodulesControl key={snapshot?.repository.id} />
-          <LfsControl key={snapshot?.repository.id} />
+          <WorktreesControl key={`worktrees:${snapshot?.repository.id}`} />
+          <SubmodulesControl key={`submodules:${snapshot?.repository.id}`} />
+          <LfsControl key={`lfs:${snapshot?.repository.id}`} />
           <CommandButton
             command="repository.terminal"
             disabled={!snapshot}

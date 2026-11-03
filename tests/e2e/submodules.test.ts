@@ -53,6 +53,8 @@ test('submodule view shows recursive state, refreshes stale selections and opens
     await initialized.getByRole('button', { name: 'Open submodule', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'child', exact: true })).toBeVisible();
+    for (const name of ['Worktrees', 'Submodules', 'Git LFS'])
+      await expect(page.getByRole('button', { name, exact: true })).toHaveCount(1);
     await expect(page.getByRole('button', { name: 'Stage draft.txt', exact: true })).toBeEnabled();
   } finally {
     await app.close();
