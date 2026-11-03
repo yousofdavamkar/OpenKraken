@@ -1,5 +1,11 @@
 import { spawn } from 'node:child_process';
 
+let processSupervisor: string | undefined;
+/** Set once by the trusted Git utility before starting any native process. */
+export function configureProcessSupervisor(helper: string) {
+  processSupervisor = helper;
+}
+
 export class GitError extends Error {
   constructor(
     public code: string,
@@ -49,13 +55,17 @@ export function runProcess(
     env.GIT_TERMINAL_PROMPT = '0';
     env.GIT_PAGER = 'cat';
     if (options.readOnly !== false) env.GIT_OPTIONAL_LOCKS = '0';
-    const child = spawn(executable, args, {
-      cwd: options.cwd,
-      env,
-      windowsHide: true,
-      detached: process.platform !== 'win32',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const child = spawn(
+      processSupervisor ?? executable,
+      processSupervisor ? ['--supervise', String(process.pid), executable, ...args] : args,
+      {
+        cwd: options.cwd,
+        env,
+        windowsHide: true,
+        detached: process.platform !== 'win32',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    );
     const stdout: Buffer[] = [],
       stderr: Buffer[] = [];
     let bytes = 0,

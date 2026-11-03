@@ -60,6 +60,9 @@ func run() int {
 	return 0
 }
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--supervise" {
+		os.Exit(runSupervised(os.Args[2:]))
+	}
 	result := make(chan int, 1)
 	go func() { result <- run() }()
 	select {

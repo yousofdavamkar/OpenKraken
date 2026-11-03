@@ -5,6 +5,7 @@ import type { Result, ServiceRequest, Repository } from '@openkraken/ipc-contrac
 import {
   GitError,
   locateGit,
+  configureProcessSupervisor,
   RepositoryService,
   RepositoryWatcher,
   AskpassBroker,
@@ -16,6 +17,7 @@ const editorHelper = join(
   'helpers',
   process.platform === 'win32' ? 'openkraken-askpass.exe' : 'openkraken-askpass',
 );
+configureProcessSupervisor(editorHelper);
 const authentication = new AskpassBroker(editorHelper, (event) => parent.postMessage(event));
 let shuttingDown = false;
 const active = new Map<string, AbortController>();
