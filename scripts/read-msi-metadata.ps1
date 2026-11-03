@@ -46,7 +46,7 @@ try {
         removedRegistry = @($removedRegistry)
         conditions = @(Read-Rows 'SELECT `Condition` FROM `LaunchCondition`' @('condition'))
         registry = @(Read-Rows 'SELECT `Registry`, `Root`, `Key`, `Name`, `Value`, `Component_` FROM `Registry`' @('id', 'root', 'key', 'name', 'value', 'component'))
-        components = @(Read-Rows 'SELECT `Component`, `Attributes`, `KeyPath` FROM `Component`' @('id', 'attributes', 'keyPath'))
+        components = @(Read-Rows 'SELECT `Component`, `ComponentId`, `Attributes`, `KeyPath` FROM `Component`' @('id', 'guid', 'attributes', 'keyPath'))
         files = @(Read-Rows 'SELECT `File`, `FileName`, `Component_` FROM `File`' @('id', 'name', 'component'))
         shortcuts = @(Read-Rows 'SELECT `Shortcut`, `Directory_`, `Name`, `Component_`, `Target`, `Arguments`, `WkDir` FROM `Shortcut`' @('id', 'directory', 'name', 'component', 'target', 'arguments', 'workingDirectory'))
     } | ConvertTo-Json -Depth 8 -Compress
