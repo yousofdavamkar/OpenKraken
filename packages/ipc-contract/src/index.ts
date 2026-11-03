@@ -13,6 +13,7 @@ import {
   submoduleRequests,
   submoduleStateSchema,
   submoduleUpdatePreviewSchema,
+  submoduleSyncPreviewSchema,
 } from './submodules.js';
 export * from './submodules.js';
 import {
@@ -1828,6 +1829,9 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('lfsLocks'), state: lfsLocksSchema }).strict(),
   z.object({ kind: z.literal('lfsSetupPreview'), preview: lfsSetupPreviewSchema }).strict(),
   z.object({ kind: z.literal('lfsInstalled') }).strict(),
+  z
+    .object({ kind: z.literal('submoduleSyncPreview'), preview: submoduleSyncPreviewSchema })
+    .strict(),
   z.object({ kind: z.literal('submodules'), state: submoduleStateSchema }).strict(),
   z
     .object({

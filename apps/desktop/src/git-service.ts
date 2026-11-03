@@ -374,6 +374,16 @@ async function executeGit(
     };
   if (request.method === 'submodules')
     return { kind: 'submodules', state: await git.submodules(request.repoId, signal) };
+  if (request.method === 'submoduleSyncPreview')
+    return {
+      kind: 'submoduleSyncPreview',
+      preview: await git.submoduleSyncPreview(request.repoId, signal),
+    };
+  if (request.method === 'syncSubmodules')
+    return {
+      kind: 'submodules',
+      state: await git.syncSubmodules(request.repoId, request.token, signal),
+    };
   if (request.method === 'submoduleUpdatePreview')
     return {
       kind: 'submoduleUpdatePreview',
@@ -602,6 +612,7 @@ parent.on('message', (event) => {
   const controller = new AbortController();
   active.set(request.id, controller);
   const writing = [
+    'syncSubmodules',
     'lfsSetup',
     'lfsLocks',
     'lfsPull',

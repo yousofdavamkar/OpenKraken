@@ -56,7 +56,37 @@ export const submoduleUpdatePreviewSchema = z
   })
   .strict();
 export type SubmoduleUpdatePreview = z.infer<typeof submoduleUpdatePreviewSchema>;
+export const submoduleSyncPreviewSchema = z
+  .object({
+    token: z.string().uuid(),
+    entries: z
+      .array(
+        z
+          .object({
+            path: z.string().max(32768),
+            declaredUrl: z.string().max(32768),
+            configuredUrl: z.string().max(32768).optional(),
+            registered: z.boolean(),
+          })
+          .strict(),
+      )
+      .max(256),
+    sources: submoduleUpdatePreviewSchema.shape.sources,
+  })
+  .strict();
+export type SubmoduleSyncPreview = z.infer<typeof submoduleSyncPreviewSchema>;
 export const submoduleRequests = [
+  z
+    .object({ id: z.string().uuid(), method: z.literal('submoduleSyncPreview'), repoId: identity })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      method: z.literal('syncSubmodules'),
+      repoId: identity,
+      token: z.string().uuid(),
+    })
+    .strict(),
   z
     .object({
       id: z.string().uuid(),

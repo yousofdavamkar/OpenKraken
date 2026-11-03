@@ -52,6 +52,7 @@ import { WorkingTree } from './working-tree.js';
 import { Worktrees, type WorktreePrunePlan } from './worktrees.js';
 import { Submodules } from './submodules.js';
 import { SubmoduleUpdates, type SubmoduleUpdatePlan } from './submodule-updates.js';
+import { SubmoduleSync, type SubmoduleSyncPlan } from './submodule-sync.js';
 import type { GitEditor } from './editor-document.js';
 import { RepositoryQueue } from './queue.js';
 
@@ -70,6 +71,7 @@ export class RepositoryService {
   private lfsPullPlans = new Map<string, LfsPullPlan>();
   private lfsSetupPlans = new Map<string, LfsSetupPlan>();
   private submoduleUpdates = new Map<string, SubmoduleUpdatePlan>();
+  private submoduleSyncPlans = new Map<string, SubmoduleSyncPlan>();
   private worktreePrunes = new Map<string, WorktreePrunePlan>();
   private processPool = new RepositoryQueue(3);
   private preferences: RepositoryPreferences;
@@ -947,6 +949,24 @@ export class RepositoryService {
     const { repo, manager } = this.submoduleManager(id);
     return this.queue(repo.commonDir).run(false, () => manager.list(signal), signal);
   }
+  submoduleSyncPreview(id: string, signal?: AbortSignal) {
+    const { repo } = this.submoduleManager(id);
+    const manager = new SubmoduleSync(
+      repo,
+      (args, options) => this.run(args, options),
+      this.submoduleSyncPlans,
+    );
+    return this.queue(repo.commonDir).run(false, () => manager.preview(signal), signal);
+  }
+  syncSubmodules(id: string, token: string, signal?: AbortSignal) {
+    const { repo } = this.submoduleManager(id);
+    const manager = new SubmoduleSync(
+      repo,
+      (args, options) => this.run(args, options),
+      this.submoduleSyncPlans,
+    );
+    return this.queue(repo.commonDir).run(true, () => manager.sync(token, signal), signal);
+  }
   submoduleUpdatePreview(id: string, signal?: AbortSignal) {
     const { repo } = this.submoduleManager(id);
     const manager = new SubmoduleUpdates(
@@ -1107,6 +1127,7 @@ export class RepositoryService {
   async dispose() {
     this.worktreePrunes.clear();
     this.submoduleUpdates.clear();
+    this.submoduleSyncPlans.clear();
     this.lfsPullPlans.clear();
     this.lfsSetupPlans.clear();
     await Promise.all([...this.histories.values()].map((cursor) => cursor.close()));

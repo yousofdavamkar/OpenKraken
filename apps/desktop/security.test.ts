@@ -7,6 +7,27 @@ import {
   resultSchema,
   parseUserTheme,
 } from '../../packages/ipc-contract/src/index.js';
+test('submodule URL synchronization accepts only service reviews and no caller paths or network controls', () => {
+  const base = { id: '00000000-0000-4000-8000-000000000001', repoId: 'a'.repeat(64) };
+  const preview = { ...base, method: 'submoduleSyncPreview' };
+  const sync = { ...base, method: 'syncSubmodules', token: base.id };
+  for (const schema of [requestSchema, serviceRequestSchema]) {
+    expect(schema.safeParse(preview).success).toBe(true);
+    expect(schema.safeParse(sync).success).toBe(true);
+    for (const fields of [
+      { path: '/outside' },
+      { url: 'https://outside.test' },
+      { force: true },
+      { recursive: false },
+      { args: ['--all'] },
+      { allowLocal: true },
+    ]) {
+      expect(schema.safeParse({ ...preview, ...fields }).success).toBe(false);
+      expect(schema.safeParse({ ...sync, ...fields }).success).toBe(false);
+    }
+    expect(schema.safeParse({ ...sync, token: 'invalid' }).success).toBe(false);
+  }
+});
 test('LFS setup accepts a checkout mode for review and only a token for confirmation', () => {
   const base = { id: '00000000-0000-4000-8000-000000000001', repoId: 'a'.repeat(64) };
   const preview = { ...base, method: 'lfsSetupPreview', skipSmudge: true };
