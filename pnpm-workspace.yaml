@@ -7,3 +7,5 @@ allowBuilds:
   electron-winstaller: false # Unused Squirrel target; no vendor binary copy hook needed.
   esbuild: true
   node-pty: true
+minimumReleaseAgeExclude:
+  - semver@7.8.6
