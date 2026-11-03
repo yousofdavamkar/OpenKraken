@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { LfsState, LfsPullPreview } from '@openkraken/ipc-contract';
+import type { LfsState, LfsPullPreview, LfsLocks } from '@openkraken/ipc-contract';
 import { CommandButton } from './commands.js';
 import { useRepository, waitForBackground } from './store.js';
 
@@ -16,11 +16,13 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
   const [progress, setProgress] = useState('');
   const [notice, setNotice] = useState('');
   const [state, setState] = useState<LfsState>();
+  const [serverLocks, setServerLocks] = useState<LfsLocks>();
+  const [checkingLocks, setCheckingLocks] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [visible, setVisible] = useState(200);
   const owners = new Map<string, string[]>();
-  for (const lock of state?.locks ?? []) {
+  for (const lock of serverLocks?.locks ?? state?.locks ?? []) {
     const existing = owners.get(lock.path);
     if (existing) existing.push(lock.owner ?? 'Unknown owner');
     else owners.set(lock.path, [lock.owner ?? 'Unknown owner']);
@@ -38,6 +40,7 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
     else if (reviewed.current) reviewButton.current?.focus();
   }, [review, pending]);
   const load = async () => {
+    setServerLocks(undefined);
     setReview(undefined);
     setNotice('');
     setPending(true);
@@ -104,6 +107,7 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
     setError('');
     setNotice('');
     setProgress('Downloading LFS objects…');
+    setServerLocks(undefined);
     try {
       if (useRepository.getState().syncing) await waitForBackground();
       if (useRepository.getState().snapshot?.repository.id !== repoId) return;
@@ -140,6 +144,43 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
       setPending(false);
     }
   };
+  const refreshLocks = async () => {
+    setPending(true);
+    setCheckingLocks(true);
+    setServerLocks(undefined);
+    setError('');
+    setNotice('');
+    reviewed.current = false;
+    try {
+      if (useRepository.getState().syncing) await waitForBackground();
+      if (useRepository.getState().snapshot?.repository.id !== repoId) return;
+      if (useRepository.getState().busy)
+        throw new Error('Wait for the current operation to finish');
+      const id = crypto.randomUUID();
+      requestId.current = id;
+      useRepository.setState({ busy: id });
+      const result = await window.openkraken.request({ id, method: 'lfsLocks', repoId, remote });
+      if (result.kind === 'error') throw new Error(result.message);
+      if (result.kind === 'cancelled') throw new Error('Server lock refresh cancelled.');
+      if (result.kind === 'lfsLocks') {
+        setServerLocks(result.state);
+        setState(
+          (current) => current && { ...current, locks: result.state.locks, lockError: undefined },
+        );
+        setNotice('Server locks checked.');
+      }
+    } catch (error) {
+      setError(
+        `${error instanceof Error ? error.message : String(error)} Server lock state is unknown; cached locks may be stale.`,
+      );
+    } finally {
+      const id = requestId.current;
+      requestId.current = undefined;
+      if (id && useRepository.getState().busy === id) useRepository.setState({ busy: undefined });
+      setCheckingLocks(false);
+      setPending(false);
+    }
+  };
   return (
     <dialog
       ref={dialog}
@@ -160,7 +201,21 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
       </p>
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
-      {pending && !downloading && !notice && !error && <p role="status">Inspecting LFS state…</p>}
+      {pending && !downloading && !checkingLocks && !notice && !error && (
+        <p role="status">Inspecting LFS state…</p>
+      )}
+      {checkingLocks && (
+        <div>
+          <p role="status">Checking server locks…</p>
+          <button
+            onClick={() => {
+              if (requestId.current) void window.openkraken.cancel(requestId.current);
+            }}
+          >
+            Cancel lock refresh
+          </button>
+        </div>
+      )}
       {downloading && (
         <div>
           <p role="status">{progress}</p>
@@ -237,14 +292,45 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
                   {file.downloaded ? 'Object available locally' : 'Object missing locally'}
                 </p>
                 <p>
-                  {owners.has(file.path)
-                    ? `Cached lock: ${owners.get(file.path)!.join(', ')}`
-                    : 'No cached lock'}{' '}
-                  · Server lock state unknown
+                  {serverLocks
+                    ? owners.has(file.path)
+                      ? `Lock reported at last check: ${owners.get(file.path)!.join(', ')}`
+                      : 'No lock reported at last check'
+                    : (owners.has(file.path)
+                        ? `Cached lock: ${owners.get(file.path)!.join(', ')}`
+                        : 'No cached lock') + ' · Server lock state unknown'}
                 </p>
               </li>
             ))}
           </ul>
+          {serverLocks && (
+            <section aria-label="Server LFS locks">
+              <h3>Server locks at last check</h3>
+              <p>Remote: {serverLocks.remote}</p>
+              <p className="lfs-endpoint">Endpoint: {serverLocks.endpoint}</p>
+              <p>
+                Checked{' '}
+                <time dateTime={serverLocks.checkedAt}>
+                  {new Date(serverLocks.checkedAt).toLocaleString()}
+                </time>
+                . Ownership can change after this check.
+              </p>
+              {!serverLocks.locks.length && (
+                <p>No locks were reported by this server at the last check.</p>
+              )}
+              <ul aria-label="Server lock results">
+                {serverLocks.locks.slice(0, visible).map((lock) => (
+                  <li key={lock.id}>
+                    <h4>{lock.path}</h4>
+                    <p>
+                      {lock.owner ?? 'Unknown owner'}
+                      {lock.lockedAt ? ` · ${lock.lockedAt}` : ''}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <h3>Cached locks</h3>
           <p>
             These are the last locks cached by Git LFS. Server ownership may have changed; an empty
@@ -263,7 +349,9 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
               </li>
             ))}
           </ul>
-          {(state.files.length > visible || state.locks.length > visible) && (
+          {(state.files.length > visible ||
+            state.locks.length > visible ||
+            (serverLocks?.locks.length ?? 0) > visible) && (
             <button onClick={() => setVisible(visible + 200)}>Show more LFS entries</button>
           )}
         </>
@@ -275,7 +363,12 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
             aria-label="LFS remote"
             disabled={pending || !!review}
             value={remote}
-            onChange={(event) => setRemote(event.target.value)}
+            onChange={(event) => {
+              setRemote(event.target.value);
+              setServerLocks(undefined);
+              setNotice('');
+              setError('');
+            }}
           >
             {remotes.map((name) => (
               <option key={name} value={name}>
@@ -286,6 +379,12 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
         </label>
       )}
       <div className="dialog-actions">
+        <button
+          disabled={pending || !!review || !state?.available || !remote}
+          onClick={() => void refreshLocks()}
+        >
+          Refresh server locks
+        </button>
         <button
           ref={reviewButton}
           disabled={pending || !!review || !state?.available || !state.files.length || !remote}
