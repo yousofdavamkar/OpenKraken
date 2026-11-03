@@ -1,0 +1,215 @@
+{
+  "date": "2026-11-03",
+  "platform": "linux-x64",
+  "node": "v24.22.2",
+  "packageManager": "pnpm@11.25.0",
+  "commands": {
+    "before": "pnpm audit --json",
+    "after": "pnpm audit --json",
+    "production": "pnpm audit --prod --json"
+  },
+  "exitCodes": {
+    "before": 1,
+    "after": 1,
+    "production": 0
+  },
+  "audits": {
+    "before": {
+      "advisories": {
+        "1244012": {
+          "findings": [
+            {
+              "version": "10.2.6",
+              "paths": [
+                ".>@babel/eslint-parser>eslint>@eslint/config-array>minimatch",
+                ".>@babel/eslint-parser>eslint>minimatch",
+                ".>@electron/packager>@electron/asar>glob>minimatch",
+                ".>@electron/packager>@electron/asar>minimatch",
+                ".>@electron/packager>@electron/universal>@electron/asar>glob>minimatch",
+                ".>@electron/packager>@electron/universal>@electron/asar>minimatch",
+                ".>@eslint/js>eslint>@eslint/config-array>minimatch",
+                ".>@eslint/js>eslint>minimatch",
+                ".>electron-builder>app-builder-lib>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>minimatch",
+                ".>eslint>@eslint/config-array>minimatch",
+                ".>eslint>minimatch"
+              ],
+              "dev": true,
+              "optional": false,
+              "bundled": false
+            },
+            {
+              "version": "3.1.5",
+              "paths": [
+                ".>electron-builder>app-builder-lib>@electron/asar>glob>minimatch",
+                ".>electron-builder>app-builder-lib>@electron/asar>minimatch",
+                ".>electron-builder>app-builder-lib>@electron/universal>@electron/asar>glob>minimatch",
+                ".>electron-builder>app-builder-lib>@electron/universal>@electron/asar>minimatch",
+                ".>electron-builder>app-builder-lib>@electron/universal>dir-compare>minimatch",
+                ".>electron-builder>app-builder-lib>electron-builder-squirrel-windows>electron-winstaller>@electron/asar>glob>minimatch",
+                ".>electron-builder>app-builder-lib>electron-builder-squirrel-windows>electron-winstaller>@electron/asar>minimatch",
+                ".>electron-builder>app-builder-lib>electron-builder-squirrel-windows>electron-winstaller>temp>rimraf>glob>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>@electron/asar>glob>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>@electron/asar>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>@electron/universal>@electron/asar>glob>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>@electron/universal>@electron/asar>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>@electron/universal>dir-compare>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>electron-builder-squirrel-windows>electron-winstaller>@electron/asar>glob>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>electron-builder-squirrel-windows>electron-winstaller>@electron/asar>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>electron-builder-squirrel-windows>electron-winstaller>temp>rimraf>glob>minimatch"
+              ],
+              "dev": true,
+              "optional": false,
+              "bundled": false
+            },
+            {
+              "version": "9.0.9",
+              "paths": [
+                ".>electron-builder>app-builder-lib>@electron/universal>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>@electron/universal>minimatch"
+              ],
+              "dev": true,
+              "optional": false,
+              "bundled": false
+            },
+            {
+              "version": "5.1.9",
+              "paths": [
+                ".>electron-builder>app-builder-lib>ejs>jake>filelist>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>ejs>jake>filelist>minimatch"
+              ],
+              "dev": true,
+              "optional": false,
+              "bundled": false
+            }
+          ],
+          "id": 1244012,
+          "title": "minimatch has potential denial of service via globparts amplification",
+          "module_name": "minimatch",
+          "vulnerable_versions": "<11.0.1",
+          "patched_versions": ">=11.0.1",
+          "severity": "moderate",
+          "cwe": "CWE-405",
+          "github_advisory_id": "GHSA-g3hv-75wg-m249",
+          "url": "https://github.com/advisories/GHSA-g3hv-75wg-m249"
+        },
+        "1244013": {
+          "findings": [
+            {
+              "version": "13.0.6",
+              "paths": [
+                ".>@electron/packager>@electron/asar>glob",
+                ".>@electron/packager>@electron/universal>@electron/asar>glob"
+              ],
+              "dev": true,
+              "optional": false,
+              "bundled": false
+            }
+          ],
+          "id": 1244013,
+          "title": "Glob: AbortSignal cancellation bypass allows post-timeout filesystem traversal",
+          "module_name": "glob",
+          "vulnerable_versions": ">=9.0.0 <=14.0.1",
+          "patched_versions": ">=14.0.2",
+          "severity": "moderate",
+          "cwe": "CWE-400",
+          "github_advisory_id": "GHSA-3g3m-2fjr-6pw4",
+          "url": "https://github.com/advisories/GHSA-3g3m-2fjr-6pw4"
+        }
+      },
+      "metadata": {
+        "vulnerabilities": {
+          "info": 0,
+          "low": 0,
+          "moderate": 2,
+          "high": 0,
+          "critical": 0
+        },
+        "dependencies": 122,
+        "devDependencies": 521,
+        "optionalDependencies": 104,
+        "totalDependencies": 655
+      }
+    },
+    "after": {
+      "advisories": {
+        "1244012": {
+          "findings": [
+            {
+              "version": "3.1.5",
+              "paths": [
+                ".>electron-builder>app-builder-lib>@electron/asar>glob>minimatch",
+                ".>electron-builder>app-builder-lib>@electron/asar>minimatch",
+                ".>electron-builder>app-builder-lib>@electron/universal>@electron/asar>glob>minimatch",
+                ".>electron-builder>app-builder-lib>@electron/universal>@electron/asar>minimatch",
+                ".>electron-builder>app-builder-lib>@electron/universal>dir-compare>minimatch",
+                ".>electron-builder>app-builder-lib>electron-builder-squirrel-windows>electron-winstaller>@electron/asar>glob>minimatch",
+                ".>electron-builder>app-builder-lib>electron-builder-squirrel-windows>electron-winstaller>@electron/asar>minimatch",
+                ".>electron-builder>app-builder-lib>electron-builder-squirrel-windows>electron-winstaller>temp>rimraf>glob>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>@electron/asar>glob>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>@electron/asar>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>@electron/universal>@electron/asar>glob>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>@electron/universal>@electron/asar>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>@electron/universal>dir-compare>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>electron-builder-squirrel-windows>electron-winstaller>@electron/asar>glob>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>electron-builder-squirrel-windows>electron-winstaller>@electron/asar>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>electron-builder-squirrel-windows>electron-winstaller>temp>rimraf>glob>minimatch"
+              ],
+              "dev": true,
+              "optional": false,
+              "bundled": false
+            },
+            {
+              "version": "5.1.9",
+              "paths": [
+                ".>electron-builder>app-builder-lib>ejs>jake>filelist>minimatch",
+                ".>electron-builder>dmg-builder>app-builder-lib>ejs>jake>filelist>minimatch"
+              ],
+              "dev": true,
+              "optional": false,
+              "bundled": false
+            }
+          ],
+          "id": 1244012,
+          "title": "minimatch has potential denial of service via globparts amplification",
+          "module_name": "minimatch",
+          "vulnerable_versions": "<11.0.1",
+          "patched_versions": ">=11.0.1",
+          "severity": "moderate",
+          "cwe": "CWE-405",
+          "github_advisory_id": "GHSA-g3hv-75wg-m249",
+          "url": "https://github.com/advisories/GHSA-g3hv-75wg-m249"
+        }
+      },
+      "metadata": {
+        "vulnerabilities": {
+          "info": 0,
+          "low": 0,
+          "moderate": 1,
+          "high": 0,
+          "critical": 0
+        },
+        "dependencies": 122,
+        "devDependencies": 521,
+        "optionalDependencies": 104,
+        "totalDependencies": 655
+      }
+    },
+    "production": {
+      "advisories": {},
+      "metadata": {
+        "vulnerabilities": {
+          "info": 0,
+          "low": 0,
+          "moderate": 0,
+          "high": 0,
+          "critical": 0
+        },
+        "dependencies": 120,
+        "devDependencies": 0,
+        "optionalDependencies": 14,
+        "totalDependencies": 134
+      }
+    }
+  }
+}
