@@ -1818,3 +1818,24 @@ input:not([type='checkbox']):not([type='radio']) {
   overflow: auto;
   unicode-bidi: plaintext;
 }
+.diagnostics-dialog {
+  width: min(760px, 90vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+.diagnostics-dialog h2,
+.diagnostics-dialog p {
+  margin-bottom: 12px;
+}
+.diagnostics-dialog textarea {
+  width: 100%;
+  height: 40vh;
+  font-family: monospace;
+  resize: vertical;
+}
+.diagnostics-dialog .dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}

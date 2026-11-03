@@ -1,4 +1,5 @@
 import { Activity } from './activity.js';
+import { DiagnosticsControl } from './diagnostics.js';
 import { RepositoryLinkControl } from './repository-link.js';
 import { themeReady } from './theme.js';
 import { CommandButton, CommandControls, CommandProvider } from './commands.js';
@@ -73,6 +74,7 @@ function App() {
           <Appearance />
           <CrashReporting />
           <Activity />
+          <DiagnosticsControl />
           <AvatarSettings />
           <Clone />
           <ProviderAccountsControl />
