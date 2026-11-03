@@ -1839,3 +1839,24 @@ input:not([type='checkbox']):not([type='radio']) {
   gap: 8px;
   margin-top: 12px;
 }
+.updates-dialog {
+  max-height: 90vh;
+  overflow: auto;
+}
+.updates-dialog h2 {
+  font-size: 1.25rem;
+}
+.updates-dialog p {
+  margin-top: 12px;
+  line-height: 1.5;
+}
+.updates-dialog progress {
+  width: 100%;
+  margin-top: 12px;
+}
+.updates-dialog .dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}

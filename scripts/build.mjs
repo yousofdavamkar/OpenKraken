@@ -5,7 +5,9 @@ import { build as vite } from 'vite';
 import { resolve } from 'node:path';
 import { cp } from 'node:fs/promises';
 import { reportDestination } from '../apps/desktop/src/report-destination.ts';
+import { updateConfiguration } from '../apps/desktop/src/update-protocol.ts';
 const reporting = reportDestination(process.env.OPENKRAKEN_SENTRY_DSN ?? null);
+const updates = updateConfiguration(JSON.parse(process.env.OPENKRAKEN_UPDATE_CONFIG ?? 'null'));
 await buildAskpass();
 await esbuild({
   entryPoints: {
@@ -19,7 +21,10 @@ await esbuild({
   format: 'cjs',
   external: ['electron', '@parcel/watcher', 'node-pty'],
   target: 'node24',
-  define: { __OPENKRAKEN_SENTRY_DSN__: JSON.stringify(reporting?.dsn ?? null) },
+  define: {
+    __OPENKRAKEN_SENTRY_DSN__: JSON.stringify(reporting?.dsn ?? null),
+    __OPENKRAKEN_UPDATE_CONFIG__: JSON.stringify(updates),
+  },
   outdir: 'apps/desktop/dist',
   outExtension: { '.js': '.cjs' },
 });

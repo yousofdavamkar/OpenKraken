@@ -1,5 +1,7 @@
 import { ActivityLog } from './activity-log.js';
 import { Diagnostics } from './diagnostics.js';
+import { Updates } from './updates.js';
+import { updatesStateSchema } from '@openkraken/ipc-contract';
 import { RepositoryLinks } from './repository-links.js';
 import { CommitDrafts } from './commit-drafts.js';
 import { CommandMenu } from './command-menu.js';
@@ -57,6 +59,8 @@ import {
 } from './provider-vault.js';
 const htmlPath = join(__dirname, 'renderer', 'index.html');
 declare const __OPENKRAKEN_SENTRY_DSN__: string | null;
+declare const __OPENKRAKEN_UPDATE_CONFIG__: unknown;
+let updates: Updates | undefined;
 let crashReports: CrashReports | undefined;
 let diagnostics: Diagnostics | undefined;
 const documentUrl = pathToFileURL(htmlPath).href;
@@ -290,6 +294,11 @@ function createWindow() {
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
+  updates = new Updates(join(app.getPath('userData'), 'updates'), __OPENKRAKEN_UPDATE_CONFIG__, {
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+  });
   diagnostics = new Diagnostics(join(app.getPath('userData'), 'diagnostics'), {
     version: app.getVersion(),
     platform: process.platform,
@@ -336,6 +345,17 @@ else {
       });
     });
     const executeRequest = async (request: DesktopRequest): Promise<Result> => {
+      if (
+        request.method === 'updatesRead' ||
+        request.method === 'updatesCheck' ||
+        request.method === 'updatesDownload' ||
+        request.method === 'updatesCancel'
+      ) {
+        if (request.method === 'updatesCheck') void updates!.check();
+        if (request.method === 'updatesDownload') void updates!.download(request.format);
+        if (request.method === 'updatesCancel') updates!.cancel();
+        return { kind: 'updates', state: updatesStateSchema.parse(await updates!.read()) };
+      }
       if (request.method === 'diagnosticsRead' || request.method === 'diagnosticsClear')
         return {
           kind: 'diagnostics',
@@ -1259,13 +1279,17 @@ else {
   let quitting = false;
   // Keep the service and caches alive if a renderer cancels the window close.
   app.on('will-quit', (event) => {
+    const updatesClosed = updates?.close();
     void diagnostics?.close();
     crashReports?.close();
     avatars?.close();
     providers?.deviceCancel();
     providers?.gitlabCancel();
     for (const controller of providerRequests.values()) controller.abort();
-    if ((!service && !providers && !appSettings && !commitDrafts && !crashReports) || quitting)
+    if (
+      (!service && !providers && !appSettings && !commitDrafts && !crashReports && !updates) ||
+      quitting
+    )
       return;
     event.preventDefault();
     quitting = true;
@@ -1278,6 +1302,7 @@ else {
       ? new Promise<void>((resolve) => child.once('exit', () => resolve()))
       : Promise.resolve();
     void Promise.all([
+      updatesClosed,
       stopped,
       providers?.idle(),
       appSettings?.idle(),

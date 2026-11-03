@@ -110,7 +110,10 @@ test('crashes, JavaScript failures and interrupted sessions reach TLS only with 
       external: ['electron', '@parcel/watcher', 'node-pty'],
       target: 'node24',
       outfile: main,
-      define: { __OPENKRAKEN_SENTRY_DSN__: JSON.stringify(dsn) },
+      define: {
+        __OPENKRAKEN_SENTRY_DSN__: JSON.stringify(dsn),
+        __OPENKRAKEN_UPDATE_CONFIG__: 'null',
+      },
     });
     await mkdir(join(root, 'app'));
     await writeFile(

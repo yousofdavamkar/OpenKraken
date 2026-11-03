@@ -97,6 +97,15 @@ try {
   );
   if (reporting.kind !== 'crashReporting' || reporting.state.enabled)
     throw new Error('Packaged crash reporting must start without consent');
+  const updates = await page.evaluate(() =>
+    window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesRead' }),
+  );
+  if (
+    updates.kind !== 'updates' ||
+    !['disabled', 'idle'].includes(updates.state.phase) ||
+    updates.state.error
+  )
+    throw new Error('Packaged updates must initialize without a background transfer');
   const diagnostics = await page.evaluate(() =>
     window.openkraken.request({ id: crypto.randomUUID(), method: 'diagnosticsRead' }),
   );

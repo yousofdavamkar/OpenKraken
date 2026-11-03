@@ -1,5 +1,5 @@
-import { expect, test } from 'vitest';
-import { createHash, generateKeyPairSync, sign } from 'node:crypto';
+import { expect, test, vi } from 'vitest';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -207,6 +207,41 @@ test('a local destination failure releases an unread network response', async ()
     expect((await updater.download('AppImage')).error).toBe('storage');
     expect(transportSignal?.aborted).toBe(true);
   } finally {
+    await updater.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a stalled metadata request has a deadline and reports no remote error details', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-update-timeout-'));
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const updater = new Updates(
+    join(root, 'updates'),
+    configuration,
+    runtime,
+    async (_url, options) => {
+      entered();
+      return new Promise((_resolve, reject) =>
+        options!.signal!.addEventListener(
+          'abort',
+          () => reject(new Error('PRIVATE-network-diagnostic')),
+          { once: true },
+        ),
+      );
+    },
+  );
+  try {
+    const pending = updater.check();
+    await started;
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(await pending).toMatchObject({ phase: 'error', error: 'timeout' });
+    expect(JSON.stringify(await updater.read())).not.toContain('PRIVATE');
+  } finally {
+    vi.useRealTimers();
     await updater.close();
     await rm(root, { recursive: true, force: true });
   }

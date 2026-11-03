@@ -1,4 +1,6 @@
 import { crashReportingStateSchema } from './crash-reports.js';
+import { updatesRequests, updatesStateSchema } from './updates.js';
+export * from './updates.js';
 import { diagnosticsRequests, diagnosticsStateSchema } from './diagnostics.js';
 export * from './diagnostics.js';
 import { repositoryLinkRequests, repositoryLinkSchema } from './repository-links.js';
@@ -1249,6 +1251,7 @@ const workingRequests = [
     .strict(),
 ] as const;
 export const requestSchema = z.discriminatedUnion('method', [
+  ...updatesRequests,
   ...diagnosticsRequests,
   ...repositoryLinkRequests,
   z
@@ -1853,6 +1856,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('rendererFailure') }).strict(),
   z.object({ kind: z.literal('crashReporting'), state: crashReportingStateSchema }).strict(),
   z.object({ kind: z.literal('diagnostics'), state: diagnosticsStateSchema }).strict(),
+  z.object({ kind: z.literal('updates'), state: updatesStateSchema }).strict(),
   z.object({ kind: z.literal('repositoryLink'), link: repositoryLinkSchema.nullable() }).strict(),
   z.object({ kind: z.literal('commitDraft'), state: commitDraftStateSchema }).strict(),
   z.object({ kind: z.literal('activity'), state: activityStateSchema }).strict(),

@@ -4,35 +4,17 @@ import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { gt, valid } from 'semver';
 import { z } from 'zod';
+import type { UpdateState } from '@openkraken/ipc-contract';
 import {
   updateConfiguration,
   updateEnvelopeLimit,
   validateUpdateRelease,
   verifyUpdateRelease,
-  type UpdateArtifact,
   type UpdateConfiguration,
   type UpdateRelease,
 } from './update-protocol.js';
 
-type UpdateError =
-  'network' | 'invalid-release' | 'rollback' | 'storage' | 'integrity' | 'cancelled' | 'timeout';
-export interface UpdateState {
-  phase:
-    | 'disabled'
-    | 'idle'
-    | 'checking'
-    | 'current'
-    | 'unsupported'
-    | 'available'
-    | 'downloading'
-    | 'verified'
-    | 'error';
-  version: string | null;
-  artifacts: { format: UpdateArtifact['format']; size: number }[];
-  selected: UpdateArtifact['format'] | null;
-  downloaded: number;
-  error: UpdateError | null;
-}
+type UpdateError = NonNullable<UpdateState['error']>;
 class UpdateFailure extends Error {
   constructor(readonly code: UpdateError) {
     super(code);
