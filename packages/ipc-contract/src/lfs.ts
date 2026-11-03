@@ -37,6 +37,15 @@ export const lfsStateSchema = z
   })
   .strict();
 export type LfsState = z.infer<typeof lfsStateSchema>;
+export const lfsLocksSchema = z
+  .object({
+    remote: z.string().min(1).max(1024),
+    endpoint: z.string().url().max(32768),
+    checkedAt: z.string().datetime(),
+    locks: lfsStateSchema.shape.locks,
+  })
+  .strict();
+export type LfsLocks = z.infer<typeof lfsLocksSchema>;
 export const lfsRequests = [
   z
     .object({
@@ -58,6 +67,27 @@ export const lfsPullPreviewSchema = z
   .strict();
 export type LfsPullPreview = z.infer<typeof lfsPullPreviewSchema>;
 export const lfsTransferRequests = [
+  z
+    .object({
+      id: z.string().uuid(),
+      method: z.literal('lfsLocks'),
+      repoId: z.string().regex(/^[0-9a-f]{64}$/),
+      remote: z
+        .string()
+        .min(1)
+        .max(1024)
+        .refine(
+          (value) =>
+            !value.startsWith('-') &&
+            !Array.from(value).some(
+              (character) =>
+                /\s/.test(character) ||
+                character.charCodeAt(0) < 32 ||
+                character.charCodeAt(0) === 127,
+            ),
+        ),
+    })
+    .strict(),
   z
     .object({
       id: z.string().uuid(),

@@ -2,10 +2,15 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open, readdir } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
-import { remoteNameSchema, type LfsPullPreview, type Repository } from '@openkraken/ipc-contract';
+import {
+  remoteNameSchema,
+  lfsLocksSchema,
+  type LfsPullPreview,
+  type Repository,
+} from '@openkraken/ipc-contract';
 import { GitError, type RunOptions, type runGit } from './runner.js';
 import { NulDecoder } from './parsers.js';
-import { lfsState } from './lfs.js';
+import { lfsState, parseLfsLocks } from './lfs.js';
 import { GitProgressLines } from './progress.js';
 import { transportError, validateUrl } from './remotes.js';
 
@@ -75,7 +80,7 @@ export class LfsTransfers {
       await file.close();
     }
   }
-  private async inspect(remote: string, signal?: AbortSignal) {
+  private async target(remote: string, signal?: AbortSignal) {
     remoteNameSchema.parse(remote);
     if (this.repo.isBare)
       throw new GitError('BARE_REPOSITORY', 'Open a working checkout before pulling LFS objects');
@@ -86,43 +91,6 @@ export class LfsTransfers {
     if (!remotes.includes(remote))
       throw new GitError('UNKNOWN_REMOTE', 'Select a configured remote');
     const lfsConfig = await this.configFile(signal);
-    const names = await readdir(this.repo.gitDir);
-    if (
-      [
-        'MERGE_HEAD',
-        'MERGE_AUTOSTASH',
-        'CHERRY_PICK_HEAD',
-        'REVERT_HEAD',
-        'REBASE_HEAD',
-        'BISECT_LOG',
-        'sequencer',
-        'rebase-merge',
-        'rebase-apply',
-        'index.lock',
-      ].some((name) => names.includes(name))
-    )
-      throw new GitError(
-        'LFS_OPERATION',
-        'Finish the current Git operation before pulling LFS objects',
-      );
-    const index = await this.run(['ls-files', '--stage', '-z'], {
-      signal,
-      maxBytes: 16 * 1024 * 1024,
-    });
-    const stages = new NulDecoder((record) => {
-      const tab = record.indexOf(9);
-      const fields = /^([0-7]{6}) ([0-9a-f]{40}(?:[0-9a-f]{24})?) ([0-3])$/.exec(
-        record.subarray(0, tab).toString('ascii'),
-      );
-      if (tab < 0 || !fields) throw new GitError('LFS_INDEX', 'Git returned invalid index entries');
-      if (fields[3] !== '0')
-        throw new GitError('LFS_OPERATION', 'Resolve index conflicts before pulling LFS objects');
-    });
-    stages.push(index.stdout);
-    stages.finish();
-    const state = await lfsState(this.run, signal);
-    if (!state.available)
-      throw new GitError('LFS_UNAVAILABLE', 'Install Git LFS before downloading objects');
     const config = await this.run(['config', '--null', '--list'], {
       signal,
       maxBytes: 2 * 1024 * 1024,
@@ -136,7 +104,7 @@ export class LfsTransfers {
       if ((/^lfs\.standalonetransferagent$/i.test(key) && value) || /^lfs\.extension\./i.test(key))
         throw new GitError(
           'LFS_CUSTOM_TRANSFER',
-          'This download action does not run standalone transfer agents or LFS extensions',
+          'This action does not run standalone transfer agents or LFS extensions',
         );
     }
     if (tls.size > 256 || [...tls].join('').length > 65536)
@@ -177,9 +145,57 @@ export class LfsTransfers {
     )
       throw new GitError(
         'LFS_ENDPOINT',
-        'Reviewed downloads currently require an HTTP or HTTPS LFS endpoint',
+        'This action currently requires an HTTP or HTTPS LFS endpoint',
       );
     const filters = lines.filter((line) => /^Fetch(?:Include|Exclude)=/.test(line));
+    return { endpoint, filters, tls: [...tls], config, environment, lfsConfig };
+  }
+  private async inspect(remote: string, signal?: AbortSignal) {
+    remoteNameSchema.parse(remote);
+    if (this.repo.isBare)
+      throw new GitError('BARE_REPOSITORY', 'Open a working checkout before pulling LFS objects');
+    await this.configFile(signal);
+    const names = await readdir(this.repo.gitDir);
+    if (
+      [
+        'MERGE_HEAD',
+        'MERGE_AUTOSTASH',
+        'CHERRY_PICK_HEAD',
+        'REVERT_HEAD',
+        'REBASE_HEAD',
+        'BISECT_LOG',
+        'sequencer',
+        'rebase-merge',
+        'rebase-apply',
+        'index.lock',
+      ].some((name) => names.includes(name))
+    )
+      throw new GitError(
+        'LFS_OPERATION',
+        'Finish the current Git operation before pulling LFS objects',
+      );
+    const index = await this.run(['ls-files', '--stage', '-z'], {
+      signal,
+      maxBytes: 16 * 1024 * 1024,
+    });
+    const stages = new NulDecoder((record) => {
+      const tab = record.indexOf(9);
+      const fields = /^([0-7]{6}) ([0-9a-f]{40}(?:[0-9a-f]{24})?) ([0-3])$/.exec(
+        record.subarray(0, tab).toString('ascii'),
+      );
+      if (tab < 0 || !fields) throw new GitError('LFS_INDEX', 'Git returned invalid index entries');
+      if (fields[3] !== '0')
+        throw new GitError('LFS_OPERATION', 'Resolve index conflicts before pulling LFS objects');
+    });
+    stages.push(index.stdout);
+    stages.finish();
+    const state = await lfsState(this.run, signal);
+    if (!state.available)
+      throw new GitError('LFS_UNAVAILABLE', 'Install Git LFS before downloading objects');
+    const { endpoint, filters, tls, config, environment, lfsConfig } = await this.target(
+      remote,
+      signal,
+    );
     const head = await this.run(['rev-parse', '--verify', 'HEAD'], { signal, maxBytes: 4096 });
     const attributes = await this.run(['check-attr', '-z', '--stdin', 'filter'], {
       signal,
@@ -236,6 +252,41 @@ export class LfsTransfers {
         ]),
       ),
     };
+  }
+  async locks(remote: string, signal?: AbortSignal, authentication?: NodeJS.ProcessEnv) {
+    try {
+      const target = await this.target(remote, signal);
+      const args = [
+        ...transferOptions,
+        ...target.tls.flatMap((key) => ['-c', `${key}=true`]),
+        '-c',
+        `lfs.url=${target.endpoint}`,
+        'lfs',
+        'locks',
+        `--remote=${remote}`,
+      ];
+      const options: RunOptions = {
+        signal,
+        readOnly: false,
+        timeoutMs: 180000,
+        maxBytes: 8 * 1024 * 1024,
+        env: { ...authentication, GIT_ALLOW_PROTOCOL: 'http:https:ssh' },
+      };
+      // Native --json can return success and [] when the server query failed.
+      // A successful non-JSON query refreshes the complete native cache; only
+      // then read that cache as JSON without making another server request.
+      await this.run(args, options);
+      const output = await this.run([...args, '--cached', '--json'], options);
+      return lfsLocksSchema.parse({
+        remote,
+        endpoint: target.endpoint,
+        checkedAt: new Date().toISOString(),
+        locks: parseLfsLocks(output.stdout),
+      });
+    } catch (error) {
+      if (error instanceof GitError) throw transportError(error);
+      throw error;
+    }
   }
   async preview(remote: string, signal?: AbortSignal): Promise<LfsPullPreview> {
     const inspected = await this.inspect(remote, signal).catch((error: unknown) => {

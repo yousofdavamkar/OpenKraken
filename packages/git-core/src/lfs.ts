@@ -23,13 +23,32 @@ const nativeFiles = z.object({
 const nativeLocks = z
   .array(
     z.object({
-      id: z.string().max(4096),
+      id: z.string().min(1).max(4096),
       path: lfsStateSchema.shape.files.element.shape.path,
       owner: z.object({ name: z.string().max(4096) }).optional(),
       locked_at: z.string().max(128).optional(),
     }),
   )
   .max(10000);
+
+export function parseLfsLocks(output: Buffer): LfsState['locks'] {
+  try {
+    const locks = nativeLocks.parse(JSON.parse(output.toString('utf8')));
+    if (
+      locks.some((lock) => !lock.path) ||
+      new Set(locks.map((lock) => lock.id)).size !== locks.length
+    )
+      throw new Error('Invalid lock identities');
+    return locks.map((lock) => ({
+      id: lock.id,
+      path: lock.path,
+      owner: lock.owner?.name,
+      lockedAt: lock.locked_at,
+    }));
+  } catch {
+    throw new GitError('LFS_LOCK_OUTPUT', 'Git LFS returned invalid or excessive lock information');
+  }
+}
 
 export async function lfsState(run: Run, signal?: AbortSignal): Promise<LfsState> {
   const version = await run(['lfs', 'version'], {
@@ -68,12 +87,7 @@ export async function lfsState(run: Run, signal?: AbortSignal): Promise<LfsState
       signal,
       maxBytes: 8 * 1024 * 1024,
     });
-    locks = nativeLocks.parse(JSON.parse(cached.stdout.toString('utf8'))).map((lock) => ({
-      id: lock.id,
-      path: lock.path,
-      owner: lock.owner?.name,
-      lockedAt: lock.locked_at,
-    }));
+    locks = parseLfsLocks(cached.stdout);
   } catch (error) {
     if (signal?.aborted || (error instanceof GitError && error.code === 'CANCELLED')) throw error;
     lockError =

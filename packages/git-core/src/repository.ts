@@ -894,6 +894,15 @@ export class RepositoryService {
       ),
     };
   }
+  lfsLocks(id: string, remote: string, signal?: AbortSignal, authentication?: NodeJS.ProcessEnv) {
+    const { repo, manager } = this.lfsTransfers(id);
+    // Serialize native LFS network commands and any local metadata they may write.
+    return this.queue(repo.commonDir).run(
+      true,
+      () => manager.locks(remote, signal, authentication),
+      signal,
+    );
+  }
   lfsPullPreview(id: string, remote: string, signal?: AbortSignal) {
     const { repo, manager } = this.lfsTransfers(id);
     return this.queue(repo.commonDir).run(false, () => manager.preview(remote, signal), signal);

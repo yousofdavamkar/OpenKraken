@@ -7,6 +7,27 @@ import {
   resultSchema,
   parseUserTheme,
 } from '../../packages/ipc-contract/src/index.js';
+test('LFS lock refresh accepts only a configured remote identity and no caller network controls', () => {
+  const request = {
+    id: '00000000-0000-4000-8000-000000000001',
+    method: 'lfsLocks',
+    repoId: 'a'.repeat(64),
+    remote: 'origin',
+  };
+  for (const schema of [requestSchema, serviceRequestSchema]) {
+    expect(schema.safeParse(request).success).toBe(true);
+    for (const remote of ['--all', 'two names', 'line\nremote', ''])
+      expect(schema.safeParse({ ...request, remote }).success).toBe(false);
+    for (const fields of [
+      { endpoint: 'https://outside.test' },
+      { path: '/outside' },
+      { args: ['--verify'] },
+      { sslVerify: false },
+      { limit: 0 },
+    ])
+      expect(schema.safeParse({ ...request, ...fields }).success).toBe(false);
+  }
+});
 test('LFS pulls accept only reviewed tokens and reject caller endpoints, paths and transport overrides', () => {
   const base = { id: '00000000-0000-4000-8000-000000000001', repoId: 'a'.repeat(64) };
   const preview = { ...base, method: 'lfsPullPreview', remote: 'origin' };
