@@ -51,16 +51,18 @@ parent.on('message', ({ data }) => {
     try {
       accessSync(shell, process.platform === 'win32' ? constants.F_OK : constants.X_OK);
       if (!statSync(shell).isFile()) throw new Error('Invalid shell');
-      const args =
-        process.platform !== 'win32' && basename(shell) === 'bash'
-          ? [
-              '--rcfile',
-              join(
-                __dirname.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'),
-                'shell-integration/bash.bashrc',
-              ),
-            ]
-          : [];
+      const integration = join(
+        __dirname.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'),
+        'shell-integration',
+      );
+      const args: string[] = [];
+      if (process.platform !== 'win32' && basename(shell) === 'bash')
+        args.push('--rcfile', join(integration, 'bash.bashrc'));
+      if (process.platform !== 'win32' && basename(shell) === 'zsh') {
+        env.OPENKRAKEN_ZSH_ZDOTDIR_SET = Object.hasOwn(env, 'ZDOTDIR') ? '1' : '0';
+        env.OPENKRAKEN_ZSH_ZDOTDIR = env.ZDOTDIR ?? '';
+        env.ZDOTDIR = join(integration, 'zsh');
+      }
       terminal = spawn(shell, args, {
         name: 'xterm-256color',
         cols: parsed.data.cols,
