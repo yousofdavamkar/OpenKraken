@@ -97,6 +97,15 @@ try {
   );
   if (reporting.kind !== 'crashReporting' || reporting.state.enabled)
     throw new Error('Packaged crash reporting must start without consent');
+  const diagnostics = await page.evaluate(() =>
+    window.openkraken.request({ id: crypto.randomUUID(), method: 'diagnosticsRead' }),
+  );
+  if (
+    diagnostics.kind !== 'diagnostics' ||
+    diagnostics.state.warning ||
+    !diagnostics.state.entries.some((entry) => entry.type === 'started')
+  )
+    throw new Error('Packaged local diagnostics failed to initialize');
   await page.getByRole('button', { name: 'Review repository link', exact: true }).click();
   const linkDialog = page.getByRole('dialog', { name: 'Open linked repository', exact: true });
   await expect(linkDialog).toContainText(linkedRepository);
