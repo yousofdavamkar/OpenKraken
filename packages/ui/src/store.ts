@@ -193,7 +193,7 @@ export const useRepository = create<State>()(
           get().snapshot?.repository.id === request.repoId
         )
           request = { ...request, view: get().snapshot!.view };
-        const result = await window.openkraken.request(request);
+        const result = JSON.parse(await window.openkraken.request(request, 'json')) as Result;
         if (get().busy !== request.id) return;
         if (result.kind === 'snapshot') {
           performance.mark('repository-snapshot-response', {
