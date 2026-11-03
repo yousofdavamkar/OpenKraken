@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from 'vitest';
+import { afterAll, expect, test, vi } from 'vitest';
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +7,153 @@ import { RepositoryService } from './src/repository.js';
 
 const root = await mkdtemp(join(tmpdir(), 'openkraken-worktrees-'));
 afterAll(() => rm(root, { recursive: true, force: true }));
+
+test('prune tokens are repository-bound and expire; a restored checkout invalidates the review', async () => {
+  const path = createFixture(join(root, 'prune-token-source'), 'linear', 3);
+  const other = createFixture(join(root, 'prune-token-other'), 'linear', 2);
+  const linked = join(root, 'prune-token-linked');
+  fixtureGit(path, ['worktree', 'add', '-b', 'token-topic', linked]);
+  const gitDir = fixtureGit(linked, ['rev-parse', '--absolute-git-dir']);
+  await rm(linked, { recursive: true });
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const foreign = await service.open(other);
+    const preview = await service.worktreePrunePreview(repo.id);
+    await expect(service.pruneWorktrees(foreign.id, preview.token)).rejects.toMatchObject({
+      code: 'STALE_WORKTREE_PRUNE',
+    });
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 600001);
+    try {
+      await expect(service.pruneWorktrees(repo.id, preview.token)).rejects.toMatchObject({
+        code: 'STALE_WORKTREE_PRUNE',
+      });
+    } finally {
+      clock.mockRestore();
+    }
+    const fresh = await service.worktreePrunePreview(repo.id);
+    await mkdir(linked);
+    await writeFile(join(linked, '.git'), `gitdir: ${gitDir}\n`);
+    await expect(service.pruneWorktrees(repo.id, fresh.token)).rejects.toMatchObject({
+      code: 'STALE_WORKTREE_PRUNE',
+    });
+    expect((await readFile(join(gitDir, 'HEAD'), 'utf8')).trim()).toBe(
+      'ref: refs/heads/token-topic',
+    );
+    expect((await service.worktreePrunePreview(repo.id)).report).toBe('');
+  } finally {
+    await service.dispose();
+  }
+});
+
+test('prune review exposes invalid registrations that do not appear in the checkout list', async () => {
+  const path = createFixture(join(root, 'prune-invalid-source'), 'linear', 3);
+  const registration = join(path, '.git/worktrees/broken-registration');
+  await mkdir(registration, { recursive: true });
+  await writeFile(join(registration, 'note'), 'invalid registration');
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const preview = await service.worktreePrunePreview(repo.id);
+    expect(preview.candidates).toHaveLength(0);
+    expect(preview.report).toContain('broken-registration');
+    expect((await service.pruneWorktrees(repo.id, preview.token)).entries).toHaveLength(1);
+    await expect(readFile(join(registration, 'note'))).rejects.toMatchObject({ code: 'ENOENT' });
+  } finally {
+    await service.dispose();
+  }
+});
+
+test('prune preserves a missing detached checkout until its commit has a retaining branch', async () => {
+  const path = createFixture(join(root, 'prune-detached-source'), 'linear', 3);
+  const linked = join(root, 'prune-detached-linked');
+  fixtureGit(path, ['worktree', 'add', '--detach', linked]);
+  fixtureGit(linked, ['commit', '--allow-empty', '-m', 'detached recovery']);
+  const head = fixtureGit(linked, ['rev-parse', 'HEAD']);
+  const gitDir = fixtureGit(linked, ['rev-parse', '--absolute-git-dir']);
+  await rm(linked, { recursive: true });
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    await expect(service.worktreePrunePreview(repo.id)).rejects.toMatchObject({
+      code: 'WORKTREE_UNREFERENCED',
+    });
+    expect((await readFile(join(gitDir, 'HEAD'), 'utf8')).trim()).toBe(head);
+    fixtureGit(path, ['branch', 'recovered-pruned-work', head]);
+    const preview = await service.worktreePrunePreview(repo.id);
+    fixtureGit(path, ['branch', '-D', 'recovered-pruned-work']);
+    await expect(service.pruneWorktrees(repo.id, preview.token)).rejects.toMatchObject({
+      code: 'WORKTREE_UNREFERENCED',
+    });
+    expect((await readFile(join(gitDir, 'HEAD'), 'utf8')).trim()).toBe(head);
+    fixtureGit(path, ['branch', 'recovered-pruned-work', head]);
+    const reviewed = await service.worktreePrunePreview(repo.id);
+    expect((await service.pruneWorktrees(repo.id, reviewed.token)).entries).toHaveLength(1);
+    expect(fixtureGit(path, ['rev-parse', 'recovered-pruned-work'])).toBe(head);
+  } finally {
+    await service.dispose();
+  }
+});
+
+test('prune confirmation refuses registration metadata changed after the review', async () => {
+  const path = createFixture(join(root, 'prune-metadata-source'), 'linear', 3);
+  const linked = join(root, 'prune-metadata-linked');
+  fixtureGit(path, ['worktree', 'add', '-b', 'metadata-topic', linked]);
+  const gitDir = fixtureGit(linked, ['rev-parse', '--absolute-git-dir']);
+  await rm(linked, { recursive: true });
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const preview = await service.worktreePrunePreview(repo.id);
+    await writeFile(join(gitDir, 'new-recovery-note'), 'created after review');
+    await expect(service.pruneWorktrees(repo.id, preview.token)).rejects.toMatchObject({
+      code: 'STALE_WORKTREE_PRUNE',
+    });
+    expect(await readFile(join(gitDir, 'new-recovery-note'), 'utf8')).toBe('created after review');
+    const next = await service.worktreePrunePreview(repo.id);
+    expect(next.token).not.toBe(preview.token);
+    expect((await service.pruneWorktrees(repo.id, next.token)).entries).toHaveLength(1);
+  } finally {
+    await service.dispose();
+  }
+});
+
+test('prune review removes missing registrations while retaining live and locked worktrees and their branches', async () => {
+  const path = createFixture(join(root, 'prune-source'), 'linear', 3);
+  const live = join(root, 'prune-live');
+  const missing = join(root, 'prune-missing');
+  const locked = join(root, 'prune-locked');
+  for (const [folder, branch] of [
+    [live, 'prune-live'],
+    [missing, 'prune-missing'],
+    [locked, 'prune-locked'],
+  ] as const)
+    fixtureGit(path, ['worktree', 'add', '-b', branch, folder]);
+  fixtureGit(path, ['worktree', 'lock', '--reason', 'offline drive', locked]);
+  await rm(missing, { recursive: true });
+  await rm(locked, { recursive: true });
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const preview = await service.worktreePrunePreview(repo.id);
+    expect(preview.report).toContain('prune-missing');
+    expect(preview.report).not.toContain('prune-locked');
+    expect((await service.worktrees(repo.id)).entries).toHaveLength(4);
+    const result = await service.pruneWorktrees(repo.id, preview.token);
+    expect(result.entries.map((entry) => entry.path).sort()).toEqual([path, live, locked].sort());
+    expect(result.entries.find((entry) => entry.path === locked)).toMatchObject({
+      locked: true,
+      lockReason: 'offline drive',
+    });
+    expect(fixtureGit(path, ['rev-parse', 'prune-missing'])).toBe(repo.head.oid);
+    await expect(service.pruneWorktrees(repo.id, preview.token)).rejects.toMatchObject({
+      code: 'STALE_WORKTREE_PRUNE',
+    });
+    expect((await service.worktreePrunePreview(repo.id)).report).toBe('');
+  } finally {
+    await service.dispose();
+  }
+});
 
 test('removal preserves an in-progress merge even when its index and files are clean', async () => {
   const path = createFixture(join(root, 'merging-source'), 'linear', 3);

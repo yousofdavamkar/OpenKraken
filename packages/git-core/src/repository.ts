@@ -46,7 +46,7 @@ import { blame } from './blame.js';
 import { fileHistory } from './file-history.js';
 import { commitComparison } from './file-comparison.js';
 import { WorkingTree } from './working-tree.js';
-import { Worktrees } from './worktrees.js';
+import { Worktrees, type WorktreePrunePlan } from './worktrees.js';
 import type { GitEditor } from './editor-document.js';
 import { RepositoryQueue } from './queue.js';
 
@@ -62,6 +62,7 @@ export class RepositoryService {
   private repositories = new Map<string, Repository>();
   private queues = new Map<string, RepositoryQueue>();
   private histories = new Map<string, HistoryCursor>();
+  private worktreePrunes = new Map<string, WorktreePrunePlan>();
   private processPool = new RepositoryQueue(3);
   private preferences: RepositoryPreferences;
   private dataDir?: string;
@@ -838,7 +839,10 @@ export class RepositoryService {
   private worktreeManager(id: string) {
     const repo = this.repositories.get(id);
     if (!repo) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
-    return { repo, manager: new Worktrees(repo, (args, options) => this.run(args, options)) };
+    return {
+      repo,
+      manager: new Worktrees(repo, (args, options) => this.run(args, options), this.worktreePrunes),
+    };
   }
   worktrees(id: string, signal?: AbortSignal) {
     const { repo, manager } = this.worktreeManager(id);
@@ -851,6 +855,14 @@ export class RepositoryService {
   worktreeAction(id: string, options: WorktreeAction, signal?: AbortSignal) {
     const { repo, manager } = this.worktreeManager(id);
     return this.queue(repo.commonDir).run(true, () => manager.action(options, signal), signal);
+  }
+  worktreePrunePreview(id: string, signal?: AbortSignal) {
+    const { repo, manager } = this.worktreeManager(id);
+    return this.queue(repo.commonDir).run(false, () => manager.previewPrune(signal), signal);
+  }
+  pruneWorktrees(id: string, token: string, signal?: AbortSignal) {
+    const { repo, manager } = this.worktreeManager(id);
+    return this.queue(repo.commonDir).run(true, () => manager.prune(token, signal), signal);
   }
   openWorktree(id: string, worktreeId: string, revision: string, signal?: AbortSignal) {
     const { repo, manager } = this.worktreeManager(id);
@@ -947,6 +959,7 @@ export class RepositoryService {
     return this.queue(work.repo.commonDir).run(true, () => work.undo(redo, signal), signal);
   }
   async dispose() {
+    this.worktreePrunes.clear();
     await Promise.all([...this.histories.values()].map((cursor) => cursor.close()));
     this.histories.clear();
     await this.cache?.flush();

@@ -337,6 +337,16 @@ async function executeGit(
     return { kind: 'stashes', state: await git.stashes(request.repoId, signal) };
   if (request.method === 'worktrees')
     return { kind: 'worktrees', state: await git.worktrees(request.repoId, signal) };
+  if (request.method === 'worktreePrunePreview')
+    return {
+      kind: 'worktreePrunePreview',
+      preview: await git.worktreePrunePreview(request.repoId, signal),
+    };
+  if (request.method === 'pruneWorktrees')
+    return {
+      kind: 'worktrees',
+      state: await git.pruneWorktrees(request.repoId, request.token, signal),
+    };
   if (request.method === 'worktreeAction')
     return {
       kind: 'worktrees',
@@ -538,6 +548,7 @@ parent.on('message', (event) => {
   const writing = [
     'addWorktree',
     'worktreeAction',
+    'pruneWorktrees',
     'files',
     'patch',
     'discard',

@@ -34,6 +34,15 @@ export const worktreeStateSchema = z
   .strict();
 export type WorktreeState = z.infer<typeof worktreeStateSchema>;
 export type Worktree = WorktreeState['entries'][number];
+export const worktreePrunePreviewSchema = z
+  .object({
+    token: z.string().uuid(),
+    cutoff: z.string().datetime(),
+    report: z.string().max(65536),
+    candidates: worktreeStateSchema.shape.entries,
+  })
+  .strict();
+export type WorktreePrunePreview = z.infer<typeof worktreePrunePreviewSchema>;
 
 const oid = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 const branch = z
@@ -73,6 +82,17 @@ export const worktreeAddRequest = z
   .strict();
 
 export const worktreeRequests = [
+  z
+    .object({ id: z.string().uuid(), method: z.literal('worktreePrunePreview'), repoId: identity })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      method: z.literal('pruneWorktrees'),
+      repoId: identity,
+      token: z.string().uuid(),
+    })
+    .strict(),
   z
     .object({
       id: z.string().uuid(),

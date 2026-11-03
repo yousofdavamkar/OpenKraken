@@ -1,6 +1,11 @@
 import { commandIdSchema, commandUsageSchema, commandPreferencesSchema } from './commands.js';
 import { terminalRequests, terminalEvents } from './terminal.js';
-import { worktreeRequests, worktreeStateSchema, worktreeAddRequest } from './worktrees.js';
+import {
+  worktreeRequests,
+  worktreeStateSchema,
+  worktreeAddRequest,
+  worktreePrunePreviewSchema,
+} from './worktrees.js';
 export * from './worktrees.js';
 export * from './terminal.js';
 import {
@@ -1785,6 +1790,9 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z
+    .object({ kind: z.literal('worktreePrunePreview'), preview: worktreePrunePreviewSchema })
+    .strict(),
   z.object({ kind: z.literal('worktrees'), state: worktreeStateSchema }).strict(),
   z
     .object({

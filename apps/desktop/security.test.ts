@@ -9,6 +9,24 @@ import {
 } from '../../packages/ipc-contract/src/index.js';
 test('worktree IPC accepts reviewed identities but reserves destination paths for main', () => {
   const base = { id: '00000000-0000-4000-8000-000000000000', repoId: 'a'.repeat(64) };
+  for (const schema of [requestSchema, serviceRequestSchema]) {
+    const preview = { ...base, method: 'worktreePrunePreview' };
+    const prune = { ...base, method: 'pruneWorktrees', token: base.id };
+    expect(schema.safeParse(preview).success).toBe(true);
+    expect(schema.safeParse(prune).success).toBe(true);
+    expect(schema.safeParse({ ...prune, token: 'invented' }).success).toBe(false);
+    expect(schema.safeParse({ ...base, method: 'pruneWorktrees' }).success).toBe(false);
+    for (const extra of [
+      { path: '/arbitrary' },
+      { force: true },
+      { cutoff: '2099-01-01T00:00:00.000Z' },
+      { report: 'remove something else' },
+      { candidates: [] },
+    ]) {
+      expect(schema.safeParse({ ...preview, ...extra }).success).toBe(false);
+      expect(schema.safeParse({ ...prune, ...extra }).success).toBe(false);
+    }
+  }
   const open = {
     ...base,
     method: 'openWorktree',
