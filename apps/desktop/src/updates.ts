@@ -6,6 +6,7 @@ import { gt, valid } from 'semver';
 import { z } from 'zod';
 import type { UpdateState } from '@openkraken/ipc-contract';
 import { stageAppImageUpdate, recoverAppImageUpdate } from './appimage-install.js';
+import type { InstalledUpdate } from './update-restart.js';
 import {
   updateConfiguration,
   updateEnvelopeLimit,
@@ -59,6 +60,7 @@ export class Updates {
   private automaticTimer: ReturnType<typeof setTimeout> | null = null;
   private schedulingReady = false;
   private checkingAutomatically = false;
+  private recoveryNotice: string | null = null;
   constructor(
     private directory: string,
     configuration: unknown,
@@ -83,6 +85,7 @@ export class Updates {
       selected: null,
       downloaded: 0,
       installId: null,
+      recovery: this.recoveryNotice ? 'restored' : null,
       automatic: this.automaticState(),
       error: null,
     };
@@ -169,6 +172,13 @@ export class Updates {
     await this.removeOwned('trusted-release.tmp', 4096);
     await this.removeOwned('artifact.part', 2 * 1024 ** 3);
     await this.removeOwned('artifact.ready', 2 * 1024 ** 3);
+    await this.removeOwned('rollback-notice.tmp', 4096);
+    const recoveryNotice = await this.readSource('rollback-notice.json');
+    if (recoveryNotice !== null)
+      z.strictObject({ schemaVersion: z.literal(1), outcome: z.literal('restored') }).parse(
+        JSON.parse(recoveryNotice),
+      );
+    this.recoveryNotice = recoveryNotice;
     try {
       this.automaticSource = await this.readSource('automatic-checks.json');
       if (this.automaticSource !== null) {
@@ -296,6 +306,16 @@ export class Updates {
       return this.read();
     });
   }
+  dismissRecovery(): Promise<UpdateState> {
+    return this.savePreferences(async () => {
+      if (!this.config || this.closed || this.recoveryNotice === null) return this.read();
+      if ((await this.readSource('rollback-notice.json')) !== this.recoveryNotice)
+        throw new Error('Update recovery notice changed');
+      await this.removeOwned('rollback-notice.json', 4096);
+      this.recoveryNotice = null;
+      return this.read();
+    });
+  }
   private async checkStorage() {
     if (this.failedStorage) throw new UpdateFailure('storage');
     try {
@@ -351,7 +371,11 @@ export class Updates {
   async read(): Promise<UpdateState> {
     await this.ready;
     if (this.failedStorage && !this.work) return { ...this.empty('error'), error: 'storage' };
-    return structuredClone({ ...this.state, automatic: this.automaticState() });
+    return structuredClone({
+      ...this.state,
+      recovery: this.recoveryNotice ? 'restored' : null,
+      automatic: this.automaticState(),
+    });
   }
   private start(
     phase: 'checking' | 'downloading' | 'preparing',
@@ -627,7 +651,7 @@ export class Updates {
     this.installController = null;
     return this.read();
   }
-  async commitInstall(): Promise<{ target: string; size: number; sha256: string } | null> {
+  async commitInstall(): Promise<InstalledUpdate | null> {
     if (
       !this.installation ||
       this.state.phase !== 'restart-ready' ||
@@ -639,6 +663,7 @@ export class Updates {
       await this.checkStorage();
       validateUpdateRelease(this.release, this.now());
       await this.installation.commit();
+      const recovery = this.installation.recovery;
       this.state.phase = 'installed';
       this.installation = null;
       this.installController = null;
@@ -648,7 +673,12 @@ export class Updates {
           a.platform === this.runtime.platform &&
           a.arch === this.runtime.arch,
       )!;
-      return { target: this.runtime.appImage, size: artifact.size, sha256: artifact.sha256 };
+      return {
+        target: this.runtime.appImage,
+        size: artifact.size,
+        sha256: artifact.sha256,
+        recovery,
+      };
     } catch {
       await this.installation?.discard().catch(() => {});
       this.installation = null;

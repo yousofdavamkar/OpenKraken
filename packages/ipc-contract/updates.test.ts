@@ -10,6 +10,7 @@ test('updates stay in main and renderer requests cannot choose trust or download
     'updatesStarted',
     'updatesInstall',
     'updatesAutomatic',
+    'updatesDismissRecovery',
   ]) {
     const request = {
       id: crypto.randomUUID(),

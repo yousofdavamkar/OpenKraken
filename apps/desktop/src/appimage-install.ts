@@ -258,6 +258,10 @@ export async function stageAppImageUpdate(
     };
   };
   return {
+    recovery: {
+      previous: { ...previous },
+      journalSha256: createHash('sha256').update(JSON.stringify(transaction)).digest('hex'),
+    },
     arm,
     async commit() {
       if (committed) fail();

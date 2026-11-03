@@ -32,6 +32,33 @@ const release = (sequence = 7, version = '0.2.0') => ({
   ],
 });
 
+test('a native restoration notice survives restart until explicitly dismissed', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-update-restored-notice-'));
+  const file = join(root, 'rollback-notice.json');
+  let updater = new Updates(root, configuration, runtime);
+  try {
+    await updater.read();
+    await updater.close();
+    await writeFile(file, JSON.stringify({ schemaVersion: 1, outcome: 'restored' }), {
+      mode: 0o600,
+    });
+    updater = new Updates(root, configuration, runtime);
+    expect((await updater.started()).recovery).toBe('restored');
+    await updater.close();
+    updater = new Updates(root, configuration, runtime);
+    expect((await updater.started()).recovery).toBe('restored');
+    expect((await updater.dismissRecovery()).recovery).toBeNull();
+    await expect(stat(file)).rejects.toMatchObject({ code: 'ENOENT' });
+    await updater.close();
+    await writeFile(file, '{}', { mode: 0o600 });
+    updater = new Updates(root, configuration, runtime);
+    expect(await updater.read()).toMatchObject({ error: 'storage', recovery: null });
+  } finally {
+    await updater.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('automatic checks require saved consent and stale preference changes cannot overwrite it', async () => {
   const root = await mkdtemp(join(tmpdir(), 'openkraken-update-preferences-'));
   const directory = join(root, 'updates');

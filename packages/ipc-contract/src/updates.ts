@@ -36,6 +36,7 @@ export const updatesStateSchema = z.strictObject({
     .min(0)
     .max(2 * 1024 ** 3),
   installId: z.uuid().nullable().default(null),
+  recovery: z.literal('restored').nullable().default(null),
   automatic: z
     .strictObject({
       enabled: z.boolean(),
@@ -60,6 +61,7 @@ export const updatesStateSchema = z.strictObject({
 });
 export type UpdateState = z.infer<typeof updatesStateSchema>;
 export const updatesRequests = [
+  z.strictObject({ id: z.uuid(), method: z.literal('updatesDismissRecovery') }),
   z.strictObject({
     id: z.uuid(),
     method: z.literal('updatesAutomatic'),

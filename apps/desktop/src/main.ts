@@ -367,6 +367,20 @@ else {
     const executeRequest = async (request: DesktopRequest): Promise<Result> => {
       if (request.method === 'updatesStarted')
         return { kind: 'updates', state: updatesStateSchema.parse(await updates!.started()) };
+      if (request.method === 'updatesDismissRecovery') {
+        try {
+          return {
+            kind: 'updates',
+            state: updatesStateSchema.parse(await updates!.dismissRecovery()),
+          };
+        } catch {
+          return {
+            kind: 'error',
+            code: 'UPDATE_RECOVERY',
+            message: 'The recovery notice could not be dismissed because its storage changed.',
+          };
+        }
+      }
       if (request.method === 'updatesAutomatic') {
         try {
           return {

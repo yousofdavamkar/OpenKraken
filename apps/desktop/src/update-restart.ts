@@ -4,6 +4,12 @@ import { lstat, open, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const hash = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
+export type InstalledUpdate = {
+  target: string;
+  sha256: string;
+  size: number;
+  recovery: { previous: { sha256: string; size: number }; journalSha256: string };
+};
 export async function prepareUpdateRestart(directory: string, source: string) {
   const folder = await lstat(directory);
   if (!folder.isDirectory() || folder.uid !== process.getuid!() || folder.mode & 0o077)
@@ -41,11 +47,7 @@ export async function prepareUpdateRestart(directory: string, source: string) {
   return helper;
 }
 
-export function launchUpdateAfterExit(
-  helper: string,
-  update: { target: string; sha256: string; size: number },
-  profile: string,
-) {
+export function launchUpdateAfterExit(helper: string, update: InstalledUpdate, profile: string) {
   return new Promise<void>((resolve, reject) => {
     const child = spawn(
       helper,
@@ -56,6 +58,9 @@ export function launchUpdateAfterExit(
         profile,
         update.sha256,
         String(update.size),
+        update.recovery.previous.sha256,
+        String(update.recovery.previous.size),
+        update.recovery.journalSha256,
       ],
       { detached: true, stdio: ['pipe', 'pipe', 'ignore'] },
     );
