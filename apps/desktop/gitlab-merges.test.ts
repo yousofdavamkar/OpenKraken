@@ -12,6 +12,14 @@ import { ProviderVault } from './src/provider-vault.js';
 const root = await mkdtemp(join(tmpdir(), 'openkraken-gitlab-merges-'));
 const server = setupServer();
 const repository = { owner: 'group/subgroup', name: 'project' };
+// MSW 3's socket interception can let pooled connections escape to the real
+// host under concurrent load. Keep this HTTP fixture's exchanges independent.
+// See docs/verification/gitlab-fixture-connections.md for the control experiment.
+function fixtureJson(data: Parameters<typeof HttpResponse.json>[0], init: ResponseInit = {}) {
+  const headers = new Headers(init.headers);
+  headers.set('Connection', 'close');
+  return HttpResponse.json(data, { ...init, headers });
+}
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(async () => {
@@ -22,10 +30,10 @@ async function setup(name: string, origin = 'https://gitlab.com') {
   const directory = join(root, name);
   const service = new ProviderService(directory, new ProviderVault(directory, protection()));
   server.use(
-    http.get(`${origin}/api/v4/user`, () => HttpResponse.json({ id: 73, username: 'gitlab-user' })),
+    http.get(`${origin}/api/v4/user`, () => fixtureJson({ id: 73, username: 'gitlab-user' })),
     http.get(`${origin}/api/v4/projects/:project`, ({ request }) => {
       expect(new URL(request.url).pathname).toBe('/api/v4/projects/group%2Fsubgroup%2Fproject');
-      return HttpResponse.json({ id: 77, path_with_namespace: 'group/subgroup/project' });
+      return fixtureJson({ id: 77, path_with_namespace: 'group/subgroup/project' });
     }),
   );
   const account = (await service.connect({ provider: 'gitlab', origin, token: 'merge-secret' }))
@@ -46,7 +54,7 @@ test('GitLab lists project merge requests by local number with encoded namespace
       expect(url.searchParams.get('sort')).toBe('desc');
       expect(url.searchParams.get('per_page')).toBe('100');
       pages.push(url.searchParams.get('page')!);
-      return HttpResponse.json(
+      return fixtureJson(
         Array.from({ length: pages.at(-1) === '1' ? 100 : 1 }, (_, i) =>
           gitlabMergeFixture(pages.at(-1) === '1' ? i + 1 : 101),
         ),
@@ -81,7 +89,7 @@ test('GitLab detail preserves three diff revisions, fork identity, approximate c
   let prepared = true;
   server.use(
     http.get(`${origin}/api/v4/projects/77/merge_requests/7`, () =>
-      HttpResponse.json({
+      fixtureJson({
         ...gitlabMergeFixture(7),
         ...(prepared
           ? {}
@@ -120,7 +128,7 @@ test('GitLab native states remain distinct and the final manual page is bounded 
       const url = new URL(request.url);
       const state = url.searchParams.get('state')!;
       states.push(state);
-      return HttpResponse.json(
+      return fixtureJson(
         Array.from({ length: 100 }, (_, i) => ({
           ...gitlabMergeFixture(i + 1),
           state,
@@ -146,7 +154,7 @@ test('GitLab refuses foreign projects, wrong local numbers, partial revisions an
   let changed: Record<string, unknown> = {};
   server.use(
     http.get(`${origin}/api/v4/projects/77/merge_requests/7`, () =>
-      HttpResponse.json({ ...gitlabMergeFixture(7), ...changed }),
+      fixtureJson({ ...gitlabMergeFixture(7), ...changed }),
     ),
   );
   for (const value of [
@@ -170,7 +178,7 @@ test('GitLab refuses foreign projects, wrong local numbers, partial revisions an
   }
   server.use(
     http.get(`${origin}/api/v4/projects/:project`, () =>
-      HttpResponse.json({ id: 77, path_with_namespace: 'another/project' }),
+      fixtureJson({ id: 77, path_with_namespace: 'another/project' }),
     ),
   );
   await expect(service.mergeRequest(account.id, { repository, number: 7 })).rejects.toMatchObject({
@@ -186,7 +194,7 @@ test('GitLab all-state pages omit the filter, bound metadata and reject wrong-st
       const url = new URL(request.url);
       expect(url.searchParams.get('scope')).toBe('all');
       if (url.searchParams.get('page') === '2') expect(url.searchParams.has('state')).toBe(false);
-      return HttpResponse.json(entries);
+      return fixtureJson(entries);
     }),
   );
   const page = await service.pullRequests(account.id, { repository, state: 'all', page: 2 });
@@ -216,7 +224,7 @@ test('Cancelling GitLab detail reads aborts transport and never returns late met
       markStarted();
       request.signal.addEventListener('abort', () => markAborted(), { once: true });
       await aborted;
-      return HttpResponse.json(gitlabMergeFixture(7));
+      return fixtureJson(gitlabMergeFixture(7));
     }),
   );
   const controller = new AbortController();
@@ -234,13 +242,13 @@ test('GitLab file pages preserve rename/mode metadata and patch availability wit
   const pages: string[] = [];
   server.use(
     http.get(`${origin}/api/v4/projects/77/merge_requests/7`, () =>
-      HttpResponse.json(gitlabMergeFixture(7)),
+      fixtureJson(gitlabMergeFixture(7)),
     ),
     http.get(`${origin}/api/v4/projects/77/merge_requests/7/diffs`, ({ request }) => {
       const url = new URL(request.url);
       expect(url.searchParams.get('per_page')).toBe('100');
       pages.push(url.searchParams.get('page')!);
-      return HttpResponse.json(
+      return fixtureJson(
         pages.at(-1) === '1'
           ? Array.from({ length: 100 }, (_, i) => gitlabFileFixture(`file-${i}`))
           : [{ ...gitlabFileFixture(), diff: '', collapsed: true, generated_file: true }],
@@ -290,12 +298,12 @@ test('GitLab file reads refuse stale source/base/target revisions before dispatc
   let fileReads = 0;
   let changeDuringRead = false;
   server.use(
-    http.get(`${origin}/api/v4/projects/77/merge_requests/7`, () => HttpResponse.json(detail)),
+    http.get(`${origin}/api/v4/projects/77/merge_requests/7`, () => fixtureJson(detail)),
     http.get(`${origin}/api/v4/projects/77/merge_requests/7/diffs`, () => {
       fileReads++;
       if (changeDuringRead)
         detail = { ...detail, diff_refs: { ...detail.diff_refs, start_sha: '4'.repeat(40) } };
-      return HttpResponse.json([gitlabFileFixture()]);
+      return fixtureJson([gitlabFileFixture()]);
     }),
   );
   for (const field of ['base_sha', 'head_sha', 'start_sha'] as const) {
@@ -336,11 +344,9 @@ test('GitLab file pages bound patches, flag provider omissions and reject malfor
   ];
   server.use(
     http.get(`${origin}/api/v4/projects/77/merge_requests/7`, () =>
-      HttpResponse.json(gitlabMergeFixture(7)),
+      fixtureJson(gitlabMergeFixture(7)),
     ),
-    http.get(`${origin}/api/v4/projects/77/merge_requests/7/diffs`, () =>
-      HttpResponse.json(entries),
-    ),
+    http.get(`${origin}/api/v4/projects/77/merge_requests/7/diffs`, () => fixtureJson(entries)),
   );
   const first = await service.mergeRequestFiles(account.id, {
     repository,
