@@ -1,6 +1,18 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The current checkpoint adds unsigned Linux AppImage generation and runtime acceptance after DEB/RPM packaging, main/PTY crash acceptance, interrupted native-prompt recovery, local commit drafts and native command supervision. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+M8 remains in progress. The current checkpoint adds opt-in process-crash summaries after Linux installer generation, main/PTY crash acceptance, interrupted native-prompt recovery, local commit drafts and native command supervision. It does not establish release completion or close the remaining [M6](m6-progress.md) and [M7](m7-progress.md) scope.
+
+## Opt-in crash summaries
+
+Main-owned reporting (`6ab45c5`) sends only allowlisted process/failure categories, app version, OS family, architecture and a random per-report ID. There are no stacks, dumps, logs, repository paths, code or account identifiers. The default build has no reporting destination. A publisher can embed a validated HTTPS Sentry DSN at build time; a user must then independently opt in, and changing the destination invalidates consent. Private consent storage, revision checks, immediate opt-out cancellation, a five-second deadline, per-session limits and no retry queue bound the reporting behavior. See [ADR 0077](../decisions/0077-opt-in-crash-summaries.md).
+
+The consent dialog and actual-crash acceptance (`0d5f69b`) passed against a local HTTPS receiver with an explicitly trusted fixture certificate. Real renderer and Git-utility crashes produce exact, minimal envelope payloads only after persisted consent. Before consent and after opt-out, no reports arrive. The default build rejects attempts to enable reporting without a destination. Unit/contract checks cover destination changes, stale/corrupt/redirected consent, cancellation despite a failed opt-out save, timeout aborts, concurrent events, session caps and main-only strict routes. The first privacy regression reproduced a pre-consent event waiting for an opt-in write; events are now discarded at observation time and cannot cross consent generations.
+
+Verification passed **603 native/unit tests in 79 files** with Git LFS enabled and explicit `ALL_UNIT_EXIT=0`, typechecking/build, full ESLint/Prettier, and **32 targeted Electron tests** with explicit `REGRESSION_E2E_EXIT=0`. Regression scope includes crash reporting, main/PTY death, interrupted native prompts, service shutdown, terminal integration, appearance and graph behavior. A 5,000-commit page measured **149.5 ms**, 12,000-row scrolling **16.7 ms p95**, and all six graph goldens passed unchanged. The consent screenshot was visually inspected; paragraph spacing was corrected. No performance budget or timeout was relaxed.
+
+A fresh unsigned Linux x64 bundle passed fuse verification and packaged smoke with explicit `PACKAGE_EXIT=0` and `PACKAGE_SMOKE_EXIT=0`, including default-off reporting, renderer isolation, native helpers, folder selection, Bash integration, keyboard input and terminal exit. Installer artifacts were not regenerated for this increment. The full desktop suite, live Sentry acceptance, Windows/macOS crash behavior and real-repository performance were not rerun or established.
+
+Evidence: `/tmp/openkraken-crash-reports-{red,privacy-red,privacy-green,privacy-final,all-unit,types,lint,final-build,regression-e2e,package,package-smoke}.log`. The test fixture compiles its own main entry point with a fixed local receiver; production code has no runtime test-destination override or TLS bypass. Main-process/native startup death and JavaScript exception reporting remain unimplemented. Actual release receiver configuration, live-service acceptance and broader platform coverage remain open; this is not completion of M8 crash reporting or release readiness.
 
 ## AppImage pipeline
 
@@ -71,7 +83,7 @@ Evidence: `/tmp/openkraken-supervisor-{red,green,native,hook,unit,e2e,types,buil
 ## Remaining work
 
 - Native supervision runtime acceptance on Windows/macOS, further crash/write scenarios beyond the Linux fetch/PTY/prompt fixtures above, native lock handling and durable write recovery. POSIX processes that intentionally detach or daemonize beyond the active command's stream lifetime are not contained.
-- Durable drafts for working-file, conflict/native editors and provider composers; commit-form drafts are implemented within the bounds above. Opt-in crash reporting, signature-verified updates, signed installers/distribution, security review and beta evidence remain open.
+- Durable drafts for working-file, conflict/native editors and provider composers; commit-form drafts are implemented within the bounds above. Crash-report coverage for main/startup death and JavaScript exceptions, live receiver configuration/acceptance, signature-verified updates, signed installers/distribution, security review and beta evidence remain open. Opt-in renderer/known utility/GPU failure summaries are implemented within the bounds above.
 - DMG/MSI, RPM distribution install/upgrade/remove acceptance, broader AppImage distribution acceptance, Linux arm64 and macOS/Windows installer runtime checks, and real release metadata. DEB/RPM/AppImage artifacts in this checkpoint remain unsigned local test builds.
 - Broader real-repository and cross-platform performance/regression gates, plus the unresolved intermittent command exit-143 investigation recorded in M7 progress.
 

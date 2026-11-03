@@ -56,6 +56,8 @@ The installer smoke verifies archive hashes, every extracted payload file/mode/l
 
 Generate sample repositories with `pnpm fixtures [output-directory]`. They include six graph topologies and a 2,200-commit performance fixture. Tests generate isolated temporary repositories and clean up afterward.
 
+Crash reporting is off by default. The default build has no receiver configured. A publisher can set `OPENKRAKEN_SENTRY_DSN` during `pnpm build` or `pnpm package`; it must be an HTTPS Sentry DSN with a public key and project ID. The destination is fixed in that build. Users must separately opt in through **Crash reporting**, and changing the destination requires new consent. Reports contain only app version, OS family, architecture and process/failure categories; no code, paths, logs, dumps or account data are sent. Main-process death and JavaScript exception reporting remain unimplemented. See [ADR 0077](docs/decisions/0077-opt-in-crash-summaries.md) for transport, privacy and verification limits.
+
 ## Benchmark a real repository
 
 The opt-in benchmark needs an existing repository with more than 17,000 reachable commits. It measures first paint, three 5,000-commit pages, scrolling with 12,000 loaded rows, mounted DOM rows and Electron process memory. It records repository HEAD, total reachable commit count, CPU, Git version and cache conditions alongside the measurements.
