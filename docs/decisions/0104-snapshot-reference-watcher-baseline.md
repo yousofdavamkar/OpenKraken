@@ -1,0 +1,21 @@
+# 0104 — Reuse snapshot refs for the initial watcher baseline
+
+## Context
+
+A startup trace on the 50,000-ref fixture measured 125 ms establishing the watcher baseline immediately before a 424 ms snapshot read. Both enumerated all refs. The initial watcher enumeration needs names, direct targets, upstreams and tracking counts already retained in the snapshot. Response transfer and validation remain separate startup costs.
+
+## Decision
+
+Let a fresh watcher prime its baseline around the initial snapshot read. Complete all other baseline reads first: status, HEAD, operation/config metadata, worktrees, shallow state and FETCH_HEAD. Then read the snapshot and reconstruct the watcher's reference identity bytes from its complete ordered ref list. Preserve direct annotated-tag targets and the exact native ahead/behind/gone tracking representation. Do not use the graph's filtered subset.
+
+Finishing the other reads before the snapshot is deliberate. Running them alongside it could capture newer state than the displayed snapshot and hide an intervening external change. Ref identities come from the snapshot itself, so a later change remains detectable by the next native fingerprint. No filesystem or native Git validation is replaced with a timer assumption.
+
+Keep the existing delayed subscription startup, pre/post-subscription checks, native self-test, polling fallback and normal native reference enumeration for every later check. Priming is permitted once on a fresh watcher. Checks wait for pending priming; closure drains it and suppresses notifications. If the initial snapshot fails, the utility drops and closes that watcher so retry creates a fresh baseline. Metadata-read failure retains the existing polling fallback behavior.
+
+Reconstruction preserves valid UTF-8 ref names. If a native ref name contains invalid UTF-8 bytes, the existing snapshot decoding can change those bytes. The next raw native fingerprint then differs conservatively and can trigger one extra refresh; subsequent checks retain the raw native baseline. This change does not add support for operating on non-UTF-8 ref names.
+
+## Verification and limits
+
+The initial regression observes two native ref enumerations before this change and one afterward. Native tests compare the seeded baseline with a fresh fingerprint for checkout, bare and linked repositories, including ahead/behind/equal/gone upstreams, Unicode names, annotated/blob tags and stashes. Handoff tests change refs, HEAD, stash, config and working files after capture and require notifications when subscriptions start. Other cases cover failed/repeated priming and closure while a snapshot is pending. Desktop retry coverage opens a repository with a missing ref object, repairs it, reopens it and observes native ref/file changes.
+
+All snapshot fields, graph roots, watcher domains, IPC validation and timing budgets remain unchanged. This removes one duplicate enumeration; it does not establish the 500 ms startup gate. Distinct-target and shared-target measurements, including variable and failing results, are retained in the [performance report](../verification/m8-reference-performance.md). A temporary V8 binary-transfer experiment did not improve transfer time and was removed.

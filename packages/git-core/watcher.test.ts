@@ -1,10 +1,11 @@
-import { afterAll, expect, test } from 'vitest';
+import { afterAll, expect, test, vi } from 'vitest';
 import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
 import { RepositoryService } from './src/repository.js';
 import { RepositoryWatcher, classifyPath } from './src/watcher.js';
+import * as runner from './src/runner.js';
 const root = await mkdtemp(join(tmpdir(), 'openkraken-watch-'));
 afterAll(() => rm(root, { recursive: true, force: true }));
 async function setup(name: string) {
@@ -12,6 +13,164 @@ async function setup(name: string) {
   const service = new RepositoryService('git');
   return { path, repo: await service.open(path) };
 }
+test('initial watcher baseline reuses snapshot refs and agrees with a fresh native fingerprint', async () => {
+  const path = createFixture(join(root, 'snapshot-baseline'));
+  fixtureGit(path, ['tag', '-d', 'annotated']);
+  const service = new RepositoryService('git');
+  const repo = await service.open(path);
+  const events: string[][] = [];
+  const watch = new RepositoryWatcher('git', repo, (event) => events.push(event.domains));
+  const run = vi.spyOn(runner, 'runGit');
+  try {
+    const snapshot = await watch.primeSnapshot(() => service.snapshot(repo.id, undefined, false));
+    expect(snapshot.refs.length).toBeGreaterThan(2);
+    expect(run.mock.calls.filter(([, args]) => args[0] === 'for-each-ref')).toHaveLength(1);
+    await watch.check();
+    expect(events).toEqual([]);
+    fixtureGit(path, ['branch', 'after-snapshot']);
+    await watch.start();
+    expect(events.flat()).toContain('refs');
+    expect(events.flat()).toContain('graph');
+  } finally {
+    run.mockRestore();
+    await watch.close();
+    await service.dispose();
+  }
+});
+test.each(['checkout', 'bare', 'linked'] as const)(
+  'snapshot baseline preserves native tracking, tag and stash identities in a %s repository',
+  async (kind) => {
+    const source = createFixture(join(root, `seed-${kind}`), 'stash');
+    const diverged = fixtureGit(source, [
+      'commit-tree',
+      'HEAD^{tree}',
+      '-p',
+      'HEAD~2',
+      '-m',
+      'diverged',
+    ]);
+    for (const [branch, target, upstream] of [
+      ['behind', 'HEAD~2', 'refs/heads/main'],
+      ['equal', 'HEAD~1', 'refs/heads/main'],
+      ['diverged', diverged, 'refs/heads/main'],
+      ['gone', 'HEAD', 'refs/heads/missing'],
+    ]) {
+      fixtureGit(source, ['branch', branch!, target!]);
+      fixtureGit(source, ['config', `branch.${branch}.remote`, 'origin']);
+      fixtureGit(source, ['config', `branch.${branch}.merge`, upstream!]);
+    }
+    fixtureGit(source, ['branch', 'Ångström']);
+    const blob = fixtureGit(source, ['hash-object', '-w', '--stdin'], 'blob tag target');
+    fixtureGit(source, ['update-ref', 'refs/tags/blob', blob]);
+    let path = source;
+    if (kind === 'bare') {
+      path = join(root, 'seed-bare-clone.git');
+      fixtureGit(source, ['clone', '--mirror', source, path]);
+    } else if (kind === 'linked') {
+      path = join(root, 'seed-linked-checkout');
+      fixtureGit(source, ['worktree', 'add', '-b', 'linked', path]);
+    }
+    const service = new RepositoryService('git');
+    const repo = await service.open(path);
+    const events: string[][] = [];
+    const watch = new RepositoryWatcher('git', repo, (event) => events.push(event.domains));
+    try {
+      const snapshot = await watch.primeSnapshot(() => service.snapshot(repo.id, undefined, false));
+      expect(snapshot.refs.some((ref) => ref.peeled)).toBe(true);
+      expect(snapshot.refs.some((ref) => ref.kind === 'stash')).toBe(true);
+      if (kind !== 'bare') {
+        expect(snapshot.refs.find((ref) => ref.shortName === 'diverged')?.upstream).toMatchObject({
+          ahead: 1,
+          behind: 1,
+        });
+        expect(snapshot.refs.find((ref) => ref.shortName === 'behind')?.upstream).toMatchObject({
+          ahead: 0,
+          behind: 1,
+        });
+        expect(snapshot.refs.find((ref) => ref.shortName === 'equal')?.upstream).toMatchObject({
+          ahead: 0,
+          behind: 0,
+        });
+        expect(snapshot.refs.find((ref) => ref.shortName === 'gone')?.upstream?.gone).toBe(true);
+      }
+      await watch.check();
+      expect(events).toEqual([]);
+    } finally {
+      await watch.close();
+      await service.dispose();
+    }
+  },
+);
+test('changes after snapshot capture are observed when subscriptions start', async () => {
+  const path = createFixture(join(root, 'seed-handoff'), 'stash');
+  const service = new RepositoryService('git');
+  const repo = await service.open(path);
+  const events: string[][] = [];
+  const watch = new RepositoryWatcher('git', repo, (event) => events.push(event.domains));
+  try {
+    await watch.primeSnapshot(async () => {
+      const snapshot = await service.snapshot(repo.id, undefined, false);
+      fixtureGit(path, ['tag', '-d', 'annotated']);
+      fixtureGit(path, ['update-ref', '-d', 'refs/stash']);
+      fixtureGit(path, ['branch', 'new-branch']);
+      fixtureGit(path, ['checkout', '--detach']);
+      fixtureGit(path, ['config', 'watcher.test', 'changed']);
+      await writeFile(join(path, 'tracked.txt'), 'after snapshot');
+      return snapshot;
+    });
+    expect(events).toEqual([]);
+    await watch.start();
+    expect(events.flat()).toEqual(
+      expect.arrayContaining(['refs', 'graph', 'stash', 'status', 'config', 'remotes']),
+    );
+  } finally {
+    await watch.close();
+    await service.dispose();
+  }
+});
+test('failed or closed snapshot priming cannot publish a baseline or be reused', async () => {
+  const path = createFixture(join(root, 'seed-lifecycle'));
+  const service = new RepositoryService('git');
+  const repo = await service.open(path);
+  const events: string[][] = [];
+  const failed = new RepositoryWatcher('git', repo, (event) => events.push(event.domains));
+  const closing = new RepositoryWatcher('git', repo, (event) => events.push(event.domains));
+  try {
+    await expect(
+      failed.primeSnapshot(async () => {
+        throw new Error('snapshot interrupted');
+      }),
+    ).rejects.toThrow('snapshot interrupted');
+    await expect(
+      failed.primeSnapshot(() => service.snapshot(repo.id, undefined, false)),
+    ).rejects.toThrow('fresh watcher');
+    const snapshot = await service.snapshot(repo.id, undefined, false);
+    let started!: () => void;
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const pending = closing.primeSnapshot(async () => {
+      started();
+      await released;
+      return snapshot;
+    });
+    await ready;
+    const closed = closing.close();
+    release();
+    expect(await pending).toBe(snapshot);
+    await closed;
+    await closing.check();
+    expect(events).toEqual([]);
+  } finally {
+    await failed.close();
+    await closing.close();
+    await service.dispose();
+  }
+});
 test('other checkout edits publish status without invalidating history and new checkouts become watched', async () => {
   const { path, repo } = await setup('other-worktrees');
   const linked = join(root, 'observed-linked');

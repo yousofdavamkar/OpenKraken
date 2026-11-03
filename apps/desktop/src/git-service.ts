@@ -58,8 +58,7 @@ async function prepareWatcher(repo: Repository) {
   watcher = new RepositoryWatcher(gitPath, repo, (event) =>
     parent!.postMessage({ type: 'repositoryChanged', ...event }),
   );
-  // Establish a baseline before the snapshot, then subscribe after delivering history.
-  await watcher.check();
+  return watcher;
 }
 
 function getService() {
@@ -584,16 +583,28 @@ async function executeGit(
             : request.method === 'init'
               ? await git.init(request.path, request.branch, signal)
               : await git.open(request.path, signal);
-  if ('path' in repo) await prepareWatcher(repo);
-  return {
-    kind: 'snapshot',
-    snapshot: await git.snapshot(
+  const initialWatcher = 'path' in repo ? await prepareWatcher(repo) : undefined;
+  const readSnapshot = () =>
+    git.snapshot(
       repo.id,
       signal,
       request.method === 'refresh',
       request.method === 'refresh' ? request.view : undefined,
-    ),
-  };
+    );
+  try {
+    return {
+      kind: 'snapshot',
+      snapshot: await (initialWatcher
+        ? initialWatcher.primeSnapshot(readSnapshot)
+        : readSnapshot()),
+    };
+  } catch (error) {
+    if (initialWatcher) {
+      if (watcher === initialWatcher) watcher = undefined;
+      await initialWatcher.close();
+    }
+    throw error;
+  }
 }
 parent.on('message', (event) => {
   if (shutdownSchema.safeParse(event.data).success) {

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readdir, readFile, stat, writeFile, rm } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
-import type { Repository, Worktree } from '@openkraken/ipc-contract';
+import type { Ref, Repository, Snapshot, Worktree } from '@openkraken/ipc-contract';
 import type { subscribe, AsyncSubscription } from '@parcel/watcher';
 import { runGit, type RunOptions } from './runner.js';
 import { Worktrees } from './worktrees.js';
@@ -65,6 +65,27 @@ export function classifyPath(repo: Repository, path: string): RefreshDomain[] {
   return !repo.isBare && within(repo.path, path) !== undefined ? ['status'] : [];
 }
 const digest = (data: Buffer | string) => createHash('sha256').update(data).digest('hex');
+function snapshotReferenceBytes(refs: readonly Ref[]): Buffer {
+  return Buffer.from(
+    refs
+      .map((ref) => {
+        const upstream = ref.upstream;
+        const tracking = upstream?.gone
+          ? '[gone]'
+          : upstream
+            ? [
+                upstream.ahead ? `ahead ${upstream.ahead}` : '',
+                upstream.behind ? `behind ${upstream.behind}` : '',
+              ]
+                .filter(Boolean)
+                .join(', ')
+            : '';
+        const track = tracking && !upstream?.gone ? `[${tracking}]` : tracking;
+        return `${ref.name}\0${ref.target}\0${upstream?.ref ?? ''}\0${track}\n`;
+      })
+      .join(''),
+  );
+}
 /** Native notifications are hints. Git determines whether observable state actually changed. */
 export class RepositoryWatcher {
   mode: 'native' | 'polling' = 'polling';
@@ -82,6 +103,8 @@ export class RepositoryWatcher {
   private baseline?: Record<RefreshDomain, string>;
   private checking?: Promise<void>;
   private starting?: Promise<void>;
+  private priming?: Promise<Snapshot>;
+  private primed = false;
   private again = false;
   private probe?: { path: string; observed: () => void };
   constructor(
@@ -92,6 +115,27 @@ export class RepositoryWatcher {
   ) {}
   private emit(domains: RefreshDomain[]) {
     if (!this.closed) this.notify({ repoId: this.repo.id, domains, mode: this.mode });
+  }
+  async primeSnapshot(read: () => Promise<Snapshot>): Promise<Snapshot> {
+    if (this.closed || this.primed || this.baseline || this.checking || this.starting)
+      throw new Error('Only a fresh watcher can prime a snapshot');
+    this.primed = true;
+    this.priming = (async () => {
+      // Finish every other baseline read before the snapshot. Running those
+      // reads alongside it could accept state newer than the displayed snapshot.
+      const metadata = await this.captureMetadata().catch(() => undefined);
+      if (this.closed) throw new Error('Watcher closed before snapshot');
+      if (!metadata) this.fallback();
+      const snapshot = await read();
+      if (!this.closed && metadata)
+        this.baseline = this.hashes(snapshotReferenceBytes(snapshot.refs), metadata);
+      return snapshot;
+    })();
+    try {
+      return await this.priming;
+    } finally {
+      this.priming = undefined;
+    }
   }
   private run(args: string[], options: RunOptions) {
     return this.processPool.run(false, () => runGit(this.git, args, options), options.signal);
@@ -164,21 +208,17 @@ export class RepositoryWatcher {
       throw error;
     }
   }
-  private async fingerprint(): Promise<Record<RefreshDomain, string>> {
+  private async captureMetadata() {
     const run = (args: string[]) =>
       this.run(args, {
         cwd: this.repo.path,
         signal: this.controller.signal,
         timeoutMs: 10000,
       });
-    const [status, refs, head, operation, config, worktrees, shallow, fetch] = await Promise.all([
+    const [status, head, operation, config, worktrees, shallow, fetch] = await Promise.all([
       this.repo.isBare
         ? undefined
         : run(['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all', '--renames']),
-      run([
-        'for-each-ref',
-        '--format=%(refname)%00%(objectname)%00%(upstream)%00%(upstream:track)',
-      ]),
       this.metadata(join(this.repo.gitDir, 'HEAD')),
       Promise.all(
         [
@@ -211,11 +251,32 @@ export class RepositoryWatcher {
       this.metadata(join(this.repo.commonDir, 'shallow')),
       this.metadata(join(this.repo.gitDir, 'FETCH_HEAD')),
     ]);
-    const lines = refs.stdout.toString().split('\n');
-    const refHash = digest(refs.stdout);
+    return { status: status?.stdout, head, operation, config, worktrees, shallow, fetch };
+  }
+  private async fingerprint(): Promise<Record<RefreshDomain, string>> {
+    const [refs, metadata] = await Promise.all([
+      this.run(
+        ['for-each-ref', '--format=%(refname)%00%(objectname)%00%(upstream)%00%(upstream:track)'],
+        {
+          cwd: this.repo.path,
+          signal: this.controller.signal,
+          timeoutMs: 10000,
+        },
+      ),
+      this.captureMetadata(),
+    ]);
+    return this.hashes(refs.stdout, metadata);
+  }
+  private hashes(
+    refs: Buffer,
+    metadata: Awaited<ReturnType<RepositoryWatcher['captureMetadata']>>,
+  ): Record<RefreshDomain, string> {
+    const { status, head, operation, config, worktrees, shallow, fetch } = metadata;
+    const lines = refs.toString().split('\n');
+    const refHash = digest(refs);
     this.otherWorktrees = worktrees?.entries.filter((entry) => !entry.current) ?? [];
     return {
-      status: digest(status?.stdout ?? ''),
+      status: digest(status ?? ''),
       refs: digest(refHash + head + fetch),
       graph: digest(lines.filter((l) => !l.startsWith('refs/tags/')).join('\n') + head + shallow),
       stash: digest(lines.filter((l) => l.startsWith('refs/stash\0')).join('\n')),
@@ -336,6 +397,7 @@ export class RepositoryWatcher {
     if (!this.paused) this.schedule(120);
   }
   async check(): Promise<void> {
+    await this.priming?.catch(() => undefined);
     if (this.closed || this.paused) return;
     if (this.checking) {
       this.again = true;
@@ -378,5 +440,6 @@ export class RepositoryWatcher {
     await this.releaseCheckouts();
     await this.checking;
     await this.starting;
+    await this.priming?.catch(() => undefined);
   }
 }
