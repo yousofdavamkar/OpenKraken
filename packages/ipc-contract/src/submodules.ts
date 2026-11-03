@@ -38,7 +38,41 @@ export const submoduleStateSchema = z
   .strict();
 export type SubmoduleState = z.infer<typeof submoduleStateSchema>;
 export type Submodule = SubmoduleState['entries'][number];
+export const submoduleUpdatePreviewSchema = z
+  .object({
+    token: z.string().uuid(),
+    entries: submoduleStateSchema.shape.entries,
+    sources: z
+      .array(
+        z
+          .object({
+            repository: z.string().max(32768),
+            setting: z.string().max(32768),
+            value: z.string().max(32768),
+          })
+          .strict(),
+      )
+      .max(2048),
+  })
+  .strict();
+export type SubmoduleUpdatePreview = z.infer<typeof submoduleUpdatePreviewSchema>;
 export const submoduleRequests = [
+  z
+    .object({
+      id: z.string().uuid(),
+      method: z.literal('submoduleUpdatePreview'),
+      repoId: identity,
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      method: z.literal('updateSubmodules'),
+      repoId: identity,
+      token: z.string().uuid(),
+      allowLocal: z.boolean(),
+    })
+    .strict(),
   z.object({ id: z.string().uuid(), method: z.literal('submodules'), repoId: identity }).strict(),
   z
     .object({

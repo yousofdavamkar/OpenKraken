@@ -48,6 +48,7 @@ import { commitComparison } from './file-comparison.js';
 import { WorkingTree } from './working-tree.js';
 import { Worktrees, type WorktreePrunePlan } from './worktrees.js';
 import { Submodules } from './submodules.js';
+import { SubmoduleUpdates, type SubmoduleUpdatePlan } from './submodule-updates.js';
 import type { GitEditor } from './editor-document.js';
 import { RepositoryQueue } from './queue.js';
 
@@ -63,6 +64,7 @@ export class RepositoryService {
   private repositories = new Map<string, Repository>();
   private queues = new Map<string, RepositoryQueue>();
   private histories = new Map<string, HistoryCursor>();
+  private submoduleUpdates = new Map<string, SubmoduleUpdatePlan>();
   private worktreePrunes = new Map<string, WorktreePrunePlan>();
   private processPool = new RepositoryQueue(3);
   private preferences: RepositoryPreferences;
@@ -867,6 +869,35 @@ export class RepositoryService {
     const { repo, manager } = this.submoduleManager(id);
     return this.queue(repo.commonDir).run(false, () => manager.list(signal), signal);
   }
+  submoduleUpdatePreview(id: string, signal?: AbortSignal) {
+    const { repo } = this.submoduleManager(id);
+    const manager = new SubmoduleUpdates(
+      repo,
+      (args, options) => this.run(args, options),
+      this.submoduleUpdates,
+    );
+    return this.queue(repo.commonDir).run(false, () => manager.preview(signal), signal);
+  }
+  updateSubmodules(
+    id: string,
+    token: string,
+    allowLocal: boolean,
+    signal?: AbortSignal,
+    progress?: (text: string) => void,
+    authentication?: NodeJS.ProcessEnv,
+  ) {
+    const { repo } = this.submoduleManager(id);
+    const manager = new SubmoduleUpdates(
+      repo,
+      (args, options) => this.run(args, options),
+      this.submoduleUpdates,
+    );
+    return this.queue(repo.commonDir).run(
+      true,
+      () => manager.update(token, allowLocal, signal, progress, authentication),
+      signal,
+    );
+  }
   openSubmodule(id: string, submoduleId: string, revision: string, signal?: AbortSignal) {
     const { repo, manager } = this.submoduleManager(id);
     return this.queue(repo.commonDir).run(
@@ -997,6 +1028,7 @@ export class RepositoryService {
   }
   async dispose() {
     this.worktreePrunes.clear();
+    this.submoduleUpdates.clear();
     await Promise.all([...this.histories.values()].map((cursor) => cursor.close()));
     this.histories.clear();
     await this.cache?.flush();

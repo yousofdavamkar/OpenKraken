@@ -28,7 +28,7 @@ import {
 import { GitError, type runGit, type RunOptions } from './runner.js';
 
 import { GitProgressLines, redactGitMessage as displayUrl } from './progress.js';
-function validateUrl(value: string) {
+export function validateUrl(value: string) {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
     let url: URL;
     try {
@@ -55,7 +55,7 @@ function validateUrl(value: string) {
     throw new GitError('INVALID_REMOTE_URL', 'External transport helper URLs are not supported');
   }
 }
-function transportError(error: GitError) {
+export function transportError(error: GitError) {
   const message = displayUrl(error.message);
   let code = error.code;
   if (code === 'GIT_FAILED') {

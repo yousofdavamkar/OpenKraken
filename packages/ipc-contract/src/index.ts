@@ -1,6 +1,10 @@
 import { commandIdSchema, commandUsageSchema, commandPreferencesSchema } from './commands.js';
 import { terminalRequests, terminalEvents } from './terminal.js';
-import { submoduleRequests, submoduleStateSchema } from './submodules.js';
+import {
+  submoduleRequests,
+  submoduleStateSchema,
+  submoduleUpdatePreviewSchema,
+} from './submodules.js';
 export * from './submodules.js';
 import {
   worktreeRequests,
@@ -1798,6 +1802,9 @@ export const resultSchema = z.discriminatedUnion('kind', [
     .object({ kind: z.literal('worktreePrunePreview'), preview: worktreePrunePreviewSchema })
     .strict(),
   z.object({ kind: z.literal('worktrees'), state: worktreeStateSchema }).strict(),
+  z
+    .object({ kind: z.literal('submoduleUpdatePreview'), preview: submoduleUpdatePreviewSchema })
+    .strict(),
   z.object({ kind: z.literal('submodules'), state: submoduleStateSchema }).strict(),
   z
     .object({

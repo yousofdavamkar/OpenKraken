@@ -78,6 +78,7 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
       accepted: authentication.answer(request.requestId, request.promptId, request.answer),
     };
   const interactive =
+    request.method === 'updateSubmodules' ||
     request.method === 'providerGit' ||
     request.method === 'clone' ||
     request.method === 'push' ||
@@ -87,24 +88,26 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
     request.method === 'pushPreview' ||
     (request.method === 'fetch' && !request.background);
   const context =
-    request.method === 'providerGit'
-      ? request.operation.method === 'fetch'
-        ? `Fetch ${request.operation.name}`
-        : request.operation.method === 'pull'
-          ? 'Pull upstream'
-          : request.operation.method === 'deleteRemote' ||
-              request.operation.method === 'deleteRemotePreview'
-            ? 'Delete remote ref'
-            : 'Push repository'
-      : request.method === 'clone'
-        ? `Clone ${request.options.url}`
-        : request.method === 'fetch'
-          ? `Fetch ${request.name}`
-          : request.method === 'pull'
+    request.method === 'updateSubmodules'
+      ? 'Update submodules'
+      : request.method === 'providerGit'
+        ? request.operation.method === 'fetch'
+          ? `Fetch ${request.operation.name}`
+          : request.operation.method === 'pull'
             ? 'Pull upstream'
-            : request.method === 'deleteRemote' || request.method === 'deleteRemotePreview'
+            : request.operation.method === 'deleteRemote' ||
+                request.operation.method === 'deleteRemotePreview'
               ? 'Delete remote ref'
-              : 'Push repository';
+              : 'Push repository'
+        : request.method === 'clone'
+          ? `Clone ${request.options.url}`
+          : request.method === 'fetch'
+            ? `Fetch ${request.name}`
+            : request.method === 'pull'
+              ? 'Pull upstream'
+              : request.method === 'deleteRemote' || request.method === 'deleteRemotePreview'
+                ? 'Delete remote ref'
+                : 'Push repository';
   const scope = interactive
     ? await authentication.open(
         request.id,
@@ -339,6 +342,23 @@ async function executeGit(
     return { kind: 'worktrees', state: await git.worktrees(request.repoId, signal) };
   if (request.method === 'submodules')
     return { kind: 'submodules', state: await git.submodules(request.repoId, signal) };
+  if (request.method === 'submoduleUpdatePreview')
+    return {
+      kind: 'submoduleUpdatePreview',
+      preview: await git.submoduleUpdatePreview(request.repoId, signal),
+    };
+  if (request.method === 'updateSubmodules')
+    return {
+      kind: 'submodules',
+      state: await git.updateSubmodules(
+        request.repoId,
+        request.token,
+        request.allowLocal,
+        signal,
+        progress,
+        auth,
+      ),
+    };
   if (request.method === 'worktreePrunePreview')
     return {
       kind: 'worktreePrunePreview',
@@ -550,6 +570,7 @@ parent.on('message', (event) => {
   const controller = new AbortController();
   active.set(request.id, controller);
   const writing = [
+    'updateSubmodules',
     'addWorktree',
     'worktreeAction',
     'pruneWorktrees',

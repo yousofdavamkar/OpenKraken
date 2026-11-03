@@ -7,6 +7,24 @@ import {
   resultSchema,
   parseUserTheme,
 } from '../../packages/ipc-contract/src/index.js';
+test('submodule updates accept only a reviewed token and explicit local transport choice', () => {
+  const base = { id: '00000000-0000-4000-8000-000000000001', repoId: 'a'.repeat(64) };
+  const request = { ...base, method: 'updateSubmodules', token: base.id, allowLocal: false };
+  for (const schema of [requestSchema, serviceRequestSchema]) {
+    expect(schema.safeParse({ ...base, method: 'submoduleUpdatePreview' }).success).toBe(true);
+    expect(schema.safeParse(request).success).toBe(true);
+    for (const fields of [
+      { path: '/outside' },
+      { url: 'file:///outside' },
+      { force: true },
+      { remote: true },
+      { token: 'invalid' },
+      { allowLocal: undefined },
+    ])
+      expect(schema.safeParse({ ...request, ...fields }).success).toBe(false);
+  }
+});
+
 test('submodule IPC selects reviewed identities and rejects caller paths and Git options', () => {
   const base = { id: '00000000-0000-4000-8000-000000000000', repoId: 'a'.repeat(64) };
   const open = {

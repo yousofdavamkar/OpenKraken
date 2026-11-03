@@ -12,6 +12,129 @@ function add(parent: string, source: string, path: string) {
   fixtureGit(parent, ['commit', '-am', 'Register submodule']);
 }
 
+test('reviewed recursive update initializes nested submodules and fetches the exact recorded commit', async () => {
+  const leaf = createFixture(join(root, 'update-leaf'), 'linear', 3);
+  const child = createFixture(join(root, 'update-child'), 'linear', 2);
+  add(child, leaf, 'nested');
+  const original = createFixture(join(root, 'update-original'), 'linear', 2);
+  add(original, child, 'child[1]');
+  const path = join(root, 'update-parent');
+  fixtureGit(root, ['clone', original, path]);
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const parentHead = fixtureGit(path, ['rev-parse', 'HEAD']);
+    const preview = await service.submoduleUpdatePreview(repo.id);
+    expect(preview.entries).toHaveLength(1);
+    expect(preview.entries[0]?.state).toBe('uninitialized');
+    expect((await service.submodules(repo.id)).entries[0]?.initialized).toBe(false);
+    const initialized = await service.updateSubmodules(repo.id, preview.token, true);
+    expect(initialized.entries.map((entry) => [entry.path, entry.state])).toEqual([
+      ['child[1]', 'clean'],
+      ['child[1]/nested', 'clean'],
+    ]);
+    await expect(service.updateSubmodules(repo.id, preview.token, true)).rejects.toMatchObject({
+      code: 'STALE_SUBMODULE_UPDATE',
+    });
+    fixtureGit(child, ['commit', '--allow-empty', '-m', 'New child commit']);
+    const target = fixtureGit(child, ['rev-parse', 'HEAD']);
+    fixtureGit(path, ['update-index', '--cacheinfo', `160000,${target},child[1]`]);
+    const next = await service.submoduleUpdatePreview(repo.id);
+    const updated = await service.updateSubmodules(repo.id, next.token, true);
+    expect(updated.entries[0]).toMatchObject({ head: target, indexOid: target, state: 'clean' });
+    expect(fixtureGit(path, ['rev-parse', 'HEAD'])).toBe(parentHead);
+    expect(fixtureGit(join(path, 'child[1]'), ['rev-parse', 'HEAD'])).toBe(target);
+  } finally {
+    await service.dispose();
+  }
+});
+
+test('submodule update rejects stale reviews and preserves active and dormant local work', async () => {
+  const source = createFixture(join(root, 'guard-source'), 'linear', 3);
+  const path = createFixture(join(root, 'guard-parent'), 'linear', 2);
+  add(path, source, 'child');
+  const child = join(path, 'child');
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const head = fixtureGit(child, ['rev-parse', 'HEAD']);
+    const preview = await service.submoduleUpdatePreview(repo.id);
+    fixtureGit(path, ['config', 'submodule.child.url', source + '-changed']);
+    await expect(service.updateSubmodules(repo.id, preview.token, true)).rejects.toMatchObject({
+      code: 'STALE_SUBMODULE_UPDATE',
+    });
+    fixtureGit(path, ['config', 'submodule.child.url', source]);
+    await writeFile(join(child, 'draft.txt'), 'keep draft');
+    await expect(service.submoduleUpdatePreview(repo.id)).rejects.toMatchObject({
+      code: 'SUBMODULE_NOT_CLEAN',
+    });
+    await rm(join(child, 'draft.txt'));
+    await writeFile(join(child, '.gitignore'), 'ignored.txt\n');
+    fixtureGit(child, ['add', '.gitignore']);
+    fixtureGit(child, ['commit', '-m', 'Ignore local output']);
+    await writeFile(join(child, 'ignored.txt'), 'keep ignored output');
+    await expect(service.submoduleUpdatePreview(repo.id)).rejects.toMatchObject({
+      code: 'SUBMODULE_NOT_CLEAN',
+    });
+    await rm(join(child, 'ignored.txt'));
+    fixtureGit(child, ['update-index', '--assume-unchanged', '.gitignore']);
+    await expect(service.submoduleUpdatePreview(repo.id)).rejects.toMatchObject({
+      code: 'SUBMODULE_INDEX_FLAGS',
+    });
+    fixtureGit(child, ['update-index', '--no-assume-unchanged', '.gitignore']);
+    fixtureGit(child, ['checkout', '--detach']);
+    fixtureGit(child, ['commit', '--allow-empty', '-m', 'Detached work']);
+    const detached = fixtureGit(child, ['rev-parse', 'HEAD']);
+    await expect(service.submoduleUpdatePreview(repo.id)).rejects.toMatchObject({
+      code: 'SUBMODULE_UNREFERENCED',
+    });
+    fixtureGit(child, ['branch', 'saved-work']);
+    await writeFile(join(child, 'staged.txt'), 'keep staged work');
+    fixtureGit(child, ['add', 'staged.txt']);
+    // Simulate an offline/deinitialized checkout while retaining its index and objects.
+    await rename(child, join(root, 'guard-offline-child'));
+    await expect(service.submoduleUpdatePreview(repo.id)).rejects.toMatchObject({
+      code: 'SUBMODULE_STAGED',
+    });
+    const stored = join(path, '.git/modules/child');
+    expect(
+      fixtureGit(path, [`--git-dir=${stored}`, `--work-tree=${path}`, 'rev-parse', 'HEAD']),
+    ).toBe(detached);
+    expect(
+      fixtureGit(path, [`--git-dir=${stored}`, `--work-tree=${path}`, 'show', ':staged.txt']),
+    ).toBe('keep staged work');
+    expect(head).not.toBe(detached);
+  } finally {
+    await service.dispose();
+  }
+});
+
+test('submodule initialization requires local transport opt-in and consumes failed update tokens', async () => {
+  const source = createFixture(join(root, 'local-source'), 'linear', 2);
+  const original = createFixture(join(root, 'local-original'), 'linear', 2);
+  add(original, source, 'child');
+  const path = join(root, 'local-parent');
+  fixtureGit(root, ['clone', original, path]);
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const preview = await service.submoduleUpdatePreview(repo.id);
+    await expect(service.updateSubmodules(repo.id, preview.token, false)).rejects.toThrow(
+      /transport.*file.*not allowed/,
+    );
+    expect((await service.submodules(repo.id)).entries[0]?.initialized).toBe(false);
+    await expect(service.updateSubmodules(repo.id, preview.token, true)).rejects.toMatchObject({
+      code: 'STALE_SUBMODULE_UPDATE',
+    });
+    const reviewed = await service.submoduleUpdatePreview(repo.id);
+    expect((await service.updateSubmodules(repo.id, reviewed.token, true)).entries[0]?.state).toBe(
+      'clean',
+    );
+  } finally {
+    await service.dispose();
+  }
+});
+
 test('submodule discovery refuses ambiguous or redirected configuration and bounds inventory size', async () => {
   const source = createFixture(join(root, 'config-source'), 'linear', 2);
   const path = createFixture(join(root, 'config-parent'), 'linear', 2);
@@ -189,5 +312,69 @@ test('submodules expose recursive checkout state and open only a reviewed initia
     ).toMatchObject({ state: 'out-of-date', outOfDate: true });
   } finally {
     await service.dispose();
+  }
+});
+
+test('recursive initialization enforces TLS verification and refuses external-helper URL rewrites', async () => {
+  const { createServer } = await import('node:https');
+  let requests = 0;
+  const server = createServer(
+    {
+      key: await readFile(new URL('../test-fixtures/tls/localhost-test.key', import.meta.url)),
+      cert: await readFile(new URL('../test-fixtures/tls/localhost-test.crt', import.meta.url)),
+    },
+    (_request, response) => {
+      requests++;
+      response.writeHead(404);
+      response.end();
+    },
+  );
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Expected TCP listener');
+  const path = createFixture(join(root, 'tls-parent'), 'linear', 2);
+  const url = `https://127.0.0.1:${address.port}/repo.git`;
+  const service = new RepositoryService('git');
+  const previousGlobalConfig = process.env.GIT_CONFIG_GLOBAL;
+  try {
+    fixtureGit(path, ['config', '--file', '.gitmodules', 'submodule.child.path', 'child']);
+    fixtureGit(path, ['config', '--file', '.gitmodules', 'submodule.child.url', url]);
+    fixtureGit(path, ['add', '.gitmodules']);
+    fixtureGit(path, [
+      'update-index',
+      '--add',
+      '--cacheinfo',
+      `160000,${fixtureGit(path, ['rev-parse', 'HEAD'])},child`,
+    ]);
+    fixtureGit(path, ['config', `http.${url}.sslVerify`, 'false']);
+    const repo = await service.open(path);
+    const review = await service.submoduleUpdatePreview(repo.id);
+    await expect(service.updateSubmodules(repo.id, review.token, false)).rejects.toMatchObject({
+      code: 'TLS_CERTIFICATE_INVALID',
+    });
+    expect(requests).toBe(0);
+    fixtureGit(path, ['config', 'submodule.child.url', 'https://rewrite.invalid/repo.git']);
+    const globalConfig = join(root, 'submodule-global-config');
+    fixtureGit(path, [
+      'config',
+      '--file',
+      globalConfig,
+      'url.ext::echo forbidden.insteadOf',
+      'https://rewrite.invalid/repo.git',
+    ]);
+    process.env.GIT_CONFIG_GLOBAL = globalConfig;
+    const rewritten = await service.submoduleUpdatePreview(repo.id);
+    expect(rewritten.sources.some((source) => source.setting.includes('insteadof'))).toBe(true);
+    await expect(service.updateSubmodules(repo.id, rewritten.token, true)).rejects.toThrow(
+      /transport.*ext.*not allowed/i,
+    );
+  } finally {
+    if (previousGlobalConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = previousGlobalConfig;
+    await service.dispose();
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
   }
 });
