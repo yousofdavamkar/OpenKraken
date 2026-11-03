@@ -3,11 +3,11 @@ import { languages } from '@codemirror/language-data';
 import { tags } from '@lezer/highlight';
 export const codeHighlighting = syntaxHighlighting(
   HighlightStyle.define([
-    { tag: tags.keyword, color: '#c792ea' },
-    { tag: [tags.string, tags.regexp], color: '#c3e88d' },
-    { tag: [tags.number, tags.bool, tags.null], color: '#f78c6c' },
-    { tag: tags.comment, color: '#a4b2c1', fontStyle: 'italic' },
-    { tag: [tags.typeName, tags.function(tags.variableName)], color: '#82aaff' },
+    { tag: tags.keyword, color: 'var(--syntaxKeyword)' },
+    { tag: [tags.string, tags.regexp], color: 'var(--syntaxString)' },
+    { tag: [tags.number, tags.bool, tags.null], color: 'var(--syntaxNumber)' },
+    { tag: tags.comment, color: 'var(--syntaxComment)', fontStyle: 'italic' },
+    { tag: [tags.typeName, tags.function(tags.variableName)], color: 'var(--syntaxType)' },
   ]),
 );
 export async function languageForPath(path: string) {

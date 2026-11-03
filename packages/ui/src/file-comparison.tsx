@@ -1,3 +1,4 @@
+import { editorTheme } from './editor-theme.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BlamePanel } from './blame.js';
 import { FileHistoryPanel } from './file-history.js';
@@ -14,14 +15,6 @@ import type {
   FileComparison,
 } from '@openkraken/ipc-contract';
 type ViewMode = 'hunks' | 'inline' | 'split';
-const theme = EditorView.theme(
-  {
-    '&': { backgroundColor: '#121b27', color: '#dae5f3', height: '100%' },
-    '.cm-scroller': { overflow: 'auto', fontFamily: 'monospace' },
-    '.cm-gutters': { backgroundColor: '#182332', color: '#94a3b8' },
-  },
-  { dark: true },
-);
 // Native hunks decide which lines changed, including ignored whitespace. CodeMirror
 // only refines those ranges into word highlights; it never re-diffs the whole file.
 function nativeChanges(data: FileComparison, a: Text, b: Text, words: boolean) {
@@ -83,7 +76,7 @@ function TextComparison({
       keymap.of(defaultKeymap),
       EditorView.editable.of(false),
       lineNumbers(),
-      theme,
+      editorTheme('100%'),
       codeHighlighting,
       language.of([]),
     ];

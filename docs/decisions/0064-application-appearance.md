@@ -12,6 +12,8 @@ Native theme selection uses [Electron nativeTheme](https://www.electronjs.org/do
 
 Shared named color tokens cover application surfaces, text, state indicators, diff lines, syntax and graph lanes. Each existing dark CSS color retains its value; light mode supplies a corresponding palette. Tokens become CSS variables. Canvas receives the active lane palette and background and repaints without changing graph topology, paging or selection. The toolbar wraps its controls within the window rather than widening the document. User JSON themes remain a subsequent part of the implementation.
 
+CodeMirror views share a theme extension whose compartment changes the dark/light facet in place. CSS variables supply editor and syntax colors. Theme changes do not recreate editor views or their documents, selections, focus or undo history. The subscription is removed when each view is destroyed. Working-file editors, local comparisons and provider patch views use this same extension.
+
 ## Verification
 
 Real Electron tests cover simultaneous appearance and keymap saves, stale appearance writes, native color-scheme changes, restart after clearing renderer storage, and importing legacy shortcuts into an appearance-only profile. The existing six command-settings regression tests continue to pass. Contract tests reject unknown modes, unsafe revisions and extra fields, and keep both appearance routes out of the utility process.
@@ -19,3 +21,5 @@ Real Electron tests cover simultaneous appearance and keymap saves, stale appear
 The native preference test resets [Playwright color-scheme emulation](https://playwright.dev/docs/api/class-page#page-emulate-media) to null on each launch. Otherwise Playwright's light emulation hides Electron's actual dark preference from the media query. Native behavior is currently verified on Linux; macOS and Windows still require acceptance.
 
 Rendered acceptance switches light/dark through the Appearance dialog, verifies computed surface colors and Canvas node colors, preserves row identities and lanes, and checks for document overflow. The six existing dark Canvas snapshots pass unchanged. Light graph screenshots are also visually inspected.
+
+An editor acceptance test simulates a system color-scheme change while an unsaved Python draft is open, verifies the editor's new background and retained focus, then undoes and redoes the edit. It also confirms the disk file was not changed. The light editor screenshot is visually inspected.

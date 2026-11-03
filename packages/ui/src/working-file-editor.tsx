@@ -1,3 +1,4 @@
+import { editorTheme } from './editor-theme.js';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
@@ -40,14 +41,7 @@ function CodeEditor({
           }),
           codeHighlighting,
           language.of([]),
-          EditorView.theme(
-            {
-              '&': { height: '100%', backgroundColor: '#121b27', color: '#dae5f3' },
-              '.cm-scroller': { overflow: 'auto', fontFamily: 'monospace' },
-              '.cm-gutters': { backgroundColor: '#182332', color: '#94a3b8' },
-            },
-            { dark: true },
-          ),
+          editorTheme('100%'),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) onChange(update.state.doc.toString());
           }),

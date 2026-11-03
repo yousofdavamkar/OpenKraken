@@ -1,3 +1,4 @@
+import { editorTheme } from './editor-theme.js';
 import { useEffect, useId, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import { EditorState } from '@codemirror/state';
@@ -39,13 +40,7 @@ function Patch({ text }: { text: string }) {
           lineNumbers(),
           keymap.of(defaultKeymap),
           EditorView.decorations.of(Decoration.set(lines)),
-          EditorView.theme(
-            {
-              '&': { height: '300px', backgroundColor: '#10151e', color: '#d8e5f5' },
-              '.cm-scroller': { overflow: 'auto', fontFamily: 'monospace' },
-            },
-            { dark: true },
-          ),
+          editorTheme('300px'),
         ],
       }),
     });

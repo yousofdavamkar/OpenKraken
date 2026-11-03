@@ -1,3 +1,4 @@
+import { editorTheme } from './editor-theme.js';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import { EditorState } from '@codemirror/state';
@@ -61,14 +62,7 @@ function MergePatch({
           lineNumbers(),
           keymap.of(defaultKeymap),
           EditorView.decorations.of(Decoration.set(decorations)),
-          EditorView.theme(
-            {
-              '&': { height: '300px', backgroundColor: '#10151e', color: '#d8e5f5' },
-              '.cm-scroller': { overflow: 'auto', fontFamily: 'monospace' },
-              '.cm-gutters': { backgroundColor: '#182332', color: '#9daec2' },
-            },
-            { dark: true },
-          ),
+          editorTheme('300px'),
         ],
       }),
     });
