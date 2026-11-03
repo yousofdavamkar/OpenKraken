@@ -15,6 +15,8 @@ test('large reference sidebar stays bounded and filtered actions survive scrolli
       .map((oid, index) => `create refs/heads/topic-${String(index).padStart(4, '0')} ${oid}`)
       .join('\n') + '\n',
   );
+  fixtureGit(repository, ['branch', 'Ångström']);
+  const refCount = fixtureGit(repository, ['for-each-ref', '--format=.']).split('\n').length;
   const app = await electron.launch({
     args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
   });
@@ -28,7 +30,21 @@ test('large reference sidebar stays bounded and filtered actions survive scrolli
     const sidebar = page.locator('.refs');
     expect(await sidebar.locator('.ref').count()).toBeLessThan(80);
     const filter = sidebar.getByRole('textbox', { name: 'Filter references', exact: true });
-    await filter.fill('topic-0999');
+    await expect(sidebar.getByRole('status')).toHaveText(
+      `${refCount.toLocaleString()} matching references`,
+    );
+    await filter.fill('  ÅNGSTRÖM  ');
+    await expect(
+      sidebar.getByRole('button', { name: 'Rename branch Ångström', exact: true }),
+    ).toBeVisible();
+    await expect(sidebar.locator('.ref')).toHaveCount(1);
+    await expect(sidebar.getByRole('listitem')).toHaveAttribute('aria-posinset', '1');
+    await expect(sidebar.getByRole('listitem')).toHaveAttribute('aria-setsize', '1');
+    await filter.fill('   ');
+    await expect(sidebar.getByRole('status')).toHaveText(
+      `${refCount.toLocaleString()} matching references`,
+    );
+    await filter.fill('TOPIC-0999');
     const rename = sidebar.getByRole('button', { name: 'Rename branch topic-0999', exact: true });
     await expect(rename).toBeVisible();
     await expect(sidebar.locator('.ref')).toHaveCount(1);

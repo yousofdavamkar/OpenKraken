@@ -57,10 +57,21 @@ test('local and remote badges sharing a name and target combine; tags stay separ
     { name: 'refs/heads/main', shortName: 'main', kind: 'local', target: 'a' },
     { name: 'refs/remotes/origin/main', shortName: 'origin/main', kind: 'remote', target: 'a' },
     { name: 'refs/tags/main', shortName: 'main', kind: 'tag', target: 'tag', peeled: 'a' },
+    { name: 'refs/heads/feature', shortName: 'feature', kind: 'local', target: 'a' },
+    { name: 'refs/remotes/fork/main', shortName: 'fork/main', kind: 'remote', target: 'a' },
+    { name: 'refs/heads/other-main', shortName: 'main', kind: 'local', target: 'b' },
   ] as Ref[];
   expect(refBadges(refs).get('a')).toEqual([
-    { label: 'main', names: ['refs/heads/main', 'refs/remotes/origin/main'], kind: 'branch' },
+    {
+      label: 'main',
+      names: ['refs/heads/main', 'refs/remotes/origin/main', 'refs/remotes/fork/main'],
+      kind: 'branch',
+    },
     { label: 'main', names: ['refs/tags/main'], kind: 'tag' },
+    { label: 'feature', names: ['refs/heads/feature'], kind: 'branch' },
+  ]);
+  expect(refBadges(refs).get('b')).toEqual([
+    { label: 'main', names: ['refs/heads/other-main'], kind: 'branch' },
   ]);
 });
 
@@ -81,3 +92,33 @@ test('HEAD and upstream shortcuts do not scan excluded histories, but still sele
     upstream: 'remote',
   });
 });
+
+test(
+  '50,000 refs sharing a commit retain badge order and every full ref name',
+  { timeout: 2000 },
+  () => {
+    const target = 'a'.repeat(40);
+    const refs: Ref[] = Array.from({ length: 50000 }, (_, index) => ({
+      name: `refs/heads/topic-${index}`,
+      shortName: `topic-${index}`,
+      kind: 'local',
+      target,
+      objectType: 'commit',
+      peeledType: '',
+      isHead: index === 0,
+    }));
+    const start = performance.now();
+    const badges = refBadges(refs).get(target)!;
+    const elapsedMs = performance.now() - start;
+    expect(badges).toHaveLength(50000);
+    expect(badges.map((badge) => badge.names[0])).toEqual(refs.map((ref) => ref.name));
+    expect(badges[0]).toEqual({ label: 'topic-0', kind: 'branch', names: ['refs/heads/topic-0'] });
+    expect(badges.at(-1)).toEqual({
+      label: 'topic-49999',
+      kind: 'branch',
+      names: ['refs/heads/topic-49999'],
+    });
+    // Generous algorithmic guard; the complete desktop still has its separate 500 ms gate.
+    expect(elapsedMs).toBeLessThan(1000);
+  },
+);

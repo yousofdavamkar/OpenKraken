@@ -54,25 +54,29 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState<string>();
   const scroll = useRef<HTMLDivElement>(null);
-  const { rows, count, indexes } = useMemo(() => {
+  const { rows, count } = useMemo(() => {
     const search = query.trim().toLocaleLowerCase();
+    const buckets = new Map<Ref['kind'], Ref[]>(groups.map(([kind]) => [kind, []]));
+    for (const ref of snapshot.refs) {
+      if (!search || ref.name.toLocaleLowerCase().includes(search))
+        buckets.get(ref.kind)!.push(ref);
+    }
     const rows: Row[] = [];
-    const indexes = new Map<string, number>();
     let count = 0;
     for (const [kind, title] of groups) {
-      const refs = snapshot.refs.filter(
-        (ref) => ref.kind === kind && ref.name.toLocaleLowerCase().includes(search),
-      );
+      const refs = buckets.get(kind)!;
       if (!refs.length) continue;
       rows.push({ kind: 'heading', title });
-      for (const reference of refs) {
-        indexes.set(reference.name, rows.length);
-        rows.push({ kind: 'ref', reference, position: ++count });
-      }
+      for (const reference of refs) rows.push({ kind: 'ref', reference, position: ++count });
     }
-    return { rows, count, indexes };
+    return { rows, count };
   }, [snapshot.refs, query]);
-  const focusedIndex = focused ? indexes.get(focused) : undefined;
+  const focusedIndex = useMemo(() => {
+    const index = focused
+      ? rows.findIndex((row) => row.kind === 'ref' && row.reference.name === focused)
+      : -1;
+    return index < 0 ? undefined : index;
+  }, [rows, focused]);
   const virtual = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scroll.current,

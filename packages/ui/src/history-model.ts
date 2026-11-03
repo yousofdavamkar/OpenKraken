@@ -63,17 +63,36 @@ export function projectCommits(
   return result;
 }
 export function refBadges(refs: Ref[]) {
-  const groups = new Map<string, { label: string; names: string[]; kind: string }[]>();
+  type Badge = { label: string; names: string[]; kind: string };
+  const groups = new Map<string, Badge[]>();
+  // Allocate a label index only when a target has more than one ref. Most
+  // targets in large histories have a single badge and need no second map.
+  const indexes = new Map<string, Map<string, Badge>>();
+  const key = (kind: string, label: string) => `${kind}\0${label}`;
   for (const ref of refs) {
     const oid = ref.peeled ?? ref.target;
     const label =
       ref.kind === 'remote' ? ref.shortName.split('/').slice(1).join('/') : ref.shortName;
     const kind = ref.kind === 'local' || ref.kind === 'remote' ? 'branch' : ref.kind;
-    const badges = groups.get(oid) ?? [];
-    const existing = badges.find((b) => b.label === label && b.kind === kind);
+    const badges = groups.get(oid);
+    if (!badges) {
+      groups.set(oid, [{ label, kind, names: [ref.name] }]);
+      continue;
+    }
+    let index = indexes.get(oid);
+    if (!index) {
+      const first = badges[0]!;
+      index = new Map([[key(first.kind, first.label), first]]);
+      indexes.set(oid, index);
+    }
+    const identity = key(kind, label);
+    const existing = index.get(identity);
     if (existing) existing.names.push(ref.name);
-    else badges.push({ label, kind, names: [ref.name] });
-    groups.set(oid, badges);
+    else {
+      const badge = { label, kind, names: [ref.name] };
+      badges.push(badge);
+      index.set(identity, badge);
+    }
   }
   return groups;
 }
