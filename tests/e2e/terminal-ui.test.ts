@@ -141,6 +141,14 @@ test('OSC 133 tracks split prompt markers and command results without trusting t
     await expect(integration).toHaveText('Command finished · exit 17');
     await command("printf '\\033]133;A\\007\\033]133;B\\007'");
     await expect(integration).toHaveText('Ready for command · last exit 17');
+    await command("printf '\\033]133;A;click_events=1\\007'");
+    await expect(integration).toHaveText('Prompt · last exit 17');
+    await command("printf '\\033]133;B;aid=fixture\\033\\\\'");
+    await expect(integration).toHaveText('Ready for command · last exit 17');
+    await command("printf '\\033]133;C;cmdline_url=echo%%20metadata-only\\007'");
+    await expect(integration).toHaveText('Command running');
+    await command("printf '\\033]133;A;click_events=1\\007\\033]133;B\\007'");
+    await expect(integration).toHaveText('Ready for command · last exit 17');
     await command(
       "printf '\\033]133;D;99999999999999999999\\007\\033]133;C;bad\\007\\033]133;D;no\\007'",
     );

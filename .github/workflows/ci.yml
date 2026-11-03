@@ -117,7 +117,10 @@ jobs:
           cache: pnpm
       - if: runner.os == 'Linux'
         name: Native terminal build and picker automation
-        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool git-lfs rpm libarchive-tools fuse3
+        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool git-lfs rpm libarchive-tools fuse3 fish
+      - if: runner.os == 'Linux'
+        name: Verify native fish prerequisite
+        run: fish --version
       - name: Verify native Git LFS prerequisite
         run: git lfs version
       - run: pnpm install --frozen-lockfile

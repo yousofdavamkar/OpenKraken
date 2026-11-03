@@ -17,7 +17,8 @@ interface ShellProgress {
   exitCode?: number;
 }
 function describeProgress({ phase, exitCode }: ShellProgress): string {
-  if (phase === 'prompt') return 'Prompt';
+  if (phase === 'prompt')
+    return `Prompt${exitCode === undefined ? '' : ` · last exit ${exitCode}`}`;
   if (phase === 'running') return 'Command running';
   if (phase === 'ready')
     return `Ready for command${exitCode === undefined ? '' : ` · last exit ${exitCode}`}`;
@@ -77,8 +78,11 @@ export default function TerminalPanel({
     // native process exit remains the authority for session lifecycle.
     const markers = terminal.parser.registerOscHandler(133, (data) => {
       if (!alive || exited) return true;
-      if (data === 'A' || data === 'B' || data === 'C') {
-        const phase = data === 'A' ? 'prompt' : data === 'B' ? 'ready' : 'running';
+      // Fish adds display parameters such as click_events and cmdline_url.
+      // Recognize the marker without retaining, decoding or acting on those values.
+      const marker = /^([ABC])(?:;[a-zA-Z_][a-zA-Z0-9_]*=[^;\p{Cc}]*)*$/u.exec(data)?.[1];
+      if (marker) {
+        const phase = marker === 'A' ? 'prompt' : marker === 'B' ? 'ready' : 'running';
         setProgress((previous) => ({ ...previous, phase }));
         return true;
       }
