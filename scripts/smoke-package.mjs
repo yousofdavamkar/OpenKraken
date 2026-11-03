@@ -7,6 +7,22 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
+async function windowsProtocolSnapshot() {
+  const { stdout } = await promisify(execFile)(
+    join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      resolve('scripts/read-windows-protocol.ps1'),
+    ],
+    { timeout: 15000, windowsHide: true },
+  );
+  return JSON.parse(stdout.trim());
+}
+const protocolBefore = process.platform === 'win32' ? await windowsProtocolSnapshot() : null;
 const directory = resolve(
   process.env.OPENKRAKEN_PACKAGE_DIRECTORY ??
     `release/OpenKraken-${process.platform}-${process.arch}`,
@@ -302,4 +318,10 @@ try {
   // The AppImage runtime can exit just before its FUSE mount is released.
   // Bound filesystem teardown retries separately from the unchanged app exit deadline.
   await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+}
+if (process.platform === 'win32') {
+  expect(await windowsProtocolSnapshot()).toEqual(protocolBefore);
+  console.log(
+    'Launching the packaged desktop leaves installer-owned protocol registration unchanged.',
+  );
 }

@@ -1428,8 +1428,8 @@ else {
     });
     await activity.read();
     startService();
-    if (process.platform === 'win32' && app.isPackaged)
-      app.setAsDefaultProtocolClient('openkraken');
+    // Native installers own protocol registration and its uninstall lifecycle.
+    // Launching an extracted/portable bundle must not leave a stale registry command.
     windowsReady = true;
     createWindow();
     app.on('activate', () => {

@@ -27,7 +27,7 @@ try {
 
   const corruptPayload = structuredClone(original);
   const helper = Object.keys(original.payload).find((key) =>
-    key.endsWith('/helpers/openkraken-askpass'),
+    key.endsWith(`/helpers/openkraken-askpass${original.platform === 'win32' ? '.exe' : ''}`),
   );
   assert.ok(helper, 'Native helper must be represented in the artifact manifest');
   corruptPayload.payload[helper].sha256 = '0'.repeat(64);
@@ -40,26 +40,29 @@ try {
       return true;
     },
   );
-  if (original.target === 'dmg') {
+  if (original.target === 'dmg' || original.target === 'msi') {
     const wrongVersion = structuredClone(original);
-    wrongVersion.version = `${original.version}-mismatch`;
+    wrongVersion.version = original.version === '0.0.0' ? '0.0.1' : '0.0.0';
     await writeFile(fixture, JSON.stringify(wrongVersion));
     await assert.rejects(
       run(process.execPath, ['scripts/verify-installer.mjs', fixture]),
       (error) => {
         assert.match(
           error.stderr,
-          /macOS bundle identity, version, executable or repository scheme differs/,
+          original.target === 'dmg'
+            ? /macOS bundle identity, version, executable or repository scheme differs/
+            : /MSI identity, version, architecture, per-user policy or launch metadata differs/,
         );
         assert.doesNotMatch(error.stdout, /Packaged|verified/);
         return true;
       },
     );
-    assert.deepEqual(
-      await dmgChecks(),
-      existingDmgChecks,
-      'Rejected DMGs must detach and clean up',
-    );
+    if (original.target === 'dmg')
+      assert.deepEqual(
+        await dmgChecks(),
+        existingDmgChecks,
+        'Rejected DMGs must detach and clean up',
+      );
   }
   console.log('Archive and native-helper mismatches rejected before desktop launch');
 } finally {

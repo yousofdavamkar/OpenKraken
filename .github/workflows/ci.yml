@@ -54,6 +54,16 @@ jobs:
           manifest="release/installers/darwin-$(node -p 'process.arch')/test/dmg/manifest.json"
           node scripts/check-installer-guards.mjs "$manifest"
           pnpm smoke:installer "$manifest"
+      - if: runner.os == 'Windows'
+        name: Build and verify unsigned MSI payload
+        timeout-minutes: 15
+        run: |
+          pnpm installer --test-metadata --target msi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-installer-guards.mjs release/installers/win32-x64/test/msi/manifest.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm smoke:installer release/installers/win32-x64/test/msi/manifest.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - if: runner.os == 'Linux'
         name: Build unsigned Linux test installers
         run: |
