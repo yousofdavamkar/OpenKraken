@@ -2,6 +2,10 @@
 
 M8 remains in progress. Watcher-warm status passes locally on Linux x64; the two-million-commit graph has passing paired checks but a new unexplained 700.1 ms first-paint failure. Latest 50,000-ref samples measure 1.086–1.113 seconds first paint with distinct targets and a variable 0.918–1.225 seconds with one shared target, still above the 500 ms gate; paging and scrolling pass. Native Git 2.38.0 passes the Linux x64 compatibility checks. AppImage recovery waits for delayed descendants before restoring the predecessor, while a still-running unconfirmed application remains an open recovery case. Native Windows/macOS acceptance, production release gates and the remaining [M6](m6-progress.md)/[M7](m7-progress.md) scope are still open.
 
+## M7 prerequisite: automatic zsh integration
+
+The [M7 zsh checkpoint](m7-progress.md#automatic-zsh-integration) adds automatic shell integration with preserved user startup/prompt hooks and conservative fallbacks (`0b97480`), plus packaged acceptance/CI (`66ca2e2`). **20 terminal Electron tests**, **51 IPC/security contract tests**, build/typecheck, syntax checks and lint passed. A fresh Linux package passed hardened-fuse verification and both zsh/Bash native terminal smoke runs. Custom global startup policies and macOS/Windows runtime acceptance remain open, as do PowerShell integration and the other M6/M7/M8 requirements. Performance gates and native installer lifecycles were not rerun for this increment.
+
 ## M7 prerequisite: native fish prompt markers
 
 The [M7 checkpoint](m7-progress.md#native-fish-integration-acceptance) closes a reproduced native fish marker compatibility gap (`9c349f1`). The renderer now recognizes parameterized OSC 133 A/B/C markers as display hints and retains the last exit status at prompts without a B marker. Native fish defaults and opt-out preserve user hooks/configuration. **13 terminal Electron tests**, **51 IPC/security contract tests**, build/typecheck and lint passed on Linux; CI now includes fish. This does not complete the other M6/M7 features, cross-platform terminal acceptance or the open M8 release/performance work.
