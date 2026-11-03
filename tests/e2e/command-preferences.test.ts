@@ -179,6 +179,52 @@ test('damaged settings remain intact until explicit repair preserves a backup', 
   }
 });
 
+test('a maximally escaped legacy keymap stays readable and repairable after restart', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-command-settings-escaped-'));
+  const args = [resolve('apps/desktop'), `--user-data-dir=${root}`];
+  let app = await electron.launch({ args });
+  try {
+    let page = await app.firstWindow();
+    await expect(page.getByRole('button', { name: 'Commands', exact: true })).toBeEnabled();
+    await page.evaluate(() => localStorage.setItem('openkraken.keymap.v1', '\u0000'.repeat(32768)));
+    await app.close();
+    rmSync(join(root, 'settings.json'));
+    app = await electron.launch({ args });
+    page = await app.firstWindow();
+    await expect(page.getByRole('button', { name: 'Commands', exact: true })).toBeEnabled();
+    expect(await page.evaluate(() => localStorage.getItem('openkraken.keymap.v1'))).toBeNull();
+    await app.close();
+    app = await electron.launch({ args });
+    page = await app.firstWindow();
+    await page.getByRole('button', { name: 'Keybindings', exact: true }).click();
+    const saved = await page.evaluate(() =>
+      window.openkraken.request({ id: crypto.randomUUID(), method: 'commandPreferences' }),
+    );
+    expect(saved).toMatchObject({
+      kind: 'commandPreferences',
+      state: { initialized: true, warning: null },
+    });
+    if (saved.kind !== 'commandPreferences') throw new Error('Missing command preferences');
+    expect(saved.state.keymap).toHaveLength(32768);
+    expect(new Set(saved.state.keymap)).toEqual(new Set(['\u0000']));
+    const editor = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+    await expect(editor.getByRole('alert')).toContainText('Saved keymap is invalid');
+    await editor.getByRole('button', { name: 'Restore defaults', exact: true }).click();
+    await editor.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(editor.getByRole('status')).toHaveText('Keyboard shortcuts saved.');
+    await app.close();
+    app = await electron.launch({ args });
+    page = await app.firstWindow();
+    await page.getByRole('button', { name: 'Keybindings', exact: true }).click();
+    await expect(
+      page.getByRole('dialog', { name: 'Keyboard shortcuts' }).getByRole('alert'),
+    ).toHaveCount(0);
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a failed native settings write keeps the old shortcuts active', async () => {
   const root = mkdtempSync(join(tmpdir(), 'openkraken-command-settings-failed-'));
   const app = await electron.launch({ args: [resolve('apps/desktop'), `--user-data-dir=${root}`] });

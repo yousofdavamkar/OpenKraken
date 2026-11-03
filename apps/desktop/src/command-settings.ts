@@ -23,6 +23,8 @@ const diskSchema = z
   })
   .strict();
 const halfLife = 14 * 24 * 60 * 60 * 1000;
+// A legacy keymap may expand to six JSON bytes per UTF-16 code unit.
+const maxSettingsBytes = 256 * 1024;
 export class CommandSettings {
   private file: string;
   private source: string | null = null;
@@ -42,7 +44,8 @@ export class CommandSettings {
   private async readSource() {
     try {
       const info = await stat(this.file);
-      if (!info.isFile() || info.size > 131072) throw new Error('Unsupported settings file.');
+      if (!info.isFile() || info.size > maxSettingsBytes)
+        throw new Error('Unsupported settings file.');
       return await readFile(this.file, 'utf8');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
@@ -97,6 +100,8 @@ export class CommandSettings {
       null,
       2,
     );
+    if (Buffer.byteLength(raw, 'utf8') > maxSettingsBytes)
+      throw new Error('Settings exceed the supported file size.');
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     if (this.state.warning === 'corrupt' && this.source !== null)
       await writeFile(join(this.directory, `settings.corrupt-${randomUUID()}.json`), this.source, {
