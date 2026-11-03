@@ -219,6 +219,8 @@ Create a worktree on a new branch, an existing unused local branch, or a detache
 
 Choose **Submodules** from the toolbar or command palette to inspect registered repositories and their initialized descendants. The view shows recorded and checked-out commits, configured URLs, changed-file counts, and uninitialized/conflict/out-of-date states. **Open submodule** opens an initialized checkout after rechecking the reviewed inventory; refresh a stale selection before retrying.
 
-This increment supports discovery and opening on Linux with UTF-8 paths, including Unicode and newline paths. Recursive initialization/update and transport review remain in progress; the submodule milestone is not complete.
+Choose **Review update** to initialize missing checkouts and recursively check out recorded commits. Review the paths and configured sources, then explicitly enable local-file sources only when trusted. The service rechecks the review and protects changed, ignored, untracked, staged and unreferenced submodule work. Updates show progress and support cancellation; failures can leave partial changes, so refresh before retrying. There is no Undo for this action.
+
+Linux fixtures cover discovery, opening and recursive initialization/update with UTF-8 paths. Add/remove/sync controls, live authenticated transport acceptance and cross-platform verification remain open; M7 is not complete.
 
 On Linux, install `xdotool` and run `OPENKRAKEN_XDOTOOL=xdotool xvfb-run -a pnpm smoke:package` after packaging to test the native folder picker and packaged terminal in addition to renderer isolation and authentication/editor helpers. Linux CI runs this check.
