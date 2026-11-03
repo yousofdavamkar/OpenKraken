@@ -4,5 +4,6 @@ packages:
 allowBuilds:
   '@parcel/watcher': false
   electron: true
+  electron-winstaller: false # Unused Squirrel target; no vendor binary copy hook needed.
   esbuild: true
   node-pty: true

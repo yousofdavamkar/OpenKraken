@@ -7,7 +7,10 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
-const directory = resolve(`release/OpenKraken-${process.platform}-${process.arch}`);
+const directory = resolve(
+  process.env.OPENKRAKEN_PACKAGE_DIRECTORY ??
+    `release/OpenKraken-${process.platform}-${process.arch}`,
+);
 const executable =
   process.platform === 'darwin'
     ? join(directory, 'OpenKraken.app/Contents/MacOS/openkraken')

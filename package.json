@@ -18,6 +18,8 @@
     "format": "prettier --write .",
     "fixtures": "tsx packages/test-fixtures/src/cli.ts",
     "smoke:package": "node scripts/smoke-package.mjs",
+    "installer": "node scripts/installers.mjs",
+    "smoke:installer": "node scripts/verify-installer.mjs",
     "benchmark:graph": "playwright test tests/e2e/benchmark.test.ts --reporter=list --output=test-results/benchmark",
     "build:helper": "node scripts/build-askpass.mjs"
   },
@@ -33,6 +35,7 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "electron": "45.2.1",
+    "electron-builder": "26.18.0",
     "esbuild": "latest",
     "eslint": "latest",
     "fast-check": "latest",
