@@ -1,12 +1,66 @@
 import { expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
+import { createConnection } from 'node:net';
 import { AskpassBroker } from './src/askpass.js';
 import { runProcess } from './src/runner.js';
 const helper = resolve(
   'apps/desktop/dist/helpers',
   process.platform === 'win32' ? 'openkraken-askpass.exe' : 'openkraken-askpass',
 );
+
+test('malformed socket frames cannot obtain saved credentials or disable subsequent authentication', async () => {
+  const events: unknown[] = [];
+  const broker = new AskpassBroker(helper, (event) => events.push(event));
+  const credential = {
+    url: 'https://example.test/team/repo.git',
+    username: 'fixture-user',
+    password: 'fixture-private-password',
+  };
+  try {
+    const scope = await broker.open(randomUUID(), 'Fetch origin', undefined, credential);
+    const input = {
+      token: scope.environment.OPENKRAKEN_ASKPASS_TOKEN,
+      prompt: "Password for 'https://fixture-user@example.test/team/repo.git': ",
+      hint: '',
+    };
+    const frame = JSON.stringify(input) + '\n';
+    const exchange = (body: string) =>
+      new Promise<string>((resolve, reject) => {
+        const socket = createConnection(scope.environment.OPENKRAKEN_ASKPASS_SOCKET);
+        const chunks: Buffer[] = [];
+        socket.setTimeout(2000, () => {
+          socket.destroy();
+          reject(new Error('Rejected authentication socket did not close'));
+        });
+        socket.once('connect', () => socket.write(body));
+        socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+        socket.on('error', (error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ECONNRESET') reject(error);
+        });
+        socket.once('close', () => resolve(Buffer.concat(chunks).toString()));
+      });
+    for (const body of [
+      JSON.stringify({ ...input, token: '0'.repeat(64) }) + '\n',
+      JSON.stringify({ ...input, token: input.token.slice(1) }) + '\n',
+      JSON.stringify({ ...input, extra: true }) + '\n',
+      '{invalid json}\n',
+      frame + frame,
+      'x'.repeat(32769),
+    ])
+      expect(await exchange(body)).toBe('');
+    expect(events).toEqual([]);
+    expect(
+      (await runProcess(helper, [input.prompt], { env: scope.environment })).stdout.toString(),
+    ).toBe('fixture-private-password\n');
+    scope.close();
+    expect(await exchange(frame)).toBe('');
+    expect(events).toEqual([]);
+  } finally {
+    await broker.close();
+  }
+});
+
 test('the native helper exchanges a secret only through its authenticated request scope', async () => {
   const id = randomUUID();
   const events: unknown[] = [];
