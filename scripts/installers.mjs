@@ -1,6 +1,7 @@
 import { build, Platform, Arch } from 'electron-builder';
 import { buildAppImage } from './appimage.mjs';
 import { buildDmg, verifyMacBundle } from './dmg.mjs';
+import { buildMsi, readMsiMetadata, verifyMsiMetadata } from './msi.mjs';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
@@ -12,18 +13,24 @@ const run = promisify(execFile);
 process.umask(0o022);
 const { values } = parseArgs({
   options: {
-    target: { type: 'string', default: process.platform === 'darwin' ? 'dmg' : 'deb' },
+    target: { type: 'string', default: { darwin: 'dmg', win32: 'msi' }[process.platform] ?? 'deb' },
     'test-metadata': { type: 'boolean', default: false },
     metadata: { type: 'string' },
   },
 });
 const target = values.target;
-if (!['linux', 'darwin'].includes(process.platform) || !['x64', 'arm64'].includes(process.arch))
-  throw new Error('This installer pipeline supports native Linux/macOS x64/arm64 builds only');
-if (!['deb', 'rpm', 'AppImage', 'dmg'].includes(target))
-  throw new Error('Supported targets: deb, rpm, AppImage, dmg');
-if (target === 'dmg' ? process.platform !== 'darwin' : process.platform !== 'linux')
-  throw new Error(`Target ${target} requires native ${target === 'dmg' ? 'macOS' : 'Linux'}`);
+if (
+  !['linux', 'darwin', 'win32'].includes(process.platform) ||
+  !(process.platform === 'win32' ? ['x64'] : ['x64', 'arm64']).includes(process.arch)
+)
+  throw new Error('Supported hosts: native Linux/macOS x64/arm64 and Windows x64');
+if (!['deb', 'rpm', 'AppImage', 'dmg', 'msi'].includes(target))
+  throw new Error('Supported targets: deb, rpm, AppImage, dmg, msi');
+const targetPlatform = { dmg: 'darwin', msi: 'win32' }[target] ?? 'linux';
+if (process.platform !== targetPlatform)
+  throw new Error(
+    `Target ${target} requires native ${target === 'dmg' ? 'macOS' : target === 'msi' ? 'Windows x64' : 'Linux'}`,
+  );
 if (values['test-metadata'] === Boolean(values.metadata))
   throw new Error('Choose --test-metadata for local validation or --metadata <JSON file>');
 const testMetadata = values['test-metadata'];
@@ -58,7 +65,8 @@ const source = join(
   target === 'dmg' ? 'OpenKraken.app' : '',
 );
 const original = await payloadManifest(source);
-await verifyFuses(target === 'dmg' ? source : join(source, 'openkraken'));
+const executableName = target === 'msi' ? 'openkraken.exe' : 'openkraken';
+await verifyFuses(target === 'dmg' ? source : join(source, executableName));
 const { version } = JSON.parse(await readFile('package.json', 'utf8'));
 if (target === 'dmg') await verifyMacBundle(source, version);
 const staged = JSON.parse(await readFile('release/staging/package.json', 'utf8'));
@@ -80,7 +88,9 @@ try {
   comparePayload(original, await payloadManifest(prepackaged));
   let artifacts;
   let appdir;
-  if (target === 'dmg') {
+  if (target === 'msi') {
+    artifacts = await buildMsi({ root, prepackaged, work, version, metadata, testMetadata });
+  } else if (target === 'dmg') {
     artifacts = [
       await buildDmg(
         prepackaged,
@@ -170,7 +180,7 @@ try {
   const payload = await payloadManifest(appdir ?? prepackaged);
   if (appdir) {
     comparePayload(original, await payloadManifest(join(appdir, 'usr/lib/openkraken')));
-  } else if (target === 'dmg') {
+  } else if (target === 'dmg' || target === 'msi') {
     comparePayload(original, payload);
   } else {
     // FPM adds this profile for Ubuntu's user namespace policy. Nothing else may
@@ -181,10 +191,11 @@ try {
     comparePayload(original, unchanged);
   }
   comparePayload(original, await payloadManifest(source));
-  await verifyFuses(target === 'dmg' ? prepackaged : join(prepackaged, 'openkraken'));
+  await verifyFuses(target === 'dmg' ? prepackaged : join(prepackaged, executableName));
   if (artifacts.length !== 1 || !artifacts[0].endsWith(`.${target}`))
     throw new Error('Expected exactly one installer artifact');
   const artifact = artifacts[0];
+  if (target === 'msi') verifyMsiMetadata(await readMsiMetadata(artifact), { version, metadata });
   const manifest = {
     schemaVersion: 1,
     target,

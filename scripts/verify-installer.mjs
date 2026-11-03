@@ -4,6 +4,7 @@ import { readFile, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { comparePayload, payloadManifest, sha256, verifyFuses } from './package-security.mjs';
 import { verifyDmg } from './dmg.mjs';
+import { verifyMsi } from './msi.mjs';
 
 // RPM may omit implicit parent directory entries. Create those with safe modes,
 // while -p below preserves all explicitly archived permissions for inspection.
@@ -15,16 +16,20 @@ const manifestPath = resolve(process.argv[2] ?? '');
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
 if (
   manifest.schemaVersion !== 1 ||
-  !['linux', 'darwin'].includes(manifest.platform) ||
+  !['linux', 'darwin', 'win32'].includes(manifest.platform) ||
   process.platform !== manifest.platform ||
   process.arch !== manifest.arch ||
-  !(manifest.platform === 'darwin' ? ['dmg'] : ['deb', 'rpm', 'AppImage']).includes(
-    manifest.target,
-  ) ||
+  !(
+    manifest.platform === 'darwin'
+      ? ['dmg']
+      : manifest.platform === 'win32'
+        ? ['msi']
+        : ['deb', 'rpm', 'AppImage']
+  ).includes(manifest.target) ||
   manifest.artifact?.file !== basename(manifest.artifact?.file ?? '') ||
   !manifest.artifact.file.endsWith(`.${manifest.target}`)
 )
-  throw new Error('Expected a native Linux or macOS installer manifest');
+  throw new Error('Expected a native platform installer manifest');
 const artifact = join(dirname(manifestPath), manifest.artifact.file);
 if (
   (await stat(artifact)).size !== manifest.artifact.size ||
@@ -33,6 +38,8 @@ if (
   throw new Error('Installer checksum or size mismatch');
 if (manifest.target === 'dmg') {
   await verifyDmg(artifact, manifest);
+} else if (manifest.target === 'msi') {
+  await verifyMsi(artifact, manifest);
 } else {
   await verifyLinuxInstaller();
 }

@@ -95,7 +95,7 @@ test('a foreign-platform DMG manifest is rejected before opening the artifact', 
   await expect(
     run(process.execPath, ['scripts/verify-installer.mjs', manifest]),
   ).rejects.toMatchObject({
-    stderr: expect.stringContaining('Expected a native Linux or macOS installer manifest'),
+    stderr: expect.stringContaining('Expected a native platform installer manifest'),
   });
 });
 
