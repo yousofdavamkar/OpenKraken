@@ -12,6 +12,19 @@ export interface TerminalSession {
 export interface TerminalHandle {
   focus: () => void;
 }
+interface ShellProgress {
+  phase: 'unavailable' | 'prompt' | 'ready' | 'running' | 'finished';
+  exitCode?: number;
+}
+function describeProgress({ phase, exitCode }: ShellProgress): string {
+  if (phase === 'prompt') return 'Prompt';
+  if (phase === 'running') return 'Command running';
+  if (phase === 'ready')
+    return `Ready for command${exitCode === undefined ? '' : ` · last exit ${exitCode}`}`;
+  if (phase === 'finished')
+    return `Command finished${exitCode === undefined ? '' : ` · exit ${exitCode}`}`;
+  return 'Shell integration unavailable';
+}
 export default function TerminalPanel({
   ref,
   session,
@@ -35,10 +48,12 @@ export default function TerminalPanel({
   const [ended, setEnded] = useState(false);
   const [error, setError] = useState('');
   const [closing, setClosing] = useState(false);
+  const [progress, setProgress] = useState<ShellProgress>({ phase: 'unavailable' });
   const request = (method: 'terminalClose') =>
     window.openkraken.request({ id: crypto.randomUUID(), method, sessionId: session.id });
   useEffect(() => {
     let alive = true;
+    let exited = false;
     let inputQueue = Promise.resolve();
     let queuedCharacters = 0;
     const theme = () => {
@@ -57,6 +72,28 @@ export default function TerminalPanel({
       scrollback: 5000,
       screenReaderMode: true,
       disableStdin: true,
+    });
+    // Shell output is untrusted. These markers describe display state only;
+    // native process exit remains the authority for session lifecycle.
+    const markers = terminal.parser.registerOscHandler(133, (data) => {
+      if (!alive || exited) return true;
+      if (data === 'A' || data === 'B' || data === 'C') {
+        const phase = data === 'A' ? 'prompt' : data === 'B' ? 'ready' : 'running';
+        setProgress((previous) => ({ ...previous, phase }));
+        return true;
+      }
+      if (data === 'D') {
+        setProgress({ phase: 'finished' });
+        return true;
+      }
+      if (/^D;-?\d{1,10}$/.test(data)) {
+        const exitCode = Number(data.slice(2));
+        if (exitCode >= -2147483648 && exitCode <= 2147483647) {
+          setProgress({ phase: 'finished', exitCode });
+          return true;
+        }
+      }
+      return false;
     });
     const sizing = new FitAddon();
     terminal.loadAddon(sizing);
@@ -100,8 +137,10 @@ export default function TerminalPanel({
             });
         });
       } else {
+        exited = true;
         terminal.options.disableStdin = true;
         setEnded(true);
+        setProgress({ phase: 'unavailable' });
         setStatus(
           event.exitCode === null ? 'Terminal stopped' : `Exited with code ${event.exitCode}`,
         );
@@ -165,6 +204,7 @@ export default function TerminalPanel({
         if (!alive) return;
         if (result.kind !== 'terminalOpened')
           throw new Error(result.kind === 'error' ? result.message : 'Terminal could not start.');
+        if (exited) return;
         setStatus(`Running · ${result.shell}`);
         terminal.options.disableStdin = false;
         resize();
@@ -183,6 +223,7 @@ export default function TerminalPanel({
       observer.disconnect();
       input.dispose();
       dimensions.dispose();
+      markers.dispose();
       terminal.dispose();
       view.current = undefined;
       fit.current = undefined;
@@ -226,6 +267,9 @@ export default function TerminalPanel({
           {session.path}
         </span>
         <span role="status">{status}</span>
+        <span aria-label="Shell integration" aria-live="polite">
+          {describeProgress(progress)}
+        </span>
         <button ref={hideButton} onClick={onHide}>
           Hide terminal
         </button>

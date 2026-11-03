@@ -105,3 +105,61 @@ test('a missing default shell reports a recoverable terminal error without block
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('OSC 133 tracks split prompt markers and command results without trusting them to close the shell', async () => {
+  test.skip(process.platform === 'win32', 'Uses POSIX printf to emit terminal sequences');
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-terminal-markers-'));
+  const repository = createFixture(join(root, 'repo'), 'linear', 3);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+    env: { ...process.env, SHELL: '/bin/sh' },
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+      dialog.showMessageBoxSync = () => 1;
+    }, repository);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+    const panel = page.getByRole('region', { name: 'Terminal', exact: true });
+    const input = panel.getByRole('textbox', { name: 'Terminal input', exact: true });
+    const integration = panel.getByLabel('Shell integration', { exact: true });
+    await expect(panel.getByRole('status')).toContainText('Running');
+    const command = async (text: string) => {
+      await input.pressSequentially(text);
+      await input.press('Enter');
+    };
+    await expect(integration).toHaveText('Shell integration unavailable');
+    await command("printf '\\033]133;'; sleep 0.1; printf 'A\\007'");
+    await expect(integration).toHaveText('Prompt');
+    await command("printf '\\033]133;B\\033\\\\'");
+    await expect(integration).toHaveText('Ready for command');
+    await command("printf '\\033]133;C\\007'");
+    await expect(integration).toHaveText('Command running');
+    await command("printf '\\033]133;D;17\\007'");
+    await expect(integration).toHaveText('Command finished · exit 17');
+    await command("printf '\\033]133;A\\007\\033]133;B\\007'");
+    await expect(integration).toHaveText('Ready for command · last exit 17');
+    await command(
+      "printf '\\033]133;D;99999999999999999999\\007\\033]133;C;bad\\007\\033]133;D;no\\007'",
+    );
+    await expect(integration).toHaveText('Ready for command · last exit 17');
+    await command("printf '\\033]133;D\\007'");
+    await expect(integration).toHaveText('Command finished');
+    await panel.getByRole('button', { name: 'Close terminal', exact: true }).click();
+    const confirmation = page.getByRole('dialog', { name: 'Close terminal?', exact: true });
+    await expect(confirmation).toBeVisible();
+    await confirmation.getByRole('button', { name: 'Keep open', exact: true }).click();
+    await command('exit 9');
+    await expect(panel.getByRole('status')).toHaveText('Exited with code 9');
+    await expect(integration).toHaveText('Shell integration unavailable');
+    await panel.getByRole('button', { name: 'Close terminal', exact: true }).click();
+    await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+    await expect(panel.getByRole('status')).toContainText('Running');
+    await expect(integration).toHaveText('Shell integration unavailable');
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
