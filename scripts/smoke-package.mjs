@@ -17,6 +17,10 @@ const executable =
     ? join(directory, 'OpenKraken.app/Contents/MacOS/openkraken')
     : join(directory, process.platform === 'win32' ? 'openkraken.exe' : 'openkraken'));
 const profile = await mkdtemp(join(tmpdir(), 'openkraken-package-'));
+const linkedRepository = join(profile, 'linked repository');
+await mkdir(linkedRepository);
+await promisify(execFile)('git', ['init', '--initial-branch=main', linkedRepository]);
+const repositoryUri = `openkraken://repo?path=${encodeURIComponent(linkedRepository)}`;
 const nativePicker = process.platform === 'linux' && !!process.env.OPENKRAKEN_XDOTOOL;
 if (nativePicker)
   await writeFile(join(profile, '.bashrc'), 'HISTFILE=/dev/null\nPS1="packaged> "\n');
@@ -25,6 +29,7 @@ const child = spawn(
   [
     '--remote-debugging-port=0',
     `--user-data-dir=${profile}`,
+    repositoryUri,
     ...(nativePicker ? ['--ozone-platform=x11', '--xdg-portal-required-version=999'] : []),
   ],
   {
@@ -92,6 +97,11 @@ try {
   );
   if (reporting.kind !== 'crashReporting' || reporting.state.enabled)
     throw new Error('Packaged crash reporting must start without consent');
+  await page.getByRole('button', { name: 'Review repository link', exact: true }).click();
+  const linkDialog = page.getByRole('dialog', { name: 'Open linked repository', exact: true });
+  await expect(linkDialog).toContainText(linkedRepository);
+  await linkDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'A clear view of your history.' })).toBeVisible();
   const socketPath =
     process.platform === 'win32'
       ? `\\\\.\\pipe\\openkraken-${randomUUID()}`
@@ -221,6 +231,21 @@ try {
       'Packaged native terminal opened the repository, tracked Bash commands, received native keyboard input and exited cleanly.',
     );
   }
+  if (process.platform !== 'darwin') {
+    await promisify(execFile)(executable, [`--user-data-dir=${profile}`, repositoryUri], {
+      timeout: 15000,
+      env: { ...process.env, TMPDIR: profile },
+    });
+    await page.getByRole('button', { name: 'Review repository link', exact: true }).click();
+    await expect(linkDialog).toContainText(linkedRepository);
+    await linkDialog.getByRole('button', { name: 'Open repository', exact: true }).click();
+    await expect(
+      page.getByRole('heading', { name: 'linked repository', exact: true }),
+    ).toBeVisible();
+    console.log(
+      'Packaged cold-start and second-process repository links require explicit consent.',
+    );
+  }
   await page.screenshot({ path: 'test-results/packaged-shell.png' });
   console.log(
     'Packaged ASAR app starts with hardened fuses; renderer isolation and native askpass/editor helpers passed.',
@@ -253,5 +278,7 @@ try {
       });
     }
   });
-  await rm(profile, { recursive: true, force: true });
+  // The AppImage runtime can exit just before its FUSE mount is released.
+  // Bound filesystem teardown retries separately from the unchanged app exit deadline.
+  await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 }

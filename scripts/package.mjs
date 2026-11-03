@@ -25,6 +25,7 @@ const outputs = await packager({
   name: 'OpenKraken',
   executableName: 'openkraken',
   electronVersion: '45.2.1',
+  protocols: [{ name: 'OpenKraken repository links', schemes: ['openkraken'] }],
   asar: {
     unpack: '**/*.node',
     unpackDir: 'dist/{helpers,node_modules/node-pty,shell-integration}',

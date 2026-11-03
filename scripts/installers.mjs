@@ -92,6 +92,7 @@ try {
         productName: 'OpenKraken',
         executableName: 'openkraken',
         electronVersion: '45.2.1',
+        protocols: [{ name: 'OpenKraken repository links', schemes: ['openkraken'] }],
         npmRebuild: false,
         publish: null,
         directories: { output: join(work, 'output'), buildResources: 'build-resources' },

@@ -88,7 +88,7 @@ export async function buildAppImage(prepackaged, work, name, releaseInfo) {
   );
   await writeFile(
     join(appdir, 'openkraken.desktop'),
-    '[Desktop Entry]\nType=Application\nName=OpenKraken\nExec=AppRun %U\nIcon=openkraken\nCategories=Development;\nTerminal=false\nStartupWMClass=openkraken\n',
+    '[Desktop Entry]\nType=Application\nName=OpenKraken\nExec=AppRun %U\nIcon=openkraken\nCategories=Development;\nTerminal=false\nStartupWMClass=openkraken\nMimeType=x-scheme-handler/openkraken;\n',
   );
   const artifact = join(work, name);
   const { stdout, stderr } = await run(

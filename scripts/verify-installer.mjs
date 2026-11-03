@@ -81,11 +81,12 @@ try {
   const expectedExec =
     manifest.target === 'AppImage'
       ? /^Exec=AppRun %U$/m
-      : /^Exec=\/?opt\/OpenKraken\/openkraken(?: %U)?$/m;
+      : /^Exec=\/opt\/OpenKraken\/openkraken %U$/m;
   if (
     !expectedExec.test(desktop) ||
     !/^Icon=openkraken$/m.test(desktop) ||
     !/^StartupWMClass=openkraken$/m.test(desktop) ||
+    !/^MimeType=x-scheme-handler\/openkraken;$/m.test(desktop) ||
     /--(?:no|disable)-sandbox/.test(desktop)
   )
     throw new Error('Desktop launcher does not match the sandboxed application');
