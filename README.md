@@ -224,3 +224,11 @@ Choose **Review update** to initialize missing checkouts and recursively check o
 Linux fixtures cover discovery, opening and recursive initialization/update with UTF-8 paths. Add/remove/sync controls, live authenticated transport acceptance and cross-platform verification remain open; M7 is not complete.
 
 On Linux, install `xdotool` and run `OPENKRAKEN_XDOTOOL=xdotool xvfb-run -a pnpm smoke:package` after packaging to test the native folder picker and packaged terminal in addition to renderer isolation and authentication/editor helpers. Linux CI runs this check.
+
+## Git LFS (M7 in progress)
+
+Choose **Git LFS** from the toolbar or command palette to see the installed version, tracked object identities and sizes, checkout state, local object availability and cached lock owners. **Refresh local state** rereads local information without downloading objects or contacting the lock server. Cached locks may be stale; an empty cache does not mean files are unlocked.
+
+File comparisons identify canonical LFS pointers and show their object identity and size without downloading content. This also works when Git LFS is unavailable. The repository inventory requires Git LFS 3 or newer on PATH. Object downloads, current server-lock refresh and authenticated transport acceptance remain in progress; see [the LFS decision](docs/decisions/0069-lfs-awareness.md).
+
+For native LFS acceptance, install Git LFS and run `OPENKRAKEN_LFS_TEST=1 pnpm test` and `OPENKRAKEN_LFS_TEST=1 xvfb-run -a pnpm exec playwright test tests/e2e/lfs.test.ts` on Linux. The opt-in flag fails when the CLI is missing; CI enables it. Omit `xvfb-run -a` on a desktop with an available display.
