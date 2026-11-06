@@ -24,7 +24,14 @@ const marker = join(root, 'started.json');
 const delayedDescendant = process.argv.includes('--delayed-descendant');
 const failStartup = process.argv.includes('--failed-startup') || delayedDescendant;
 const helperUnavailable = process.argv.includes('--helper-unavailable');
-assert.ok(!(failStartup && helperUnavailable), 'Select one failure scenario');
+const beforeRename = process.argv.includes('--interrupt-before-rename');
+const afterRename = process.argv.includes('--interrupt-after-rename');
+const interruptedCommit = beforeRename || afterRename;
+assert.ok(
+  [failStartup, helperUnavailable, beforeRename, afterRename].filter(Boolean).length <= 1,
+  'Select one failure scenario',
+);
+const predecessorReturns = failStartup || beforeRename;
 const failedMarker = join(root, 'failed-startup');
 const descendantMarker = join(root, 'delayed-descendant.json');
 async function waitForFile(path, timeout = 30000) {
@@ -101,8 +108,21 @@ try {
       const fixtureBoots = require('node:fs').existsSync(fixtureBootsPath) ? JSON.parse(require('node:fs').readFileSync(fixtureBootsPath, 'utf8')) : [];
       fixtureBoots.push(${JSON.stringify(version)});
       require('node:fs').writeFileSync(fixtureBootsPath, JSON.stringify(fixtureBoots));
-      const fixtureReturning = ${failStartup && version === '0.1.0'} && require('node:fs').existsSync(${JSON.stringify(failedMarker)});
-      if (fixtureReturning) fixtureElectron.app.commandLine.appendSwitch('remote-debugging-port', '0');
+      const fixtureReturning = ${predecessorReturns && version === '0.1.0'} && require('node:fs').existsSync(${JSON.stringify(failedMarker)});
+      if (${interruptedCommit && version === '0.1.0'} && !fixtureReturning) {
+        const fixtureFs = require('node:fs/promises');
+        const originalRename = fixtureFs.rename;
+        fixtureFs.rename = async (from, to) => {
+          if (from === to + '.openkraken-update/next.AppImage') {
+            if (${afterRename}) await originalRename(from, to);
+            require('node:fs').writeFileSync(${JSON.stringify(failedMarker)}, ${JSON.stringify(afterRename ? 'after rename' : 'before rename')});
+            process.kill(process.pid, 'SIGKILL');
+            return new Promise(() => {});
+          }
+          return originalRename(from, to);
+        };
+      }
+      if (fixtureReturning && ${failStartup}) fixtureElectron.app.commandLine.appendSwitch('remote-debugging-port', '0');
       if (${failStartup && version === '0.2.0'}) {
         require('node:fs').writeFileSync(${JSON.stringify(failedMarker)}, 'replacement reached main');
         if (${delayedDescendant}) {
@@ -140,7 +160,7 @@ try {
         }
         if ((${!failStartup && version === '0.2.0'} || fixtureReturning) && args[1]?.method === 'updatesStarted') {
           require('node:fs').writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ version: fixtureElectron.app.getVersion(), pid: process.pid, state: result }));
-          if (!fixtureReturning) setTimeout(() => fixtureElectron.app.quit(), 100);
+          if (!fixtureReturning || ${interruptedCommit}) setTimeout(() => fixtureElectron.app.quit(), 100);
         }
         return result;
       });
@@ -359,7 +379,7 @@ try {
     );
     await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
     const started = JSON.parse(await waitForFile(marker));
-    assert.equal(started.version, failStartup ? '0.1.0' : '0.2.0');
+    assert.equal(started.version, predecessorReturns ? '0.1.0' : '0.2.0');
     if (delayedDescendant)
       assert.equal(
         await readFile(join(root, 'descendant-stopped'), 'utf8'),
@@ -367,16 +387,31 @@ try {
       );
     assert.equal(started.state.kind, 'updates');
     assert.equal(started.state.state.error, null);
-    assert.equal(await sha256(target), failStartup ? originalDigest : await sha256(artifact));
+    assert.equal(
+      await sha256(target),
+      predecessorReturns ? originalDigest : await sha256(artifact),
+    );
     assert.deepEqual(
       JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')),
-      failStartup ? ['0.1.0', '0.2.0', '0.1.0'] : ['0.1.0', '0.2.0'],
+      beforeRename
+        ? ['0.1.0', '0.1.0']
+        : failStartup
+          ? ['0.1.0', '0.2.0', '0.1.0']
+          : ['0.1.0', '0.2.0'],
     );
     assert.equal(
       JSON.parse(await readFile(join(profile, 'updates/trusted-release.json'), 'utf8')).sequence,
       1,
     );
     await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
+    if (interruptedCommit) {
+      assert.equal(
+        await readFile(failedMarker, 'utf8'),
+        afterRename ? 'after rename' : 'before rename',
+      );
+      assert.equal(started.state.state.recovery, null);
+      assert.equal((await stat(target)).nlink, 1);
+    }
     if (failStartup) {
       assert.equal(started.state.state.recovery, 'restored');
       await browser.close().catch(() => {});
@@ -396,11 +431,13 @@ try {
     }
     await delay(500);
     console.log(
-      delayedDescendant
-        ? 'Packaged AppImage: waited for the delayed descendant, restored the exact predecessor, and retained the release watermark.'
-        : failStartup
-          ? 'Packaged AppImage: failed replacement startup restored and launched the exact predecessor; startup cleanup and release watermark retention passed.'
-          : 'Packaged AppImage: signed HTTPS download, cancelled unsaved-work restart, accepted install, new-version launch and recovery acknowledgement passed.',
+      interruptedCommit
+        ? `Packaged AppImage: killed the parent ${afterRename ? 'after' : 'before'} rename, launched ${started.version}, cleaned staging and retained the release watermark.`
+        : delayedDescendant
+          ? 'Packaged AppImage: waited for the delayed descendant, restored the exact predecessor, and retained the release watermark.'
+          : failStartup
+            ? 'Packaged AppImage: failed replacement startup restored and launched the exact predecessor; startup cleanup and release watermark retention passed.'
+            : 'Packaged AppImage: signed HTTPS download, cancelled unsaved-work restart, accepted install, new-version launch and recovery acknowledgement passed.',
     );
   }
   completed = true;

@@ -199,10 +199,14 @@ jobs:
           xvfb-run -a node scripts/verify-update-restart.mjs
           xvfb-run -a node scripts/verify-update-restart.mjs --failed-startup
           xvfb-run -a node scripts/verify-update-restart.mjs --delayed-descendant
+          xvfb-run -a node scripts/verify-update-restart.mjs --interrupt-before-rename
+          xvfb-run -a node scripts/verify-update-restart.mjs --interrupt-after-rename
           xvfb-run -a node scripts/verify-update-restart.mjs --helper-unavailable
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --failed-startup
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --delayed-descendant
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --interrupt-before-rename
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --interrupt-after-rename
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --helper-unavailable
       - if: runner.os == 'Linux'
         name: Verify extracted installer payloads and desktop behavior
