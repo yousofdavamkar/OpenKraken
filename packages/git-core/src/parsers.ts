@@ -218,8 +218,8 @@ export class HistoryParser {
   constructor(private accept?: (commit: Commit) => void) {}
   readonly value: Commit[] = [];
   private fields: string[] = [];
-  private decoder = new NulDecoder((field) => {
-    this.fields.push(field.toString('utf8'));
+  private decoder = new TextNulDecoder((field) => {
+    this.fields.push(field);
     if (this.fields.length !== 12) return;
     const [header, parents, an, ae, at, ai, cn, ce, ct, ci, body, end] = this.fields as [
       string,

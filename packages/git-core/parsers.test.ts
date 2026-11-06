@@ -156,6 +156,35 @@ describe('stream parsers', () => {
       { numRuns: 300 },
     );
   });
+  test('streamed history decodes invalid UTF-8 per field and enforces the message byte limit', () => {
+    const prefix = Buffer.from(
+      [
+        `commit ${hash}\n${hash}`,
+        '',
+        'A',
+        '',
+        '0',
+        '1970-01-01 00:00:00 +0000',
+        'C',
+        '',
+        '0',
+        '1970-01-01 00:00:00 +0000',
+        '',
+      ].join('\0'),
+    );
+    const messages: string[] = [];
+    const parser = new HistoryParser((commit) => messages.push(commit.body));
+    parser.push(prefix);
+    parser.push(Buffer.from([0xf0, 0x9f]));
+    parser.push(Buffer.from([0, 0, 10]));
+    expect(parser.finish()).toEqual([]);
+    expect(messages).toEqual(['\uFFFD']);
+
+    const oversized = new HistoryParser();
+    oversized.push(prefix);
+    oversized.push(Buffer.alloc(2 * 1024 * 1024, 0x61));
+    expect(() => oversized.push(Buffer.from('b\0\0\n'))).toThrow('limit');
+  });
   test('malformed streams fail closed and bounded fields reject', () => {
     for (const Parser of [HistoryParser, RefsParser, StatusParser])
       expect(() => feed(new Parser(), Buffer.from('truncated'), 1)).toThrow();
