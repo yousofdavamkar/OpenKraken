@@ -1,3 +1,4 @@
+import { compactRef, expandRef } from './compact-refs.js';
 import { crashReportingStateSchema } from './crash-reports.js';
 import { updatesRequests, updatesStateSchema } from './updates.js';
 export * from './updates.js';
@@ -141,7 +142,8 @@ import {
 export * from './providers.js';
 export { providerPatchLines } from './provider-patch.js';
 
-export const oidSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
+const objectIdPattern = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+export const oidSchema = z.string().regex(objectIdPattern);
 export const headSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('branch'), ref: z.string(), oid: oidSchema.optional() }),
   z.object({ kind: z.literal('detached'), oid: oidSchema }),
@@ -2153,7 +2155,52 @@ export const resultSchema = z.discriminatedUnion('kind', [
     retryAt: providerRetryAtSchema.optional(),
   }),
 ]);
-export const serviceResponseSchema = z.object({ id: requestId, result: resultSchema });
+const compactRefsSchema = z.array(z.unknown()).transform((rows, ctx) => {
+  const refs: Ref[] = [];
+  for (const [index, row] of rows.entries()) {
+    if (typeof row === 'string') {
+      const ref = expandRef(row);
+      if (ref && objectIdPattern.test(ref.target)) {
+        refs.push(ref);
+        continue;
+      }
+    } else {
+      const parsed = refSchema.safeParse(row);
+      if (parsed.success) {
+        refs.push(parsed.data);
+        continue;
+      }
+    }
+    ctx.addIssue({ code: 'custom', path: [index], message: 'Invalid compact reference' });
+    return z.NEVER;
+  }
+  return refs;
+});
+const compactSnapshotResult = z
+  .object({
+    kind: z.literal('compactSnapshot'),
+    snapshot: snapshotSchema.extend({ refs: compactRefsSchema }),
+  })
+  .transform(({ snapshot }) => ({ kind: 'snapshot' as const, snapshot }));
+export const serviceResponseSchema = z.object({
+  id: requestId,
+  result: z.union([resultSchema, compactSnapshotResult]),
+});
+
+export function encodeGitServiceResult(result: Result) {
+  if (result.kind !== 'snapshot' || result.snapshot.refs.length < 10000) return result;
+  const refs: (Ref | string)[] = [];
+  let compactCount = 0;
+  for (const ref of result.snapshot.refs) {
+    const row = compactRef(ref);
+    refs.push(row);
+    if (typeof row === 'string') compactCount++;
+  }
+  // Rich refs need their full records. Keep the normal array validator for those repositories.
+  if (compactCount * 2 < refs.length) return result;
+  return { kind: 'compactSnapshot' as const, snapshot: { ...result.snapshot, refs } };
+}
+
 export const CHANNEL = 'openkraken:request';
 export const CANCEL_CHANNEL = 'openkraken:cancel';
 export type Commit = z.infer<typeof commitSchema>;

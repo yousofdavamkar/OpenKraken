@@ -1,6 +1,11 @@
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { serviceRequestSchema, shutdownSchema, cancelSchema } from '@openkraken/ipc-contract';
+import {
+  encodeGitServiceResult,
+  serviceRequestSchema,
+  shutdownSchema,
+  cancelSchema,
+} from '@openkraken/ipc-contract';
 import type { Result, ServiceRequest, Repository } from '@openkraken/ipc-contract';
 import {
   GitError,
@@ -661,7 +666,7 @@ parent.on('message', (event) => {
   if (writing) observed?.pause();
   execute(request, controller.signal)
     .then((result) => {
-      parent.postMessage({ id: request.id, result });
+      parent.postMessage({ id: request.id, result: encodeGitServiceResult(result) });
       if (result.kind === 'snapshot' && request.method !== 'refresh') {
         const current = watcher;
         clearTimeout(watchStart);
