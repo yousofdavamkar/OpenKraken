@@ -17,3 +17,24 @@ Checks were initially user initiated; [ADR 0085](0085-opt-in-automatic-update-ch
 Metadata is streamed with a 48 KiB cap. Artifacts stream to an exclusive private scratch file with exact signed length and SHA-256 checks, then sync and rename to `artifact.ready`. An existing cache is removed before a new download, failed/incomplete owned scratch files are removed, and expiration/storage ownership are checked again before promotion. One download is retained; startup discards prior cache and scratch files and requires a fresh authenticated check/download. Cache contents must be reverified before any future installation handoff. These checks do not defend against an attacker who controls the user's account or races arbitrary changes inside its private profile.
 
 The original Updates dialog offered check, download, progress and cancellation without installation. [ADR 0084](0084-appimage-desktop-update-handoff.md) adds supported AppImage installation/restart, ADR 0085 adds opt-in automatic checks, and [ADR 0086](0086-appimage-startup-exit-recovery.md) adds startup-exit restoration. Closing the dialog does not cancel a transfer; quitting does. Recovery of hung or interrupted updates, other native installation formats, production release configuration, signed installers and native platform acceptance remain open. No release has been published by this implementation.
+
+## Configuring a release feed
+
+Choose a stable manifest URL on a host the publisher controls. Enable managed HTTPS with automatic certificate renewal, or configure an ACME client on that host. A Let's Encrypt certificate authenticates the connection to the host. The app verifies each release manifest with an independent Ed25519 key, so routine TLS certificate renewal requires no app rebuild. [Let's Encrypt setup](https://letsencrypt.org/getting-started/)
+
+On a POSIX signing machine, run these commands once from a private location outside the checkout. The fresh directory prevents a rerun from overwriting an existing key. Keep the private PEM and a protected backup under the publisher's control. Copy only the single-line public key to the build machine.
+
+```sh
+(
+  set -eu
+  umask 077
+  mkdir openkraken-release-key
+  cd openkraken-release-key
+  openssl genpkey -algorithm ED25519 -out private-key.pem
+  openssl pkey -in private-key.pem -pubout -outform DER -out public-key.der
+  openssl base64 -A -in public-key.der
+  printf '\n'
+)
+```
+
+At package build time, set `OPENKRAKEN_UPDATE_CONFIG` to JSON with that public key and the actual HTTPS manifest URL. For example, replace both values in `{"feed":"https://updates.example.org/stable/release.json","publicKey":"<base64 public key>"}`. On the signing machine, use the offline publisher above with the same private PEM. Publish the immutable artifact files first, then the signed manifest, so every file it references is already available in the same directory. The host must serve the files directly without redirects.
