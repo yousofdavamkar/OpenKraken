@@ -1,6 +1,12 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. Watcher-warm status passes locally on Linux x64; the two-million-commit graph has passing paired checks but a new unexplained 700.1 ms first-paint failure. Latest 50,000-ref samples measure 1.086–1.113 seconds first paint with distinct targets and a variable 0.918–1.225 seconds with one shared target, still above the 500 ms gate; paging and scrolling pass. Native Git 2.38.0 passes the Linux x64 compatibility checks. AppImage recovery waits for delayed descendants before restoring the predecessor, while a still-running unconfirmed application remains an open recovery case. Native Windows/macOS acceptance, production release gates and the remaining [M6](m6-progress.md)/[M7](m7-progress.md) scope are still open.
+M8 remains in progress. On Linux x64 the 50,000-ref filtered graph improved from 13.9 seconds to 1.17 seconds after indexing hidden references. First paint still exceeds the 500 ms gate on every large-ref sample. Watcher-warm status and minimum Git compatibility have earlier passing results. Native Windows/macOS acceptance, production release gates and the remaining [M6](m6-progress.md)/[M7](m7-progress.md) scope are open.
+
+## Large-reference graph views and history decoding
+
+The [reference performance record](m8-reference-performance.md#saved-views-with-10000-hidden-tags) includes paired filtered/default baselines, six intermediate measurements and fifteen final measurements. The 10,000-hidden-tag view now paints in 1,167.9–1,172.0 ms. Opening a default distinct-target graph takes 1,098.5–1,162.8 ms. All 27 large-ref page loads passed the 300 ms budget and all fifteen scroll samples passed. Full Linux first paints passed, with one page at 305.9 ms. Two of three synthetic first paints exceeded budget at 583.5 and 502.8 ms. See [ADR 0111](../decisions/0111-graph-view-membership-and-history-decoding.md) for graph filtering and parser compatibility.
+
+Linux verification passed **813 tests across 100 files, with 14 skipped**, and **23 selected Electron tests** including six graph visual comparisons, paging, search and keyboard navigation. The minimum Git 2.38.0 selection passed 40 tests. Typecheck/build and full lint passed. The first full run exposed a GitHub issue-action cancellation fixture that received a generic transport error on the next mocked read. Moving it to the existing isolated provider test harness (`75ca361`) passed three grouped runs of 57 tests and the final full suite. Native Windows/macOS, packaging and cold-OS-cache benchmarks were outside this checkpoint.
 
 ## Interrupted AppImage replacement
 

@@ -2,6 +2,28 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Saved views with 10,000 hidden tags
+
+The maximum-size saved hidden list exposed repeated linear membership scans during both traversal and badge construction. With 10,000 tags hidden on the 50,000-distinct-ref fixture, the baseline took **13,908.2 ms** to paint. Of that, 10,116.8 ms was inside snapshot preparation and 3,267.4 ms was between renderer publication and paint. The unfiltered baseline in the same pair took 1,344.2 ms.
+
+The service and renderer now index the saved names once per view (`a93dbc5`). Three filtered runs after that change alone took 1,136.3–1,376.9 ms. Three unfiltered controls took 1,129.0–1,273.7 ms, with one 300.7 ms page. The following history parser change (`506d7dd`) reuses the streaming UTF-8 decoder while retaining the byte limit and callback behavior. See [ADR 0111](../decisions/0111-graph-view-membership-and-history-decoding.md).
+
+On 22,615,101 bytes of `rev-list` output from 17,000 Linux commits, six alternating-order parser samples took **193.9–234.7 ms** before and **113.9–129.1 ms** after the decoder change. Each received the same 64 KiB chunks after one warm-up per parser. All complete parsed arrays had SHA-256 `9a112556899ddfdf20d3f07fa4249a39bbfbdb37ec7f0f2c07af9185c7bc179d` over their JSON serialization. These numbers isolate parsing. End-to-end startup times overlap for the indexed implementations.
+
+| Final cohort (three runs each)               | First paint (ms) | 5,000-commit pages (ms) | Scroll p95 (ms) |
+| -------------------------------------------- | ---------------- | ----------------------- | --------------- |
+| 50,000 distinct targets, 10,000 tags hidden  | 1,167.9–1,172.0  | 207.8–270.0             | 16.7–16.8       |
+| 50,000 distinct targets, default view        | 1,098.5–1,162.8  | 216.0–274.6             | 16.8            |
+| 50,000 refs at the same target, default view | 968.4–1,040.9    | 227.9–267.8             | 16.7–16.8       |
+| Full Linux with one ref                      | 373.1–408.5      | 240.3–305.9             | 16.8            |
+| Synthetic two-million-commit repository      | 482.1–583.5      | 120.1–195.2             | 16.7–16.8       |
+
+Every large-ref first paint still exceeded 500 ms. All 27 pages on the three large-ref cohorts passed. The single-ref Linux cohort missed one page budget at 305.9 ms. Synthetic first paints were 583.5, 502.8 and 482.1 ms. All scroll samples passed. The earlier isolated outliers and these misses remain in the record.
+
+[Per-run measurements](m8-graph-view-samples.csv) cover the original pair (`base`), the indexed-view intermediate runs (`final`) and the combined changes (`history`, `shared`, `linux`, `synthetic`). Each fresh-profile Electron run was sequential with uncleared OS caches and no simultaneous tests or builds. To reproduce the filtered cohort, add `OPENKRAKEN_BENCH_HIDDEN_TAGS=1` to the distinct-target benchmark command below. It seeds the first 10,000 tags into the disposable profile and checks the sidebar's hidden state after timing.
+
+## Original baseline and bounded sidebar
+
 Both fixtures contain the full Linux history at `46fec1c3029b552ec63b2d01af9d43a386f043ea`: 1,505,199 commits, not shallow, with a Git commit graph. The original bare repository has one branch. The second is an isolated shared-object bare clone with 50,000 refs targeting distinct recent commits: the original branch, 5,000 additional branches, 5,000 remote-tracking refs and 39,999 tags. The original repository's refs and objects were not changed. Objects are tree-filtered; this measures history/ref behavior, not checkout or blob-heavy operations.
 
 Measurements used Linux x64, Git 2.53.0 and an Intel Core i7-9750H. Each app used a fresh profile; OS caches were **not cleared**. Main benchmark runs were sequential without concurrent builds or test suites. Memory is Electron's reported renderer working set, not a total-system measurement.
