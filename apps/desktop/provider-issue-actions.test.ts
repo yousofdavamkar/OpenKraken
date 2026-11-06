@@ -1,19 +1,16 @@
-import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
+import { afterAll, expect, test } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { http, HttpResponse } from 'msw';
-import { setupServer } from 'msw/node';
+import { providerServer } from '../../tests/provider-server.js';
 import { ProviderService } from './src/providers.js';
 import { ProviderVault } from './src/provider-vault.js';
 import { githubIssueFixture } from '../../packages/test-fixtures/src/provider.js';
 import { protection } from '../../tests/provider-protection.js';
 const root = await mkdtemp(join(tmpdir(), 'openkraken-issue-actions-'));
-const server = setupServer();
-beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
-afterEach(() => server.resetHandlers());
+const server = providerServer();
 afterAll(async () => {
-  server.close();
   await rm(root, { recursive: true, force: true });
 });
 const repository = { owner: 'team', name: 'project' };
