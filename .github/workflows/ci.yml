@@ -138,7 +138,11 @@ jobs:
         name: Gitea HTTPS and SSH acceptance
         env:
           OPENKRAKEN_GITEA_TEST: '1'
-        run: xvfb-run -a pnpm exec playwright test tests/e2e/gitea.test.ts
+        run: >-
+          xvfb-run -a pnpm exec playwright test
+          tests/e2e/gitea.test.ts
+          tests/e2e/provider-push.test.ts
+          tests/e2e/provider-delete.test.ts
       - run: pnpm package
       - if: runner.os == 'Linux'
         env:
