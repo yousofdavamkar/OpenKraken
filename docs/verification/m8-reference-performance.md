@@ -2,6 +2,24 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Git utility snapshot transfer
+
+Three alternating instrumented pairs on the 50,000-distinct-target repository measured 116–123 ms to copy the ordinary utility reply into main. Compact references took 47–50 ms to transfer and 9–12 ms to pack. An experiment using the compact form on the renderer boundary as well reduced its JSON reply from 13.24 MB to 7.37 MB. Main serialization rose from 43–47 ms to 67–74 ms. The shipped change confines the format to the Git utility boundary. See [ADR 0112](../decisions/0112-compact-git-snapshot-references.md).
+
+| Final cohort (three runs each)              | First paint, median (ms) | First paint, range (ms) | 5,000-commit pages (ms) |
+| ------------------------------------------- | -----------------------: | ----------------------: | ----------------------: |
+| 50,000 distinct targets                     |                  1,039.7 |         1,025.4–1,276.2 |             211.4–309.9 |
+| 50,000 distinct targets, 10,000 hidden tags |                  1,084.8 |         1,077.7–1,098.8 |             212.1–265.4 |
+| 50,000 refs at one target                   |                    966.0 |           928.3–1,122.5 |             212.5–269.2 |
+| Full Linux, one ref                         |                    359.6 |             354.5–362.6 |             211.2–280.4 |
+| Synthetic two-million-commit repository     |                    469.4 |             460.5–474.7 |             126.0–181.0 |
+
+The ordinary distinct-target baseline ranged from 1,108.5 to 1,542.0 ms (median 1,112.7 ms). Its range overlaps the final build. All nine large-ref openings exceeded 500 ms; 44 of 45 pages finished within 300 ms. All fifteen scroll measurements were 16.7–16.8 ms p95. Each run used a fresh profile with uncleared OS caches on the same Linux host, sequentially without competing suites or builds.
+
+For the final distinct-target cohort, the median wait from open to response was 816.1 ms, including 445.0 ms preparing the snapshot inside the utility. The slow page spent 189.9 ms awaiting the service, 93.7 ms in worker layout and 26.3 ms publishing the result. These timings identify work on both sides of the utility boundary.
+
+The [per-run measurements](m8-snapshot-transport-samples.csv) include the ordinary baseline (`base`), compact utility replies revalidated as normal objects (`compact`), compact replies on both boundaries (`both`), the alternating instrumented pairs (`trace`), per-row schema transforms (`direct`), batch validation before the density threshold (`batch`) and the final five cohorts (`final`). Probe columns appear only for instrumented runs. Snapshot time is included in service time. See the fixture and harness instructions below to reproduce the measurements.
+
 ## Saved views with 10,000 hidden tags
 
 The maximum-size saved hidden list exposed repeated linear membership scans during both traversal and badge construction. With 10,000 tags hidden on the 50,000-distinct-ref fixture, the baseline took **13,908.2 ms** to paint. Of that, 10,116.8 ms was inside snapshot preparation and 3,267.4 ms was between renderer publication and paint. The unfiltered baseline in the same pair took 1,344.2 ms.
