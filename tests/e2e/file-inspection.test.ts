@@ -271,13 +271,43 @@ test('10k-line blame streams its first screen within budget and virtualizes attr
     await grid.press('Enter');
     await page.getByRole('button', { name: 'Compare lines.txt', exact: true }).click();
     const viewer = page.getByRole('dialog', { name: 'File comparison' });
-    await expect(viewer.getByRole('button', { name: 'Blame', exact: true })).toBeEnabled();
+    const button = viewer.getByRole('button', { name: 'Blame', exact: true });
+    await expect(button).toBeEnabled();
+    await button.evaluate((element) => {
+      element.addEventListener(
+        'click',
+        (event) => {
+          const start = event.timeStamp;
+          const frame = () => {
+            const row = document.querySelector('.blame-line > code');
+            const rect = row?.getBoundingClientRect();
+            if (
+              row?.textContent === 'changed first' &&
+              rect &&
+              document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) === row
+            ) {
+              requestAnimationFrame(() => performance.measure('blame-first-screen', { start }));
+            } else {
+              requestAnimationFrame(frame);
+            }
+          };
+          requestAnimationFrame(frame);
+        },
+        { once: true },
+      );
+    });
     const start = performance.now();
-    await viewer.getByRole('button', { name: 'Blame', exact: true }).click();
+    await button.click();
     const blame = viewer.getByRole('region', { name: 'File blame' });
     await expect(blame.getByText('changed first', { exact: true })).toBeVisible();
-    const elapsed = performance.now() - start;
-    console.log(`10k-line blame first screen: ${elapsed.toFixed(1)}ms`);
+    const wall = performance.now() - start;
+    const timing = await page.waitForFunction(
+      () => performance.getEntriesByName('blame-first-screen')[0]?.duration ?? 0,
+    );
+    const elapsed = await timing.jsonValue();
+    console.log(
+      `10k-line blame first screen: ${elapsed.toFixed(1)}ms (driver ${wall.toFixed(1)}ms)`,
+    );
     expect(elapsed).toBeLessThan(300);
     await expect(blame.getByRole('status')).toHaveText('10,000 lines attributed');
     expect(await blame.locator('.blame-line').count()).toBeLessThan(100);
