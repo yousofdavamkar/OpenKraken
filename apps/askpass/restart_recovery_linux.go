@@ -18,7 +18,7 @@ func restartSame(a, b os.FileInfo) bool {
 	return leftOK && rightOK && os.SameFile(a, b) && a.Size() == b.Size() && a.Mode() == b.Mode() && a.ModTime().Equal(b.ModTime()) && left.Ctim == right.Ctim && left.Nlink == right.Nlink
 }
 
-func restartVerifiedFile(path, expected string, size int64, private bool) (os.FileInfo, bool) {
+func restartVerifiedFile(path, expected string, size int64, links uint64, private bool) (os.FileInfo, bool) {
 	info, err := os.Lstat(path)
 	mask := os.FileMode(0022)
 	if private {
@@ -28,7 +28,7 @@ func restartVerifiedFile(path, expected string, size int64, private bool) (os.Fi
 		return nil, false
 	}
 	owner, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || int(owner.Uid) != os.Getuid() || owner.Nlink != 1 {
+	if !ok || int(owner.Uid) != os.Getuid() || uint64(owner.Nlink) != links {
 		return nil, false
 	}
 	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
@@ -142,7 +142,9 @@ func restartSync(path string) bool {
 	return file.Sync() == nil
 }
 
-func restoreFailedRestart(target, profile, nextHash string, nextSize int64, previousHash string, previousSize int64, journalHash string) int {
+// After the rename, restore from the backup. Before the rename, the installed
+// predecessor must still be the backup's other hard link. Launch it in place.
+func reopenPredecessor(target, profile, nextHash string, nextSize int64, previousHash string, previousSize int64, journalHash string, beforeRename bool) int {
 	folder := target + ".openkraken-update"
 	if !restartDirectory(filepath.Dir(target), false) || !restartDirectory(folder, true) || !restartGroupIdle() {
 		return 125
@@ -156,49 +158,52 @@ func restoreFailedRestart(target, profile, nextHash string, nextSize int64, prev
 	if err != nil {
 		return 125
 	}
-	names, err := directory.Readdirnames(3)
-	directory.Close()
-	if (err != nil && err != io.EOF) || len(names) != 2 {
-		return 125
+	replacement := target
+	backupLinks := uint64(1)
+	entryCount := 2
+	if beforeRename {
+		replacement = filepath.Join(folder, "next.AppImage")
+		backupLinks = 2
+		entryCount = 3
 	}
-	for _, name := range names {
-		if name != "previous.AppImage" && name != "transaction.json" {
-			return 125
-		}
+	// All expected entries are opened by name below; reject extra entries.
+	names, err := directory.Readdirnames(entryCount + 1)
+	directory.Close()
+	if (err != nil && err != io.EOF) || len(names) != entryCount {
+		return 125
 	}
 	journal := filepath.Join(folder, "transaction.json")
 	info, err := os.Lstat(journal)
 	if err != nil || info.Size() < 1 || info.Size() > 4096 {
 		return 125
 	}
-	journalBefore, ok := restartVerifiedFile(journal, journalHash, info.Size(), true)
+	journalBefore, ok := restartVerifiedFile(journal, journalHash, info.Size(), 1, true)
 	if !ok {
 		return 125
 	}
-	current, ok := restartVerifiedFile(target, nextHash, nextSize, false)
+	current, ok := restartVerifiedFile(replacement, nextHash, nextSize, 1, beforeRename)
 	if !ok {
 		return 125
 	}
 	backup := filepath.Join(folder, "previous.AppImage")
-	previous, ok := restartVerifiedFile(backup, previousHash, previousSize, false)
+	previous, ok := restartVerifiedFile(backup, previousHash, previousSize, backupLinks, false)
 	if !ok {
 		return 125
 	}
-	after, err := os.Lstat(target)
-	if err != nil || !restartSame(current, after) {
+	if !restartGroupIdle() {
 		return 125
 	}
-	after, err = os.Lstat(backup)
-	if err != nil || !restartSame(previous, after) || !restartGroupIdle() {
-		return 125
+	verified := map[string]os.FileInfo{replacement: current, backup: previous, journal: journalBefore, folder: folderBefore, filepath.Dir(target): parentBefore}
+	if beforeRename {
+		verified[target] = previous
 	}
-	for path, before := range map[string]os.FileInfo{journal: journalBefore, folder: folderBefore, filepath.Dir(target): parentBefore} {
+	for path, before := range verified {
 		after, err := os.Lstat(path)
 		if err != nil {
 			return 125
 		}
 		same := restartSame(before, after)
-		if before.IsDir() {
+		if path == filepath.Dir(target) {
 			left, right := before.Sys().(*syscall.Stat_t), after.Sys().(*syscall.Stat_t)
 			same = os.SameFile(before, after) && before.Mode() == after.Mode() && left.Uid == right.Uid
 		}
@@ -206,10 +211,12 @@ func restoreFailedRestart(target, profile, nextHash string, nextSize int64, prev
 			return 125
 		}
 	}
-	if os.Rename(backup, target) != nil || !restartSync(filepath.Dir(target)) || !restartSync(folder) {
-		return 125
+	if !beforeRename {
+		if os.Rename(backup, target) != nil || !restartSync(filepath.Dir(target)) || !restartSync(folder) {
+			return 125
+		}
+		restartRestorationNotice(profile)
 	}
-	restartRestorationNotice(profile)
 	// Leave the journal for the restored app's normal startup recovery. No retry loop.
 	command := restartCommand(target, profile, true)
 	if command.Start() != nil {

@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -104,6 +104,12 @@ test
   .each([
     'exited',
     'not-executable',
+    'before-rename',
+    'before-rename-changed-stage',
+    'before-rename-copied-backup',
+    'before-rename-extra-link',
+    'before-rename-unknown-file',
+    'before-rename-changed-journal',
     'changed-backup',
     'changed-journal',
     'changed-target',
@@ -138,8 +144,23 @@ test
     const predecessor = '#!/bin/sh\nprintf "%s" "$1" > "$0.restored"\n';
     const journal = JSON.stringify({ fixture: 'retained predecessor' });
     await mkdir(recovery, { mode: 0o700 });
-    await writeFile(target, replacement, { mode: 0o700 });
-    await writeFile(recovery + '/previous.AppImage', predecessor, { mode: 0o700 });
+    const beforeRename = scenario.startsWith('before-rename');
+    await writeFile(target, beforeRename ? predecessor : replacement, { mode: 0o700 });
+    const backup = recovery + '/previous.AppImage';
+    if (beforeRename) {
+      await writeFile(
+        recovery + '/next.AppImage',
+        scenario === 'before-rename-changed-stage' ? 'altered' : replacement,
+        { mode: 0o700 },
+      );
+      if (scenario === 'before-rename-copied-backup') {
+        // Both inodes have the expected bytes and link count, but differ in identity.
+        await writeFile(backup, predecessor, { mode: 0o700 });
+        await link(target, target + '.second');
+        await link(backup, target + '.second-backup');
+      } else await link(target, backup);
+      if (scenario === 'before-rename-extra-link') await link(target, target + '.extra');
+    } else await writeFile(backup, predecessor, { mode: 0o700 });
     await writeFile(recovery + '/transaction.json', journal, { mode: 0o600 });
     const digest = (value: string) => createHash('sha256').update(value).digest('hex');
     const args = [
@@ -152,8 +173,8 @@ test
       digest(journal),
     ];
     if (scenario === 'changed-backup') await writeFile(recovery + '/previous.AppImage', 'changed');
-    if (scenario === 'changed-journal') await writeFile(recovery + '/transaction.json', '{}');
-    if (scenario === 'unknown-file') await writeFile(recovery + '/unexpected', 'preserve');
+    if (scenario.endsWith('changed-journal')) await writeFile(recovery + '/transaction.json', '{}');
+    if (scenario.endsWith('unknown-file')) await writeFile(recovery + '/unexpected', 'preserve');
     const supervisionStarted = performance.now();
     const parent = spawn(
       process.execPath,
@@ -190,7 +211,23 @@ test
         .toBe(true);
       if (['unconfirmed-running', 'live-descendant'].includes(scenario))
         expect(performance.now() - supervisionStarted).toBeGreaterThanOrEqual(59000);
-      if (['exited', 'not-executable', 'delayed-descendant'].includes(scenario)) {
+      if (beforeRename) {
+        if (scenario === 'before-rename') {
+          await expect
+            .poll(() => readFile(target + '.restored', 'utf8'))
+            .toBe(`--user-data-dir=${root}`);
+        } else {
+          await expect(readFile(target + '.restored')).rejects.toMatchObject({ code: 'ENOENT' });
+        }
+        expect(await readFile(target, 'utf8')).toBe(predecessor);
+        expect(await readFile(backup, 'utf8')).toBe(predecessor);
+        expect(await readFile(recovery + '/next.AppImage', 'utf8')).toBe(
+          scenario === 'before-rename-changed-stage' ? 'altered' : replacement,
+        );
+        await expect(readFile(join(root, 'updates/rollback-notice.json'))).rejects.toMatchObject({
+          code: 'ENOENT',
+        });
+      } else if (['exited', 'not-executable', 'delayed-descendant'].includes(scenario)) {
         await expect
           .poll(() => readFile(target + '.restored', 'utf8'))
           .toBe(`--user-data-dir=${root}`);
@@ -204,7 +241,7 @@ test
         expect(await readFile(target, 'utf8')).toBe(
           scenario === 'changed-target' ? 'changed' : replacement,
         );
-        if (scenario === 'unknown-file')
+        if (scenario.endsWith('unknown-file'))
           expect(await readFile(recovery + '/unexpected', 'utf8')).toBe('preserve');
         if (['unconfirmed-running', 'live-descendant'].includes(scenario))
           expect(await stopped(Number(await readFile(target + '.child', 'utf8')))).toBe(false);

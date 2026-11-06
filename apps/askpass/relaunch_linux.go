@@ -54,12 +54,12 @@ func runRelaunch(args []string) int {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if _, ok := restartVerifiedFile(args[1], args[3], size, false); !ok {
-		return 125
+	if _, ok := restartVerifiedFile(args[1], args[3], size, 1, false); !ok {
+		return reopenPredecessor(args[1], args[2], args[3], size, args[5], previousSize, args[7], true)
 	}
 	commandToRun := restartCommand(args[1], args[2], false)
 	if commandToRun.Start() != nil {
-		return restoreFailedRestart(args[1], args[2], args[3], size, args[5], previousSize, args[7])
+		return reopenPredecessor(args[1], args[2], args[3], size, args[5], previousSize, args[7], false)
 	}
 	finished := make(chan struct{})
 	var exited <-chan struct{} = finished
@@ -86,7 +86,7 @@ func runRelaunch(args []string) int {
 		// identity reserved for the existing supervision window; restore only
 		// after the group is idle, without terminating a running application.
 		if launcherExited && restartGroupIdle() {
-			return restoreFailedRestart(args[1], args[2], args[3], size, args[5], previousSize, args[7])
+			return reopenPredecessor(args[1], args[2], args[3], size, args[5], previousSize, args[7], false)
 		}
 	}
 }
