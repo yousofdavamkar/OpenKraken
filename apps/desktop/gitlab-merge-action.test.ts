@@ -1,15 +1,15 @@
-import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
+import { afterAll, expect, test } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { http, HttpResponse } from 'msw';
-import { setupServer } from 'msw/node';
+import { providerServer } from '../../tests/provider-server.js';
 import { protection } from '../../tests/provider-protection.js';
 import { gitlabMergeFixture } from '../../tests/gitlab-fixtures.js';
 import { ProviderService } from './src/providers.js';
 import { ProviderVault } from './src/provider-vault.js';
 const root = await mkdtemp(join(tmpdir(), 'openkraken-gitlab-merge-action-'));
-const server = setupServer();
+const server = providerServer();
 const repository = { owner: 'group/subgroup', name: 'project' };
 const target = { repository, number: 7 };
 const intent = {
@@ -20,10 +20,7 @@ const intent = {
   mergeMessage: 'Merge message',
   squashMessage: 'Squash message',
 };
-beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
-afterEach(() => server.resetHandlers());
 afterAll(async () => {
-  server.close();
   await rm(root, { recursive: true, force: true });
 });
 async function setup(name: string, origin = 'https://gitlab.com') {

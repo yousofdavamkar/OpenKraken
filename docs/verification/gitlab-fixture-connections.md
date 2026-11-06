@@ -18,3 +18,9 @@ Local evidence:
 - `/tmp/openkraken-gitlab-control-4.log`: restored-control failure.
 
 To repeat the control experiment, create eight temporary test files alongside the original with the contents of `apps/desktop/gitlab-merges.test.ts` from commit `d2d35d0`. Run `pnpm exec vitest run apps/desktop/gitlab-repro-*.test.ts` in a bounded loop of ten attempts. For the workaround comparison, copy the current fixture instead. Remove all temporary copies afterward. Do not run packaging or Electron acceptance while changing test/build artifacts. The failure is intermittent: one passing control run is not sufficient evidence that it is absent.
+
+## Provider cancellation and rejection fixtures
+
+During AppImage verification the full suite failed six GitHub, GitLab and Bitbucket fixture tests. The six suites failed together on a second run. Some calls produced generic transport errors where a mocked authentication or rejection status was expected. Two cancellation tests timed out waiting for their pending request to reach the handler. One affected file passed in isolation.
+
+The shared test fixture now sets `Connection: close` on requests before sending them through MSW. This also applies when a handler is waiting for cancellation and has not sent response headers yet. The original six suites passed five consecutive grouped runs (38 tests per run). A full rerun revealed the same class of failure in the GitLab merge-action fixture. Using the same fixture there passed all seven suites together (44 tests). Production transports keep their existing connection policy.

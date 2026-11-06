@@ -1,9 +1,9 @@
-import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
+import { afterAll, expect, test } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { http, HttpResponse } from 'msw';
-import { setupServer } from 'msw/node';
+import { providerServer } from '../../tests/provider-server.js';
 import { protection } from '../../tests/provider-protection.js';
 import {
   bitbucketPullFixture,
@@ -15,13 +15,10 @@ import { ProviderVault } from './src/provider-vault.js';
 import { resultSchema } from '@openkraken/ipc-contract';
 
 const root = await mkdtemp(join(tmpdir(), 'openkraken-bitbucket-pulls-'));
-const server = setupServer();
+const server = providerServer();
 const repository = { owner: 'team', name: 'project' };
 const api = 'https://api.bitbucket.org/2.0';
-beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
-afterEach(() => server.resetHandlers());
 afterAll(async () => {
-  server.close();
   await rm(root, { recursive: true, force: true });
 });
 async function setup(name: string) {
