@@ -1,6 +1,8 @@
-import { _electron as electron, expect, test } from '@playwright/test';
+import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { RepositoryPreferences } from '../../packages/git-core/src/preferences.js';
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus, release, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -15,8 +17,26 @@ test('real-repository first paint, paging and scrolling budgets', async ({
   const path = resolve(repository!);
   const profile = mkdtempSync(join(tmpdir(), 'openkraken-bench-'));
   const args = [resolve('apps/desktop'), `--user-data-dir=${profile}`];
-  let app = await electron.launch({ args });
+  let app: ElectronApplication | undefined;
   try {
+    let hiddenTags: string[] = [];
+    if (process.env.OPENKRAKEN_BENCH_HIDDEN_TAGS === '1') {
+      hiddenTags = execFileSync(
+        'git',
+        ['for-each-ref', '--count=10000', '--format=%(refname)', 'refs/tags'],
+        {
+          cwd: path,
+          encoding: 'utf8',
+          maxBuffer: 16 * 1024 * 1024,
+        },
+      )
+        .trimEnd()
+        .split('\n');
+      expect(hiddenTags).toHaveLength(10000);
+      const id = createHash('sha256').update(realpathSync(path)).digest('hex');
+      await new RepositoryPreferences(profile).save(id, { hiddenRefs: hiddenTags });
+    }
+    app = await electron.launch({ args });
     if (warm) {
       const prime = await app.firstWindow();
       await app.evaluate(({ dialog }, folder) => {
@@ -127,6 +147,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       git: git('--version'),
       platform: `${process.platform} ${process.arch} ${release()}`,
       cpu: cpus()[0]?.model,
+      hiddenRefCount: hiddenTags.length,
       firstPaintMs,
       firstPaintPhases,
       page5000Ms: pages,
@@ -163,6 +184,15 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       contentType: 'application/json',
     });
     await page.screenshot({ path: testInfo.outputPath('real-repository.png') });
+    if (hiddenTags.length) {
+      // Check the saved view after taking timings and the screenshot.
+      const name = hiddenTags[0]!;
+      await page.getByLabel('Filter references').fill(name);
+      await expect(page.getByRole('button', { name: `Hide ${name}`, exact: true })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+    }
     expect(mountedRows).toBeLessThan(100);
     expect.soft(mountedReferences).toBeLessThan(100);
     expect.soft(firstPaintMs).toBeLessThan(500);
@@ -170,7 +200,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
     // 60 Hz is ~16.67 ms; allow 2 ms scheduling jitter in the headless runner.
     expect.soft(p95FrameMs).toBeLessThan(18.7);
   } finally {
-    await app.close();
+    await app?.close();
     rmSync(profile, { recursive: true, force: true });
   }
 });
