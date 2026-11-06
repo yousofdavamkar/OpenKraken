@@ -89,3 +89,60 @@ test('serialized responses retain Git text, paging and errors through the sandbo
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('large Git snapshots expose complete ordinary refs through both public response formats', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-large-refs-ipc-'));
+  const repository = createFixture(join(root, 'repo'), 'linear', 5);
+  const head = fixtureGit(repository, ['rev-parse', 'HEAD']);
+  fixtureGit(
+    repository,
+    ['update-ref', '--stdin'],
+    Array.from({ length: 10000 }, (_, i) => `create refs/tags/fixture-${i} ${head}\n`).join(''),
+  );
+  fixtureGit(repository, ['pack-refs', '--all']);
+  fixtureGit(repository, ['branch', 'Ångström/🌱']);
+  const names = fixtureGit(repository, ['for-each-ref', '--format=%(refname)']).split('\n');
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, repository);
+    const result = await page.evaluate(async () => {
+      const opened = await window.openkraken.request({ id: crypto.randomUUID(), method: 'open' });
+      if (opened.kind !== 'snapshot') throw new Error('Expected an ordinary snapshot');
+      const refreshed: Result = JSON.parse(
+        await window.openkraken.request(
+          { id: crypto.randomUUID(), method: 'refresh', repoId: opened.snapshot.repository.id },
+          'json',
+        ),
+      );
+      if (refreshed.kind !== 'snapshot') throw new Error('Expected a serialized snapshot');
+      return {
+        names: opened.snapshot.refs.map((ref) => ref.name),
+        same: JSON.stringify(opened.snapshot.refs) === JSON.stringify(refreshed.snapshot.refs),
+        branch: opened.snapshot.refs.find((ref) => ref.shortName === 'Ångström/🌱'),
+        annotated: opened.snapshot.refs.find((ref) => ref.name === 'refs/tags/annotated'),
+      };
+    });
+    expect(result.names).toEqual(names);
+    expect(result.same).toBe(true);
+    expect(result.branch).toMatchObject({
+      kind: 'local',
+      objectType: 'commit',
+      target: head,
+      isHead: false,
+    });
+    expect(result.annotated).toMatchObject({
+      kind: 'tag',
+      objectType: 'tag',
+      peeledType: 'commit',
+      peeled: expect.stringMatching(/^[a-f0-9]{40}$/),
+    });
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
