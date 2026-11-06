@@ -1,6 +1,18 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. On Linux x64 the 50,000-ref filtered graph improved from 13.9 seconds to 1.17 seconds after indexing hidden references. First paint still exceeds the 500 ms gate on every large-ref sample. Watcher-warm status and minimum Git compatibility have earlier passing results. Native Windows/macOS acceptance, production release gates and the remaining [M6](m6-progress.md)/[M7](m7-progress.md) scope are open.
+M8 remains in progress. On Linux x64 the 50,000-ref filtered graph improved from 13.9 seconds to a median of 1.08 seconds after indexing hidden references and compacting the Git utility reply. First paint still exceeds the 500 ms gate on every large-ref sample. Watcher-warm status and minimum Git compatibility have earlier passing results. Native Windows/macOS acceptance, production release gates and the remaining [M6](m6-progress.md)/[M7](m7-progress.md) scope are open.
+
+## Git utility snapshot transfer
+
+The utility now sends ordinary commit refs in a compact private format on large snapshots. Main validates and expands them before forwarding the result. An Electron regression compares both public formats against one another and the ordered names from native Git in a repository with over 10,000 refs.
+
+On Linux x64, three 50,000-distinct-target runs had a median first paint of 1,039.7 ms, compared with a baseline median of 1,112.7 ms. Across five fixture cohorts, 44 of 45 pages met the 300 ms budget and all fifteen scroll measurements passed. See the [full timing record](m8-reference-performance.md#git-utility-snapshot-transfer) for individual samples, including the 309.9 ms page miss and the nine large-ref first-paint misses.
+
+The production build, TypeScript checks and full lint passed. With Git LFS enabled, the native/unit suite passed 816 tests in 101 files, with 14 skipped. Tests cover the compact wire format, SHA-1 and SHA-256, Unicode names, annotated tags, tracking metadata, malformed input and both public reply formats. Both serialized IPC desktop tests also passed on the minimum supported Git 2.38.0.
+
+The initial Linux desktop run had 194 passes, five opt-in skips and one 307.3 ms blame first-screen miss. Its timer included Playwright visibility polling. The test now records the duration from the renderer click timestamp to the animation frame after the first attribution text is visible at its on-screen position. It also reports the driver duration and still enforces 300 ms. Eight isolated runs measured 96.8–219.0 ms to the visible frame and 106.2–284.4 ms on the driver. The original miss had no renderer timestamp.
+
+A second complete Linux desktop run enabled the local Gitea container, native Git LFS and fish/zsh fixtures, full Linux history and the two-million-commit/100,000-file status fixture. **All 200 Electron tests passed with zero skips in 11.4 minutes**, including six graph visual comparisons and the blame first-screen check at 218.9 ms. Full Linux history painted in 371.7 ms, its three pages took 224.6–242.1 ms and scroll p95 was 16.8 ms. Ten watcher-warm clean/dirty status requests took 231.3–283.9 ms. An external edit became visible in 872.3 ms. Linux CI now includes the saved-account push and remote-deletion tests in its Gitea job. The 50,000-ref measurements above are separate from this suite.
 
 ## Large-reference graph views and history decoding
 
