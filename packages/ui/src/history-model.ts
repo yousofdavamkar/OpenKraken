@@ -1,4 +1,10 @@
-import type { Commit, Ref, Snapshot } from '@openkraken/ipc-contract';
+import {
+  graphRefVisibility,
+  type Commit,
+  type GraphView,
+  type Ref,
+  type Snapshot,
+} from '@openkraken/ipc-contract';
 export interface DisplayCommit extends Commit {
   kind: 'commit' | 'wip' | 'conflict' | 'worktree';
 }
@@ -67,13 +73,15 @@ export interface RefBadge {
   names: string[];
   kind: string;
 }
-export function refBadges(refs: Ref[]) {
+export function refBadges(refs: Ref[], view: GraphView = { hiddenRefs: [] }) {
+  const isVisible = graphRefVisibility(view);
   const groups = new Map<string, RefBadge[]>();
   // Allocate a label index only when a target has more than one ref. Most
   // targets in large histories have a single badge and need no second map.
   const indexes = new Map<string, Map<string, RefBadge>>();
   const key = (kind: string, label: string) => `${kind}\0${label}`;
   for (const ref of refs) {
+    if (!isVisible(ref.name)) continue;
     const oid = ref.peeled ?? ref.target;
     const label =
       ref.kind === 'remote' ? ref.shortName.split('/').slice(1).join('/') : ref.shortName;

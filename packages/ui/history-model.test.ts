@@ -122,3 +122,27 @@ test(
     expect(elapsedMs).toBeLessThan(1000);
   },
 );
+
+test('large hidden-ref lists preserve visible badge order and solo takes precedence', () => {
+  const refs: Ref[] = Array.from({ length: 50000 }, (_, i) => ({
+    name: `refs/tags/benchmark-${String(i).padStart(5, '0')}`,
+    shortName: String(i),
+    kind: 'tag',
+    target: 'a'.repeat(40),
+    objectType: 'commit',
+    peeledType: '',
+    isHead: false,
+  }));
+  const hiddenRefs = refs.filter((_, i) => i % 5 === 0).map((ref) => ref.name);
+  const start = performance.now();
+  const badges = refBadges(refs, { hiddenRefs }).get(refs[0]!.target)!;
+  const elapsed = performance.now() - start;
+  expect(badges.map((badge) => badge.names[0])).toEqual(
+    refs.filter((_, i) => i % 5 !== 0).map((ref) => ref.name),
+  );
+  expect(elapsed).toBeLessThan(1000);
+  expect(refBadges(refs, { hiddenRefs, soloRef: refs[0]!.name }).get(refs[0]!.target)).toEqual([
+    { label: '0', kind: 'tag', names: [refs[0]!.name] },
+  ]);
+  expect(refBadges(refs, { hiddenRefs, soloRef: 'refs/tags/missing' }).size).toBe(0);
+});

@@ -1,3 +1,4 @@
+import { graphRefVisibility } from '@openkraken/ipc-contract';
 import { LfsTransfers, type LfsPullPlan } from './lfs-transfers.js';
 import { lfsState } from './lfs.js';
 import { LfsSetup, type LfsSetupPlan } from './lfs-setup.js';
@@ -318,42 +319,33 @@ export class RepositoryService {
         ]);
         const status = statusParser.finish();
         // Keep missing ref preferences: a deleted solo ref must not silently reveal all history.
-        const visible = refs.filter((r) =>
-          view.soloRef ? r.name === view.soloRef : !view.hiddenRefs.includes(r.name),
-        );
-        const pinned = visible.find(
-          (r) =>
-            r.name === view.pinnedRef &&
-            r.kind !== 'stash' &&
-            (r.objectType === 'commit' || r.peeledType === 'commit'),
-        );
-        // Filter non-commit tags. Explicit OIDs on stdin avoid ref/option ambiguity.
-        const starts = new Set(
-          visible
-            .filter(
-              (r) => r.kind !== 'stash' && (r.objectType === 'commit' || r.peeledType === 'commit'),
-            )
-            .map((r) => r.peeled ?? r.target),
-        );
+        const isVisible = graphRefVisibility(view);
+        const starts = new Set<string>();
+        let hasStash = false;
+        let pinnedOid: string | undefined;
+        for (const ref of refs) {
+          if (!isVisible(ref.name)) continue;
+          if (ref.kind === 'stash') {
+            hasStash = true;
+            continue;
+          }
+          // Filter non-commit tags. Explicit OIDs on stdin avoid ref/option ambiguity.
+          if (ref.objectType !== 'commit' && ref.peeledType !== 'commit') continue;
+          const oid = ref.peeled ?? ref.target;
+          starts.add(oid);
+          if (ref.name === view.pinnedRef) pinnedOid = oid;
+        }
         const head = repository.head;
-        if (
-          head.oid &&
-          !view.soloRef &&
-          (head.kind === 'detached' || !view.hiddenRefs.includes(head.ref))
-        )
+        if (head.oid && !view.soloRef && (head.kind === 'detached' || isVisible(head.ref)))
           starts.add(head.oid);
         for (const worktree of worktrees?.entries ?? []) {
           if (worktree.current || !worktree.head) continue;
-          const visible = worktree.branch
-            ? view.soloRef
-              ? worktree.branch === view.soloRef
-              : !view.hiddenRefs.includes(worktree.branch)
-            : !view.soloRef;
+          const visible = worktree.branch ? isVisible(worktree.branch) : !view.soloRef;
           if (visible) starts.add(worktree.head);
         }
         // Walk stash bases with normal history, but hide index/untracked parents.
         let stashCommits: Commit[] = [];
-        if (visible.some((r) => r.kind === 'stash')) {
+        if (hasStash) {
           const stashes = new HistoryParser();
           await this.run(
             ['log', '-g', '--max-count=200', `--format=commit %H%n${HISTORY_FORMAT}`, 'refs/stash'],
@@ -431,7 +423,7 @@ export class RepositoryService {
           repository,
           view,
           worktrees,
-          pinnedOid: pinned ? (pinned.peeled ?? pinned.target) : undefined,
+          pinnedOid,
           refs,
           status,
           commits: page.commits,

@@ -333,6 +333,15 @@ export const graphViewSchema = z
   })
   .strict();
 export type GraphView = z.infer<typeof graphViewSchema>;
+/** Compile one membership lookup per graph view, shared by traversal and badge rendering. */
+export function graphRefVisibility(view: GraphView): (name: string) => boolean {
+  const { soloRef, hiddenRefs } = view;
+  if (soloRef) return (name) => name === soloRef;
+  if (!hiddenRefs.length) return () => true;
+  const hidden = new Set(hiddenRefs);
+  return (name) => !hidden.has(name);
+}
+
 export const snapshotSchema = z.object({
   view: graphViewSchema,
   worktrees: worktreeStateSchema.optional(),

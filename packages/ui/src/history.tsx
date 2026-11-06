@@ -82,14 +82,7 @@ export function History() {
     [rows],
   );
   const badges = useMemo(
-    () =>
-      refBadges(
-        snapshot?.refs.filter((r) =>
-          snapshot.view.soloRef
-            ? r.name === snapshot.view.soloRef
-            : !snapshot.view.hiddenRefs.includes(r.name),
-        ) ?? [],
-      ),
+    () => (snapshot ? refBadges(snapshot.refs, snapshot.view) : undefined),
     [snapshot?.refs, snapshot?.view],
   );
   useLayoutEffect(() => {
@@ -345,7 +338,7 @@ export function History() {
                   </code>
                   <span role="gridcell" className="commit-subject" title={commit.body}>
                     <CommitBadges
-                      badges={badges.get(commit.oid) ?? noBadges}
+                      badges={badges?.get(commit.oid) ?? noBadges}
                       oid={commit.oid}
                       open={(opener) => {
                         if (snapshot)
@@ -394,7 +387,7 @@ export function History() {
         <CommitReferencesDialog
           key={references.oid}
           oid={references.oid}
-          badges={badges.get(references.oid) ?? noBadges}
+          badges={badges?.get(references.oid) ?? noBadges}
           close={closeReferences}
         />
       )}
