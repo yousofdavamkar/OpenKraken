@@ -29,6 +29,24 @@ test('large reference sidebar stays bounded and filtered actions survive scrolli
     await expect(page.getByTestId('commit-count')).toContainText('2,000 commits');
     const sidebar = page.locator('.refs');
     expect(await sidebar.locator('.ref').count()).toBeLessThan(80);
+    const firstItem = sidebar.getByRole('listitem').first();
+    const firstRef = firstItem.locator('.ref');
+    // A row can grow independently of other branches (for example, to display an error).
+    for (const minHeight of ['250px', '']) {
+      await firstRef.evaluate((element, height) => {
+        element.style.minHeight = height;
+      }, minHeight);
+      await expect
+        .poll(() =>
+          firstItem.evaluate((item) =>
+            Math.abs(
+              item.nextElementSibling!.getBoundingClientRect().top -
+                item.getBoundingClientRect().bottom,
+            ),
+          ),
+        )
+        .toBeLessThan(1);
+    }
     const filter = sidebar.getByRole('textbox', { name: 'Filter references', exact: true });
     await expect(sidebar.getByRole('status')).toHaveText(
       `${refCount.toLocaleString()} matching references`,
@@ -44,6 +62,10 @@ test('large reference sidebar stays bounded and filtered actions survive scrolli
     await expect(sidebar.getByRole('status')).toHaveText(
       `${refCount.toLocaleString()} matching references`,
     );
+    await filter.fill('TOPIC-0998');
+    await expect(
+      sidebar.getByRole('button', { name: 'Rename branch topic-0998', exact: true }),
+    ).toBeVisible();
     await filter.fill('TOPIC-0999');
     const rename = sidebar.getByRole('button', { name: 'Rename branch topic-0999', exact: true });
     await expect(rename).toBeVisible();

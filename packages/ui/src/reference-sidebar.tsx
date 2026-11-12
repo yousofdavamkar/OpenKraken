@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
-import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { defaultRangeExtractor, measureElement, useVirtualizer } from '@tanstack/react-virtual';
 import type { Ref, Snapshot } from '@openkraken/ipc-contract';
 import { RefControls } from './ref-controls.js';
 import { ReferenceActions } from './references.js';
@@ -77,14 +77,28 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
       : -1;
     return index < 0 ? undefined : index;
   }, [rows, focused]);
-  const virtual = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => scroll.current,
-    getItemKey: (index) => {
+  const getItemKey = useCallback(
+    (index: number) => {
       const row = rows[index]!;
       return row.kind === 'ref' ? row.reference.name : row.title;
     },
-    estimateSize: (index) => (rows[index]?.kind === 'heading' ? 48 : 120),
+    [rows],
+  );
+  const estimatedHeights = useRef(new Map<Ref['kind'] | 'heading', number>());
+  const rowKind = (row: Row) => (row.kind === 'ref' ? row.reference.kind : row.kind);
+  const virtual = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scroll.current,
+    getItemKey,
+    estimateSize: (index) =>
+      estimatedHeights.current.get(rowKind(rows[index]!)) ??
+      (rows[index]!.kind === 'heading' ? 48 : 120),
+    measureElement: (element, entry, instance) => {
+      const height = measureElement(element, entry, instance);
+      const row = rows[instance.indexFromElement(element)];
+      if (row && height > 0) estimatedHeights.current.set(rowKind(row), height);
+      return height;
+    },
     overscan: 4,
     // A focused action or its modal must survive scrolling offscreen.
     rangeExtractor: (range) =>
