@@ -134,3 +134,94 @@ test('a preference write failure leaves the old page usable and a later successf
     await service.dispose();
   }
 });
+
+test('a pending status scan overlaps history, and a late status failure keeps the previous cursor', async () => {
+  const path = createFixture(join(root, 'parallel-status'), 'linear', 2050);
+  const service = new RepositoryService('git');
+  const repo = await service.open(path);
+  const first = await service.snapshot(repo.id);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const native = runner.runGit;
+  const run = vi.spyOn(runner, 'runGit').mockImplementation(async (git, args, options) => {
+    if (args[0] === 'status' && args.includes('--branch')) {
+      await gate;
+      throw new runner.GitError('STATUS_TEST_FAILURE', 'Late status failure');
+    }
+    return native(git, args, options);
+  });
+  const page = vi.spyOn(HistoryCursor.prototype, 'page');
+  const closed = vi.spyOn(HistoryCursor.prototype, 'close');
+  const pending = service.snapshot(repo.id).then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  try {
+    await vi.waitFor(
+      () =>
+        expect(page.mock.settledResults.some((result) => result.type === 'fulfilled')).toBe(true),
+      { timeout: 3000 },
+    );
+    release();
+    expect(await pending).toMatchObject({ code: 'STATUS_TEST_FAILURE' });
+    expect(closed).toHaveBeenCalledTimes(1);
+    const more = await service.page(repo.id, first.cursor, first.commits.length, 50);
+    expect(more.commits).toHaveLength(50);
+  } finally {
+    release();
+    await pending;
+    page.mockRestore();
+    closed.mockRestore();
+    run.mockRestore();
+    await service.dispose();
+  }
+});
+
+test('a failed history walk cancels and drains its in-flight status scan', async () => {
+  const path = createFixture(join(root, 'parallel-history-failure'), 'linear', 2050);
+  const service = new RepositoryService('git');
+  const repo = await service.open(path);
+  const first = await service.snapshot(repo.id);
+  missingParent(path);
+  const native = runner.runGit;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let scanSignal: AbortSignal | undefined;
+  const run = vi.spyOn(runner, 'runGit').mockImplementation(async (git, args, options) => {
+    if (args[0] === 'status' && args.includes('--branch')) {
+      const cancelled = options?.signal;
+      if (!cancelled) throw new Error('Expected a cancellable status read');
+      scanSignal = cancelled;
+      await new Promise<void>((resolve) => {
+        if (cancelled.aborted) resolve();
+        else cancelled.addEventListener('abort', () => resolve(), { once: true });
+      });
+      await gate;
+      throw new runner.GitError('CANCELLED', 'Status scan stopped');
+    }
+    return native(git, args, options);
+  });
+  const controller = new AbortController();
+  let rejected = false;
+  const pending = service.snapshot(repo.id, controller.signal).catch((error: unknown) => {
+    rejected = true;
+    return error;
+  });
+  try {
+    await vi.waitFor(() => expect(scanSignal?.aborted).toBe(true), { timeout: 3000 });
+    expect(rejected).toBe(false);
+    release();
+    expect(await pending).toMatchObject({ code: 'GIT_FAILED' });
+    expect((await service.page(repo.id, first.cursor, 2000, 50)).commits).toHaveLength(50);
+  } finally {
+    controller.abort();
+    release();
+    await pending;
+    run.mockRestore();
+    await service.dispose();
+  }
+});

@@ -316,127 +316,34 @@ export class RepositoryService {
       async () => {
         const view = requestedView ?? (await this.preferences.load(id));
         const repository = refresh ? await this.open(known.path, signal) : known;
-        const statusParser = new StatusParser();
-        const [refs, , worktrees] = await Promise.all([
-          this.referenceReader.read(repository.path, signal),
-          repository.isBare
-            ? Promise.resolve()
-            : this.run(
-                [
-                  'status',
-                  '--porcelain=v2',
-                  '-z',
-                  '--branch',
-                  '--untracked-files=all',
-                  '--renames',
-                ],
-                {
-                  cwd: repository.path,
-                  signal,
-                  onStdout: (chunk) => {
-                    statusParser.push(chunk);
-                    observeStatus?.(chunk);
-                  },
-                },
-              ),
-          exists(join(repository.commonDir, 'worktrees')).then((present) =>
-            present ? this.worktreeManager(id).manager.list(signal) : undefined,
-          ),
-        ]);
-        const status = statusParser.finish();
-        // Keep missing ref preferences: a deleted solo ref must not silently reveal all history.
-        const isVisible = graphRefVisibility(view);
-        const starts = new Set<string>();
-        let hasStash = false;
-        let pinnedOid: string | undefined;
-        for (const ref of refs) {
-          if (!isVisible(ref.name)) continue;
-          if (ref.kind === 'stash') {
-            hasStash = true;
-            continue;
-          }
-          // Filter non-commit tags. Explicit OIDs on stdin avoid ref/option ambiguity.
-          if (ref.objectType !== 'commit' && ref.peeledType !== 'commit') continue;
-          const oid = ref.peeled ?? ref.target;
-          starts.add(oid);
-          if (ref.name === view.pinnedRef) pinnedOid = oid;
-        }
-        const head = repository.head;
-        if (head.oid && !view.soloRef && (head.kind === 'detached' || isVisible(head.ref)))
-          starts.add(head.oid);
-        for (const worktree of worktrees?.entries ?? []) {
-          if (worktree.current || !worktree.head) continue;
-          const visible = worktree.branch ? isVisible(worktree.branch) : !view.soloRef;
-          if (visible) starts.add(worktree.head);
-        }
-        // Walk stash bases with normal history, but hide index/untracked parents.
-        let stashCommits: Commit[] = [];
-        if (hasStash) {
-          const stashes = new HistoryParser();
-          await this.run(
-            ['log', '-g', '--max-count=200', `--format=commit %H%n${HISTORY_FORMAT}`, 'refs/stash'],
-            { cwd: repository.path, signal, onStdout: (b) => stashes.push(b) },
-          );
-          stashCommits = stashes
-            .finish()
-            .map((c) => ({ ...c, parents: c.parents.slice(0, 1), isStash: true }));
-          for (const stash of stashCommits) if (stash.parents[0]) starts.add(stash.parents[0]);
-        }
-        await this.cache?.flush();
-        let cache: HistoryCache | undefined;
-        if (
-          this.dataDir &&
-          !process.env.GIT_SHALLOW_FILE &&
-          !process.env.GIT_REPLACE_REF_BASE &&
-          !process.env.GIT_NO_REPLACE_OBJECTS
-        ) {
-          const [version, config, ...metadata] = await Promise.all([
-            this.text(repository.path, ['--version'], signal),
-            this.text(repository.path, ['config', '--null', '--list'], signal),
-            ...['shallow', 'info/grafts', 'objects/info/alternates'].map((p) =>
-              readFile(join(repository.commonDir, p))
-                .then((b) => b.toString('base64'))
-                .catch(() => ''),
-            ),
-            ...['objects/info/commit-graph', 'objects/info/commit-graphs/commit-graph-chain'].map(
-              (p) =>
-                stat(join(repository.commonDir, p))
-                  .then((s) => `${s.size}:${s.mtimeMs}`)
-                  .catch(() => ''),
-            ),
-          ]);
-          const key = createHash('sha256')
-            .update(
-              JSON.stringify({
-                format: 2,
-                version,
-                config,
-                metadata,
-                starts: [...starts],
-                stashes: stashCommits.map((c) => c.oid),
-                replacements: refs.filter((r) => r.name.startsWith('refs/replace/')),
-              }),
-            )
-            .digest('hex');
-          cache = new HistoryCache(this.dataDir, id, key);
-        }
-        const seed = await cache?.load();
-        const history = new HistoryCursor(
-          this.git,
-          repository.path,
-          [...starts],
-          stashCommits,
-          seed,
+        const stop = new AbortController();
+        const readSignal = signal ? AbortSignal.any([signal, stop.signal]) : stop.signal;
+        const refRead = this.referenceReader.read(repository.path, readSignal);
+        const worktreeRead = exists(join(repository.commonDir, 'worktrees')).then((present) =>
+          present ? this.worktreeManager(id).manager.list(readSignal) : undefined,
         );
-        let page: Awaited<ReturnType<HistoryCursor['page']>>;
+        const graphRead = Promise.all([refRead, worktreeRead]).then(([refs, worktrees]) =>
+          this.prepareHistory(repository, view, refs, worktrees, readSignal),
+        );
+        const statusRead = this.readSnapshotStatus(repository, readSignal, observeStatus);
+        let graph: Awaited<typeof graphRead>;
+        let status: Snapshot['status'];
         try {
-          page = await history.page(0, 2000, signal);
+          [graph, status] = await Promise.all([graphRead, statusRead]);
           if (requestedView) await this.preferences.save(id, requestedView);
           if (signal?.aborted) throw new GitError('CANCELLED', 'Snapshot loading cancelled');
         } catch (error) {
-          await history.close();
+          stop.abort();
+          const [candidate] = await Promise.allSettled([
+            graphRead,
+            statusRead,
+            refRead,
+            worktreeRead,
+          ]);
+          if (candidate.status === 'fulfilled') await candidate.value.history.close();
           throw error;
         }
+        const { history, cache, page, refs, worktrees, pinnedOid } = graph;
         // Commit the prepared snapshot only after all fallible reads complete.
         // Keep the displayed cursor and its cache usable on failure/cancellation.
         for (const cursor of this.histories.values()) await cursor.close();
@@ -460,6 +367,119 @@ export class RepositoryService {
       },
       signal,
     );
+  }
+  private async readSnapshotStatus(
+    repository: Repository,
+    signal: AbortSignal,
+    observeStatus?: (chunk: Buffer) => void,
+  ) {
+    const parser = new StatusParser();
+    if (!repository.isBare) {
+      await this.run(
+        ['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all', '--renames'],
+        {
+          cwd: repository.path,
+          signal,
+          onStdout: (chunk) => {
+            parser.push(chunk);
+            observeStatus?.(chunk);
+          },
+        },
+      );
+    }
+    return parser.finish();
+  }
+  private async prepareHistory(
+    repository: Repository,
+    view: GraphView,
+    refs: Snapshot['refs'],
+    worktrees: Snapshot['worktrees'],
+    signal: AbortSignal,
+  ) {
+    // Keep missing ref preferences: a deleted solo ref must not silently reveal all history.
+    const isVisible = graphRefVisibility(view);
+    const starts = new Set<string>();
+    let hasStash = false;
+    let pinnedOid: string | undefined;
+    for (const ref of refs) {
+      if (!isVisible(ref.name)) continue;
+      if (ref.kind === 'stash') {
+        hasStash = true;
+        continue;
+      }
+      // Filter non-commit tags. Explicit OIDs on stdin avoid ref/option ambiguity.
+      if (ref.objectType !== 'commit' && ref.peeledType !== 'commit') continue;
+      const oid = ref.peeled ?? ref.target;
+      starts.add(oid);
+      if (ref.name === view.pinnedRef) pinnedOid = oid;
+    }
+    const head = repository.head;
+    if (head.oid && !view.soloRef && (head.kind === 'detached' || isVisible(head.ref)))
+      starts.add(head.oid);
+    for (const worktree of worktrees?.entries ?? []) {
+      if (worktree.current || !worktree.head) continue;
+      const visible = worktree.branch ? isVisible(worktree.branch) : !view.soloRef;
+      if (visible) starts.add(worktree.head);
+    }
+    // Walk stash bases with normal history, but hide index/untracked parents.
+    let stashCommits: Commit[] = [];
+    if (hasStash) {
+      const stashes = new HistoryParser();
+      await this.run(
+        ['log', '-g', '--max-count=200', `--format=commit %H%n${HISTORY_FORMAT}`, 'refs/stash'],
+        { cwd: repository.path, signal, onStdout: (b) => stashes.push(b) },
+      );
+      stashCommits = stashes
+        .finish()
+        .map((c) => ({ ...c, parents: c.parents.slice(0, 1), isStash: true }));
+      for (const stash of stashCommits) if (stash.parents[0]) starts.add(stash.parents[0]);
+    }
+    await this.cache?.flush();
+    let cache: HistoryCache | undefined;
+    if (
+      this.dataDir &&
+      !process.env.GIT_SHALLOW_FILE &&
+      !process.env.GIT_REPLACE_REF_BASE &&
+      !process.env.GIT_NO_REPLACE_OBJECTS
+    ) {
+      const [version, config, ...metadata] = await Promise.all([
+        this.text(repository.path, ['--version'], signal),
+        this.text(repository.path, ['config', '--null', '--list'], signal),
+        ...['shallow', 'info/grafts', 'objects/info/alternates'].map((p) =>
+          readFile(join(repository.commonDir, p))
+            .then((b) => b.toString('base64'))
+            .catch(() => ''),
+        ),
+        ...['objects/info/commit-graph', 'objects/info/commit-graphs/commit-graph-chain'].map((p) =>
+          stat(join(repository.commonDir, p))
+            .then((s) => `${s.size}:${s.mtimeMs}`)
+            .catch(() => ''),
+        ),
+      ]);
+      const key = createHash('sha256')
+        .update(
+          JSON.stringify({
+            format: 2,
+            version,
+            config,
+            metadata,
+            starts: [...starts],
+            stashes: stashCommits.map((c) => c.oid),
+            replacements: refs.filter((r) => r.name.startsWith('refs/replace/')),
+          }),
+        )
+        .digest('hex');
+      cache = new HistoryCache(this.dataDir, repository.id, key);
+    }
+    const seed = await cache?.load();
+    const history = new HistoryCursor(this.git, repository.path, [...starts], stashCommits, seed);
+    try {
+      const page = await history.page(0, 2000, signal);
+      return { history, cache, page, refs, worktrees, pinnedOid };
+    } catch (error) {
+      await history.close();
+      throw error;
+    }
   }
   private history(id: string, cursor: string) {
     const history = this.histories.get(id);
