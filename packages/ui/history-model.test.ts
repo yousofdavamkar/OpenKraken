@@ -2,7 +2,8 @@ import { expect, test } from 'vitest';
 import {
   navigationTarget,
   projectCommits,
-  refBadges,
+  refsByTarget,
+  groupRefBadges,
   selectRow,
   refNavigationTargets,
 } from './src/history-model.js';
@@ -61,17 +62,18 @@ test('local and remote badges sharing a name and target combine; tags stay separ
     { name: 'refs/remotes/fork/main', shortName: 'fork/main', kind: 'remote', target: 'a' },
     { name: 'refs/heads/other-main', shortName: 'main', kind: 'local', target: 'b' },
   ] as Ref[];
-  expect(refBadges(refs).get('a')).toEqual([
+  expect(groupRefBadges(refsByTarget(refs).get('a')!).badges).toEqual([
     {
       label: 'main',
+      nameCount: 3,
       names: ['refs/heads/main', 'refs/remotes/origin/main', 'refs/remotes/fork/main'],
       kind: 'branch',
     },
-    { label: 'main', names: ['refs/tags/main'], kind: 'tag' },
-    { label: 'feature', names: ['refs/heads/feature'], kind: 'branch' },
+    { label: 'main', nameCount: 1, names: ['refs/tags/main'], kind: 'tag' },
+    { label: 'feature', nameCount: 1, names: ['refs/heads/feature'], kind: 'branch' },
   ]);
-  expect(refBadges(refs).get('b')).toEqual([
-    { label: 'main', names: ['refs/heads/other-main'], kind: 'branch' },
+  expect(groupRefBadges(refsByTarget(refs).get('b')!).badges).toEqual([
+    { label: 'main', nameCount: 1, names: ['refs/heads/other-main'], kind: 'branch' },
   ]);
 });
 
@@ -108,13 +110,19 @@ test(
       isHead: index === 0,
     }));
     const start = performance.now();
-    const badges = refBadges(refs).get(target)!;
+    const { badges } = groupRefBadges(refsByTarget(refs).get(target)!);
     const elapsedMs = performance.now() - start;
     expect(badges).toHaveLength(50000);
     expect(badges.map((badge) => badge.names[0])).toEqual(refs.map((ref) => ref.name));
-    expect(badges[0]).toEqual({ label: 'topic-0', kind: 'branch', names: ['refs/heads/topic-0'] });
+    expect(badges[0]).toEqual({
+      label: 'topic-0',
+      nameCount: 1,
+      kind: 'branch',
+      names: ['refs/heads/topic-0'],
+    });
     expect(badges.at(-1)).toEqual({
       label: 'topic-49999',
+      nameCount: 1,
       kind: 'branch',
       names: ['refs/heads/topic-49999'],
     });
@@ -135,14 +143,60 @@ test('large hidden-ref lists preserve visible badge order and solo takes precede
   }));
   const hiddenRefs = refs.filter((_, i) => i % 5 === 0).map((ref) => ref.name);
   const start = performance.now();
-  const badges = refBadges(refs, { hiddenRefs }).get(refs[0]!.target)!;
+  const { badges } = groupRefBadges(refsByTarget(refs, { hiddenRefs }).get(refs[0]!.target)!);
   const elapsed = performance.now() - start;
   expect(badges.map((badge) => badge.names[0])).toEqual(
     refs.filter((_, i) => i % 5 !== 0).map((ref) => ref.name),
   );
   expect(elapsed).toBeLessThan(1000);
-  expect(refBadges(refs, { hiddenRefs, soloRef: refs[0]!.name }).get(refs[0]!.target)).toEqual([
-    { label: '0', kind: 'tag', names: [refs[0]!.name] },
+  expect(
+    groupRefBadges(refsByTarget(refs, { hiddenRefs, soloRef: refs[0]!.name }).get(refs[0]!.target)!)
+      .badges,
+  ).toEqual([{ label: '0', nameCount: 1, kind: 'tag', names: [refs[0]!.name] }]);
+  expect(refsByTarget(refs, { hiddenRefs, soloRef: 'refs/tags/missing' }).size).toBe(0);
+});
+
+test('a capped badge preview counts matching branches even after later labels overflow', () => {
+  const ref = (kind: 'local' | 'remote' | 'tag', shortName: string): Ref => ({
+    name:
+      (kind === 'local' ? 'refs/heads/' : kind === 'remote' ? 'refs/remotes/' : 'refs/tags/') +
+      shortName,
+    kind,
+    shortName,
+    target: 'a'.repeat(40),
+    objectType: 'commit',
+    isHead: false,
+    peeledType: '',
+  });
+  const refs = [
+    ref('local', 'main'),
+    ref('tag', 'main'),
+    ref('local', 'feature'),
+    ref('tag', 'v1'),
+    ref('remote', 'origin/main'),
+    ref('remote', 'fork/main'),
+    ref('remote', 'last/main'),
+  ];
+  const { badges, overflow } = groupRefBadges(refs, 3);
+  expect(overflow).toBe(true);
+  expect(badges).toEqual([
+    {
+      kind: 'branch',
+      label: 'main',
+      names: ['refs/heads/main', 'refs/remotes/origin/main', 'refs/remotes/fork/main'],
+      nameCount: 4,
+    },
+    { kind: 'tag', label: 'main', names: ['refs/tags/main'], nameCount: 1 },
+    { kind: 'branch', label: 'feature', names: ['refs/heads/feature'], nameCount: 1 },
   ]);
-  expect(refBadges(refs, { hiddenRefs, soloRef: 'refs/tags/missing' }).size).toBe(0);
+  expect(groupRefBadges(refs).badges.flatMap((b) => b.names)).toEqual([
+    'refs/heads/main',
+    'refs/remotes/origin/main',
+    'refs/remotes/fork/main',
+    'refs/remotes/last/main',
+    'refs/tags/main',
+    'refs/heads/feature',
+    'refs/tags/v1',
+  ]);
+  expect(groupRefBadges(refs.slice(0, 3), 3).overflow).toBe(false);
 });

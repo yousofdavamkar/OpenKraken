@@ -3,14 +3,14 @@ import type { KeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { passageBuckets } from '@openkraken/graph';
 import { paintGraph, ROW_HEIGHT, LANE_WIDTH, GRAPH_PADDING } from '@openkraken/graph/canvas';
-import { navigationTarget, refBadges, refNavigationTargets } from './history-model.js';
+import { navigationTarget, refsByTarget, refNavigationTargets } from './history-model.js';
 import { AuthorAvatar, useVisibleAvatars } from './avatars.js';
 import { CommandButton } from './commands.js';
 import { useRepository } from './store.js';
 import { useTheme } from './theme.js';
 import { CommitBadges, CommitReferencesDialog } from './commit-references.js';
-import type { RefBadge } from './history-model.js';
-const noBadges: RefBadge[] = [];
+import type { Ref } from '@openkraken/ipc-contract';
+const noRefs: Ref[] = [];
 const dateFormatter = new Intl.DateTimeFormat();
 export function History() {
   const theme = useTheme();
@@ -81,8 +81,8 @@ export function History() {
     () => new Set(rows.filter((r) => r.kind !== 'commit').map((r) => r.oid)),
     [rows],
   );
-  const badges = useMemo(
-    () => (snapshot ? refBadges(snapshot.refs, snapshot.view) : undefined),
+  const commitRefs = useMemo(
+    () => (snapshot ? refsByTarget(snapshot.refs, snapshot.view) : undefined),
     [snapshot?.refs, snapshot?.view],
   );
   useLayoutEffect(() => {
@@ -338,7 +338,7 @@ export function History() {
                   </code>
                   <span role="gridcell" className="commit-subject" title={commit.body}>
                     <CommitBadges
-                      badges={badges?.get(commit.oid) ?? noBadges}
+                      refs={commitRefs?.get(commit.oid) ?? noRefs}
                       oid={commit.oid}
                       open={(opener) => {
                         if (snapshot)
@@ -387,7 +387,7 @@ export function History() {
         <CommitReferencesDialog
           key={references.oid}
           oid={references.oid}
-          badges={badges?.get(references.oid) ?? noBadges}
+          refs={commitRefs?.get(references.oid) ?? noRefs}
           close={closeReferences}
         />
       )}

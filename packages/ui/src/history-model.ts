@@ -68,45 +68,47 @@ export function projectCommits(
   }
   return result;
 }
-export interface RefBadge {
-  label: string;
-  names: string[];
-  kind: string;
-}
-export function refBadges(refs: Ref[], view: GraphView = { hiddenRefs: [] }) {
+export function refsByTarget(refs: readonly Ref[], view: GraphView = { hiddenRefs: [] }) {
   const isVisible = graphRefVisibility(view);
-  const groups = new Map<string, RefBadge[]>();
-  // Allocate a label index only when a target has more than one ref. Most
-  // targets in large histories have a single badge and need no second map.
-  const indexes = new Map<string, Map<string, RefBadge>>();
-  const key = (kind: string, label: string) => `${kind}\0${label}`;
+  const targets = new Map<string, Ref[]>();
   for (const ref of refs) {
     if (!isVisible(ref.name)) continue;
     const oid = ref.peeled ?? ref.target;
+    const bucket = targets.get(oid);
+    if (bucket) bucket.push(ref);
+    else targets.set(oid, [ref]);
+  }
+  return targets;
+}
+
+interface RefBadge {
+  label: string;
+  kind: string;
+  names: string[];
+  nameCount: number;
+}
+
+// Keep counting names on the displayed badges after the preview fills.
+export function groupRefBadges(refs: readonly Ref[], limit = Infinity) {
+  const groups = new Map<string, RefBadge>();
+  let overflow = false;
+  for (const ref of refs) {
     const label =
       ref.kind === 'remote' ? ref.shortName.split('/').slice(1).join('/') : ref.shortName;
     const kind = ref.kind === 'local' || ref.kind === 'remote' ? 'branch' : ref.kind;
-    const badges = groups.get(oid);
-    if (!badges) {
-      groups.set(oid, [{ label, kind, names: [ref.name] }]);
-      continue;
-    }
-    let index = indexes.get(oid);
-    if (!index) {
-      const first = badges[0]!;
-      index = new Map([[key(first.kind, first.label), first]]);
-      indexes.set(oid, index);
-    }
-    const identity = key(kind, label);
-    const existing = index.get(identity);
-    if (existing) existing.names.push(ref.name);
-    else {
-      const badge = { label, kind, names: [ref.name] };
-      badges.push(badge);
-      index.set(identity, badge);
+    const key = kind + '\0' + label;
+    const badge = groups.get(key);
+    if (badge) {
+      badge.nameCount++;
+      if (badge.names.length < limit) badge.names.push(ref.name);
+      else overflow = true;
+    } else if (groups.size < limit) {
+      groups.set(key, { label, kind, names: [ref.name], nameCount: 1 });
+    } else {
+      overflow = true;
     }
   }
-  return groups;
+  return { badges: [...groups.values()], overflow };
 }
 export interface Selection {
   focus?: string;
