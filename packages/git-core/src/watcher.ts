@@ -139,6 +139,19 @@ export class RepositoryWatcher {
     if (!this.closed) this.notify({ repoId: this.repo.id, domains, mode: this.mode });
   }
   async primeSnapshot(read: () => Promise<Snapshot>): Promise<Snapshot> {
+    return this.primeObservedSnapshot(async () => {
+      const statusHash = await this.readStatusHash().catch(() => {
+        if (!this.closed) this.fallback();
+        return undefined;
+      });
+      if (this.closed) throw new Error('Watcher closed before snapshot');
+      return { snapshot: await read(), statusHash };
+    });
+  }
+
+  async primeObservedSnapshot(
+    read: () => Promise<{ snapshot: Snapshot; statusHash?: string }>,
+  ): Promise<Snapshot> {
     if (this.closed || this.primed || this.baseline || this.checking || this.starting)
       throw new Error('Only a fresh watcher can prime a snapshot');
     this.primed = true;
@@ -148,9 +161,14 @@ export class RepositoryWatcher {
       const metadata = await this.captureMetadata().catch(() => undefined);
       if (this.closed) throw new Error('Watcher closed before snapshot');
       if (!metadata) this.fallback();
-      const snapshot = await read();
-      if (!this.closed && metadata)
-        this.baseline = this.hashes(referenceHashes(snapshotReferenceLines(snapshot.refs)), metadata);
+      const { snapshot, statusHash } = await read();
+      if (!this.closed && metadata && statusHash)
+        this.baseline = this.hashes(
+          referenceHashes(snapshotReferenceLines(snapshot.refs)),
+          metadata,
+          statusHash,
+          snapshot.worktrees,
+        );
       return snapshot;
     })();
     try {
@@ -230,17 +248,36 @@ export class RepositoryWatcher {
       throw error;
     }
   }
-  private async captureMetadata() {
-    const run = (args: string[]) =>
-      this.run(args, {
+  private async readStatusHash() {
+    if (this.repo.isBare) return digest('');
+    const result = await this.run(
+      ['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all', '--renames'],
+      {
         cwd: this.repo.path,
         signal: this.controller.signal,
         timeoutMs: 10000,
-      });
-    const [status, head, operation, config, worktrees, shallow, fetch] = await Promise.all([
-      this.repo.isBare
-        ? undefined
-        : run(['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all', '--renames']),
+      },
+    );
+    return digest(result.stdout);
+  }
+
+  private readWorktrees() {
+    return stat(join(this.repo.commonDir, 'worktrees')).then(
+      () =>
+        new Worktrees(
+          this.repo,
+          (args, options) => this.run(args, { timeoutMs: 10000, ...options }),
+          new Map(),
+        ).list(this.controller.signal),
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return undefined;
+        throw error;
+      },
+    );
+  }
+
+  private async captureMetadata() {
+    const [head, operation, config, shallow, fetch] = await Promise.all([
       this.metadata(join(this.repo.gitDir, 'HEAD')),
       Promise.all(
         [
@@ -258,25 +295,13 @@ export class RepositoryWatcher {
           this.metadata(p),
         ),
       ),
-      stat(join(this.repo.commonDir, 'worktrees')).then(
-        () =>
-          new Worktrees(
-            this.repo,
-            (args, options) => this.run(args, { timeoutMs: 10000, ...options }),
-            new Map(),
-          ).list(this.controller.signal),
-        (error: NodeJS.ErrnoException) => {
-          if (error.code === 'ENOENT') return undefined;
-          throw error;
-        },
-      ),
       this.metadata(join(this.repo.commonDir, 'shallow')),
       this.metadata(join(this.repo.gitDir, 'FETCH_HEAD')),
     ]);
-    return { status: status?.stdout, head, operation, config, worktrees, shallow, fetch };
+    return { head, operation, config, shallow, fetch };
   }
   private async fingerprint(): Promise<Record<RefreshDomain, string>> {
-    const [refs, metadata] = await Promise.all([
+    const [refs, metadata, statusHash, worktrees] = await Promise.all([
       this.run(
         ['for-each-ref', '--format=%(refname)%00%(objectname)%00%(upstream)%00%(upstream:track)'],
         {
@@ -286,17 +311,26 @@ export class RepositoryWatcher {
         },
       ),
       this.captureMetadata(),
+      this.readStatusHash(),
+      this.readWorktrees(),
     ]);
-    return this.hashes(referenceHashes(refs.stdout.toString().split('\n'), refs.stdout), metadata);
+    return this.hashes(
+      referenceHashes(refs.stdout.toString().split('\n'), refs.stdout),
+      metadata,
+      statusHash,
+      worktrees,
+    );
   }
   private hashes(
     refs: ReturnType<typeof referenceHashes>,
     metadata: Awaited<ReturnType<RepositoryWatcher['captureMetadata']>>,
+    statusHash: string,
+    worktrees: Snapshot['worktrees'],
   ): Record<RefreshDomain, string> {
-    const { status, head, operation, config, worktrees, shallow, fetch } = metadata;
+    const { head, operation, config, shallow, fetch } = metadata;
     this.otherWorktrees = worktrees?.entries.filter((entry) => !entry.current) ?? [];
     return {
-      status: digest(status ?? ''),
+      status: statusHash,
       refs: digest(refs.all + head + fetch),
       graph: digest(refs.graph + head + shallow),
       stash: refs.stash,

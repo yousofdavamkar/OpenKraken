@@ -37,6 +37,46 @@ test('initial watcher baseline reuses snapshot refs and agrees with a fresh nati
     await service.dispose();
   }
 });
+test('watcher priming shares snapshot reads and detects a staged blob change with the same status codes', async () => {
+  const path = createFixture(join(root, 'observed-snapshot'));
+  const linked = join(root, 'captured-status-linked');
+  fixtureGit(path, ['worktree', 'add', '-b', 'linked', linked]);
+  await writeFile(join(path, 'captured.txt'), 'first');
+  fixtureGit(path, ['add', 'captured.txt']);
+  const service = new RepositoryService('git');
+  const repo = await service.open(path);
+  const events: string[][] = [];
+  const watch = new RepositoryWatcher('git', repo, (event) => events.push(event.domains));
+  const run = vi.spyOn(runner, 'runGit');
+  try {
+    const snapshot = await watch.primeObservedSnapshot(() =>
+      service.observeInitialSnapshot(repo.id),
+    );
+    expect(snapshot.worktrees?.entries).toHaveLength(2);
+    expect(snapshot.status.entries.find((entry) => entry.path === 'captured.txt')).toMatchObject({
+      index: 'A',
+      worktree: '.',
+    });
+    expect(
+      run.mock.calls.filter(([, args]) => args[0] === 'status' && args.includes('--branch')),
+    ).toHaveLength(1);
+    expect(
+      run.mock.calls.filter(([, args]) => args[0] === 'worktree' && args[1] === 'list'),
+    ).toHaveLength(1);
+    await watch.check();
+    expect(events).toEqual([]);
+    await writeFile(join(path, 'captured.txt'), 'second');
+    fixtureGit(path, ['add', 'captured.txt']);
+    await writeFile(join(linked, 'untracked.txt'), 'another checkout');
+    await watch.check();
+    expect(events).toEqual([expect.arrayContaining(['status', 'worktreeStatus'])]);
+  } finally {
+    run.mockRestore();
+    await watch.close();
+    await service.dispose();
+  }
+});
+
 test('large Unicode reference baselines distinguish tag-only updates from branch movement', async () => {
   const path = createFixture(join(root, 'large-observed-refs'));
   const head = fixtureGit(path, ['rev-parse', 'HEAD']);
@@ -54,7 +94,7 @@ test('large Unicode reference baselines distinguish tag-only updates from branch
   const events: string[][] = [];
   const watch = new RepositoryWatcher('git', repo, (event) => events.push(event.domains));
   try {
-    await watch.primeSnapshot(() => service.snapshot(repo.id, undefined, false));
+    await watch.primeObservedSnapshot(() => service.observeInitialSnapshot(repo.id));
     await watch.check();
     expect(events).toEqual([]);
     fixtureGit(path, ['update-ref', '-d', names[1]!]);
@@ -139,15 +179,15 @@ test('changes after snapshot capture are observed when subscriptions start', asy
   const events: string[][] = [];
   const watch = new RepositoryWatcher('git', repo, (event) => events.push(event.domains));
   try {
-    await watch.primeSnapshot(async () => {
-      const snapshot = await service.snapshot(repo.id, undefined, false);
+    await watch.primeObservedSnapshot(async () => {
+      const observation = await service.observeInitialSnapshot(repo.id);
       fixtureGit(path, ['tag', '-d', 'annotated']);
       fixtureGit(path, ['update-ref', '-d', 'refs/stash']);
       fixtureGit(path, ['branch', 'new-branch']);
       fixtureGit(path, ['checkout', '--detach']);
       fixtureGit(path, ['config', 'watcher.test', 'changed']);
       await writeFile(join(path, 'tracked.txt'), 'after snapshot');
-      return snapshot;
+      return observation;
     });
     expect(events).toEqual([]);
     await watch.start();

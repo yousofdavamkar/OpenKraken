@@ -276,10 +276,28 @@ export class RepositoryService {
     refresh = true,
     requestedView?: GraphView,
   ): Promise<Snapshot> {
+    return this.readSnapshot(id, signal, refresh, requestedView);
+  }
+
+  async observeInitialSnapshot(id: string, signal?: AbortSignal) {
+    const status = createHash('sha256');
+    const snapshot = await this.readSnapshot(id, signal, false, undefined, (chunk) =>
+      status.update(chunk),
+    );
+    return { snapshot, statusHash: status.digest('hex') };
+  }
+
+  private readSnapshot(
+    id: string,
+    signal: AbortSignal | undefined,
+    refresh: boolean,
+    requestedView?: GraphView,
+    observeStatus?: (chunk: Buffer) => void,
+  ): Promise<Snapshot> {
     const start = performance.now();
     return this.snapshotQueue.run(
       false,
-      () => this.prepareSnapshot(id, signal, refresh, requestedView, start),
+      () => this.prepareSnapshot(id, signal, refresh, requestedView, start, observeStatus),
       signal,
     );
   }
@@ -289,6 +307,7 @@ export class RepositoryService {
     refresh: boolean,
     requestedView: GraphView | undefined,
     start: number,
+    observeStatus?: (chunk: Buffer) => void,
   ): Promise<Snapshot> {
     const known = this.repositories.get(id);
     if (!known) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
@@ -311,7 +330,14 @@ export class RepositoryService {
                   '--untracked-files=all',
                   '--renames',
                 ],
-                { cwd: repository.path, signal, onStdout: (b) => statusParser.push(b) },
+                {
+                  cwd: repository.path,
+                  signal,
+                  onStdout: (chunk) => {
+                    statusParser.push(chunk);
+                    observeStatus?.(chunk);
+                  },
+                },
               ),
           exists(join(repository.commonDir, 'worktrees')).then((present) =>
             present ? this.worktreeManager(id).manager.list(signal) : undefined,

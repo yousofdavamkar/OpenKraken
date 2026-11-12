@@ -586,17 +586,15 @@ async function executeGit(
               ? await git.init(request.path, request.branch, signal)
               : await git.open(request.path, signal);
   const initialWatcher = 'path' in repo ? prepareWatcher(repo) : undefined;
-  const readSnapshot = () =>
-    git.snapshot(
-      repo.id,
-      signal,
-      request.method === 'refresh',
-      request.method === 'refresh' ? request.view : undefined,
-    );
   try {
     const snapshot = await (initialWatcher
-      ? initialWatcher.primeSnapshot(readSnapshot)
-      : readSnapshot());
+      ? initialWatcher.primeObservedSnapshot(() => git.observeInitialSnapshot(repo.id, signal))
+      : git.snapshot(
+          repo.id,
+          signal,
+          request.method === 'refresh',
+          request.method === 'refresh' ? request.view : undefined,
+        ));
     if (initialWatcher) {
       const previous = watcher;
       clearTimeout(watchStart);
