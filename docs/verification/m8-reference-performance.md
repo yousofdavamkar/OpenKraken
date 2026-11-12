@@ -2,6 +2,26 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Opening status and history
+
+Fresh watchers now seed their status fingerprint from the porcelain bytes consumed by the opening snapshot and reuse its linked worktree list. Graph preparation can start when refs and worktree heads are available, while the current checkout's full status scan continues. A bare repository has no current-checkout scan to overlap. [ADR 0114](../decisions/0114-concurrent-snapshot-status-and-history.md)
+
+| Repository, three openings each             | First paint (ms)            | 5,000-commit page range (ms) |
+| ------------------------------------------- | --------------------------- | ---------------------------- |
+| Two million commits, 100,000 files          | 297.9 / 321.4 / 299.7       | 123.0–206.9                  |
+| Full Linux, one ref                         | 353.8 / 479.2 / 359.4       | 209.9–268.1                  |
+| 50,000 distinct targets                     | 1,021.2 / 1,070.0 / 1,018.0 | 206.9–264.4                  |
+| 50,000 refs at one target                   | 1,105.4 / 938.0 / 893.4     | 209.9–247.1                  |
+| 50,000 distinct targets, 10,000 hidden tags | 1,161.8 / 1,174.6 / 1,049.0 | 220.4–287.4                  |
+
+All 45 pages in the five-fixture run met the 300 ms budget. Graph and large-ref sidebar scrolling measured 16.7–16.8 ms p95. All nine large-ref openings exceeded the 500 ms target. In the default distinct-target view, waiting for the service alone took 791.1–835.1 ms. The synthetic checkout and the single-ref Linux history each met the opening budget in all three runs.
+
+Three earlier alternating baseline/intermediate pairs per fixture isolate watcher reuse before concurrent history preparation. On the synthetic checkout, first paints were 1,329.4 / 414.0 / 469.1 ms at baseline and 655.2 / 403.4 / 332.4 ms with reuse. One intermediate synthetic page took 569.9 ms and its graph scroll p95 was 33.4 ms. The final cohorts ran separately. OS caches stayed populated between samples, so elapsed differences include run order and filesystem cache effects.
+
+A diagnostic build timed the native ref read and parsing at 210.6–242.8 ms and the first history page at 161.6–178.0 ms in the three original distinct-target runs. Hashing the watcher's opening reference set took 37.1–39.2 ms in that build and 29.1–35.4 ms after batching. Production timings exclude the trace probes. The [43 sample records](m8-snapshot-observation-samples.csv) include the six instrumented openings, eighteen paired openings, fifteen five-fixture openings and four Linux follow-ups, including every budget miss. Each used a fresh Electron profile on Linux x64 with native Git 2.53.0. The benchmark retained its original first-paint, paging and scrolling assertions.
+
+The later full desktop suite recorded a 312.3 ms first 5,000-commit page on Linux history. Three isolated X11 runs on the same repository recorded first pages of 303.4 / 260.6 / 349.0 ms. For the slowest page, waiting for the service took 209.6 ms, the worker phase took 116.0 ms and publishing took 23.4 ms. The six later pages passed at 238.2–257.0 ms. First paints passed at 349.7–445.0 ms and graph scrolling measured 16.8 ms p95 in all three runs.
+
 ## Visible commit badges and sidebar scrolling
 
 In three fresh-profile runs on the 50,000-distinct-target fixture, jumping the reference list by 1,400 px per frame produced a 33.4 ms p95. A temporary key-lookup counter measured 36,919,053 lookups over the 120 jumps. Keeping the key callback stable reduced this to 33,827,435. Estimating unseen rows from measured rows of the same kind reduced it to 2,782. All three runs for each instrumented variant gave the same lookup counts. Each mounted row still receives individual resize measurements.

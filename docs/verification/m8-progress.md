@@ -1,6 +1,20 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. On Linux x64 the 50,000-ref sidebar now scrolls at 16.7–16.8 ms p95. Large-ref graph first paints still exceed 500 ms. Watcher-warm status and minimum Git compatibility have earlier passing results. Native Windows/macOS acceptance, production release gates and the remaining [M6](m6-progress.md)/[M7](m7-progress.md) scope are open.
+M8 remains in progress. The single-ref Linux history and the two-million-commit working checkout met first-paint and scrolling budgets on Linux x64. The first 5,000-commit Linux page still sometimes exceeds 300 ms. The 50,000-ref repositories still exceed the 500 ms first-paint target. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+
+## Opening a working checkout and searching many refs
+
+The opening watcher shares the status bytes and linked worktree list read for the displayed snapshot. History begins preparing its first page while the current checkout's status scan runs. Both must finish before the new graph replaces the old one. Native regressions hold each side open, fail the other and check that the previous graph can still page. A separate watcher test changes a staged blob while keeping the same path and status letters. [Snapshot decision](../decisions/0114-concurrent-snapshot-status-and-history.md)
+
+On the two-million-commit, 100,000-file checkout, three fresh-profile first paints took 297.9–321.4 ms. Full Linux history took 353.8–479.2 ms. All 45 pages in the initial five-fixture run passed the 300 ms target, with graph scrolling at 16.7–16.8 ms p95. The nine large-ref openings took 893.4–1,174.6 ms. Ten watcher-warm status requests took 203.9–243.2 ms and an external edit became visible in 861.1 ms. The fixture finished clean. [Performance record and raw samples](m8-reference-performance.md#opening-status-and-history)
+
+Full-history hash search now checks ancestry against all captured graph tips in one revision walk. A regression with 32 distinct tips reproduced 35 native commands when searching for a hash outside the open graph. The same lookup now takes four, including the message, author and object-resolution commands. Coverage includes a visible ancestor, an empty view and a ref created after opening. In a read-only native probe, checking an older ancestor against 50,000 distinct tips took 491.1 ms. Checking HEAD against the other 49,999 tips correctly excluded it in 73.8 ms. A full repository-service search for the older commit returned the expected single result in 21.1 seconds, including both full-history text scans, while the unit suite was running. [Search decision](../decisions/0004-m1-history-and-interaction.md#object-id-lookup-in-the-active-graph)
+
+The production build, TypeScript checks and lint passed. The full Linux native/unit suite with Git LFS enabled passed 822 tests across 101 files, with 14 skipped. Six focused suites passed all 65 tests on the minimum Git 2.38.0. The 200-test Linux Electron run enabled local Gitea, LFS, fish, zsh and the real-repository benchmark fixtures. It passed 195 tests, including all six Canvas goldens.
+
+Three shortcut cases missed focus on the host Wayland session. The keystroke probe found the correct menu accelerator enabled in all 15 launches. Both misses had an unfocused Electron window and web contents. Explicit X11 selection under Xvfb produced 15 successful probes. A fourth failure came from the issue test changing its fixture before the async review had captured the previous revision. The test now waits for the confirmation region before changing the fixture. All four functional cases passed three consecutive times under X11.
+
+The fifth failure was a 312.3 ms first page on full Linux history. The service took 202.5 ms, worker layout took 89.9 ms and publishing took 19.9 ms. The same opening painted in 373.3 ms. Three isolated fresh-profile X11 repeats measured 303.4 / 260.6 / 349.0 ms for that page. All six subsequent pages passed. The three first paints and scroll measurements passed. Local artifacts are under `test-results/m8-observed-full-desktop`, `test-results/m8-x11-focus-and-stale-review` and `test-results/m8-overlap-x11-linux`.
 
 ## Visible commit badges and sidebar scrolling
 
