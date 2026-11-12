@@ -6,6 +6,23 @@ import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'no
 import { cpus, release, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+async function scrollP95(element: HTMLElement | SVGElement) {
+  const samples: number[] = [];
+  let previous = performance.now();
+  for (let i = 0; i < 120; i++) {
+    element.scrollTop = 500 + i * 1400;
+    await new Promise<void>((done) =>
+      requestAnimationFrame((now) => {
+        samples.push(now - previous);
+        previous = now;
+        done();
+      }),
+    );
+  }
+  const frames = samples.slice(2).sort((a, b) => a - b);
+  return frames[Math.floor(frames.length * 0.95)]!;
+}
+
 // Opt-in benchmark: no Git writes. The observer creates/removes its private self-test probe.
 const repository = process.env.OPENKRAKEN_BENCH_REPO;
 const warm = process.env.OPENKRAKEN_BENCH_WARM === '1';
@@ -95,22 +112,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
         await page.evaluate(() => performance.getEntriesByName('history-page').at(-1)!.duration),
       );
     }
-    const frames = await grid.evaluate(async (element) => {
-      const samples: number[] = [];
-      let previous = performance.now();
-      for (let i = 0; i < 120; i++) {
-        element.scrollTop = 500 + i * 1400;
-        await new Promise<void>((done) =>
-          requestAnimationFrame((now) => {
-            samples.push(now - previous);
-            previous = now;
-            done();
-          }),
-        );
-      }
-      return samples.slice(2).sort((a, b) => a - b);
-    });
-    const p95FrameMs = frames[Math.floor(frames.length * 0.95)]!;
+    const p95FrameMs = await grid.evaluate(scrollP95);
     const mountedRows = await grid.getByRole('row').count();
     const mountedReferences = await page.locator('.refs .ref').count();
     await page.getByRole('button', { name: 'Load more commits', exact: true }).click();
@@ -136,6 +138,14 @@ test('real-repository first paint, paging and scrolling budgets', async ({
         workingSetKiB: m.memory.workingSetSize,
       })),
     );
+    const referenceList = page.getByRole('list', { name: 'Reference list', exact: true });
+    let sidebarScrollP95Ms: number | undefined;
+    if (await referenceList.count()) {
+      sidebarScrollP95Ms = await referenceList.evaluate(scrollP95);
+      await referenceList.evaluate((element) => {
+        element.scrollTop = 0;
+      });
+    }
     const git = (...args: string[]) =>
       execFileSync('git', args, { cwd: path, encoding: 'utf8', timeout: 30000 }).trim();
     const measurement = {
@@ -156,6 +166,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       p95FrameMs,
       mountedRows,
       mountedReferences,
+      sidebarScrollP95Ms,
       electronMemory: memory,
       cache: {
         os: 'Not cleared',
