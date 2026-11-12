@@ -17,3 +17,7 @@ This delivery does not add hide/solo/pin, network avatars, tabs, or full M1 rele
 Responses are validated once at the utility-to-main trust boundary with the shared Zod result schema. Main and preload then forward the typed result without additional parse-and-copy passes. Page arrays are frozen before a single store assignment, avoiding thousands of Immer proxy writes while preserving previous row identities.
 
 If a normal branch reaches a stash object, its actual commit DAG takes precedence: it is displayed once as an ordinary merge, rather than adding a duplicate projected stash row. Standalone stash overlay rows still link only to their base. Duplicate reflog entries for the same stash OID produce one overlay node.
+
+## Object ID lookup in the active graph
+
+The history cursor retains the exact start OIDs selected when the graph opened. A hash lookup can return a captured tip directly after resolving it to a commit. For other resolved commits, subtract the ancestry of all captured tips from the queried commit's ancestry in one native revision walk. An empty result means the commit is visible in the open graph. Pass the resolved OID and all excluded OIDs on standard input and limit output to one commit. Commits made visible only by a new ref enter the search scope when the graph refreshes. Message and author matches still contribute to the same results. [Git revision-set semantics](https://git-scm.com/docs/git-rev-list#_description)

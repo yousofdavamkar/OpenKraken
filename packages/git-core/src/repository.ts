@@ -532,27 +532,23 @@ export class RepositoryService {
     let commits = [
       ...new Map([...stashes, ...messages, ...authors].map((c) => [c.oid, c])).values(),
     ];
-    if (/^[0-9a-f]{7,64}$/i.test(query)) {
+    if (history.starts.length && /^[0-9a-f]{7,64}$/i.test(query)) {
       const resolved = await this.text(
         repo.path,
         ['rev-parse', '--verify', '--quiet', '--end-of-options', `${query}^{commit}`],
         signal,
         [0, 1],
       );
-      // Hash lookup must obey the same traversal as message/author search.
-      let reachable = false;
-      if (resolved)
-        for (const tip of history.starts) {
-          const result = await this.run(['merge-base', '--is-ancestor', resolved, tip], {
-            cwd: repo.path,
-            signal,
-            allowedExitCodes: [0, 1],
-          });
-          if (result.exitCode === 0) {
-            reachable = true;
-            break;
-          }
-        }
+      let reachable = history.starts.includes(resolved);
+      if (resolved && !reachable) {
+        // Subtract all visible history. An empty range puts the commit in this view.
+        const remaining = await this.run(['rev-list', '--max-count=1', '--stdin'], {
+          cwd: repo.path,
+          signal,
+          stdin: resolved + '\n^' + history.starts.join('\n^') + '\n',
+        });
+        reachable = remaining.stdout.length === 0;
+      }
       if (reachable) {
         const parser = new HistoryParser();
         await this.run(['log', '-1', `--format=commit %H%n${HISTORY_FORMAT}`, resolved, '--'], {

@@ -110,6 +110,39 @@ test('Git search finds unloaded messages, author/email and object prefixes witho
   ).toHaveLength(200);
 });
 
+test('hash lookup checks many visible tips together and ignores refs added after opening', async () => {
+  const path = createFixture(join(root, 'many-search-tips'), 'linear', 80);
+  const tips = fixtureGit(path, ['rev-list', '--max-count=32', 'HEAD']).split('\n');
+  fixtureGit(
+    path,
+    ['update-ref', '--stdin'],
+    tips.map((oid, i) => `create refs/tags/search-${i} ${oid}\n`).join(''),
+  );
+  const repo = await service.open(path);
+  const snapshot = await service.snapshot(repo.id);
+  const hidden = fixtureGit(path, ['commit-tree', 'HEAD^{tree}', '-m', 'Outside the open graph']);
+  fixtureGit(path, ['update-ref', 'refs/heads/new-since-open', hidden]);
+  const ancestor = fixtureGit(path, ['rev-parse', 'HEAD~60']);
+  const requests = vi.spyOn(runner, 'runGit');
+  try {
+    expect((await service.search(repo.id, snapshot.cursor, hidden)).commits).toEqual([]);
+    // Message, author, prefix resolution and one reachability check for all tips.
+    expect(requests.mock.calls.length).toBeLessThanOrEqual(4);
+    expect(
+      (await service.search(repo.id, snapshot.cursor, ancestor.slice(0, 10))).commits.map(
+        (commit) => commit.oid,
+      ),
+    ).toEqual([ancestor]);
+    const empty = await service.snapshot(repo.id, undefined, true, {
+      hiddenRefs: [],
+      soloRef: 'refs/heads/missing',
+    });
+    expect((await service.search(repo.id, empty.cursor, ancestor)).commits).toEqual([]);
+  } finally {
+    requests.mockRestore();
+  }
+});
+
 test('all-history search includes stash messages without exposing implementation parents', async () => {
   const path = createFixture(join(root, 'stash-search'), 'stash');
   const snapshot = await service.snapshot((await service.open(path)).id);
