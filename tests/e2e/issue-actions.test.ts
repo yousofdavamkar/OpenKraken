@@ -169,6 +169,7 @@ test('issue actions review drafts, refuse stale changes, confirm writes and insp
     await detail.getByRole('button', { name: 'Write issue comment' }).click();
     await modal.getByRole('textbox', { name: 'Comment' }).fill('Keep my comment');
     await modal.getByRole('button', { name: 'Review issue action' }).click();
+    await expect(modal.getByRole('region', { name: 'Confirm issue action' })).toBeVisible();
     await app.evaluate(() => {
       (
         globalThis as typeof globalThis & { issueActionsFixture: { issues: { body: string }[] } }
