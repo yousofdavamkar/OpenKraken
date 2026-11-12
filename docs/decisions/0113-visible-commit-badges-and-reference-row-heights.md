@@ -1,0 +1,7 @@
+# 0113. Build badges for mounted commits and estimate sidebar rows by reference kind
+
+Index the current view's references by their peeled or direct target. The Canvas graph's virtual rows use this index to group badges as they mount. A preview retains the first three groups and the first three names in each group. Later refs that match a displayed group still contribute to its exact count. Opening the commit reference dialog groups the complete bucket in encounter order, including local and remote branches that share a display label.
+
+In the branch and tag sidebar, use the latest positive measured height for that reference kind as the estimate for unseen rows. The first heading uses 48 px and the first ref of each kind uses 120 px until a measurement is available. TanStack Virtual measures each mounted element, including rows that resize independently. The sidebar's key function is stable until the filtered rows change. The commit reference dialog also retains its key function while the matching names are stable.
+
+On the 50,000-ref fixture a fixed estimate made the virtualizer revisit tens of millions of item keys as new rows were measured during a scroll. The measured estimates brought this down to thousands. The [performance record](../verification/m8-reference-performance.md#visible-commit-badges-and-sidebar-scrolling) describes the fixture, timings and outstanding graph startup target.

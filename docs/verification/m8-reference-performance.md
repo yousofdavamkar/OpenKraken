@@ -2,6 +2,27 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Visible commit badges and sidebar scrolling
+
+In three fresh-profile runs on the 50,000-distinct-target fixture, jumping the reference list by 1,400 px per frame produced a 33.4 ms p95. A temporary key-lookup counter measured 36,919,053 lookups over the 120 jumps. Keeping the key callback stable reduced this to 33,827,435. Estimating unseen rows from measured rows of the same kind reduced it to 2,782. All three runs for each instrumented variant gave the same lookup counts. Each mounted row still receives individual resize measurements.
+
+The final production build measured **16.7–16.8 ms p95** for sidebar scrolling in all nine large-ref runs. The existing graph scroll measurement ran before the sidebar measurement. The benchmark records both and restores the sidebar scroll position after sampling. Full Linux history with one ref uses the small sidebar.
+
+The graph now groups badge labels only for mounted commits and builds the complete name list when the dialog opens. A Node probe compared the complete visible previews for the first 32 Linux commits using the same frozen ref records. Across eight alternating pairs with a warm-up and GC before each timed call, median preparation took 14.7 ms before and 11.9 ms after for distinct targets. For a shared target it took 27.8 ms before and 13.8 ms after. These measurements isolate badge preparation. [ADR 0113](../decisions/0113-visible-commit-badges-and-reference-row-heights.md)
+
+| Final build, three runs each                | First paint median (ms) | First paint range (ms) | 5,000-commit page range (ms) |
+| ------------------------------------------- | ----------------------: | ---------------------: | ---------------------------: |
+| 50,000 distinct targets                     |                 1,074.7 |        1,040.7–1,076.2 |                  206.6–252.8 |
+| 50,000 refs at one target                   |                   881.9 |            867.7–979.2 |                  222.2–320.1 |
+| 50,000 distinct targets, 10,000 hidden tags |                 1,091.3 |        1,062.2–1,102.9 |                  203.5–246.6 |
+| Full Linux, one ref                         |                   385.7 |            356.3–912.0 |                  217.7–270.7 |
+
+Every large-ref first paint missed the 500 ms budget. One shared-target page missed the 300 ms budget. The first single-ref Linux run also missed first paint at 912.0 ms. Startup ranges overlap earlier cohorts. For the final distinct-target runs, the median wait for the snapshot response alone was 844.6 ms.
+
+The [36 uninstrumented runs](m8-badge-sidebar-samples.csv) include the original build (`baseline`), on-demand badges (`lazy` and `list-before`), stable item keys (`final`) and measured row estimates (`measured`). Each Electron run used a fresh profile and uncleared OS caches. The first baseline openings took 2,023.5 and 1,522.9 ms for distinct and shared targets respectively. All samples are included.
+
+A separate read-only native probe compared the current reference format with reading identities first and resolving types with one buffered `cat-file --batch-check` over unique object IDs. Both produced identical records on these fixtures. In three trials, the current command took 190–196 ms for distinct targets. The two-command probe including Python reconstruction took 233–257 ms. Shared targets took 152–168 ms and 125–144 ms respectively. The production path continues to use the existing native commands.
+
 ## Git utility snapshot transfer
 
 Three alternating instrumented pairs on the 50,000-distinct-target repository measured 116–123 ms to copy the ordinary utility reply into main. Compact references took 47–50 ms to transfer and 9–12 ms to pack. An experiment using the compact form on the renderer boundary as well reduced its JSON reply from 13.24 MB to 7.37 MB. Main serialization rose from 43–47 ms to 67–74 ms. The shipped change confines the format to the Git utility boundary. See [ADR 0112](../decisions/0112-compact-git-snapshot-references.md).

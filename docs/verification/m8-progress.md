@@ -1,6 +1,12 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. On Linux x64 the 50,000-ref filtered graph improved from 13.9 seconds to a median of 1.08 seconds after indexing hidden references and compacting the Git utility reply. First paint still exceeds the 500 ms gate on every large-ref sample. Watcher-warm status and minimum Git compatibility have earlier passing results. Native Windows/macOS acceptance, production release gates and the remaining [M6](m6-progress.md)/[M7](m7-progress.md) scope are open.
+M8 remains in progress. On Linux x64 the 50,000-ref sidebar now scrolls at 16.7–16.8 ms p95. Large-ref graph first paints still exceed 500 ms. Watcher-warm status and minimum Git compatibility have earlier passing results. Native Windows/macOS acceptance, production release gates and the remaining [M6](m6-progress.md)/[M7](m7-progress.md) scope are open.
+
+## Visible commit badges and sidebar scrolling
+
+The graph indexes visible refs by commit, shows up to three badges per mounted row and three names per tooltip and opens the full grouped name list on demand. The sidebar estimates unseen branch, remote, tag and other row heights from live measurements and continues to measure individual rows. The [performance record](m8-reference-performance.md#visible-commit-badges-and-sidebar-scrolling) covers all 36 runs, the isolated badge and Git measurements and the 500 ms graph startup gate. In the final twelve runs, 35 of 36 pages met the 300 ms budget. One full Linux first paint took 912.0 ms and every large-ref first paint missed the target.
+
+The production build, typecheck and lint passed. Linux verification passed 817 native/unit tests with 14 skipped and all 19 selected Electron tests. Coverage includes six graph visual goldens, paging and search, hidden and pinned refs, exact tooltip and dialog counts, same-count filter replacements, a resizing sidebar row and a focused rename dialog scrolled out of view. The previous complete Linux desktop suite is recorded below.
 
 ## Git utility snapshot transfer
 
