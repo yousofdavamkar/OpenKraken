@@ -65,26 +65,48 @@ export function classifyPath(repo: Repository, path: string): RefreshDomain[] {
   return !repo.isBare && within(repo.path, path) !== undefined ? ['status'] : [];
 }
 const digest = (data: Buffer | string) => createHash('sha256').update(data).digest('hex');
-function snapshotReferenceBytes(refs: readonly Ref[]): Buffer {
-  return Buffer.from(
-    refs
-      .map((ref) => {
-        const upstream = ref.upstream;
-        const tracking = upstream?.gone
-          ? '[gone]'
-          : upstream
-            ? [
-                upstream.ahead ? `ahead ${upstream.ahead}` : '',
-                upstream.behind ? `behind ${upstream.behind}` : '',
-              ]
-                .filter(Boolean)
-                .join(', ')
-            : '';
-        const track = tracking && !upstream?.gone ? `[${tracking}]` : tracking;
-        return `${ref.name}\0${ref.target}\0${upstream?.ref ?? ''}\0${track}\n`;
-      })
-      .join(''),
-  );
+function* snapshotReferenceLines(refs: readonly Ref[]) {
+  for (const ref of refs) {
+    const upstream = ref.upstream;
+    let track = '';
+    if (upstream?.gone) track = '[gone]';
+    else if (upstream && (upstream.ahead || upstream.behind)) {
+      const counts = [];
+      if (upstream.ahead) counts.push(`ahead ${upstream.ahead}`);
+      if (upstream.behind) counts.push(`behind ${upstream.behind}`);
+      track = '[' + counts.join(', ') + ']';
+    }
+    yield `${ref.name}\0${ref.target}\0${upstream?.ref ?? ''}\0${track}`;
+  }
+}
+
+function referenceHashes(lines: Iterable<string>, nativeBytes?: Buffer) {
+  // Preserve native byte identity for names which cannot round-trip through UTF-8.
+  const all = createHash('sha256');
+  if (nativeBytes) all.update(nativeBytes);
+  const graph = createHash('sha256');
+  let allText = '',
+    graphText = '',
+    stash = '';
+  for (const line of lines) {
+    if (!line) continue;
+    if (!nativeBytes) allText += line + '\n';
+    if (!line.startsWith('refs/tags/')) graphText += line + '\n';
+    if (line.startsWith('refs/stash\0')) stash = line;
+    if (allText.length >= 65536) {
+      all.update(allText);
+      allText = '';
+    }
+    if (graphText.length >= 65536) {
+      graph.update(graphText);
+      graphText = '';
+    }
+  }
+  return {
+    all: all.update(allText).digest('hex'),
+    graph: graph.update(graphText).digest('hex'),
+    stash: digest(stash),
+  };
 }
 /** Native notifications are hints. Git determines whether observable state actually changed. */
 export class RepositoryWatcher {
@@ -128,7 +150,7 @@ export class RepositoryWatcher {
       if (!metadata) this.fallback();
       const snapshot = await read();
       if (!this.closed && metadata)
-        this.baseline = this.hashes(snapshotReferenceBytes(snapshot.refs), metadata);
+        this.baseline = this.hashes(referenceHashes(snapshotReferenceLines(snapshot.refs)), metadata);
       return snapshot;
     })();
     try {
@@ -265,21 +287,19 @@ export class RepositoryWatcher {
       ),
       this.captureMetadata(),
     ]);
-    return this.hashes(refs.stdout, metadata);
+    return this.hashes(referenceHashes(refs.stdout.toString().split('\n'), refs.stdout), metadata);
   }
   private hashes(
-    refs: Buffer,
+    refs: ReturnType<typeof referenceHashes>,
     metadata: Awaited<ReturnType<RepositoryWatcher['captureMetadata']>>,
   ): Record<RefreshDomain, string> {
     const { status, head, operation, config, worktrees, shallow, fetch } = metadata;
-    const lines = refs.toString().split('\n');
-    const refHash = digest(refs);
     this.otherWorktrees = worktrees?.entries.filter((entry) => !entry.current) ?? [];
     return {
       status: digest(status ?? ''),
-      refs: digest(refHash + head + fetch),
-      graph: digest(lines.filter((l) => !l.startsWith('refs/tags/')).join('\n') + head + shallow),
-      stash: digest(lines.filter((l) => l.startsWith('refs/stash\0')).join('\n')),
+      refs: digest(refs.all + head + fetch),
+      graph: digest(refs.graph + head + shallow),
+      stash: refs.stash,
       worktrees: worktrees?.revision ?? '',
       worktreeStatus: digest(
         JSON.stringify(

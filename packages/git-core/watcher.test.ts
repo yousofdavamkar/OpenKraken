@@ -37,6 +37,37 @@ test('initial watcher baseline reuses snapshot refs and agrees with a fresh nati
     await service.dispose();
   }
 });
+test('large Unicode reference baselines distinguish tag-only updates from branch movement', async () => {
+  const path = createFixture(join(root, 'large-observed-refs'));
+  const head = fixtureGit(path, ['rev-parse', 'HEAD']);
+  const names = Array.from(
+    { length: 2000 },
+    (_, i) => 'refs/' + (i % 2 ? 'tags/' : 'heads/') + '猫-🌱-' + i,
+  );
+  fixtureGit(
+    path,
+    ['update-ref', '--stdin'],
+    names.map((name) => 'create ' + name + ' ' + head + '\n').join(''),
+  );
+  const service = new RepositoryService('git');
+  const repo = await service.open(path);
+  const events: string[][] = [];
+  const watch = new RepositoryWatcher('git', repo, (event) => events.push(event.domains));
+  try {
+    await watch.primeSnapshot(() => service.snapshot(repo.id, undefined, false));
+    await watch.check();
+    expect(events).toEqual([]);
+    fixtureGit(path, ['update-ref', '-d', names[1]!]);
+    await watch.check();
+    expect(events).toEqual([['refs']]);
+    fixtureGit(path, ['update-ref', '-d', names[0]!]);
+    await watch.check();
+    expect(events[1]).toEqual(['refs', 'graph']);
+  } finally {
+    await watch.close();
+    await service.dispose();
+  }
+});
 test.each(['checkout', 'bare', 'linked'] as const)(
   'snapshot baseline preserves native tracking, tag and stash identities in a %s repository',
   async (kind) => {
