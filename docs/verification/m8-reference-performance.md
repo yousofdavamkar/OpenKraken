@@ -2,6 +2,22 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Reading history cache inputs alongside references
+
+Four paired fresh-profile openings on Linux x64 used the same 1,505,199-commit, 50,000-distinct-target fixture with Git 2.53.0, X11 under Xvfb and populated OS caches. The only bundle switched between runs was the Git utility. The order alternated between pairs. Each run drew 2,000 commits, appended three 5,000-commit pages and scrolled with 12,000 loaded rows.
+
+| Measurement               | Sequential cache reads | Concurrent cache reads |
+| ------------------------- | ---------------------: | ---------------------: |
+| Median first paint        |             1,114.7 ms |             1,135.3 ms |
+| Median utility snapshot   |               518.2 ms |               532.7 ms |
+| First paints below 500 ms |                    0/4 |                    0/4 |
+| Pages below 300 ms        |                  12/12 |                   7/12 |
+| Scroll p95 below 18.7 ms  |                    4/4 |                    2/4 |
+
+The last concurrent run took 2,125.1 ms to paint, including 968.2 ms in the utility snapshot. These measurements show no repeatable end-to-end speedup. A gated native test verifies that a cache config error interrupts a pending ref scan and preserves the displayed cursor. [All eight openings](m8-history-cache-read-samples.csv) · [Scheduling decision](../decisions/0117-history-cache-inputs.md)
+
+Five separate native probes on the distinct-target fixture measured 241.7–285.9 ms for the complete direct ref records and 178.5–258.9 ms for a date-ordered 2,000-commit walk from all distinct tips. A second probe compared direct enumeration with reading identities, deduplicating object IDs, resolving their types with buffered Git processes, and reconstructing the records in Python. Six alternating runs per fixture produced identical bytes. Median times for direct enumeration, one type reader and up to three type readers were 204.5 / 260.9 / 191.9 ms for distinct targets and 171.3 / 129.7 / 132.8 ms for the shared target. The production reference reader still uses direct enumeration.
+
 ## Passing validated references to the renderer
 
 The repository store now requests compact JSON for snapshots. Main checks each reference from the utility, expands ordinary branch, remote and tag records for callers using the object or ordinary JSON API, and passes their compact strings to callers using the new format. Main validates and strips unknown fields from rich reference records in every format. [ADR 0116](../decisions/0116-validated-snapshot-references.md)

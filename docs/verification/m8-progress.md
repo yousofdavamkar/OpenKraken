@@ -2,6 +2,14 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Snapshot startup and commit ID search
+
+Cache configuration now loads while Git enumerates refs. The displayed cursor remains pageable if the config read fails during enumeration. On the 50,000-distinct-target fixture, median first paint across four paired runs moved from 1,114.7 ms to 1,135.3 ms. All eight openings exceeded 500 ms. Seven of twelve pages following the new openings met 300 ms. [Measurements for every opening](m8-reference-performance.md#reading-history-cache-inputs-alongside-references)
+
+All-history search puts a visible commit ID first even when more than 100 newer messages mention the ID. It resolves abbreviated IDs against the object database so a hexadecimal branch name cannot redirect the lookup. Ambiguous prefixes can still match literal commit text. An Electron test opens a colliding name and checks the full object ID in the commit details. [Search decision](../decisions/0004-m1-history-and-interaction.md#object-id-lookup-in-the-active-graph)
+
+The Linux native/unit suite passed 830 tests with 14 skipped. The Git 2.38.0 selection passed 42 tests with 12 skipped. The 24 focused Electron cases passed, including the six graph visual comparisons, followed by the new desktop commit-ID search case on the final build. The graph suite measured 172.3 ms to append 5,000 fixture commits and 16.7 ms scroll p95. The production build and typecheck passed.
+
 ## Large-reference snapshot transfer
 
 Main validates compact reference strings and full exception records received from the Git utility. The repository store can request those validated strings and expand them in the renderer. Object and ordinary JSON callers still receive complete ref records. A Linux replay with 50,000 refs reduced the serialized payload from 9.38 MB to 3.51 MB and the median validation/serialization/decoding time from 172.4 ms to 66.9 ms. In three paired Electron runs on the shared host, compact-format first paints ranged from 1.28 to 2.48 seconds and ordinary-format first paints from 1.33 to 1.74 seconds. All six exceeded 500 ms. [Fixture measurements and comparisons](m8-reference-performance.md#passing-validated-references-to-the-renderer)
