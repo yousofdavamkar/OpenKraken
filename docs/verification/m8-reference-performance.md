@@ -2,6 +2,25 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Transferring history pages
+
+On the first 5,000-commit append after opening the full Linux history, the commit array occupied 7,426,072 bytes as JSON. The unescaped UTF-8 message bodies alone accounted for 5,235,164 bytes. Main now sends the bodies as strings alongside the remaining metadata. [ADR 0115](../decisions/0115-history-page-response.md)
+
+Four paired runs used the same production bundles, changing only the renderer call between the ordinary JSON API and the new page format. Each benchmark opened a fresh Electron profile and appended three consecutive 5,000-commit pages. The order was JSON/split, split/JSON, JSON/split and split/JSON. The repository had 1,505,199 commits and one ref, using Git 2.53.0, Linux x64 and X11 under Xvfb. The OS cache stayed populated. An earlier diagnostic accessed the partial clone before the paired runs. Both paired conditions used that same clone with lazy fetching disabled.
+
+| Measurement                                         |               Whole-page JSON |               Separate bodies |
+| --------------------------------------------------- | ----------------------------: | ----------------------------: |
+| First append, four runs (ms)                        | 289.6 / 298.7 / 338.1 / 366.4 | 291.2 / 248.1 / 284.4 / 241.7 |
+| Median first append (ms)                            |                         318.4 |                         266.2 |
+| Median first request through renderer decoding (ms) |                         208.6 |                         140.3 |
+| Pages under 300 ms                                  |                      10 of 12 |                      12 of 12 |
+
+Four earlier runs using just the new page format also passed all 12 page checks (184.1–285.2 ms). The real-repository test before the desktop restart recorded 283.1 / 269.2 / 214.9 ms, a 372.6 ms first paint and 16.8 ms graph scrolling p95. On the first full-suite run after the host app restarted, first paint took 1,216.3 ms, including 805.6 ms inside the snapshot read. Pages took 305.9 / 294.1 / 307.8 ms and scrolling reached 16.8 ms p95. Three later fresh-profile runs on the same shared host took 584.4–1,300.7 ms per page, 1,319.7–3,012.8 ms to paint and 33.4–83.3 ms p95 to scroll. The host had 12 logical CPUs and reported a one-minute load average of 42.38 near the end of these runs. All samples are retained. These results leave the full-Linux gates open.
+
+On the two-million-commit checkout, all nine pages passed (144.7–211.8 ms). First paints were 1,172.0 / 316.3 / 299.9 ms. On Linux history with 50,000 distinct ref targets, all nine pages passed (186.4–273.3 ms), and all three first paints missed the 500 ms budget (1,754.6 / 1,003.8 / 1,042.2 ms). Graph and sidebar scrolling on that fixture measured 16.7–16.8 ms p95.
+
+The [sample CSV](m8-page-transfer-samples.csv) includes every measured page and opening in this checkpoint. The initial baseline missed three of nine page checks. The diagnostic cohorts cover process-boundary timing (`trace`), utility JSON (`jsonprobe`), packed records (`packed`), worker layout transfer (`geometry`), commit freezing (`freeze`), and compacted fields (`columns`). The `bodies` experiment combined separate message text with experimental layout and freeze changes. The `body-only`, `split1`–`split4`, `distinct`, `synthetic`, `full-desktop`, `restarted-desktop` and `keyboard-final` cohorts used the shipped page implementation in isolation. Benchmark limits and graph layout stayed the same.
+
 ## Opening status and history
 
 Fresh watchers now seed their status fingerprint from the porcelain bytes consumed by the opening snapshot and reuse its linked worktree list. Graph preparation can start when refs and worktree heads are available, while the current checkout's full status scan continues. A bare repository has no current-checkout scan to overlap. [ADR 0114](../decisions/0114-concurrent-snapshot-status-and-history.md)

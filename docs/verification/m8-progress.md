@@ -1,6 +1,16 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. The single-ref Linux history and the two-million-commit working checkout met first-paint and scrolling budgets on Linux x64. The first 5,000-commit Linux page still sometimes exceeds 300 ms. The 50,000-ref repositories still exceed the 500 ms first-paint target. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+
+## Appending history pages
+
+The renderer requests commit message bodies separately from the rest of each page's JSON metadata. Four paired runs on full Linux history reduced median time to append the first 5,000 commits from 318.4 to 266.2 ms. The first 27 Linux-history pages using the new transfer passed. In the desktop suite after the host app restarted, two more pages took 305.9 and 307.8 ms and first paint took 1,216.3 ms. Three later runs on the shared Linux host missed the page and frame budgets throughout. All nine pages on each of the synthetic checkout and 50,000-distinct-ref fixtures passed in the earlier measurements. [Benchmarks and raw measurements](m8-reference-performance.md#transferring-history-pages)
+
+A single Down key now selects the next row across a page boundary. An ancestry jump shares an outstanding page read and yields to a newer selection. The store regressions first reproduced the stale selection and lost second jump. An Electron regression isolated the boundary from scroll prefetch and failed on the prior build, then passed with the fix. [Keyboard navigation decision](../decisions/0004-m1-history-and-interaction.md#keyboard-navigation-across-a-page-boundary)
+
+The full Linux Electron run passed 200 of 201 tests. Its only failure was the real-repository timing check. All six graph visual goldens, the page-format round trip across the sandbox, the keyboard regression and the watcher-warm status benchmark passed. The production build and lint passed. The unsigned Linux x64 package passed fuse verification and smoke tests for renderer isolation, native helpers, keyboard input, the terminal and repository-link consent. Desktop metrics and the failed benchmark trace are in `test-results/m8-final-history-desktop`.
+
+The initial native run inherited `GIT_NO_LAZY_FETCH=1` from the history benchmark, which prevented the filtered clone fixture from completing checkout. The clone case passed when run with its normal environment. A reference-badge timing assertion also passed on rerun. Two provider fixtures sometimes received a generic transport failure after cancelling an earlier request. Both now use the existing per-request mock connection helper. The 16 pull-check tests passed three consecutive times, and all 18 issue tests passed in a separate run. The final native/unit suite with Git LFS enabled passed 826 tests across 102 files, with 14 skipped, using four Vitest workers.
 
 ## Opening a working checkout and searching many refs
 
