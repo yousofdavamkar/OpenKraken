@@ -92,6 +92,47 @@ test('appending keeps previous rows and selection intact', async () => {
   await useRepository.getState().search('Second');
   expect(useRepository.getState().matches).toEqual(['b'.repeat(40)]);
 });
+test('a pending jump to unloaded history preserves a newer row selection', async () => {
+  const snapshot = fixture();
+  const second = { ...snapshot.commits[0]!, oid: 'b'.repeat(40), parents: ['c'.repeat(40)] };
+  snapshot.commits.push(second);
+  await open(snapshot);
+  const pending = deferred();
+  request.mockReturnValueOnce(pending.promise);
+  const target = second.parents[0]!;
+  const navigation = useRepository.getState().navigate(target);
+  useRepository.getState().select(second.oid);
+  pending.resolve({
+    kind: 'page',
+    cursor: snapshot.cursor,
+    offset: 2,
+    commits: [{ ...second, oid: target, parents: [] }],
+    hasMore: false,
+  });
+  await navigation;
+  expect(useRepository.getState().rows.at(-1)?.oid).toBe(target);
+  expect(useRepository.getState().selection.focus).toBe(second.oid);
+});
+test('the newest keyboard jump uses the page already in flight', async () => {
+  const snapshot = fixture();
+  await open(snapshot);
+  const pending = deferred();
+  request.mockReturnValueOnce(pending.promise);
+  const second = { ...snapshot.commits[0]!, oid: 'b'.repeat(40), parents: ['c'.repeat(40)] };
+  const third = { ...second, oid: 'c'.repeat(40), parents: [] };
+  const firstJump = useRepository.getState().navigate(third.oid);
+  const nextRow = useRepository.getState().navigate(1);
+  pending.resolve({
+    kind: 'page',
+    cursor: snapshot.cursor,
+    offset: 1,
+    commits: [second, third],
+    hasMore: false,
+  });
+  await Promise.all([firstJump, nextRow]);
+  expect(useRepository.getState().selection.focus).toBe(second.oid);
+  expect(request).toHaveBeenCalledTimes(2); // Open and one page.
+});
 test('late page after refresh cannot append to the new generation', async () => {
   const old = fixture();
   await open(old);

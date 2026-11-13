@@ -24,6 +24,7 @@ declare global {
 let client: GraphClient | undefined;
 const graph = () => (client ??= new GraphClient());
 let querySequence = 0;
+let navigationSequence = 0;
 interface State {
   snapshot?: Snapshot;
   workingState?: WorkingState;
@@ -51,7 +52,7 @@ interface State {
   search: (query: string) => Promise<void>;
   searchAll: () => Promise<void>;
   select: (oid: string, mode?: 'single' | 'toggle' | 'range') => void;
-  navigate: (oid: string) => Promise<void>;
+  navigate: (target: string | number) => Promise<void>;
   setDetail: (commit?: Commit | DisplayCommit) => void;
 }
 export const useRepository = create<State>()(
@@ -437,15 +438,37 @@ export const useRepository = create<State>()(
       set((s) => {
         s.selection = selectRow(s.rows, s.selection, oid, mode);
       }),
-    navigate: async (oid) => {
-      const cursor = get().snapshot?.cursor;
-      while (!get().rows.some((r) => r.oid === oid) && get().snapshot?.hasMore) {
-        if (get().paging || get().busy || get().snapshot?.cursor !== cursor) return;
-        const before = get().rows.length;
-        await get().loadMore();
-        if (get().rows.length === before) return;
+    navigate: async (target) => {
+      const sequence = ++navigationSequence;
+      const { snapshot, selection } = get();
+      const cursor = snapshot?.cursor;
+      while (
+        get().snapshot?.cursor === cursor &&
+        get().selection === selection &&
+        sequence === navigationSequence
+      ) {
+        const { rows, busy, paging, snapshot: current } = get();
+        const row =
+          typeof target === 'number' ? rows[target] : rows.find((row) => row.oid === target);
+        if (row) {
+          get().select(row.oid);
+          return;
+        }
+        if (!current?.hasMore || busy) return;
+        if (paging) {
+          await new Promise<void>((resolve) => {
+            const unsubscribe = useRepository.subscribe((state) => {
+              if (state.paging !== paging) {
+                unsubscribe();
+                resolve();
+              }
+            });
+          });
+        } else {
+          await get().loadMore();
+        }
+        if (get().rows.length === rows.length) return;
       }
-      if (get().snapshot?.cursor === cursor) get().select(oid);
     },
     setDetail: (detail) =>
       set((s) => {

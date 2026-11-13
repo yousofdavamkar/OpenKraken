@@ -161,21 +161,29 @@ export function History() {
       state.setDetail(rows.find((r) => r.oid === selection.focus));
       return;
     }
-    const refs = refNavigationTargets(snapshot, rows);
+    if (
+      event.key === 'ArrowDown' &&
+      !event.shiftKey &&
+      snapshot.hasMore &&
+      rows.length > 0 &&
+      selection.focus === rows.at(-1)!.oid
+    ) {
+      event.preventDefault();
+      void state.navigate(rows.length);
+      return;
+    }
+    const refs = event.key.toLowerCase() === 'h' ? refNavigationTargets(snapshot, rows) : undefined;
     const target = navigationTarget(
       rows,
       selection.focus,
       event.key,
       event.shiftKey,
-      refs.head,
-      refs.upstream,
+      refs?.head,
+      refs?.upstream,
     );
     if (target) {
       event.preventDefault();
       void state.navigate(target);
-    } else if (event.key === 'ArrowDown' && snapshot.hasMore && !paging) {
-      event.preventDefault();
-      void state.loadMore();
     }
   }
   const focused = rows.findIndex((r) => r.oid === selection.focus);

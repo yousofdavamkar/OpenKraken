@@ -101,6 +101,26 @@ test('Canvas search dims without moving rows; keyboard, ancestry, multi-select a
     await close();
   }
 });
+test('one Down key moves past the last initially loaded commit', async () => {
+  const { page, close } = await launch('linear', 2003);
+  try {
+    const grid = page.getByRole('grid');
+    // Stay at the top while End selects the last loaded row. Scrolling there would prefetch it.
+    await grid.evaluate((element) => {
+      Object.defineProperty(element, 'scrollTo', { configurable: true, value: () => {} });
+    });
+    await grid.focus();
+    await grid.press('End');
+    await expect(grid).not.toHaveAttribute('aria-activedescendant', /.+/);
+    await expect(page.getByTestId('commit-count')).toHaveText('2,000 commits · more available');
+    await grid.evaluate((element) => Reflect.deleteProperty(element, 'scrollTo'));
+    await grid.press('ArrowDown');
+    await expect(grid.getByRole('row', { selected: true })).toContainText('Commit 3 — linear');
+    await expect(page.getByTestId('commit-count')).toHaveText('2,003 commits');
+  } finally {
+    await close();
+  }
+});
 test('5000-commit pages append without changing previous lanes; unloaded search and bounded scrolling', async ({
   browserName: _browserName,
 }, testInfo) => {
