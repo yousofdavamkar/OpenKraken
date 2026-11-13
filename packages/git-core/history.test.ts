@@ -110,6 +110,27 @@ test('Git search finds unloaded messages, author/email and object prefixes witho
   ).toHaveLength(200);
 });
 
+test('a visible commit ID leads the capped results even when newer messages contain its prefix', async () => {
+  const path = createFixture(join(root, 'search-id-cap'), 'linear', 5);
+  const target = fixtureGit(path, ['rev-parse', 'HEAD~3']);
+  const prefix = target.slice(0, 12);
+  const head = fixtureGit(path, ['rev-parse', 'HEAD']);
+  const message = `Follow up on ${prefix}\n`;
+  let stream = '';
+  for (let i = 0; i < 101; i++) {
+    stream += `commit refs/heads/main\ncommitter Fixture <author@example.test> ${1700000300 + i} +0000\ndata ${Buffer.byteLength(message)}\n${message}`;
+    if (!i) stream += `from ${head}\n`;
+    stream += '\n';
+  }
+  fixtureGit(path, ['fast-import', '--quiet'], stream + 'done\n');
+  const textMatches = fixtureGit(path, ['rev-list', '--max-count=99', 'HEAD']).split('\n');
+  const repo = await service.open(path);
+  const snapshot = await service.snapshot(repo.id);
+  const result = await service.search(repo.id, snapshot.cursor, prefix);
+  expect(result.commits.map((c) => c.oid)).toEqual([target, ...textMatches]);
+  expect(result.truncated).toBe(true);
+});
+
 test('hash lookup checks many visible tips together and ignores refs added after opening', async () => {
   const path = createFixture(join(root, 'many-search-tips'), 'linear', 80);
   const tips = fixtureGit(path, ['rev-list', '--max-count=32', 'HEAD']).split('\n');

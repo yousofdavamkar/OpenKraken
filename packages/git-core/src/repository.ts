@@ -538,9 +538,8 @@ export class RepositoryService {
         value.toLocaleLowerCase().includes(queryLower),
       ),
     );
-    let commits = [
-      ...new Map([...stashes, ...messages, ...authors].map((c) => [c.oid, c])).values(),
-    ];
+    const matches = new Map([...stashes, ...messages, ...authors].map((c) => [c.oid, c]));
+    let exact: Commit | undefined;
     if (history.starts.length && /^[0-9a-f]{7,64}$/i.test(query)) {
       const resolved = await this.text(
         repo.path,
@@ -548,8 +547,9 @@ export class RepositoryService {
         signal,
         [0, 1],
       );
+      exact = matches.get(resolved);
       let reachable = history.starts.includes(resolved);
-      if (resolved && !reachable) {
+      if (resolved && !exact && !reachable) {
         // Subtract all visible history. An empty range puts the commit in this view.
         const remaining = await this.run(['rev-list', '--max-count=1', '--stdin'], {
           cwd: repo.path,
@@ -558,18 +558,20 @@ export class RepositoryService {
         });
         reachable = remaining.stdout.length === 0;
       }
-      if (reachable) {
+      if (reachable && !exact) {
         const parser = new HistoryParser();
         await this.run(['log', '-1', `--format=commit %H%n${HISTORY_FORMAT}`, resolved, '--'], {
           cwd: repo.path,
           signal,
           onStdout: (b) => parser.push(b),
         });
-        commits = [...new Map([...commits, ...parser.finish()].map((c) => [c.oid, c])).values()];
+        [exact] = parser.finish();
       }
     }
     this.history(id, cursor);
-    commits.sort((a, b) => b.committer.time - a.committer.time);
+    if (exact) matches.delete(exact.oid);
+    const commits = [...matches.values()].sort((a, b) => b.committer.time - a.committer.time);
+    if (exact) commits.unshift(exact);
     return { cursor, commits: commits.slice(0, 100), truncated: commits.length > 100 };
   }
   private workingTrees = new Map<string, WorkingTree>();
