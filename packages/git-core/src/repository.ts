@@ -502,6 +502,16 @@ export class RepositoryService {
     cache?.record(offset, result.commits, result.hasMore);
     return result;
   }
+  private async resolveSearchCommit(path: string, prefix: string, signal?: AbortSignal) {
+    const object = await this.text(path, ['rev-parse', `--disambiguate=${prefix}`], signal);
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(object) || !object.startsWith(prefix)) return '';
+    return this.text(
+      path,
+      ['rev-parse', '--verify', '--quiet', '--end-of-options', `${object}^{commit}`],
+      signal,
+      [0, 1],
+    );
+  }
   async search(id: string, cursor: string, query: string, signal?: AbortSignal) {
     const history = this.history(id, cursor);
     const repo = this.repositories.get(id)!;
@@ -541,12 +551,7 @@ export class RepositoryService {
     const matches = new Map([...stashes, ...messages, ...authors].map((c) => [c.oid, c]));
     let exact: Commit | undefined;
     if (history.starts.length && /^[0-9a-f]{7,64}$/i.test(query)) {
-      const resolved = await this.text(
-        repo.path,
-        ['rev-parse', '--verify', '--quiet', '--end-of-options', `${query}^{commit}`],
-        signal,
-        [0, 1],
-      );
+      const resolved = await this.resolveSearchCommit(repo.path, query.toLowerCase(), signal);
       exact = matches.get(resolved);
       let reachable = history.starts.includes(resolved);
       if (resolved && !exact && !reachable) {

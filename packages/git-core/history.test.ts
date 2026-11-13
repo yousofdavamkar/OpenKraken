@@ -131,6 +131,43 @@ test('a visible commit ID leads the capped results even when newer messages cont
   expect(result.truncated).toBe(true);
 });
 
+test('hexadecimal ref names cannot impersonate or shadow a commit ID in history search', async () => {
+  const path = createFixture(join(root, 'hex-ref'), 'linear', 20);
+  const target = fixtureGit(path, ['rev-parse', 'HEAD~8']);
+  const prefix = target.slice(0, 10);
+  fixtureGit(path, ['branch', prefix, 'HEAD']);
+  fixtureGit(path, ['branch', 'badc0ffee123', 'HEAD']);
+  const tag = fixtureGit(path, ['rev-parse', 'refs/tags/annotated']);
+  const taggedCommit = fixtureGit(path, ['rev-parse', 'refs/tags/annotated^{commit}']);
+  const repo = await service.open(path);
+  const snapshot = await service.snapshot(repo.id);
+  const lookup = async (query: string) =>
+    (await service.search(repo.id, snapshot.cursor, query)).commits.map((c) => c.oid);
+  expect(await lookup(prefix.toUpperCase())).toEqual([target]);
+  expect(await lookup('badc0ffee123')).toEqual([]);
+  expect(await lookup(tag.slice(0, 12))).toEqual([taggedCommit]);
+});
+
+test('an ambiguous object prefix keeps literal search results and selects neither object', async () => {
+  const path = createFixture(join(root, 'ambiguous-oid'), 'linear', 8);
+  const tree = fixtureGit(path, ['mktree'], '');
+  // These two SHA-1 commit objects share their first seven hexadecimal digits.
+  for (const n of [25990, 35034]) {
+    const contents = `tree ${tree}\nauthor Fixture <f@example.test> 1700000000 +0000\ncommitter Fixture <f@example.test> 1700000000 +0000\n\nLookup ${n}\n`;
+    const oid = fixtureGit(path, ['hash-object', '-t', 'commit', '-w', '--stdin'], contents);
+    expect(oid.slice(0, 7)).toBe('75ee05d');
+    fixtureGit(path, ['branch', `match-${n}`, oid]);
+  }
+  fixtureGit(path, ['commit', '--allow-empty', '-m', 'Investigate 75ee05d']);
+  const head = fixtureGit(path, ['rev-parse', 'HEAD']);
+  fixtureGit(path, ['branch', '75ee05d', 'match-25990']);
+  const repo = await service.open(path);
+  const snapshot = await service.snapshot(repo.id);
+  const result = await service.search(repo.id, snapshot.cursor, '75ee05d');
+  expect(result.commits.map((c) => c.oid)).toEqual([head]);
+  expect(result.truncated).toBe(false);
+});
+
 test('hash lookup checks many visible tips together and ignores refs added after opening', async () => {
   const path = createFixture(join(root, 'many-search-tips'), 'linear', 80);
   const tips = fixtureGit(path, ['rev-list', '--max-count=32', 'HEAD']).split('\n');
@@ -147,8 +184,9 @@ test('hash lookup checks many visible tips together and ignores refs added after
   const requests = vi.spyOn(runner, 'runGit');
   try {
     expect((await service.search(repo.id, snapshot.cursor, hidden)).commits).toEqual([]);
-    // Message, author, prefix resolution and one reachability check for all tips.
-    expect(requests.mock.calls.length).toBeLessThanOrEqual(4);
+    // Two text reads, object lookup, peeling, and one reachability check for all tips.
+    expect(requests.mock.calls.length).toBeLessThanOrEqual(5);
+    expect(requests.mock.calls.filter(([, args]) => args[0] === 'rev-list')).toHaveLength(1);
     expect(
       (await service.search(repo.id, snapshot.cursor, ancestor.slice(0, 10))).commits.map(
         (commit) => commit.oid,

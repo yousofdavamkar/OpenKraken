@@ -22,6 +22,8 @@ If a normal branch reaches a stash object, its actual commit DAG takes precedenc
 
 The history cursor retains the exact start OIDs selected when the graph opened. A hash lookup can return a captured tip directly after resolving it to a commit. For other resolved commits, subtract the ancestry of all captured tips from the queried commit's ancestry in one native revision walk. An empty result means the commit is visible in the open graph. Pass the resolved OID and all excluded OIDs on standard input and limit output to one commit. Commits made visible only by a new ref enter the search scope when the graph refreshes. Message and author matches still contribute to the same results. [Git revision-set semantics](https://git-scm.com/docs/git-rev-list#_description)
 
+Resolve hexadecimal queries against Git object IDs before peeling a unique match to a commit. A branch with a hexadecimal name can shadow an abbreviation in ordinary Git revision syntax. An ambiguous or absent object prefix still returns any literal text matches.
+
 When an object ID resolves to a visible commit, put that commit first and fill the remaining results with text matches ordered by commit time. Deduplicate before applying the 100-result limit so an older commit can still be found when many newer messages cite its ID.
 
 ## Keyboard navigation across a page boundary
