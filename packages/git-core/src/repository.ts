@@ -322,10 +322,12 @@ export class RepositoryService {
         const worktreeRead = exists(join(repository.commonDir, 'worktrees')).then((present) =>
           present ? this.worktreeManager(id).manager.list(readSignal) : undefined,
         );
-        const graphRead = Promise.all([refRead, worktreeRead]).then(([refs, worktrees]) =>
-          this.prepareHistory(repository, view, refs, worktrees, readSignal),
-        );
         const statusRead = this.readSnapshotStatus(repository, readSignal, observeStatus);
+        const cacheReads = this.cacheFingerprintReads(repository, readSignal);
+        const graphRead = Promise.all([refRead, worktreeRead, Promise.all(cacheReads)]).then(
+          ([refs, worktrees, cacheInputs]) =>
+            this.prepareHistory(repository, view, refs, worktrees, cacheInputs, readSignal),
+        );
         let graph: Awaited<typeof graphRead>;
         let status: Snapshot['status'];
         try {
@@ -339,6 +341,7 @@ export class RepositoryService {
             statusRead,
             refRead,
             worktreeRead,
+            ...cacheReads,
           ]);
           if (candidate.status === 'fulfilled') await candidate.value.history.close();
           throw error;
@@ -389,11 +392,35 @@ export class RepositoryService {
     }
     return parser.finish();
   }
+  private cacheFingerprintReads(repository: Repository, signal: AbortSignal) {
+    if (
+      !this.dataDir ||
+      process.env.GIT_SHALLOW_FILE ||
+      process.env.GIT_REPLACE_REF_BASE ||
+      process.env.GIT_NO_REPLACE_OBJECTS
+    )
+      return [];
+    return [
+      this.text(repository.path, ['--version'], signal),
+      this.text(repository.path, ['config', '--null', '--list'], signal),
+      ...['shallow', 'info/grafts', 'objects/info/alternates'].map((p) =>
+        readFile(join(repository.commonDir, p))
+          .then((b) => b.toString('base64'))
+          .catch(() => ''),
+      ),
+      ...['objects/info/commit-graph', 'objects/info/commit-graphs/commit-graph-chain'].map((p) =>
+        stat(join(repository.commonDir, p))
+          .then((s) => `${s.size}:${s.mtimeMs}`)
+          .catch(() => ''),
+      ),
+    ];
+  }
   private async prepareHistory(
     repository: Repository,
     view: GraphView,
     refs: Snapshot['refs'],
     worktrees: Snapshot['worktrees'],
+    cacheInputs: string[],
     signal: AbortSignal,
   ) {
     // Keep missing ref preferences: a deleted solo ref must not silently reveal all history.
@@ -436,26 +463,8 @@ export class RepositoryService {
     }
     await this.cache?.flush();
     let cache: HistoryCache | undefined;
-    if (
-      this.dataDir &&
-      !process.env.GIT_SHALLOW_FILE &&
-      !process.env.GIT_REPLACE_REF_BASE &&
-      !process.env.GIT_NO_REPLACE_OBJECTS
-    ) {
-      const [version, config, ...metadata] = await Promise.all([
-        this.text(repository.path, ['--version'], signal),
-        this.text(repository.path, ['config', '--null', '--list'], signal),
-        ...['shallow', 'info/grafts', 'objects/info/alternates'].map((p) =>
-          readFile(join(repository.commonDir, p))
-            .then((b) => b.toString('base64'))
-            .catch(() => ''),
-        ),
-        ...['objects/info/commit-graph', 'objects/info/commit-graphs/commit-graph-chain'].map((p) =>
-          stat(join(repository.commonDir, p))
-            .then((s) => `${s.size}:${s.mtimeMs}`)
-            .catch(() => ''),
-        ),
-      ]);
+    if (this.dataDir && cacheInputs.length) {
+      const [version, config, ...metadata] = cacheInputs;
       const key = createHash('sha256')
         .update(
           JSON.stringify({

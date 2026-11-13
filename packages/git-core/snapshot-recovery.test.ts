@@ -225,3 +225,42 @@ test('a failed history walk cancels and drains its in-flight status scan', async
     await service.dispose();
   }
 });
+
+test('the cache config read can fail while refs are pending and the published cursor stays usable', async () => {
+  const path = createFixture(join(root, 'cache-config-failure'), 'linear', 2050);
+  const service = new RepositoryService('git', { dataDir: join(root, 'cache-config-profile') });
+  const repo = await service.open(path);
+  const first = await service.snapshot(repo.id);
+  const native = runner.runGit;
+  let refSignal: AbortSignal | undefined;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const run = vi.spyOn(runner, 'runGit').mockImplementation(async (git, args, options) => {
+    if (args[0] === 'for-each-ref') {
+      refSignal = options?.signal;
+      await gate;
+    }
+    if (args[0] === 'config' && args.includes('--list'))
+      throw new runner.GitError('CONFIG_TEST_FAILURE', 'Cache configuration read failed');
+    return native(git, args, options);
+  });
+  let rejected = false;
+  const pending = service.snapshot(repo.id).catch((error: unknown) => {
+    rejected = true;
+    return error;
+  });
+  try {
+    await vi.waitFor(() => expect(refSignal?.aborted).toBe(true), { timeout: 2000 });
+    expect(rejected).toBe(false);
+    release();
+    expect(await pending).toMatchObject({ code: 'CONFIG_TEST_FAILURE' });
+    expect((await service.page(repo.id, first.cursor, 2000, 50)).commits).toHaveLength(50);
+  } finally {
+    release();
+    await pending;
+    run.mockRestore();
+    await service.dispose();
+  }
+});
