@@ -2,7 +2,7 @@ import { _electron as electron, expect, test } from '@playwright/test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { Result } from '../../packages/ipc-contract/src/index.js';
+import { decodeHistoryPage, type Result } from '../../packages/ipc-contract/src/index.js';
 import { createFixture, fixtureGit } from '../../packages/test-fixtures/src/index.js';
 
 test('serialized responses retain Git text, paging and errors through the sandbox bridge', async () => {
@@ -71,6 +71,34 @@ test('serialized responses retain Git text, paging and errors through the sandbo
         Reflect.apply(window.openkraken.request, window.openkraken, [
           { id: crypto.randomUUID(), method: 'commandPreferences' },
           'yaml',
+        ]),
+      ),
+    ).rejects.toThrow('Invalid response format');
+    const split = await page.evaluate(async (old) => {
+      const refreshed = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'refresh',
+        repoId: old.repoId,
+      });
+      if (refreshed.kind !== 'snapshot') throw new Error('Expected refreshed snapshot');
+      const page = { ...old, cursor: refreshed.snapshot.cursor };
+      const transferred = await window.openkraken.request(
+        { id: crypto.randomUUID(), ...page },
+        'history-page',
+      );
+      const stale = await window.openkraken.request(
+        { id: crypto.randomUUID(), ...page },
+        'history-page',
+      );
+      return { transferred, cursor: refreshed.snapshot.cursor, stale };
+    }, pageRequest);
+    expect(decodeHistoryPage(split.transferred)).toEqual({ ...next, cursor: split.cursor });
+    expect(split.stale).toMatchObject({ kind: 'error', code: 'STALE_PAGE' });
+    await expect(
+      page.evaluate(() =>
+        Reflect.apply(window.openkraken.request, window.openkraken, [
+          { id: crypto.randomUUID(), method: 'open' },
+          'history-page',
         ]),
       ),
     ).rejects.toThrow('Invalid response format');

@@ -2,18 +2,33 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   CHANNEL,
   CANCEL_CHANNEL,
+  validateResponseFormat,
   EVENT_CHANNEL,
   desktopEventSchema,
   requestSchema,
   cancelSchema,
 } from '@openkraken/ipc-contract';
-import type { DesktopApi, Request, Result } from '@openkraken/ipc-contract';
+import type {
+  DesktopApi,
+  HistoryPageRequest,
+  HistoryPageReply,
+  Request,
+  Result,
+} from '@openkraken/ipc-contract';
 // Main validates utility responses before IPC; do not deep-clone large pages again here.
+async function request(
+  input: HistoryPageRequest,
+  format: 'history-page',
+): Promise<HistoryPageReply>;
 async function request(input: Request, format: 'json'): Promise<string>;
 async function request(input: Request): Promise<Result>;
-async function request(input: Request, format?: 'json'): Promise<Result | string> {
-  if (format !== undefined && format !== 'json') throw new Error('Invalid response format');
-  return ipcRenderer.invoke(CHANNEL, requestSchema.parse(input), format);
+async function request(
+  input: Request,
+  format?: 'json' | 'history-page',
+): Promise<Result | string | HistoryPageReply> {
+  const request = requestSchema.parse(input);
+  validateResponseFormat(format, request.method);
+  return ipcRenderer.invoke(CHANNEL, request, format);
 }
 const api: DesktopApi = {
   subscribe: (listener) => {

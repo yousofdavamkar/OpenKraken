@@ -32,7 +32,9 @@ import { pathToFileURL } from 'node:url';
 import {
   CHANNEL,
   CANCEL_CHANNEL,
+  validateResponseFormat,
   EVENT_CHANNEL,
+  encodeHistoryPage,
   desktopEventSchema,
   requestSchema,
   cancelSchema,
@@ -46,6 +48,7 @@ import {
 import type {
   Result,
   ServiceRequest,
+  HistoryPageTransfer,
   AppearancePreferences,
   Request as DesktopRequest,
   Repository,
@@ -1381,21 +1384,25 @@ else {
         cancelled.delete(request.id);
       }
     };
-    ipcMain.handle(CHANNEL, async (event, raw, format: unknown): Promise<Result | string> => {
-      validateSender(event);
-      if (format !== undefined && format !== 'json') throw new Error('Invalid response format');
-      const request = requestSchema.parse(raw);
-      const result = await diagnostics!.track(request, () => handleRequest(request));
-      if (result.kind === 'snapshot') {
-        terminalRepository = result.snapshot.repository;
-        draftRepositories.delete(result.snapshot.repository.id);
-        draftRepositories.set(result.snapshot.repository.id, result.snapshot.repository);
-        if (draftRepositories.size > 128)
-          draftRepositories.delete(draftRepositories.keys().next().value!);
-      }
-      // Serialize after validation and before both renderer IPC and isolated-world copying.
-      return format === 'json' ? JSON.stringify(result) : result;
-    });
+    ipcMain.handle(
+      CHANNEL,
+      async (event, raw, format: unknown): Promise<Result | string | HistoryPageTransfer> => {
+        validateSender(event);
+        const request = requestSchema.parse(raw);
+        validateResponseFormat(format, request.method);
+        const result = await diagnostics!.track(request, () => handleRequest(request));
+        if (result.kind === 'snapshot') {
+          terminalRepository = result.snapshot.repository;
+          draftRepositories.delete(result.snapshot.repository.id);
+          draftRepositories.set(result.snapshot.repository.id, result.snapshot.repository);
+          if (draftRepositories.size > 128)
+            draftRepositories.delete(draftRepositories.keys().next().value!);
+        }
+        // Serialize after validation and before both renderer IPC and isolated-world copying.
+        if (format === 'history-page' && result.kind === 'page') return encodeHistoryPage(result);
+        return format === 'json' ? JSON.stringify(result) : result;
+      },
+    );
     ipcMain.handle(CANCEL_CHANNEL, (event, raw) => {
       validateSender(event);
       const { id } = cancelSchema.parse(raw);

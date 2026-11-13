@@ -1,3 +1,4 @@
+import type { HistoryPageReply } from './page-transfer.js';
 import { compactRef, expandRef } from './compact-refs.js';
 import { crashReportingStateSchema } from './crash-reports.js';
 import { updatesRequests, updatesStateSchema } from './updates.js';
@@ -2212,7 +2213,11 @@ export type Snapshot = z.infer<typeof snapshotSchema>;
 export type Request = z.infer<typeof requestSchema>;
 export type ServiceRequest = z.infer<typeof serviceRequestSchema>;
 export type Result = z.infer<typeof resultSchema>;
+export { encodeHistoryPage, decodeHistoryPage, validateResponseFormat } from './page-transfer.js';
+export type { HistoryPageTransfer, HistoryPageReply } from './page-transfer.js';
+export type HistoryPageRequest = Extract<Request, { method: 'page' }>;
 export interface DesktopApi {
+  request(request: HistoryPageRequest, format: 'history-page'): Promise<HistoryPageReply>;
   /** Main-validated result as JSON, avoiding nested object copies across contextBridge. */
   request(request: Request, format: 'json'): Promise<string>;
   request(request: Request): Promise<Result>;

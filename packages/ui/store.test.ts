@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, expect, test, vi } from 'vitest';
 import { GraphEngine } from '../graph/src/engine.js';
 import type { GraphRequest } from '../graph/src/engine.js';
+import { encodeHistoryPage } from '@openkraken/ipc-contract';
 import type { Result, Snapshot } from '@openkraken/ipc-contract';
 vi.mock('./src/graph-client.js', () => ({
   GraphClient: class {
@@ -59,8 +60,9 @@ beforeEach(() => {
   request.mockReset();
   vi.stubGlobal('window', {
     openkraken: {
-      request: async (input: unknown, format?: 'json') => {
+      request: async (input: unknown, format?: 'json' | 'history-page') => {
         const result = await request(input);
+        if (format === 'history-page' && result.kind === 'page') return encodeHistoryPage(result);
         return format === 'json' ? JSON.stringify(result) : result;
       },
       cancel: vi.fn(async () => {}),

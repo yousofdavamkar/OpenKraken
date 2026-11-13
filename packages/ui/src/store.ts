@@ -10,6 +10,7 @@ import type {
   Snapshot,
   WorkingState,
 } from '@openkraken/ipc-contract';
+import { decodeHistoryPage } from '@openkraken/ipc-contract';
 import { patchPassages } from '@openkraken/graph';
 import type { GraphRow, GraphPassage } from '@openkraken/graph';
 import { GraphClient } from './graph-client.js';
@@ -314,10 +315,10 @@ export const useRepository = create<State>()(
       });
       performance.mark('history-page-start');
       try {
-        const result: Result = JSON.parse(
+        const result = decodeHistoryPage(
           await window.openkraken.request(
             { id, method: 'page', repoId: snapshot.repository.id, cursor, offset, count },
-            'json',
+            'history-page',
           ),
         );
         performance.mark('history-page-response');
