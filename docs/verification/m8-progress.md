@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Large-reference snapshot transfer
+
+Main validates compact reference strings and full exception records received from the Git utility. The repository store can request those validated strings and expand them in the renderer. Object and ordinary JSON callers still receive complete ref records. A Linux replay with 50,000 refs reduced the serialized payload from 9.38 MB to 3.51 MB and the median validation/serialization/decoding time from 172.4 ms to 66.9 ms. In three paired Electron runs on the shared host, compact-format first paints ranged from 1.28 to 2.48 seconds and ordinary-format first paints from 1.33 to 1.74 seconds. All six exceeded 500 ms. [Fixture measurements and comparisons](m8-reference-performance.md#passing-validated-references-to-the-renderer)
+
+The production build, TypeScript checks and lint passed. The full Linux native/unit suite with Git LFS enabled passed 826 tests across 102 files, with 14 skips. All 33 focused Linux Electron tests passed, including all six Canvas goldens, a native 10,000-tag fixture comparing every reference across three response formats, and repository, submodule and linked-worktree opening. The earlier 201-test full desktop run is recorded below. Local logs for this change are in `/tmp/ok-ref-block`.
+
 ## Appending history pages
 
 The renderer requests commit message bodies separately from the rest of each page's JSON metadata. Four paired runs on full Linux history reduced median time to append the first 5,000 commits from 318.4 to 266.2 ms. The first 27 Linux-history pages using the new transfer passed. In the desktop suite after the host app restarted, two more pages took 305.9 and 307.8 ms and first paint took 1,216.3 ms. Three later runs on the shared Linux host missed the page and frame budgets throughout. All nine pages on each of the synthetic checkout and 50,000-distinct-ref fixtures passed in the earlier measurements. [Benchmarks and raw measurements](m8-reference-performance.md#transferring-history-pages)

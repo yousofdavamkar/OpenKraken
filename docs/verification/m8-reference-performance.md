@@ -2,6 +2,27 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Passing validated references to the renderer
+
+The repository store now requests compact JSON for snapshots. Main checks each reference from the utility, expands ordinary branch, remote and tag records for callers using the object or ordinary JSON API, and passes their compact strings to callers using the new format. Main validates and strips unknown fields from rich reference records in every format. [ADR 0116](../decisions/0116-validated-snapshot-references.md)
+
+The original 50,000-distinct-target build took 1,701.2–2,122.2 ms to paint in three fresh profiles. The following diagnostic cohorts used the same fixture and interleaved one-run variants. Combining up to 1,024 compact rows per string on the utility boundary alone yielded a median first paint of 1,420.1 ms across three runs. Carrying those combined strings on both boundaries yielded 1,091.0 ms. Reusing individual compact strings on the renderer boundary produced a median of 1,056.1 ms in three runs, compared with 1,116.1 ms in the three interleaved ordinary-format controls. Repacking already-expanded records in main took 1,080.7 ms median across three runs. The final implementation validates the wire strings in main and expands them once at the receiving boundary.
+
+An isolated Node replay used all 50,000 ordered Git refs from the distinct-target fixture in a snapshot with an empty commit list. Both paths used the production response schema and main/renderer conversion functions. Each of eight pairs alternated execution order after warming both paths and ran GC before each timed sample. Exact deep equality with the original snapshot was checked after each timing. Validation, JSON serialization, parsing and expansion together took **172.4 ms median** with ordinary JSON and **66.9 ms median** with compact JSON. The encoded snapshots occupied **9,375,499 and 3,510,622 bytes** respectively. This measures the reference transfer code in one Node process and excludes Git, Electron IPC and drawing.
+
+A separate six-opening Electron comparison switched only the renderer call between the two supported APIs in the same production build. With ordinary JSON the first paints were 1,738.6 / 1,591.3 / 1,333.2 ms. With compact JSON they were 2,481.8 / 2,406.5 / 1,280.5 ms. In the two slowest compact runs, the Git utility's snapshot read alone took 1,047.9 and 1,184.1 ms, before main serialized the response. That phase took 570.6–628.2 ms in the three controls. These runs did not demonstrate a repeatable end-to-end startup improvement. All six missed the 500 ms target.
+
+The four fixture runs below used the production build with new renderer requests, fresh Electron profiles, uncleared OS caches, native Git 2.53.0 and X11 under Xvfb. Each opened 2,000 commits and appended three pages of 5,000. During these runs the shared 12-CPU host reported one-minute load averages above 19. Every large-ref opening exceeded 500 ms.
+
+| Fixture, three openings each          | First paints (ms)           | 5,000-commit pages (ms) | Pages below 300 ms |
+| ------------------------------------- | --------------------------- | ----------------------- | -----------------: |
+| 50,000 distinct targets               | 2,943.7 / 2,974.1 / 2,934.7 | 500.9–728.0             |                0/9 |
+| 50,000 refs at one target             | 3,051.5 / 2,528.4 / 2,415.4 | 450.7–637.3             |                0/9 |
+| Full Linux, one ref                   | 1,829.7 / 1,204.3 / 1,203.8 | 448.7–754.5             |                0/9 |
+| Two million commits and 100,000 files | 1,922.7 / 457.1 / 501.9     | 167.5–652.8             |                7/9 |
+
+The [per-opening CSV](m8-snapshot-bridge-samples.csv) records every opening phase, page and scroll measurement from the initial baseline, interleaved experiments, four fixture runs and same-build comparison. Service time includes the utility snapshot read. The difference between service and snapshot time also includes dispatch, repository opening, watcher work and renderer decoding.
+
 ## Transferring history pages
 
 On the first 5,000-commit append after opening the full Linux history, the commit array occupied 7,426,072 bytes as JSON. The unescaped UTF-8 message bodies alone accounted for 5,235,164 bytes. Main now sends the bodies as strings alongside the remaining metadata. [ADR 0115](../decisions/0115-history-page-response.md)
