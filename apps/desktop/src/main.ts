@@ -35,6 +35,7 @@ import {
   validateResponseFormat,
   EVENT_CHANNEL,
   encodeHistoryPage,
+  expandGitServiceResult,
   desktopEventSchema,
   requestSchema,
   cancelSchema,
@@ -49,6 +50,7 @@ import type {
   Result,
   ServiceRequest,
   HistoryPageTransfer,
+  ServiceResult,
   AppearancePreferences,
   Request as DesktopRequest,
   Repository,
@@ -135,7 +137,7 @@ let providers: ProviderService | undefined;
 const providerRequests = new Map<string, AbortController>();
 const pending = new Map<
   string,
-  { resolve: (result: Result) => void; timer: ReturnType<typeof setTimeout> }
+  { resolve: (result: ServiceResult) => void; timer: ReturnType<typeof setTimeout> }
 >();
 const inFlight = new Set<string>();
 const cancelled = new Set<string>();
@@ -208,12 +210,12 @@ function interruptGitRequests(requestIds: string[]) {
   if (requestIds.length && window && !window.isDestroyed())
     window.webContents.send(EVENT_CHANNEL, { type: 'gitRequestsInterrupted', requestIds });
 }
-function callService(request: ServiceRequest, signal?: AbortSignal): Promise<Result> {
+function callService(request: ServiceRequest, signal?: AbortSignal): Promise<ServiceResult> {
   if (signal?.aborted) return Promise.resolve({ kind: 'cancelled' });
   const child = service ?? startService();
   const cancel = () => child.postMessage({ id: request.id });
   signal?.addEventListener('abort', cancel, { once: true });
-  return new Promise<Result>((resolve) => {
+  return new Promise<ServiceResult>((resolve) => {
     const timer = setTimeout(
       () => {
         interruptGitRequests([request.id]);
@@ -381,7 +383,7 @@ else {
         cancel: !details.url.startsWith(pathToFileURL(join(__dirname, 'renderer') + '/').href),
       });
     });
-    const executeRequest = async (request: DesktopRequest): Promise<Result> => {
+    const executeRequest = async (request: DesktopRequest): Promise<ServiceResult> => {
       if (request.method === 'updatesStarted')
         return { kind: 'updates', state: updatesStateSchema.parse(await updates!.started()) };
       if (request.method === 'updatesDismissRecovery') {
@@ -1348,7 +1350,7 @@ else {
         providerRequests.delete(request.id);
       }
     };
-    const handleRequest = async (request: DesktopRequest): Promise<Result> => {
+    const handleRequest = async (request: DesktopRequest): Promise<ServiceResult> => {
       if (
         updateHandoff &&
         ![
@@ -1391,7 +1393,7 @@ else {
         const request = requestSchema.parse(raw);
         validateResponseFormat(format, request.method);
         const result = await diagnostics!.track(request, () => handleRequest(request));
-        if (result.kind === 'snapshot') {
+        if (result.kind === 'snapshot' || result.kind === 'compactSnapshot') {
           terminalRepository = result.snapshot.repository;
           draftRepositories.delete(result.snapshot.repository.id);
           draftRepositories.set(result.snapshot.repository.id, result.snapshot.repository);
@@ -1400,7 +1402,9 @@ else {
         }
         // Serialize after validation and before both renderer IPC and isolated-world copying.
         if (format === 'history-page' && result.kind === 'page') return encodeHistoryPage(result);
-        return format === 'json' ? JSON.stringify(result) : result;
+        if (format === 'snapshot-json') return JSON.stringify(result);
+        const expanded = expandGitServiceResult(result);
+        return format === 'json' ? JSON.stringify(expanded) : expanded;
       },
     );
     ipcMain.handle(CANCEL_CHANNEL, (event, raw) => {

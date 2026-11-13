@@ -10,15 +10,6 @@ export interface HistoryPageTransfer {
 
 export type HistoryPageReply = HistoryPageTransfer | Exclude<Result, Page>;
 
-export function validateResponseFormat(format: unknown, method: string): void {
-  if (
-    format !== undefined &&
-    format !== 'json' &&
-    !(format === 'history-page' && method === 'page')
-  )
-    throw new Error('Invalid response format');
-}
-
 /** Called by main only after validating the Git service reply. */
 export function encodeHistoryPage(page: Page): HistoryPageTransfer {
   const bodies: string[] = [];

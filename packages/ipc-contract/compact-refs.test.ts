@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import {
   encodeGitServiceResult,
+  expandGitServiceResult,
   resultSchema,
   serviceResponseSchema,
   type Ref,
@@ -76,7 +77,14 @@ test('a large Git reply round-trips ordered refs and retains exceptional metadat
   expect(encoded.snapshot.refs.slice(1, 1 + exceptional.length)).toEqual(exceptional);
   expect(typeof encoded.snapshot.refs[0]).toBe('string');
   expect(JSON.stringify(encoded).length).toBeLessThan(JSON.stringify(original).length / 2);
-  expect(serviceResponseSchema.parse({ id, result: encoded }).result).toEqual(original);
+  // The service is untrusted. Extra fields on a rich record must never cross into the renderer.
+  encoded.snapshot.refs[1] = Object.assign({}, exceptional[0]!, { extra: 'discard' });
+  const checked = serviceResponseSchema.parse({ id, result: encoded }).result;
+  expect(checked.kind).toBe('compactSnapshot');
+  if (checked.kind !== 'compactSnapshot') throw new Error('Expected compact validated reply');
+  expect(checked.snapshot.refs[1]).not.toHaveProperty('extra');
+  expect(typeof checked.snapshot.refs[0]).toBe('string');
+  expect(expandGitServiceResult(JSON.parse(JSON.stringify(checked)))).toStrictEqual(original);
   expect(resultSchema.safeParse(encoded).success).toBe(false);
 });
 

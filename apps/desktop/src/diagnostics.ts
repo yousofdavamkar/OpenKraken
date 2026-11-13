@@ -11,7 +11,7 @@ import {
   type DiagnosticEntry,
   type DiagnosticsState,
   type Request,
-  type Result,
+  type ServiceResult,
 } from '@openkraken/ipc-contract';
 
 const segmentSchema = z
@@ -248,7 +248,7 @@ export class Diagnostics {
       reason: diagnosticReasons.find((known) => known === reason) ?? 'unknown',
     });
   }
-  async track(request: Request, execute: () => Promise<Result>): Promise<Result> {
+  async track(request: Request, execute: () => Promise<ServiceResult>): Promise<ServiceResult> {
     const method = request.method === 'providerGit' ? request.operation.method : request.method;
     const action: DiagnosticAction = Object.hasOwn(diagnosticActions, method)
       ? (method as DiagnosticAction)

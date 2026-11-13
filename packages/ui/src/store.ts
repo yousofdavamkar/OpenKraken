@@ -5,12 +5,11 @@ import type {
   Commit,
   DesktopApi,
   GraphView,
-  Request,
-  Result,
+  SnapshotRequest,
   Snapshot,
   WorkingState,
 } from '@openkraken/ipc-contract';
-import { decodeHistoryPage } from '@openkraken/ipc-contract';
+import { decodeHistoryPage, expandGitServiceResult } from '@openkraken/ipc-contract';
 import { patchPassages } from '@openkraken/graph';
 import type { GraphRow, GraphPassage } from '@openkraken/graph';
 import { GraphClient } from './graph-client.js';
@@ -45,7 +44,7 @@ interface State {
   searchTruncated: boolean;
   selection: Selection;
   detail?: Commit | DisplayCommit;
-  run: (request: Request, background?: boolean) => Promise<void>;
+  run: (request: SnapshotRequest, background?: boolean) => Promise<void>;
   cancel: () => Promise<void>;
   setView: (view: GraphView) => Promise<void>;
   loadMore: (count?: number) => Promise<void>;
@@ -195,7 +194,9 @@ export const useRepository = create<State>()(
           get().snapshot?.repository.id === request.repoId
         )
           request = { ...request, view: get().snapshot!.view };
-        const result = JSON.parse(await window.openkraken.request(request, 'json')) as Result;
+        const result = expandGitServiceResult(
+          JSON.parse(await window.openkraken.request(request, 'snapshot-json')),
+        );
         if (get().busy !== request.id) return;
         if (result.kind === 'snapshot') {
           performance.mark('repository-snapshot-response', {

@@ -1,5 +1,6 @@
 import type { HistoryPageReply } from './page-transfer.js';
-import { compactRef, expandRef } from './compact-refs.js';
+import { compactRef, objectIdPattern, validCompactRef } from './compact-refs.js';
+export { expandGitServiceResult } from './compact-refs.js';
 import { crashReportingStateSchema } from './crash-reports.js';
 import { updatesRequests, updatesStateSchema } from './updates.js';
 export * from './updates.js';
@@ -143,7 +144,6 @@ import {
 export * from './providers.js';
 export { providerPatchLines } from './provider-patch.js';
 
-const objectIdPattern = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 export const oidSchema = z.string().regex(objectIdPattern);
 export const headSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('branch'), ref: z.string(), oid: oidSchema.optional() }),
@@ -2157,12 +2157,11 @@ export const resultSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 const compactRefsSchema = z.array(z.unknown()).transform((rows, ctx) => {
-  const refs: Ref[] = [];
+  const refs: (string | Ref)[] = [];
   for (const [index, row] of rows.entries()) {
     if (typeof row === 'string') {
-      const ref = expandRef(row);
-      if (ref && objectIdPattern.test(ref.target)) {
-        refs.push(ref);
+      if (validCompactRef(row)) {
+        refs.push(row);
         continue;
       }
     } else {
@@ -2177,12 +2176,10 @@ const compactRefsSchema = z.array(z.unknown()).transform((rows, ctx) => {
   }
   return refs;
 });
-const compactSnapshotResult = z
-  .object({
-    kind: z.literal('compactSnapshot'),
-    snapshot: snapshotSchema.extend({ refs: compactRefsSchema }),
-  })
-  .transform(({ snapshot }) => ({ kind: 'snapshot' as const, snapshot }));
+const compactSnapshotResult = z.object({
+  kind: z.literal('compactSnapshot'),
+  snapshot: snapshotSchema.extend({ refs: compactRefsSchema }),
+});
 export const serviceResponseSchema = z.object({
   id: requestId,
   result: z.union([resultSchema, compactSnapshotResult]),
@@ -2213,11 +2210,33 @@ export type Snapshot = z.infer<typeof snapshotSchema>;
 export type Request = z.infer<typeof requestSchema>;
 export type ServiceRequest = z.infer<typeof serviceRequestSchema>;
 export type Result = z.infer<typeof resultSchema>;
-export { encodeHistoryPage, decodeHistoryPage, validateResponseFormat } from './page-transfer.js';
+export type ServiceResult = z.infer<typeof serviceResponseSchema>['result'];
+export { encodeHistoryPage, decodeHistoryPage } from './page-transfer.js';
 export type { HistoryPageTransfer, HistoryPageReply } from './page-transfer.js';
+export type SnapshotRequest = Extract<Request, { method: (typeof snapshotMethods)[number] }>;
+const snapshotMethods = [
+  'open',
+  'init',
+  'clone',
+  'openSubmodule',
+  'openWorktree',
+  'repositoryLinkOpen',
+  'refresh',
+] as const;
+export function validateResponseFormat(format: unknown, method: string): void {
+  if (
+    format !== undefined &&
+    format !== 'json' &&
+    !(format === 'snapshot-json' && snapshotMethods.some((item) => item === method)) &&
+    !(format === 'history-page' && method === 'page')
+  )
+    throw new Error('Invalid response format');
+}
+
 export type HistoryPageRequest = Extract<Request, { method: 'page' }>;
 export interface DesktopApi {
   request(request: HistoryPageRequest, format: 'history-page'): Promise<HistoryPageReply>;
+  request(request: SnapshotRequest, format: 'snapshot-json'): Promise<string>;
   /** Main-validated result as JSON, avoiding nested object copies across contextBridge. */
   request(request: Request, format: 'json'): Promise<string>;
   request(request: Request): Promise<Result>;

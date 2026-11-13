@@ -60,10 +60,10 @@ beforeEach(() => {
   request.mockReset();
   vi.stubGlobal('window', {
     openkraken: {
-      request: async (input: unknown, format?: 'json' | 'history-page') => {
+      request: async (input: unknown, format?: 'json' | 'history-page' | 'snapshot-json') => {
         const result = await request(input);
         if (format === 'history-page' && result.kind === 'page') return encodeHistoryPage(result);
-        return format === 'json' ? JSON.stringify(result) : result;
+        return format === 'json' || format === 'snapshot-json' ? JSON.stringify(result) : result;
       },
       cancel: vi.fn(async () => {}),
     },

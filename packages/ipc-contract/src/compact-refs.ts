@@ -1,4 +1,4 @@
-import type { Ref } from './index.js';
+import type { Ref, Result, ServiceResult } from './index.js';
 
 const prefixes = { local: 'refs/heads/', remote: 'refs/remotes/', tag: 'refs/tags/' } as const;
 
@@ -18,19 +18,27 @@ export function compactRef(ref: Ref): string | Ref {
   return ref.target + ':' + ref.name;
 }
 
-/** Only the target needs additional validation: all other fields come from strings or fixed defaults. */
-export function expandRef(value: string): Ref | undefined {
+// Main checks the string representation before allowing it onto the renderer bridge.
+export const objectIdPattern = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+function packedRefKind(name: string) {
+  if (name.startsWith(prefixes.local)) return 'local';
+  if (name.startsWith(prefixes.remote)) return 'remote';
+  if (name.startsWith(prefixes.tag)) return 'tag';
+}
+export function validCompactRef(value: string) {
   const separator = value.indexOf(':');
-  if (separator !== 40 && separator !== 64) return undefined;
+  return (
+    (separator === 40 || separator === 64) &&
+    objectIdPattern.test(value.slice(0, separator)) &&
+    packedRefKind(value.slice(separator + 1)) !== undefined
+  );
+}
+
+function expandRef(value: string): Ref {
+  const separator = value.indexOf(':');
   const name = value.slice(separator + 1);
-  const kind = name.startsWith(prefixes.local)
-    ? 'local'
-    : name.startsWith(prefixes.remote)
-      ? 'remote'
-      : name.startsWith(prefixes.tag)
-        ? 'tag'
-        : undefined;
-  if (!kind) return undefined;
+  const kind = packedRefKind(name);
+  if (!kind) throw new Error('Invalid compact reference');
   return {
     name,
     shortName: name.slice(prefixes[kind].length),
@@ -40,4 +48,11 @@ export function expandRef(value: string): Ref | undefined {
     peeledType: '',
     isHead: false,
   };
+}
+
+/** Expand a main-validated snapshot at the boundary that needs ordinary refs. */
+export function expandGitServiceResult(result: ServiceResult): Result {
+  if (result.kind !== 'compactSnapshot') return result;
+  const refs = result.snapshot.refs.map((row) => (typeof row === 'string' ? expandRef(row) : row));
+  return { kind: 'snapshot', snapshot: { ...result.snapshot, refs } };
 }

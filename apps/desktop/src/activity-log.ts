@@ -9,7 +9,7 @@ import {
   type ActivityEntry,
   type ActivityState,
   type Request,
-  type Result,
+  type ServiceResult,
 } from '@openkraken/ipc-contract';
 const diskSchema = z
   .object({ version: z.literal(1), entries: z.array(activityEntrySchema).max(500) })
@@ -124,7 +124,7 @@ export class ActivityLog {
   idle() {
     return this.writes;
   }
-  async track(request: Request, execute: () => Promise<Result>): Promise<Result> {
+  async track(request: Request, execute: () => Promise<ServiceResult>): Promise<ServiceResult> {
     const method = request.method === 'providerGit' ? request.operation.method : request.method;
     if (!(method in activityActions) || (request.method === 'fetch' && request.background))
       return execute();
