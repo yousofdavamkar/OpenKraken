@@ -231,7 +231,7 @@ export function History() {
       {searchResults && (
         <div className="search-results" aria-label="All history results">
           <p>
-            Literal message/author matches · {searchResults.length}
+            Commit ID or literal message/author matches · {searchResults.length}
             {searchTruncated ? '+' : ''} results
           </p>
           {!searchResults.length && <p>No matches in repository history.</p>}

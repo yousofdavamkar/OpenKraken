@@ -5,9 +5,14 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createFixture, fixtureGit, fixtureKinds } from '../../packages/test-fixtures/src/index.js';
 import type { FixtureKind } from '../../packages/test-fixtures/src/index.js';
-async function launch(kind: FixtureKind = 'merge', count?: number) {
+async function launch(
+  kind: FixtureKind = 'merge',
+  count?: number,
+  prepare?: (path: string) => void,
+) {
   const root = mkdtempSync(join(tmpdir(), 'openkraken-graph-e2e-'));
   const repository = createFixture(join(root, 'repo'), kind, count);
+  prepare?.(repository);
   const app = await electron.launch({
     args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
   });
@@ -97,6 +102,23 @@ test('Canvas search dims without moving rows; keyboard, ancestry, multi-select a
     await grid.press('Escape');
     await expect(grid.getByRole('row', { selected: true })).toHaveCount(0);
     await page.screenshot({ path: 'test-results/graph-merge.png' });
+  } finally {
+    await close();
+  }
+});
+test('searching a hexadecimal branch name opens the commit with the matching object ID', async () => {
+  const { page, repository, close } = await launch('linear', 12, (path) => {
+    const prefix = fixtureGit(path, ['rev-parse', 'HEAD~6']).slice(0, 10);
+    fixtureGit(path, ['branch', prefix, 'HEAD']);
+  });
+  try {
+    const oid = fixtureGit(repository, ['rev-parse', 'HEAD~6']);
+    await page.getByRole('textbox', { name: 'Search commits' }).fill(oid.slice(0, 10));
+    await page.getByRole('button', { name: 'Search all history' }).click();
+    const results = page.getByLabel('All history results');
+    await expect(results.getByRole('button')).toHaveCount(1);
+    await results.getByRole('button', { name: /Commit 6 — linear/ }).click();
+    await expect(page.getByRole('region', { name: 'Commit details' })).toContainText(oid);
   } finally {
     await close();
   }
