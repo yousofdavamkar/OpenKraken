@@ -287,6 +287,21 @@ jobs:
             --volume "$PWD/scripts/check-rpm-lifecycle.sh:/check.sh:ro" \
             quay.io/fedora/fedora@sha256:086bb30fc7dd0f84b266b9c93d14298f06e30d04421dcd6813629ea00542fa8a \
             timeout 12m bash /check.sh "/artifacts/$artifact" "/upgrade/$upgrade_artifact"
+      - name: Save signed-feed installers through Electron
+        shell: bash
+        run: |
+          platform=$(node -p 'process.platform + "-" + process.arch')
+          display=()
+          case "$RUNNER_OS" in
+            Linux) targets=(deb rpm); display=(xvfb-run -a) ;;
+            macOS) targets=(dmg) ;;
+            Windows) targets=(msi) ;;
+          esac
+          for target in "${targets[@]}"; do
+            export OPENKRAKEN_UPDATE_TEST_MANIFEST="release/installers/$platform/test/$target/manifest.json"
+            "${display[@]}" pnpm exec playwright test tests/e2e/updates.test.ts -g 'signed update UI' \
+              --reporter=list --output="test-results/update-export-$target"
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:

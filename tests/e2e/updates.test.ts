@@ -1,11 +1,13 @@
 import { _electron as electron, expect, test } from '@playwright/test';
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
-import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import { createServer } from 'node:https';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 test('the default build stays disconnected and offers no update download', async () => {
   const profile = await mkdtemp(join(tmpdir(), 'openkraken-updates-disabled-'));
@@ -41,10 +43,53 @@ test('the default build stays disconnected and offers no update download', async
   }
 });
 
+async function updatePackage(manifestPath?: string) {
+  if (!manifestPath) {
+    const format =
+      process.platform === 'win32' ? 'msi' : process.platform === 'darwin' ? 'dmg' : 'deb';
+    return {
+      format,
+      filename: 'OpenKraken.' + format,
+      version: '0.2.0',
+      size: 7,
+      sha256: createHash('sha256').update('fixture').digest('hex'),
+      path: undefined,
+    };
+  }
+  const manifest: {
+    platform: string;
+    arch: string;
+    target: string;
+    version: string;
+    artifact: { file: string; size: number; sha256: string };
+  } = JSON.parse(await readFile(manifestPath, 'utf8'));
+  expect(manifest.platform).toBe(process.platform);
+  expect(manifest.arch).toBe(process.arch);
+  const { file: filename, size, sha256 } = manifest.artifact;
+  expect(basename(filename)).toBe(filename);
+  const path = join(dirname(manifestPath), filename);
+  expect((await stat(path)).size).toBe(size);
+  return {
+    format: manifest.target,
+    filename,
+    version: manifest.version,
+    size,
+    sha256,
+    path,
+  };
+}
+
+async function fileDigest(path: string) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest('hex');
+}
+
 test('signed update UI checks, downloads, cancels and rejects tampering through real HTTPS', async () => {
   // Includes the real startup delay, background notice polling and two consent restarts.
-  test.setTimeout(90000);
-  test.skip(process.platform !== 'linux', 'Local OpenSSL fixture currently validated on Linux');
+  const manifestPath = process.env.OPENKRAKEN_UPDATE_TEST_MANIFEST;
+  test.setTimeout(manifestPath ? 180000 : 90000);
+  const { format, filename, version, size, sha256, path } = await updatePackage(manifestPath);
   const root = await mkdtemp(join(tmpdir(), 'openkraken-update-e2e-'));
   const main = resolve(`apps/desktop/dist/update-test-${randomUUID()}.cjs`);
   let server: ReturnType<typeof createServer> | undefined;
@@ -52,27 +97,7 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
   try {
     const cert = join(root, 'cert.pem');
     const key = join(root, 'key.pem');
-    execFileSync(
-      'openssl',
-      [
-        'req',
-        '-x509',
-        '-newkey',
-        'rsa:2048',
-        '-nodes',
-        '-keyout',
-        key,
-        '-out',
-        cert,
-        '-days',
-        '1',
-        '-subj',
-        '/CN=localhost',
-        '-addext',
-        'subjectAltName=DNS:localhost,IP:127.0.0.1',
-      ],
-      { stdio: 'ignore' },
-    );
+    execFileSync(process.execPath, [resolve('scripts/create-loopback-certificate.mjs'), root]);
     const keys = generateKeyPairSync('ed25519');
     let sequence = 7;
     let tamper = false;
@@ -91,17 +116,17 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
               product: 'org.openkraken.desktop',
               channel: 'stable',
               sequence,
-              version: '0.2.0',
+              version,
               issuedAt,
               expiresAt,
               artifacts: [
                 {
-                  platform: 'linux',
+                  platform: process.platform,
                   arch: process.arch,
-                  format: 'AppImage',
-                  name: 'OpenKraken.AppImage',
-                  size: 7,
-                  sha256: 'f16d05ec6b29248d2c61adb1e9263f78e4f7bace1b955014a2d17872cfe4064d',
+                  format,
+                  name: filename,
+                  size,
+                  sha256,
                 },
               ],
             }),
@@ -118,8 +143,10 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
               signature: signature.toString('base64'),
             }),
           );
-        } else if (request.url === '/stable/OpenKraken.AppImage') {
+        } else if (request.url === '/stable/' + filename) {
           if (slow) response.write('fix');
+          else if (path)
+            void pipeline(createReadStream(path), response).catch(() => response.destroy());
           else response.end('fixture');
         } else {
           response.writeHead(404);
@@ -150,7 +177,7 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     await mkdir(join(root, 'app'));
     await writeFile(
       join(root, 'app/package.json'),
-      JSON.stringify({ name: 'openkraken-update-fixture', version: '0.1.0', main }),
+      JSON.stringify({ name: 'openkraken-update-fixture', version: '0.0.0', main }),
     );
     const profile = join(root, 'profile');
     const args = [join(root, 'app'), `--user-data-dir=${profile}`];
@@ -166,35 +193,58 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     await expect(dialog.getByRole('status')).toHaveText('Check for a newer signed release.');
     expect(requests).toHaveLength(0);
     await dialog.getByRole('button', { name: 'Check for updates' }).click();
-    await expect(dialog.getByRole('status')).toHaveText('Version 0.2.0 is available.');
-    await dialog.getByRole('button', { name: 'Download AppImage' }).click();
-    await expect(dialog.getByRole('status')).toContainText('download verified');
-    expect(await readFile(join(profile, 'updates/artifact.ready'), 'utf8')).toBe('fixture');
+    await expect(dialog.getByRole('status')).toHaveText(`Version ${version} is available.`);
+    await dialog.getByRole('button', { name: `Download ${format}` }).click();
+    await expect(dialog.getByRole('status')).toContainText('download verified', { timeout: 60000 });
+    expect(await fileDigest(join(profile, 'updates/artifact.ready'))).toBe(sha256);
     await page.screenshot({ path: 'test-results/signed-update-verified.png' });
-    const exported = join(root, 'OpenKraken.AppImage');
-    await app.evaluate(({ dialog }, path) => {
-      let first = true;
-      dialog.showSaveDialog = async (...args: unknown[]) => {
-        const options = args.at(-1) as Electron.SaveDialogOptions;
-        if (!options.defaultPath?.endsWith('/OpenKraken.AppImage'))
-          throw new Error('Missing signed default filename');
-        if (first) {
-          first = false;
-          return { canceled: true, filePath: '' };
-        }
-        return { canceled: false, filePath: path };
-      };
-    }, exported);
+    const exported = join(root, filename);
+    const downloads = await app.evaluate(({ app }) => app.getPath('downloads'));
+    await app.evaluate(
+      ({ dialog }, { path, expectedPath }) => {
+        let first = true;
+        dialog.showSaveDialog = async (...args: unknown[]) => {
+          const options = args.at(-1) as Electron.SaveDialogOptions;
+          if (options.defaultPath !== expectedPath)
+            throw new Error('Missing signed default filename');
+          if (first) {
+            first = false;
+            return { canceled: true, filePath: '' };
+          }
+          return { canceled: false, filePath: path };
+        };
+      },
+      { path: exported, expectedPath: join(downloads, filename) },
+    );
     const save = dialog.getByRole('button', { name: 'Save installer…' });
     await save.click();
     await expect(save).toBeEnabled();
     await expect(stat(exported)).rejects.toMatchObject({ code: 'ENOENT' });
     await save.click();
-    await expect(dialog.getByRole('status')).toHaveText('Version 0.2.0 installer saved.');
-    expect(await readFile(exported, 'utf8')).toBe('fixture');
+    await expect(dialog.getByRole('status')).toHaveText(`Version ${version} installer saved.`, {
+      timeout: 60000,
+    });
+    const exportedDigest = await fileDigest(exported);
+    expect(exportedDigest).toBe(sha256);
+    expect((await stat(exported)).size).toBe(size);
+    if (manifestPath) {
+      const receipt = {
+        platform: process.platform,
+        arch: process.arch,
+        format,
+        version,
+        filename,
+        size,
+        sha256: exportedDigest,
+      };
+      await writeFile(
+        test.info().outputPath('saved-installer.json'),
+        JSON.stringify(receipt, null, 2),
+      );
+    }
     slow = true;
     await dialog.getByRole('button', { name: 'Check for updates' }).click();
-    await dialog.getByRole('button', { name: 'Download AppImage' }).click();
+    await dialog.getByRole('button', { name: `Download ${format}` }).click();
     await expect(dialog.getByRole('progressbar', { name: 'Download progress' })).toHaveAttribute(
       'value',
       '3',
@@ -209,7 +259,7 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     await expect(dialog.getByRole('status')).toContainText(
       'signature or validity period could not be verified',
     );
-    await expect(dialog.getByRole('button', { name: 'Download AppImage' })).toHaveCount(0);
+    await expect(dialog.getByRole('button', { name: `Download ${format}` })).toHaveCount(0);
     tamper = false;
     slow = false;
     const automatic = dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' });
@@ -224,18 +274,18 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     await expect.poll(() => requests.length, { timeout: 35000 }).toBe(beforeAutomatic + 1);
     await expect(page.getByRole('button', { name: 'Updates', exact: true })).toHaveAttribute(
       'title',
-      'OpenKraken 0.2.0 is available',
+      `OpenKraken ${version} is available`,
       { timeout: 35000 },
     );
     await page.getByRole('button', { name: 'Updates', exact: true }).click();
     dialog = page.getByRole('dialog', { name: 'App updates' });
-    await expect(dialog.getByRole('status')).toHaveText('Version 0.2.0 is available.');
+    await expect(dialog.getByRole('status')).toHaveText(`Version ${version} is available.`);
     await expect(
       dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' }),
     ).toBeChecked();
     await expect(page.getByRole('button', { name: 'Updates', exact: true })).toHaveAttribute(
       'title',
-      'OpenKraken 0.2.0 is available',
+      `OpenKraken ${version} is available`,
     );
     await page.screenshot({ path: 'test-results/automatic-updates.png' });
     await dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' }).uncheck();
@@ -259,7 +309,7 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     sequence = 8;
     slow = true;
     await dialog.getByRole('button', { name: 'Check for updates' }).click();
-    await dialog.getByRole('button', { name: 'Download AppImage' }).click();
+    await dialog.getByRole('button', { name: `Download ${format}` }).click();
     await expect(dialog.getByRole('progressbar', { name: 'Download progress' })).toHaveAttribute(
       'value',
       '3',
