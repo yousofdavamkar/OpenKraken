@@ -45,35 +45,12 @@ test('the default build has no reporting destination and cannot be opted in', as
 });
 
 test('crashes, JavaScript failures and interrupted sessions reach TLS only with consent', async () => {
-  test.skip(
-    process.platform !== 'linux',
-    'Local OpenSSL trust fixture currently validated on Linux',
-  );
+  test.skip(process.platform !== 'linux', 'Exercises Linux native process crash signals');
   const root = await mkdtemp(join(tmpdir(), 'openkraken-reporting-tls-'));
   const main = resolve(`apps/desktop/dist/reporting-test-${randomUUID()}.cjs`);
   const cert = join(root, 'cert.pem');
   const key = join(root, 'key.pem');
-  execFileSync(
-    'openssl',
-    [
-      'req',
-      '-x509',
-      '-newkey',
-      'rsa:2048',
-      '-nodes',
-      '-keyout',
-      key,
-      '-out',
-      cert,
-      '-days',
-      '1',
-      '-subj',
-      '/CN=localhost',
-      '-addext',
-      'subjectAltName=DNS:localhost,IP:127.0.0.1',
-    ],
-    { stdio: 'ignore' },
-  );
+  execFileSync(process.execPath, [resolve('scripts/create-loopback-certificate.mjs'), root]);
   const received: { url: string; body: string; cookie?: string; authorization?: string }[] = [];
   const server = createServer(
     { key: await readFile(key), cert: await readFile(cert) },

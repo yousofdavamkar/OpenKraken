@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 const exec = promisify(execFile);
-export async function buildAskpass() {
+export async function locateGo() {
   const cached = join(
     homedir(),
     '.cache',
@@ -23,6 +23,10 @@ export async function buildAskpass() {
       go = cached;
     }
   }
+  return go;
+}
+export async function buildAskpass() {
+  const go = await locateGo();
   const output = resolve('apps/desktop/dist/helpers');
   await mkdir(output, { recursive: true });
   await exec(
