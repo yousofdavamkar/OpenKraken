@@ -2,7 +2,12 @@ import { execFile, spawn } from 'node:child_process';
 import { lstat, mkdir, mkdtemp, readlink, rm, symlink } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { comparePayload, payloadManifest, verifyFuses } from './package-security.mjs';
+import {
+  comparePayload,
+  payloadManifest,
+  verifyFuses,
+  verifyPackagedApplication,
+} from './package-security.mjs';
 
 const run = promisify(execFile);
 const commandOptions = { timeout: 180_000, maxBuffer: 8 * 1024 * 1024 };
@@ -96,6 +101,7 @@ export async function verifyDmg(artifact, manifest) {
       const mounted = join(mountpoint, 'OpenKraken.app');
       comparePayload(manifest.payload, await payloadManifest(mounted));
       await verifyMacBundle(mounted, manifest.version);
+      verifyPackagedApplication(mounted, manifest.version);
       await run('/usr/bin/ditto', [mounted, copied], commandOptions);
       comparePayload(manifest.payload, await payloadManifest(copied));
       await verifyMacBundle(copied, manifest.version);

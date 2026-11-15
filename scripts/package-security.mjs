@@ -1,9 +1,30 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
+import { createRequire } from 'node:module';
 import { lstat, readdir, readlink } from 'node:fs/promises';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { getCurrentFuseWire, FuseV1Options, FuseState } from '@electron/fuses';
 import { readWindowsPayloadAccess } from './windows-payload.mjs';
+
+const require = createRequire(import.meta.url);
+const { extractFile } = createRequire(require.resolve('@electron/packager'))('@electron/asar');
+
+export function verifyPackagedApplication(directory, version) {
+  const resources = process.platform === 'darwin' ? 'Contents/Resources' : 'resources';
+  const archive = join(directory, resources, 'app.asar');
+  const app = JSON.parse(extractFile(archive, 'package.json').toString('utf8'));
+  if (
+    typeof version !== 'string' ||
+    !version ||
+    app.version !== version ||
+    app.name !== 'openkraken' ||
+    app.desktopName !== 'openkraken.desktop' ||
+    app.main !== 'dist/main.cjs'
+  )
+    throw new Error(
+      'Packaged application identity or version differs. Rebuild the platform bundle with pnpm package.',
+    );
+}
 
 export const packageFuses = {
   [FuseV1Options.RunAsNode]: false,

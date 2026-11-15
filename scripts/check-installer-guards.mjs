@@ -40,31 +40,31 @@ try {
       return true;
     },
   );
-  if (original.target === 'dmg' || original.target === 'msi') {
-    const wrongVersion = structuredClone(original);
-    wrongVersion.version = original.version === '0.0.0' ? '0.0.1' : '0.0.0';
-    await writeFile(fixture, JSON.stringify(wrongVersion));
-    await assert.rejects(
-      run(process.execPath, ['scripts/verify-installer.mjs', fixture]),
-      (error) => {
-        assert.match(
-          error.stderr,
-          original.target === 'dmg'
-            ? /macOS bundle identity, version, executable or repository scheme differs/
-            : /MSI identity, version, architecture, per-user policy or launch metadata differs/,
-        );
-        assert.doesNotMatch(error.stdout, /Packaged|verified/);
-        return true;
-      },
-    );
-    if (original.target === 'dmg')
-      assert.deepEqual(
-        await dmgChecks(),
-        existingDmgChecks,
-        'Rejected DMGs must detach and clean up',
+  const wrongVersion = structuredClone(original);
+  wrongVersion.version = original.version === '0.0.0' ? '0.0.1' : '0.0.0';
+  await writeFile(fixture, JSON.stringify(wrongVersion));
+  await assert.rejects(
+    run(process.execPath, ['scripts/verify-installer.mjs', fixture]),
+    (error) => {
+      assert.match(
+        error.stderr,
+        original.target === 'dmg'
+          ? /macOS bundle identity, version, executable or repository scheme differs/
+          : original.target === 'msi'
+            ? /MSI identity, version, architecture, per-user policy or launch metadata differs/
+            : /Packaged application identity or version differs/,
       );
-  }
-  console.log('Archive and native-helper mismatches rejected before desktop launch');
+      assert.doesNotMatch(error.stdout, /Packaged|verified/);
+      return true;
+    },
+  );
+  if (original.target === 'dmg')
+    assert.deepEqual(
+      await dmgChecks(),
+      existingDmgChecks,
+      'Rejected DMGs must detach and clean up',
+    );
+  console.log('Archive, native-helper and version mismatches rejected before desktop launch');
 } finally {
   await rm(fixture, { force: true });
 }

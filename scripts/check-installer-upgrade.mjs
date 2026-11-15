@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { msiVersion } from './msi.mjs';
@@ -75,6 +76,28 @@ try {
     version,
     'Bundle must use the release version, not a hard-coded value',
   );
+  // Model a failed rebuild that updated staging but left the previous bundle on disk.
+  await writeFile(join(fixture, 'package.json'), JSON.stringify(source));
+  const staging = join(fixture, 'release/staging');
+  await mkdir(staging, { recursive: true });
+  await writeFile(
+    join(staging, 'package.json'),
+    JSON.stringify({ ...bundled, version: source.version }),
+  );
+  await assert.rejects(
+    promisify(execFile)(
+      process.execPath,
+      [join(root, 'scripts/installers.mjs'), '--test-metadata', '--target', target],
+      { cwd: fixture },
+    ),
+    (error) => {
+      assert.match(error.stderr, /Rebuild the platform bundle/);
+      return true;
+    },
+    'An installer must reject a bundle whose embedded version differs from the requested release',
+  );
+  await writeFile(join(fixture, 'package.json'), JSON.stringify({ ...source, version }));
+  await rm(staging, { recursive: true });
   await run('installers.mjs', ['--test-metadata', '--target', target]);
   const manifestPath = join(
     fixture,

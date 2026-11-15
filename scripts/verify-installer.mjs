@@ -2,7 +2,13 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import { comparePayload, payloadManifest, sha256, verifyFuses } from './package-security.mjs';
+import {
+  comparePayload,
+  payloadManifest,
+  sha256,
+  verifyFuses,
+  verifyPackagedApplication,
+} from './package-security.mjs';
 import { verifyDmg } from './dmg.mjs';
 import { verifyMsi } from './msi.mjs';
 
@@ -105,6 +111,7 @@ async function verifyLinuxInstaller() {
     if (manifest.target !== 'AppImage')
       comparePayload(manifest.payload, await payloadManifest(directory));
     await verifyFuses(join(directory, 'openkraken'));
+    verifyPackagedApplication(directory, manifest.version);
     const desktop = await readFile(desktopPath, 'utf8');
     const expectedExec =
       manifest.target === 'AppImage'

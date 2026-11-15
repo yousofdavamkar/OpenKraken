@@ -270,7 +270,9 @@ jobs:
           node scripts/check-installer-upgrade.mjs deb
           node scripts/check-installer-upgrade.mjs rpm
           pnpm installer --test-metadata --target AppImage
-          node scripts/check-installer-guards.mjs "$INSTALLER_ROOT/AppImage/manifest.json"
+          for target in deb rpm AppImage; do
+            node scripts/check-installer-guards.mjs "$INSTALLER_ROOT/$target/manifest.json"
+          done
           node scripts/verify-appimage-update.mjs
       - if: runner.os == 'Linux'
         name: AppImage preflight, cancellation, restart and startup recovery

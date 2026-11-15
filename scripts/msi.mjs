@@ -4,7 +4,12 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { comparePayload, payloadManifest, verifyFuses } from './package-security.mjs';
+import {
+  comparePayload,
+  payloadManifest,
+  verifyFuses,
+  verifyPackagedApplication,
+} from './package-security.mjs';
 
 const run = promisify(execFile);
 // Freeze the builder's appId-derived upgrade identity across releases.
@@ -216,6 +221,7 @@ export async function verifyMsi(artifact, manifest) {
     const directory = dirname(executable);
     comparePayload(manifest.payload, await payloadManifest(directory));
     await verifyFuses(executable);
+    verifyPackagedApplication(directory, manifest.version);
     console.log('MSI tables, extracted payload, Windows access and Electron fuses verified');
     const smoke = spawn(process.execPath, ['scripts/smoke-package.mjs'], {
       stdio: 'inherit',
