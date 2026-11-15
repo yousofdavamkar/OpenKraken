@@ -156,6 +156,7 @@ function UpdatesDialog({
       onCancel={onClose}
     >
       <h2>App updates</h2>
+      {state?.channel === 'beta' && <p>Beta channel · This build receives prerelease updates.</p>}
       <p>
         Checking contacts the release server. Repository contents and account information are not
         sent.

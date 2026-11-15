@@ -31,6 +31,9 @@ assert.ok(
   [failStartup, helperUnavailable, beforeRename, afterRename].filter(Boolean).length <= 1,
   'Select one failure scenario',
 );
+const beta = process.argv.includes('--beta');
+const initialVersion = beta ? '0.2.0-beta.2' : '0.1.0';
+const replacementVersion = beta ? '0.2.0-beta.10' : '0.2.0';
 const predecessorReturns = failStartup || beforeRename;
 const failedMarker = join(root, 'failed-startup');
 const descendantMarker = join(root, 'delayed-descendant.json');
@@ -86,11 +89,12 @@ try {
   );
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const config = {
+    ...(beta && { channel: 'beta' }),
     feed: `https://127.0.0.1:${server.address().port}/release.json`,
     publicKey: keys.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
   };
   const images = [];
-  for (const version of ['0.1.0', '0.2.0']) {
+  for (const version of [initialVersion, replacementVersion]) {
     const staging = join(root, version, 'staging');
     await mkdir(staging, { recursive: true });
     await cp('apps/desktop/dist', join(staging, 'dist'), { recursive: true });
@@ -108,8 +112,8 @@ try {
       const fixtureBoots = require('node:fs').existsSync(fixtureBootsPath) ? JSON.parse(require('node:fs').readFileSync(fixtureBootsPath, 'utf8')) : [];
       fixtureBoots.push(${JSON.stringify(version)});
       require('node:fs').writeFileSync(fixtureBootsPath, JSON.stringify(fixtureBoots));
-      const fixtureReturning = ${predecessorReturns && version === '0.1.0'} && require('node:fs').existsSync(${JSON.stringify(failedMarker)});
-      if (${interruptedCommit && version === '0.1.0'} && !fixtureReturning) {
+      const fixtureReturning = ${predecessorReturns && version === initialVersion} && require('node:fs').existsSync(${JSON.stringify(failedMarker)});
+      if (${interruptedCommit && version === initialVersion} && !fixtureReturning) {
         const fixtureFs = require('node:fs/promises');
         const originalRename = fixtureFs.rename;
         fixtureFs.rename = async (from, to) => {
@@ -123,7 +127,7 @@ try {
         };
       }
       if (fixtureReturning && ${failStartup}) fixtureElectron.app.commandLine.appendSwitch('remote-debugging-port', '0');
-      if (${failStartup && version === '0.2.0'}) {
+      if (${failStartup && version === replacementVersion}) {
         require('node:fs').writeFileSync(${JSON.stringify(failedMarker)}, 'replacement reached main');
         if (${delayedDescendant}) {
           const descendant = require('node:child_process').spawn('/bin/sleep', ['3'], { stdio: 'ignore' });
@@ -149,7 +153,7 @@ try {
       fixtureElectron.dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
       fixtureElectron.dialog.showMessageBoxSync = () => 0;
       fixtureElectron.dialog.showErrorBox = (title) => require('node:fs').writeFileSync(${JSON.stringify(join(root, 'install-error'))}, title);
-      let fixtureCancelBeforeQuit = ${!helperUnavailable && version === '0.1.0'} && !fixtureReturning;
+      let fixtureCancelBeforeQuit = ${!helperUnavailable && version === initialVersion} && !fixtureReturning;
       const fixtureHandle = fixtureElectron.ipcMain.handle.bind(fixtureElectron.ipcMain);
       fixtureElectron.ipcMain.handle = (channel, listener) => fixtureHandle(channel, async (...args) => {
         let result = await listener(...args);
@@ -158,7 +162,7 @@ try {
           // Deliver cancellation in the microtask before the queued quit can run.
           result = await listener(args[0], { id: require('node:crypto').randomUUID(), method: 'updatesCancel' }, ...args.slice(2));
         }
-        if ((${!failStartup && version === '0.2.0'} || fixtureReturning) && args[1]?.method === 'updatesStarted') {
+        if ((${!failStartup && version === replacementVersion} || fixtureReturning) && args[1]?.method === 'updatesStarted') {
           require('node:fs').writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ version: fixtureElectron.app.getVersion(), pid: process.pid, state: result }));
           if (!fixtureReturning || ${interruptedCommit}) setTimeout(() => fixtureElectron.app.quit(), 100);
         }
@@ -215,9 +219,9 @@ try {
     JSON.stringify({
       schemaVersion: 1,
       product: 'org.openkraken.desktop',
-      channel: 'stable',
+      channel: beta ? 'beta' : 'stable',
       sequence: 1,
-      version: '0.2.0',
+      version: replacementVersion,
       issuedAt: now - 1000,
       expiresAt: now + 86400000,
       artifacts: [
@@ -243,12 +247,21 @@ try {
   const target = join(root, 'Installed OpenKraken.AppImage');
   await cp(images[0], target);
   const originalDigest = await sha256(target);
-  const profile = join(root, 'profile');
-  await mkdir(profile);
-  child = spawn(target, ['--remote-debugging-port=0', `--user-data-dir=${profile}`], {
+  const configHome = join(root, 'config');
+  const profile = beta ? join(configHome, 'OpenKraken Beta') : join(root, 'profile');
+  const stableUpdates = join(configHome, 'OpenKraken', 'updates');
+  const args = ['--remote-debugging-port=0'];
+  if (beta) {
+    await mkdir(stableUpdates, { recursive: true, mode: 0o700 });
+    await writeFile(join(stableUpdates, 'trusted-release.json'), 'stable fixture watermark');
+  } else {
+    await mkdir(profile);
+    args.push(`--user-data-dir=${profile}`);
+  }
+  child = spawn(target, args, {
     detached: true,
     stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...process.env, TMPDIR: root },
+    env: { ...process.env, TMPDIR: root, XDG_CONFIG_HOME: configHome },
   });
   const endpoint = await new Promise((resolve, reject) => {
     let output = '';
@@ -281,6 +294,7 @@ try {
   const page = context.pages()[0] ?? (await context.waitForEvent('page'));
   await page.getByRole('button', { name: 'Updates', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'App updates' });
+  if (beta) await expect(dialog.getByText(/Beta channel/)).toBeVisible();
   await dialog.getByRole('button', { name: 'Check for updates' }).click();
   await dialog.getByRole('button', { name: 'Download AppImage' }).click();
   await expect(
@@ -304,7 +318,7 @@ try {
     assert.ok(current.state.installId && current.state.installId !== first.state.installId);
     assert.equal(await sha256(target), originalDigest);
     await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
-    assert.deepEqual(JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')), ['0.1.0']);
+    assert.deepEqual(JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')), [initialVersion]);
     // A second install reaches preparation again instead of retaining the admission lock.
     const retried = await page.evaluate(
       (installId) =>
@@ -379,13 +393,19 @@ try {
     );
     await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
     const started = JSON.parse(await waitForFile(marker));
-    assert.equal(started.version, predecessorReturns ? '0.1.0' : '0.2.0');
+    assert.equal(started.version, predecessorReturns ? initialVersion : replacementVersion);
     if (delayedDescendant)
       assert.equal(
         await readFile(join(root, 'descendant-stopped'), 'utf8'),
         'verified before predecessor startup',
       );
     assert.equal(started.state.kind, 'updates');
+    assert.equal(started.state.state.channel, beta ? 'beta' : 'stable');
+    if (beta)
+      assert.equal(
+        await readFile(join(stableUpdates, 'trusted-release.json'), 'utf8'),
+        'stable fixture watermark',
+      );
     assert.equal(started.state.state.error, null);
     assert.equal(
       await sha256(target),
@@ -394,10 +414,10 @@ try {
     assert.deepEqual(
       JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')),
       beforeRename
-        ? ['0.1.0', '0.1.0']
+        ? [initialVersion, initialVersion]
         : failStartup
-          ? ['0.1.0', '0.2.0', '0.1.0']
-          : ['0.1.0', '0.2.0'],
+          ? [initialVersion, replacementVersion, initialVersion]
+          : [initialVersion, replacementVersion],
     );
     assert.equal(
       JSON.parse(await readFile(join(profile, 'updates/trusted-release.json'), 'utf8')).sequence,

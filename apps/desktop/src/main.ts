@@ -1,6 +1,8 @@
 import { ActivityLog } from './activity-log.js';
 import { Diagnostics } from './diagnostics.js';
 import { Updates } from './updates.js';
+import type { UpdateConfiguration } from './update-protocol.js';
+import { mkdirSync } from 'node:fs';
 import { appImageTarget } from './appimage-target.js';
 import {
   prepareUpdateRestart,
@@ -70,7 +72,7 @@ import {
 } from './provider-vault.js';
 const htmlPath = join(__dirname, 'renderer', 'index.html');
 declare const __OPENKRAKEN_SENTRY_DSN__: string | null;
-declare const __OPENKRAKEN_UPDATE_CONFIG__: unknown;
+declare const __OPENKRAKEN_UPDATE_CONFIG__: UpdateConfiguration | null;
 let updates: Updates | undefined;
 let updateHandoff = false;
 let installOnQuit = false;
@@ -321,6 +323,15 @@ function createWindow() {
     providers?.gitlabCancel();
   });
   void window.loadFile(htmlPath);
+}
+if (
+  __OPENKRAKEN_UPDATE_CONFIG__?.channel === 'beta' &&
+  !app.commandLine.hasSwitch('user-data-dir')
+) {
+  const profile = join(app.getPath('appData'), 'OpenKraken Beta');
+  mkdirSync(profile, { recursive: true, mode: 0o700 });
+  app.setPath('userData', profile);
+  app.setPath('sessionData', profile);
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {

@@ -1,0 +1,7 @@
+# 0118. Signed beta updates and profile isolation
+
+The release publisher signs the channel alongside the product, version, release sequence and artifact digests. A packaged build trusts one channel. An omitted channel in `OPENKRAKEN_UPDATE_CONFIG` selects stable. An explicit `stable` has the same configuration fingerprint as earlier stable builds, preserving their saved check preferences and highest accepted sequence. A beta build sets `channel` to `beta`. Main checks the authenticated channel before saving a sequence or offering a download. The renderer can display the channel. It cannot select a different feed, key or channel.
+
+Stable manifests use canonical three-component release versions. Beta manifests use canonical numeric prereleases such as `0.2.0-beta.2` and `0.2.0-beta.10`. Both channels use SemVer ordering, the existing expiration checks and the downgrade and same-sequence change protections. The AppImage journal records the full version so successful beta startup must acknowledge the installed candidate. Failed startup can restore the retained predecessor through the same transaction.
+
+Beta builds default to a sibling `OpenKraken Beta` profile before acquiring Electron's single-instance lock. Preferences, sessions, account storage, update watermarks and reporting consent start separately. An explicit Electron profile argument is honored, including the absolute path passed by the restart helper. Use a dedicated profile when overriding that path. Opening the same Git checkout from either build still operates on that checkout.
