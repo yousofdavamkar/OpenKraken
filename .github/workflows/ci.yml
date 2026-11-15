@@ -230,6 +230,8 @@ jobs:
         run: |
           xvfb-run -a node scripts/verify-update-restart.mjs
           xvfb-run -a node scripts/verify-update-restart.mjs --beta
+          xvfb-run -a node scripts/verify-update-restart.mjs --slow-commit
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --stalled-commit
           xvfb-run -a node scripts/verify-update-restart.mjs --failed-startup
           xvfb-run -a node scripts/verify-update-restart.mjs --delayed-descendant
           xvfb-run -a node scripts/verify-update-restart.mjs --interrupt-before-rename

@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test } from '@playwright/test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -31,6 +31,55 @@ test('the application exits normally after its idle Git service crashes', async 
     if (desktopProcess.exitCode === null && desktopProcess.signalCode === null)
       desktopProcess.kill('SIGKILL');
     await closing?.catch(() => {});
+    rmSync(profile, { recursive: true, force: true });
+  }
+});
+
+test('a repeated quit still stops an unresponsive Git service before the app exits', async () => {
+  test.skip(process.platform !== 'linux', 'Uses Linux process stop and exit states');
+  const profile = mkdtempSync(join(tmpdir(), 'openkraken-double-quit-'));
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${profile}`],
+  });
+  const desktop = app.process();
+  let service: number | undefined;
+  try {
+    await app.firstWindow();
+    service = await app.evaluate(({ app }) => {
+      const child = app.getAppMetrics().find((metric) => metric.name === 'OpenKraken Git');
+      if (!child) throw new Error('Missing Git service');
+      process.kill(child.pid, 'SIGSTOP');
+      return child.pid;
+    });
+    const start = performance.now();
+    await app.evaluate(({ app }) => {
+      setImmediate(() => {
+        app.quit();
+        setTimeout(() => app.quit(), 100);
+      });
+    });
+    await expect.poll(() => desktop.exitCode, { timeout: 8000 }).toBe(0);
+    expect(performance.now() - start).toBeGreaterThanOrEqual(1400);
+    await expect
+      .poll(() => {
+        try {
+          return /\) Z /.test(readFileSync(`/proc/${service}/stat`, 'utf8'));
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
+          throw error;
+        }
+      })
+      .toBe(true);
+    service = undefined;
+  } finally {
+    if (service) {
+      try {
+        process.kill(service, 'SIGKILL');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      }
+    }
+    if (desktop.exitCode === null && desktop.signalCode === null) desktop.kill('SIGKILL');
     rmSync(profile, { recursive: true, force: true });
   }
 });

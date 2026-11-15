@@ -1,6 +1,6 @@
 import { ActivityLog } from './activity-log.js';
 import { Diagnostics } from './diagnostics.js';
-import { Updates } from './updates.js';
+import { installTimeoutMs, Updates } from './updates.js';
 import type { UpdateConfiguration } from './update-protocol.js';
 import { mkdirSync } from 'node:fs';
 import { appImageTarget } from './appimage-target.js';
@@ -477,7 +477,7 @@ else {
               app.getPath('userData'),
               preparation.signal,
             );
-            if (preparation.signal.aborted || quitting || !updates!.restartPlan()) {
+            if (preparation.signal.aborted || quitState !== 'running' || !updates!.restartPlan()) {
               await launch.cancel();
               return { kind: 'updates', state: await updates!.read() };
             }
@@ -1461,9 +1461,13 @@ else {
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
   });
-  let quitting = false;
+  let quitState: 'running' | 'draining' | 'ready' = 'running';
   // Keep the service and caches alive if a renderer cancels the window close.
   app.on('will-quit', (event) => {
+    if (quitState !== 'running') {
+      if (quitState === 'draining') event.preventDefault();
+      return;
+    }
     const installing = installOnQuit;
     installOnQuit = false;
     const launch = installing ? restartLaunch : undefined;
@@ -1477,7 +1481,8 @@ else {
             if (!launch) throw new Error('Restart was not prepared');
             await launch.arm();
             const target = await updates!.commitInstall();
-            if (!target) await launch.cancel();
+            if (target) launch.finishCommit();
+            else await launch.cancel();
             return target;
           } catch {
             await launch?.cancel();
@@ -1493,23 +1498,15 @@ else {
     providers?.deviceCancel();
     providers?.gitlabCancel();
     for (const controller of providerRequests.values()) controller.abort();
-    if (
-      (!service && !providers && !appSettings && !commitDrafts && !crashReports && !updates) ||
-      quitting
-    )
+    if (!service && !providers && !appSettings && !commitDrafts && !crashReports && !updates)
       return;
     event.preventDefault();
-    quitting = true;
+    quitState = 'draining';
     const child = service;
-    const deadline = setTimeout(() => {
-      child?.kill();
-      app.quit();
-    }, 1500);
     const stopped = child
       ? new Promise<void>((resolve) => child.once('exit', () => resolve()))
       : Promise.resolve();
-    void Promise.all([
-      installed,
+    const services = Promise.all([
       updatesClosed,
       stopped,
       providers?.idle(),
@@ -1518,28 +1515,50 @@ else {
       diagnostics?.idle(),
       commitDrafts?.idle(),
       terminals.close(),
-    ])
-      .then(async ([target]) => {
-        await activity?.idle();
-        if (!target && installing)
+    ]).then(() => activity?.idle());
+    let serviceTimer: ReturnType<typeof setTimeout>;
+    const serviceDeadline = new Promise<void>((resolve) => {
+      serviceTimer = setTimeout(() => {
+        if (child && service === child) {
+          // UtilityProcess.kill sends SIGTERM on POSIX. A stopped service cannot
+          // handle it, and has already had the full graceful shutdown interval.
+          if (process.platform !== 'win32' && child.pid) {
+            try {
+              process.kill(child.pid, 'SIGKILL');
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== 'ESRCH') child.kill();
+            }
+          } else child.kill();
+        }
+        resolve();
+      }, 1500);
+    });
+    const finishQuit = () => {
+      if (quitState === 'ready') return;
+      quitState = 'ready';
+      clearTimeout(serviceTimer);
+      clearTimeout(installTimer);
+      // Electron ignores a reentrant quit in the original will-quit microtask.
+      setImmediate(() => app.quit());
+    };
+    // A blocked filesystem still has a bounded exit with the armed helper and
+    // journal intact. Ordinary service teardown cannot truncate a live commit.
+    const installTimer = installing ? setTimeout(finishQuit, installTimeoutMs) : undefined;
+    void Promise.allSettled([installed, Promise.race([services, serviceDeadline])])
+      .then(([installation, cleanup]) => {
+        if (!installing || quitState === 'ready') return;
+        if (installation.status === 'rejected' || cleanup.status === 'rejected')
+          dialog.showErrorBox(
+            'Update shutdown did not finish cleanly',
+            'OpenKraken could not finish all shutdown work. Retained update files remain available for recovery.',
+          );
+        else if (!installation.value)
           dialog.showErrorBox(
             'Update could not be installed',
             'The update was not completed. Retained update files have been left for recovery.',
           );
       })
-      .catch(() => {
-        if (installing)
-          dialog.showErrorBox(
-            'Update shutdown did not finish cleanly',
-            'OpenKraken could not finish all shutdown work. Retained update files remain available for recovery.',
-          );
-      })
-      .finally(() => {
-        clearTimeout(deadline);
-        // With no live service, cleanup can finish in the original will-quit microtask.
-        // Electron ignores a reentrant quit there; resume on the next event-loop turn.
-        setImmediate(() => app.quit());
-      });
+      .finally(finishQuit);
     child?.postMessage({ shutdown: true });
   });
 }

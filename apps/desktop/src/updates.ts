@@ -17,6 +17,8 @@ import {
 } from './update-protocol.js';
 
 type UpdateError = NonNullable<UpdateState['error']>;
+export const installTimeoutMs = 10 * 60_000;
+
 class UpdateFailure extends Error {
   constructor(readonly code: UpdateError) {
     super(code);
@@ -609,7 +611,7 @@ export class Updates {
     this.state.installId = null;
     const installController = new AbortController();
     this.installController = installController;
-    return this.start('preparing', 10 * 60_000, async (signal) => {
+    return this.start('preparing', installTimeoutMs, async (signal) => {
       const abort = () => installController.abort(signal.reason);
       signal.addEventListener('abort', abort, { once: true });
       try {

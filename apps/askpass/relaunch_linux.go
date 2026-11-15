@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -45,6 +46,12 @@ func runRelaunch(args []string) int {
 		return 125
 	}
 	if _, err := fmt.Fprintln(os.Stdout, "armed"); err != nil {
+		return 125
+	}
+	// The parent owns the write end while committing the update. EOF means
+	// the commit finished or the parent died. In either case its actual exit
+	// is still required before launching or recovering an image.
+	if _, err := reader.ReadByte(); err != io.EOF {
 		return 125
 	}
 	deadline := time.Now().Add(20 * time.Second)

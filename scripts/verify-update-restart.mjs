@@ -25,17 +25,22 @@ const marker = join(root, 'started.json');
 const delayedDescendant = process.argv.includes('--delayed-descendant');
 const failStartup = process.argv.includes('--failed-startup') || delayedDescendant;
 const helperUnavailable = process.argv.includes('--helper-unavailable');
+const slowCommit = process.argv.includes('--slow-commit');
+const stalledCommit = process.argv.includes('--stalled-commit');
 const beforeRename = process.argv.includes('--interrupt-before-rename');
 const afterRename = process.argv.includes('--interrupt-after-rename');
-const interruptedCommit = beforeRename || afterRename;
+const predecessorInstalled = beforeRename || stalledCommit;
+const interruptedCommit = predecessorInstalled || afterRename;
 assert.ok(
-  [failStartup, helperUnavailable, beforeRename, afterRename].filter(Boolean).length <= 1,
+  [failStartup, helperUnavailable, beforeRename, afterRename, slowCommit, stalledCommit].filter(
+    Boolean,
+  ).length <= 1,
   'Select one failure scenario',
 );
 const beta = process.argv.includes('--beta');
 const initialVersion = beta ? '0.2.0-beta.2' : '0.1.0';
 const replacementVersion = beta ? '0.2.0-beta.10' : '0.2.0';
-const predecessorReturns = failStartup || beforeRename;
+const predecessorReturns = failStartup || predecessorInstalled;
 const failedMarker = join(root, 'failed-startup');
 const descendantMarker = join(root, 'delayed-descendant.json');
 async function waitForFile(path, timeout = 30000) {
@@ -121,6 +126,34 @@ try {
       fixtureBoots.push(${JSON.stringify(version)});
       require('node:fs').writeFileSync(fixtureBootsPath, JSON.stringify(fixtureBoots));
       const fixtureReturning = ${predecessorReturns && version === initialVersion} && require('node:fs').existsSync(${JSON.stringify(failedMarker)});
+      if (${slowCommit && version === initialVersion}) {
+        if (fixtureBoots.length > 1) {
+          require('node:fs').writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ version: fixtureElectron.app.getVersion(), pid: process.pid }));
+          process.exit(125);
+        }
+        const files = require('node:fs/promises');
+        const rename = files.rename.bind(files);
+        files.rename = async (from, to) => {
+          if (from === to + '.openkraken-update/next.AppImage') {
+            setTimeout(() => fixtureElectron.app.quit(), 2500);
+            await new Promise(resolve => setTimeout(resolve, 22000));
+            require('node:fs').writeFileSync(${JSON.stringify(join(root, 'slow-commit'))}, 'rename resumed');
+          }
+          return rename(from, to);
+        };
+      }
+      if (${stalledCommit && version === initialVersion} && !fixtureReturning) {
+        fixtureElectron.app.once('will-quit', () => {
+          const timer = global.setTimeout;
+          global.setTimeout = (callback, ms, ...args) => {
+            if (ms !== 600000) return timer(callback, ms, ...args);
+            return timer(() => {
+              require('node:fs').writeFileSync(${JSON.stringify(join(root, 'commit-timeout'))}, 'ten-minute deadline fired');
+              callback(...args);
+            }, 4000);
+          };
+        });
+      }
       if (${interruptedCommit && version === initialVersion} && !fixtureReturning) {
         const fixtureFs = require('node:fs/promises');
         const originalRename = fixtureFs.rename;
@@ -128,7 +161,7 @@ try {
           if (from === to + '.openkraken-update/next.AppImage') {
             if (${afterRename}) await originalRename(from, to);
             require('node:fs').writeFileSync(${JSON.stringify(failedMarker)}, ${JSON.stringify(afterRename ? 'after rename' : 'before rename')});
-            process.kill(process.pid, 'SIGKILL');
+            if (!${stalledCommit}) process.kill(process.pid, 'SIGKILL');
             return new Promise(() => {});
           }
           return originalRename(from, to);
@@ -419,8 +452,10 @@ try {
       window.removeEventListener('beforeunload', Reflect.get(window, 'fixtureUnload')),
     );
     await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
-    const started = JSON.parse(await waitForFile(marker));
+    const started = JSON.parse(await waitForFile(marker, slowCommit ? 60000 : 30000));
     assert.equal(started.version, predecessorReturns ? initialVersion : replacementVersion);
+    if (slowCommit)
+      assert.equal(await readFile(join(root, 'slow-commit'), 'utf8'), 'rename resumed');
     if (delayedDescendant)
       assert.equal(
         await readFile(join(root, 'descendant-stopped'), 'utf8'),
@@ -440,7 +475,7 @@ try {
     );
     assert.deepEqual(
       JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')),
-      beforeRename
+      predecessorInstalled
         ? [initialVersion, initialVersion]
         : failStartup
           ? [initialVersion, replacementVersion, initialVersion]
@@ -451,6 +486,11 @@ try {
       receipts[1].sequence,
     );
     await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
+    if (stalledCommit)
+      assert.equal(
+        await readFile(join(root, 'commit-timeout'), 'utf8'),
+        'ten-minute deadline fired',
+      );
     if (interruptedCommit) {
       assert.equal(
         await readFile(failedMarker, 'utf8'),
@@ -478,13 +518,17 @@ try {
     }
     await delay(500);
     console.log(
-      interruptedCommit
-        ? `Packaged AppImage: killed the parent ${afterRename ? 'after' : 'before'} rename, launched ${started.version}, cleaned staging and retained the release watermark.`
-        : delayedDescendant
-          ? 'Packaged AppImage: waited for the delayed descendant, restored the exact predecessor, and retained the release watermark.'
-          : failStartup
-            ? 'Packaged AppImage: failed replacement startup restored and launched the exact predecessor; startup cleanup and release watermark retention passed.'
-            : 'Packaged AppImage: signed HTTPS download, cancelled unsaved-work restart, accepted install, new-version launch and recovery acknowledgement passed.',
+      stalledCommit
+        ? 'Packaged AppImage: finalization deadline stopped a stalled commit; the verified predecessor reopened and cleaned staging.'
+        : slowCommit
+          ? 'Packaged AppImage: the 22-second commit survived repeated quit, launched the signed replacement and confirmed startup.'
+          : interruptedCommit
+            ? `Packaged AppImage: killed the parent ${afterRename ? 'after' : 'before'} rename, launched ${started.version}, cleaned staging and retained the release watermark.`
+            : delayedDescendant
+              ? 'Packaged AppImage: waited for the delayed descendant, restored the exact predecessor, and retained the release watermark.'
+              : failStartup
+                ? 'Packaged AppImage: failed replacement startup restored and launched the exact predecessor; startup cleanup and release watermark retention passed.'
+                : 'Packaged AppImage: signed HTTPS download, cancelled unsaved-work restart, accepted install, new-version launch and recovery acknowledgement passed.',
     );
   }
   completed = true;

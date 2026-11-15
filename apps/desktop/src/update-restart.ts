@@ -49,6 +49,7 @@ export async function prepareUpdateRestart(directory: string, source: string) {
 
 export type PreparedUpdateLaunch = {
   arm(): Promise<void>;
+  finishCommit(): void;
   cancel(): Promise<void>;
 };
 
@@ -111,9 +112,12 @@ export function prepareUpdateLaunch(
           armed = done;
           armFailed = failed;
           timer = setTimeout(() => fail(new Error('Restart helper did not arm')), 750);
-          child.stdin.end('launch\n');
+          child.stdin.write('launch\n');
         });
         return armPromise;
+      },
+      finishCommit() {
+        child.stdin.end();
       },
       cancel() {
         fail(new Error('Restart helper preparation cancelled'));
