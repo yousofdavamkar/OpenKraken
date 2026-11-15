@@ -25,6 +25,7 @@ const marker = join(root, 'started.json');
 const delayedDescendant = process.argv.includes('--delayed-descendant');
 const failStartup = process.argv.includes('--failed-startup') || delayedDescendant;
 const helperUnavailable = process.argv.includes('--helper-unavailable');
+const unchangedImage = process.argv.includes('--unchanged-image');
 const slowCommit = process.argv.includes('--slow-commit');
 const stalledCommit = process.argv.includes('--stalled-commit');
 const syncError = process.argv.includes('--sync-error-after-rename');
@@ -36,6 +37,7 @@ assert.ok(
   [
     failStartup,
     helperUnavailable,
+    unchangedImage,
     beforeRename,
     afterRename,
     slowCommit,
@@ -97,6 +99,32 @@ try {
     mode: 0o600,
   });
   const receipts = [];
+  let correctedEnvelope;
+  async function publishArtifact(path, version, sequence) {
+    const now = Date.now();
+    const descriptor = join(root, `release-input-${sequence}.json`);
+    const manifest = join(root, `release-${sequence}.json`);
+    await writeFile(
+      descriptor,
+      JSON.stringify({
+        schemaVersion: 1,
+        product: 'org.openkraken.desktop',
+        channel: beta ? 'beta' : 'stable',
+        sequence,
+        version,
+        issuedAt: now - 1000,
+        expiresAt: now + 86400000,
+        artifacts: [{ platform: 'linux', arch: process.arch, format: 'AppImage', path }],
+      }),
+    );
+    const { stdout } = await promisify(execFile)(process.execPath, [
+      resolve('scripts/sign-update.mjs'),
+      descriptor,
+      signingKey,
+      manifest,
+    ]);
+    return { receipt: JSON.parse(stdout), envelope: await readFile(manifest, 'utf8') };
+  }
   for (const version of [initialVersion, replacementVersion]) {
     const staging = join(root, version, 'staging');
     await mkdir(staging, { recursive: true });
@@ -260,30 +288,16 @@ try {
     const name = `OpenKraken-${version}-linux-${process.arch}.AppImage`;
     const { artifact } = await buildAppImage(bundle, work, name, { version, testOnly: true });
     images.push(artifact);
-    const now = Date.now();
-    const descriptor = join(work, 'release-input.json');
-    const manifest = join(work, 'release.json');
-    await writeFile(
-      descriptor,
-      JSON.stringify({
-        schemaVersion: 1,
-        product: 'org.openkraken.desktop',
-        channel: beta ? 'beta' : 'stable',
-        sequence: images.length,
-        version,
-        issuedAt: now - 1000,
-        expiresAt: now + 86400000,
-        artifacts: [{ platform: 'linux', arch: process.arch, format: 'AppImage', path: name }],
-      }),
+    if (version === replacementVersion && unchangedImage)
+      envelope = (await publishArtifact(images[0], version, 2)).envelope;
+    const signed = await publishArtifact(
+      artifact,
+      version,
+      version === replacementVersion && unchangedImage ? 3 : images.length,
     );
-    const { stdout } = await promisify(execFile)(process.execPath, [
-      resolve('scripts/sign-update.mjs'),
-      descriptor,
-      signingKey,
-      manifest,
-    ]);
-    receipts.push(JSON.parse(stdout));
-    envelope = await readFile(manifest, 'utf8');
+    receipts.push(signed.receipt);
+    if (unchangedImage && version === replacementVersion) correctedEnvelope = signed.envelope;
+    else envelope = signed.envelope;
   }
   const artifact = images[1];
   const initialArtifact = receipts[0].artifacts[0];
@@ -368,6 +382,28 @@ try {
   await expect(
     dialog.getByRole('button', { name: 'Install and restart', exact: true }),
   ).toBeVisible({ timeout: 30000 });
+  if (unchangedImage) {
+    await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
+    await expect(dialog).toContainText('This release contains the installed AppImage.', {
+      timeout: 30000,
+    });
+    assert.equal(await sha256(target), originalDigest);
+    await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
+    assert.deepEqual(JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')), [initialVersion]);
+    assert.equal(
+      JSON.parse(await readFile(join(profile, 'updates/trusted-release.json'), 'utf8')).sequence,
+      2,
+    );
+    envelope = correctedEnvelope;
+    await dialog.getByRole('button', { name: 'Check for updates' }).click();
+    await dialog.getByRole('button', { name: 'Download AppImage' }).click();
+    await expect(
+      dialog.getByRole('button', { name: 'Install and restart', exact: true }),
+    ).toBeVisible({ timeout: 30000 });
+    console.log(
+      'An identical signed AppImage was rejected before restart. The corrected release downloaded in the same session.',
+    );
+  }
   let first = await page.evaluate(() =>
     window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesRead' }),
   );

@@ -276,7 +276,7 @@ jobs:
         name: AppImage preflight, cancellation, restart and startup recovery
         run: |
           xvfb-run -a node scripts/verify-update-restart.mjs
-          xvfb-run -a node scripts/verify-update-restart.mjs --beta
+          xvfb-run -a node scripts/verify-update-restart.mjs --beta --unchanged-image
           xvfb-run -a node scripts/verify-update-restart.mjs --slow-commit
           xvfb-run -a node scripts/verify-update-restart.mjs --sync-error-after-rename
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --stalled-commit
