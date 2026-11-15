@@ -20,6 +20,8 @@ The original Updates dialog offered check, download, progress and cancellation w
 
 ## Configuring a release feed
 
+For a beta feed, configure the channel and prerelease versions described in [ADR 0118](0118-beta-update-channel.md). The following example configures a stable build.
+
 Choose a stable manifest URL on a host the publisher controls. Enable managed HTTPS with automatic certificate renewal, or configure an ACME client on that host. A Let's Encrypt certificate authenticates the connection to the host. The app verifies each release manifest with an independent Ed25519 key, so routine TLS certificate renewal requires no app rebuild. [Let's Encrypt setup](https://letsencrypt.org/getting-started/)
 
 On a POSIX signing machine, run these commands once from a private location outside the checkout. The fresh directory prevents a rerun from overwriting an existing key. Keep the private PEM and a protected backup under the publisher's control. Copy only the single-line public key to the build machine.

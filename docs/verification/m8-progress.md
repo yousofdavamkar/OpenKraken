@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Beta updates and Linux installer verification
+
+A Linux x64 AppImage configured for the beta channel upgraded from `0.2.0-beta.2` to `0.2.0-beta.10` through a signed local HTTPS feed and restarted under FUSE. A separate extract-and-run case made the new candidate exit before confirming startup. The helper restored the predecessor, retained the accepted release sequence and displayed the recovery notice. Both cases preserved the stable profile. The stable FUSE upgrade also passed. These runs used disposable keys. Public beta distribution and participant feedback remain open. [Beta runbook](../beta.md) · [Channel and profile decision](../decisions/0118-beta-update-channel.md)
+
+The Linux native/unit suite passed 837 tests with 14 skipped. Five desktop tests passed across signed HTTPS updates, crash-reporting consent and opening a repository. The replacement Fedora 43 container passed install, reinstall, upgrade and removal of the existing unsigned x64 RPM fixtures. The CI workflow now schedules native Linux arm64 checks for both system Git and Git 2.38, and selects Linux installer artifacts by host architecture. The workflow passed actionlint locally. A native arm64 run still needs a runner. Local logs are under `/tmp/ok-beta`.
+
 ## Graph worker startup, recovery and working-tree status
 
 The renderer starts the graph worker while Git opens the repository. It keeps the displayed worker until the replacement has produced its first layout. If the active worker fails, Refresh reconstructs the graph and reapplies the current search and selection. The Electron regression terminates the worker during search, refreshes, checks the selected row, appends history and finds a commit on the appended page.
