@@ -3,7 +3,9 @@ on: [push, pull_request]
 jobs:
   scale-performance:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
+    env:
+      LINUX_HISTORY_REVISION: 46fec1c3029b552ec63b2d01af9d43a386f043ea
     defaults:
       run:
         shell: bash
@@ -62,6 +64,51 @@ jobs:
           OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/refs-shared/repository.git" GIT_NO_LAZY_FETCH=1 \
             xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --workers=1 --reporter=list \
             --output=test-results/performance/refs-shared > test-results/performance/refs-shared.log 2>&1
+      - name: Initialize the full Linux history fixture
+        id: linux_init
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: git init --bare --initial-branch=master "$RUNNER_TEMP/linux-history.git"
+      - name: Restore Linux commit packs
+        id: linux_cache
+        if: ${{ !cancelled() && steps.linux_init.outcome == 'success' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/linux-history.git/objects/pack
+          key: linux-history-tree-filter-v1-${{ env.LINUX_HISTORY_REVISION }}
+      - name: Prepare and verify pinned Linux history
+        id: linux_history
+        if: ${{ !cancelled() && steps.linux_init.outcome == 'success' }}
+        timeout-minutes: 15
+        run: |
+          repo="$RUNNER_TEMP/linux-history.git"
+          if ! git -C "$repo" cat-file -e "$LINUX_HISTORY_REVISION^{commit}" 2>/dev/null; then
+            git -C "$repo" remote add origin https://github.com/torvalds/linux.git
+            git -C "$repo" config remote.origin.promisor true
+            git -C "$repo" config remote.origin.partialclonefilter tree:0
+            git -C "$repo" fetch --filter=tree:0 --no-tags origin "$LINUX_HISTORY_REVISION"
+            git -C "$repo" remote remove origin
+          fi
+          export GIT_NO_LAZY_FETCH=1
+          git -C "$repo" update-ref refs/heads/master "$LINUX_HISTORY_REVISION"
+          test -z "$(git -C "$repo" remote)"
+          test "$(git -C "$repo" rev-parse HEAD)" = "$LINUX_HISTORY_REVISION"
+          test "$(git -C "$repo" rev-parse --is-shallow-repository)" = false
+          test "$(git -C "$repo" for-each-ref --format='%(refname)')" = refs/heads/master
+          test "$(git -C "$repo" rev-list --count HEAD)" = 1505199
+          git -C "$repo" commit-graph write --reachable --no-progress
+          git -C "$repo" commit-graph verify --no-progress
+      - name: Save verified Linux commit packs
+        if: ${{ !cancelled() && steps.linux_history.outcome == 'success' && steps.linux_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/linux-history.git/objects/pack
+          key: linux-history-tree-filter-v1-${{ env.LINUX_HISTORY_REVISION }}
+      - name: Full Linux history gates, three fresh profiles
+        if: ${{ !cancelled() && steps.linux_history.outcome == 'success' }}
+        run: |
+          OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/linux-history.git" GIT_NO_LAZY_FETCH=1 \
+            xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --workers=1 --reporter=list \
+            --output=test-results/performance/linux-history > test-results/performance/linux-history.log 2>&1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
