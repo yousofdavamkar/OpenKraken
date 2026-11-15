@@ -29,6 +29,7 @@ const failStartup =
 const installFolder = rollbackSyncError ? join(root, 'install') : root;
 const helperUnavailable = process.argv.includes('--helper-unavailable');
 const unchangedImage = process.argv.includes('--unchanged-image');
+const migrateFeed = process.argv.includes('--migrate-feed');
 const slowCommit = process.argv.includes('--slow-commit');
 const stalledCommit = process.argv.includes('--stalled-commit');
 const syncError = process.argv.includes('--sync-error-after-rename');
@@ -46,8 +47,9 @@ assert.ok(
     slowCommit,
     stalledCommit,
     syncError,
+    migrateFeed,
   ].filter(Boolean).length <= 1,
-  'Select one failure scenario',
+  'Select one restart scenario',
 );
 const beta = process.argv.includes('--beta');
 const initialVersion = beta ? '0.2.0-beta.2' : '0.1.0';
@@ -76,12 +78,16 @@ try {
   ]);
   const keys = generateKeyPairSync('ed25519');
   const images = [];
-  let envelope;
+  let envelope, nextEnvelope;
+  let newFeedChecks = 0;
   server = createServer(
     { key: await readFile(key), cert: await readFile(cert) },
     (request, response) => {
       if (request.url === '/release.json' && envelope) response.end(envelope);
-      else {
+      else if (request.url === '/next/release.json' && nextEnvelope) {
+        newFeedChecks++;
+        response.end(nextEnvelope);
+      } else {
         const image = images.find((file) => request.url === '/' + basename(file));
         if (image) createReadStream(image).pipe(response);
         else {
@@ -101,9 +107,23 @@ try {
   await writeFile(signingKey, keys.privateKey.export({ format: 'pem', type: 'pkcs8' }), {
     mode: 0o600,
   });
+  let replacementConfig = config;
+  const nextSigningKey = join(root, 'next-release-key.pem');
+  if (migrateFeed) {
+    const nextKeys = generateKeyPairSync('ed25519');
+    replacementConfig = {
+      ...config,
+      feed: new URL('/next/release.json', config.feed).href,
+      publicKey: nextKeys.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
+      migrateFrom: { feed: config.feed, publicKey: config.publicKey },
+    };
+    await writeFile(nextSigningKey, nextKeys.privateKey.export({ format: 'pem', type: 'pkcs8' }), {
+      mode: 0o600,
+    });
+  }
   const receipts = [];
   let correctedEnvelope;
-  async function publishArtifact(path, version, sequence) {
+  async function publishArtifact(path, version, sequence, pem = signingKey) {
     const now = Date.now();
     const descriptor = join(root, `release-input-${sequence}.json`);
     const manifest = join(root, `release-${sequence}.json`);
@@ -123,7 +143,7 @@ try {
     const { stdout } = await promisify(execFile)(process.execPath, [
       resolve('scripts/sign-update.mjs'),
       descriptor,
-      signingKey,
+      pem,
       manifest,
     ]);
     return { receipt: JSON.parse(stdout), envelope: await readFile(manifest, 'utf8') };
@@ -208,7 +228,7 @@ try {
           return originalRename(from, to);
         };
       }
-      if (fixtureReturning && ${failStartup}) fixtureElectron.app.commandLine.appendSwitch('remote-debugging-port', '0');
+      if ((fixtureReturning && ${failStartup}) || ${migrateFeed && version === replacementVersion}) fixtureElectron.app.commandLine.appendSwitch('remote-debugging-port', '0');
       if (${failStartup && version === replacementVersion}) {
         require('node:fs').writeFileSync(${JSON.stringify(failedMarker)}, 'replacement reached main');
         if (${rollbackSyncError}) require('node:fs').chmodSync(${JSON.stringify(installFolder)}, 0o300);
@@ -247,7 +267,7 @@ try {
         }
         if ((${!failStartup && version === replacementVersion} || fixtureReturning) && args[1]?.method === 'updatesStarted') {
           require('node:fs').writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ version: fixtureElectron.app.getVersion(), pid: process.pid, state: result }));
-          if (!fixtureReturning || ${interruptedCommit} || (${rollbackSyncError} && result.state?.error === 'installation')) setTimeout(() => fixtureElectron.app.quit(), 100);
+          if (!${migrateFeed} && (!fixtureReturning || ${interruptedCommit} || (${rollbackSyncError} && result.state?.error === 'installation'))) setTimeout(() => fixtureElectron.app.quit(), 100);
         }
         return result;
       });
@@ -262,7 +282,9 @@ try {
       external: ['electron', '@parcel/watcher', 'node-pty'],
       define: {
         __OPENKRAKEN_SENTRY_DSN__: 'null',
-        __OPENKRAKEN_UPDATE_CONFIG__: JSON.stringify(config),
+        __OPENKRAKEN_UPDATE_CONFIG__: JSON.stringify(
+          version === replacementVersion ? replacementConfig : config,
+        ),
       },
       banner: { js: banner },
     });
@@ -306,6 +328,7 @@ try {
     else envelope = signed.envelope;
   }
   const artifact = images[1];
+  if (migrateFeed) nextEnvelope = envelope; // The new key must reject the old signature.
   const initialArtifact = receipts[0].artifacts[0];
   const download = join(root, initialArtifact.name);
   const checksum = `${initialArtifact.sha256}  ${initialArtifact.name}\n`;
@@ -384,6 +407,12 @@ try {
   await page.getByRole('button', { name: 'Updates', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'App updates' });
   if (beta) await expect(dialog.getByText(/Beta channel/)).toBeVisible();
+  if (migrateFeed) {
+    const consent = dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' });
+    await consent.check();
+    await expect(consent).toBeEnabled();
+    await expect(consent).toBeChecked();
+  }
   await dialog.getByRole('button', { name: 'Check for updates' }).click();
   await dialog.getByRole('button', { name: 'Download AppImage' }).click();
   await expect(
@@ -592,22 +621,52 @@ try {
       assert.equal(started.state.state.recovery, null);
       assert.equal((await stat(target)).nlink, 1);
     }
-    if (failStartup) {
-      assert.equal(started.state.state.recovery, 'restored');
+    if (failStartup || migrateFeed) {
       await browser.close().catch(() => {});
       const port = (await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0];
       assert.match(port, /^\d+$/);
       browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
-      const restoredPage = browser.contexts()[0].pages()[0];
-      await restoredPage.getByRole('button', { name: 'Updates', exact: true }).click();
-      const restoredDialog = restoredPage.getByRole('dialog', { name: 'App updates' });
-      await expect(restoredDialog.getByRole('alert')).toHaveText(
-        'An update failed to start and the previous version was restored.',
-      );
-      await restoredPage.screenshot({ path: 'test-results/appimage-recovery-notice.png' });
-      await restoredDialog.getByRole('button', { name: 'Dismiss recovery notice' }).click();
-      await expect(restoredDialog.getByRole('alert')).toHaveCount(0);
-      await assert.rejects(stat(join(profile, 'updates/rollback-notice.json')), { code: 'ENOENT' });
+      const reopenedPage = browser.contexts()[0].pages()[0];
+      await reopenedPage.getByRole('button', { name: 'Updates', exact: true }).click();
+      const reopenedDialog = reopenedPage.getByRole('dialog', { name: 'App updates' });
+      if (migrateFeed) {
+        assert.equal(newFeedChecks, 0);
+        const consent = reopenedDialog.getByRole('checkbox', {
+          name: 'Automatically check every 10 hours',
+        });
+        await expect(consent).not.toBeChecked();
+        const check = reopenedDialog.getByRole('button', { name: 'Check for updates' });
+        await check.click();
+        await expect(reopenedDialog.getByRole('status')).toContainText(
+          'signature or validity period',
+        );
+        nextEnvelope = (await publishArtifact(artifact, replacementVersion, 3, nextSigningKey))
+          .envelope;
+        await check.click();
+        await expect(reopenedDialog.getByRole('status')).toHaveText(
+          'You are up to date with the signed release feed.',
+        );
+        assert.equal(newFeedChecks, 2);
+        assert.equal(
+          JSON.parse(await readFile(join(profile, 'updates/trusted-release.json'), 'utf8'))
+            .sequence,
+          3,
+        );
+        console.log(
+          'The installed replacement rejected the old key, verified sequence 3 at the new feed and left automatic checks disabled.',
+        );
+      } else {
+        assert.equal(started.state.state.recovery, 'restored');
+        await expect(reopenedDialog.getByRole('alert')).toHaveText(
+          'An update failed to start and the previous version was restored.',
+        );
+        await reopenedPage.screenshot({ path: 'test-results/appimage-recovery-notice.png' });
+        await reopenedDialog.getByRole('button', { name: 'Dismiss recovery notice' }).click();
+        await expect(reopenedDialog.getByRole('alert')).toHaveCount(0);
+        await assert.rejects(stat(join(profile, 'updates/rollback-notice.json')), {
+          code: 'ENOENT',
+        });
+      }
     }
     await delay(500);
     console.log(

@@ -285,7 +285,7 @@ jobs:
       - if: runner.os == 'Linux'
         name: AppImage preflight, cancellation, restart and startup recovery
         run: |
-          xvfb-run -a node scripts/verify-update-restart.mjs
+          xvfb-run -a node scripts/verify-update-restart.mjs --migrate-feed
           xvfb-run -a node scripts/verify-update-restart.mjs --beta --unchanged-image
           xvfb-run -a node scripts/verify-update-restart.mjs --slow-commit
           xvfb-run -a node scripts/verify-update-restart.mjs --sync-error-after-rename
