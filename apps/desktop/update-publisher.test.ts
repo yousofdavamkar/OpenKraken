@@ -39,14 +39,21 @@ test('the release publisher signs actual artifact bytes and refuses invalid or o
         { cwd: directory },
       );
     const result = await invoke();
-    expect(result.stdout).toContain(publicKey);
     expect(result.stdout + result.stderr).not.toContain('PRIVATE KEY');
     const signed = await readFile(join(directory, 'release.json'), 'utf8');
     const config = updateConfiguration({
       feed: 'https://updates.example.test/release.json',
       publicKey,
     })!;
-    expect(verifyUpdateRelease(signed, config, now).release.artifacts).toEqual([
+    const { release } = verifyUpdateRelease(signed, config, now);
+    expect(JSON.parse(result.stdout)).toEqual({
+      publicKey,
+      sequence: release.sequence,
+      version: release.version,
+      channel: release.channel,
+      artifacts: release.artifacts,
+    });
+    expect(release.artifacts).toEqual([
       {
         platform: 'linux',
         arch: 'x64',

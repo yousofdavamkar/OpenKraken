@@ -86,6 +86,8 @@ async function publish() {
   console.log(
     JSON.stringify({
       publicKey: createPublicKey(key).export({ type: 'spki', format: 'der' }).toString('base64'),
+      channel: release.channel,
+      artifacts: release.artifacts,
       sequence: release.sequence,
       version: release.version,
     }),
