@@ -199,6 +199,7 @@ test('an ambiguous object prefix keeps literal search results and selects neithe
   fixtureGit(path, ['commit', '--allow-empty', '-m', 'Investigate 75ee05d']);
   const head = fixtureGit(path, ['rev-parse', 'HEAD']);
   fixtureGit(path, ['branch', '75ee05d', 'match-25990']);
+  fixtureGit(path, ['update-ref', '--create-reflog', 'refs/stash', 'match-25990']);
   const repo = await service.open(path);
   const snapshot = await service.snapshot(repo.id);
   const result = await service.search(repo.id, snapshot.cursor, '75ee05d');
@@ -247,6 +248,27 @@ test('all-history search includes stash messages without exposing implementation
   expect(result.commits).toHaveLength(1);
   expect(result.commits[0]?.isStash).toBe(true);
   expect(result.commits[0]?.parents).toHaveLength(1);
+});
+
+test('stash IDs use the same unambiguous prefix lookup as other visible commits', async () => {
+  const path = createFixture(join(root, 'stash-id-search'), 'stash');
+  const stash = fixtureGit(path, ['rev-parse', 'refs/stash']);
+  const middle = stash.slice(8, 20);
+  fixtureGit(path, ['commit', '--allow-empty', '-m', `Look into ${middle}`]);
+  const head = fixtureGit(path, ['rev-parse', 'HEAD']);
+  const repo = await service.open(path);
+  const snapshot = await service.snapshot(repo.id);
+  const lookup = async (query: string) =>
+    (await service.search(repo.id, snapshot.cursor, query)).commits;
+  expect((await lookup(middle)).map((commit) => commit.oid)).toEqual([head]);
+  const overlay = snapshot.commits.find((commit) => commit.oid === stash);
+  expect(await lookup(stash.slice(0, 12).toUpperCase())).toEqual([overlay]);
+
+  fixtureGit(path, ['branch', 'recovery', stash]);
+  const refreshed = await service.snapshot(repo.id, undefined, true);
+  const native = refreshed.commits.find((commit) => commit.oid === stash);
+  expect(native!.parents.length).toBeGreaterThan(1);
+  expect((await service.search(repo.id, refreshed.cursor, stash)).commits).toEqual([native]);
 });
 
 test('a branch pointing at a stash object keeps its actual DAG without duplicate overlay nodes', async () => {

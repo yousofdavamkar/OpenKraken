@@ -156,6 +156,31 @@ test('searching a hexadecimal branch name opens the commit with the matching obj
     await close();
   }
 });
+test('all-history stash search opens the stash by prefix and preserves literal message matches', async () => {
+  const { page, repository, close } = await launch('stash', undefined, (path) => {
+    const stash = fixtureGit(path, ['rev-parse', 'refs/stash']);
+    fixtureGit(path, ['commit', '--allow-empty', '-m', `Investigate ${stash.slice(8, 20)}`]);
+  });
+  try {
+    const stash = fixtureGit(repository, ['rev-parse', 'refs/stash']);
+    const query = page.getByRole('textbox', { name: 'Search commits' });
+    const search = page.getByRole('button', { name: 'Search all history' });
+    const results = page.getByLabel('All history results').getByRole('button');
+    await query.fill(stash.slice(8, 20));
+    await search.click();
+    await expect(results).toHaveCount(1);
+    await expect(results).toContainText('Investigate');
+    await query.fill(stash.slice(0, 12).toUpperCase());
+    await search.click();
+    await expect(results).toHaveCount(1);
+    await expect(results).toContainText('Fixture stash');
+    await results.click();
+    await expect(page.getByRole('region', { name: 'Commit details' })).toContainText(stash);
+  } finally {
+    await close();
+  }
+});
+
 test('cancelling the folder picker keeps an in-flight append and the next native page usable', async () => {
   const { app, page, close } = await launch('linear', 7200);
   try {

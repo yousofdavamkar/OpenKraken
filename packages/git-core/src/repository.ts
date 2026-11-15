@@ -624,17 +624,18 @@ export class RepositoryService {
     ]);
     const queryLower = query.toLocaleLowerCase();
     const stashes = history.stashes.filter((c) =>
-      [c.body, c.author.name, c.author.email, c.oid].some((value) =>
+      [c.body, c.author.name, c.author.email].some((value) =>
         value.toLocaleLowerCase().includes(queryLower),
       ),
     );
     const matches = new Map([...stashes, ...messages, ...authors].map((c) => [c.oid, c]));
     let exact: Commit | undefined;
-    if (history.starts.length && /^[0-9a-f]{7,64}$/i.test(query)) {
+    if ((history.starts.length || history.stashes.length) && /^[0-9a-f]{7,64}$/i.test(query)) {
       const resolved = await this.resolveSearchCommit(repo.path, query.toLowerCase(), signal);
       exact = matches.get(resolved);
+      if (exact?.isStash) exact = undefined;
       let reachable = history.starts.includes(resolved);
-      if (resolved && !exact && !reachable) {
+      if (resolved && !exact && !reachable && history.starts.length) {
         // Subtract all visible history. An empty range puts the commit in this view.
         const remaining = await this.run(['rev-list', '--max-count=1', '--stdin'], {
           cwd: repo.path,
@@ -652,6 +653,7 @@ export class RepositoryService {
         });
         [exact] = parser.finish();
       }
+      exact ??= history.stashes.find((stash) => stash.oid === resolved);
     }
     this.history(id, cursor);
     if (exact) matches.delete(exact.oid);
