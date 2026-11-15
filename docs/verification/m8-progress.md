@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Graph paging and worker timeout recovery
+
+Transferring layout rows and edges reduced the median worker phase on both 50,000-ref fixtures. The distinct-target median full page went from 228.2 to 208.7 ms, and the interleaved median went from 209.6 to 211.8 ms. All 18 candidate appends met the 300 ms limit. All six candidate openings missed the 500 ms limit. [Paired measurements](m8-reference-performance.md#transferring-canvas-rows-from-the-graph-worker)
+
+The Linux x64 packaged app at `ec5e642` opened 50,000 refs and appended 5,000 commits. After a completed refresh lost its worker reply, the app reported the timeout after 30 seconds. A second Refresh restored the active hash search and loaded the next 5,000 commits. Before `92a1028`, the desktop regression stayed at 2,000 commits after the retry. The unit and native suite passed 948 tests with 14 skips. All 23 selected Electron tests passed, including search, keyboard navigation and the six Canvas goldens.
+
 ## Memory used by commit badges
 
 At `071e6cf`, the Linux x64 renderer retained 1.33–1.60 MiB less JavaScript heap after first paint across four paired openings with 50,000 distinct reference targets. The packaged app matched single badges to native Git, showed a second badge after an external tag was created, removed it after deletion and appended 5,000 commits. It also verified multiple refs per commit on the interleaved fixture. The unit and native suite passed 945 tests with 14 skips, and all 22 selected Electron tests passed, including the graph goldens. First-paint timings varied by fixture and all measured openings exceeded 500 ms. [Heap and timing results](m8-reference-performance.md#renderer-heap-for-commits-with-one-reference)

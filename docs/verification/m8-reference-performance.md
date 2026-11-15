@@ -13,6 +13,17 @@ The baseline at `18f0ef4` cloned the row and edge objects. The worker in `63a7e8
 
 The worker phase includes projection, dispatch, layout and receipt in the renderer. All 18 appends in each build passed the 300 ms budget. Every opening missed the 500 ms budget. Graph and sidebar p95 frame intervals were at most 16.8 ms in both builds. The full-page median on the interleaved fixture increased by 2.2 ms despite the lower worker time. [All paired runs](m8-layout-transfer-samples.csv)
 
+The final Linux x64 build with timeout recovery also ran against two smaller ref sets. Each opening used a fresh app profile. The synthetic checkout has 100,000 tracked files and 2,000,000 commits reachable across both branches, of which 1,999,999 are reachable from HEAD. Each fixture missed first paint on its first run and passed on its next two. Every append passed. Graph p95 frame intervals were 16.7–16.8 ms, and the renderer mounted at most 32 rows.
+
+| Fixture                     | Run | First paint (ms) | Three successive 5,000-commit appends (ms) |
+| --------------------------- | --: | ---------------: | ------------------------------------------ |
+| Full Linux, one ref         |   1 |            900.0 | 196.2 / 183.3 / 173.9                      |
+| Two-million-commit checkout |   1 |          1,148.5 | 145.0 / 134.9 / 114.1                      |
+| Full Linux, one ref         |   2 |            350.3 | 263.1 / 190.2 / 198.2                      |
+| Two-million-commit checkout |   2 |            291.1 | 158.3 / 149.6 / 113.4                      |
+| Full Linux, one ref         |   3 |            354.3 | 268.5 / 189.5 / 174.8                      |
+| Two-million-commit checkout |   3 |            315.3 | 185.8 / 142.7 / 114.7                      |
+
 ## Renderer heap for commits with one reference
 
 The graph used to allocate a badge list for every target when opening a repository. It now holds a single ref directly until a row needs its list. Additional refs at the same target still form an ordered list. Four alternating pairs of fresh Electron profiles opened 2,000 commits from full Linux history with 50,000 distinct targets. After first paint, Chromium collected garbage and reported live renderer JavaScript heap through CDP.
