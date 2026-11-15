@@ -304,7 +304,7 @@ jobs:
         run: |
           xvfb-run -a pnpm smoke:installer "$INSTALLER_ROOT/deb/manifest.json"
           xvfb-run -a pnpm smoke:installer "$INSTALLER_ROOT/rpm/manifest.json"
-          for target in deb rpm; do
+          for target in deb rpm deb-beta rpm-beta; do
             upgrade_manifest=$(node -p 'require("./release/installer-upgrade-" + process.argv[1] + ".json").manifestPath' "$target")
             xvfb-run -a pnpm smoke:installer "$upgrade_manifest"
           done
