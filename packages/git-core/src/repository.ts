@@ -119,7 +119,10 @@ export class RepositoryService {
     allowedExitCodes?: number[],
   ) {
     const result = await this.run(args, { cwd, signal, allowedExitCodes });
-    return result.stdout.toString('utf8').replace(/\r?\n$/, '');
+    // POSIX permits a carriage return as the last byte of a repository path.
+    return result.stdout
+      .toString('utf8')
+      .replace(process.platform === 'win32' ? /\r?\n$/ : /\n$/, '');
   }
   async clone(
     input: string,
@@ -164,7 +167,7 @@ export class RepositoryService {
         ],
         signal,
       )
-    ).split('\n');
+    ).split(process.platform === 'win32' ? /\r?\n/ : '\n');
     let [gitDir, commonDir] = metadata;
     const [bare, shallow] = metadata.slice(-2);
     // rev-parse separates values with newlines even when a path contains one.

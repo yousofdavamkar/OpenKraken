@@ -3,7 +3,7 @@ import { spawn, execFile } from 'node:child_process';
 import { createServer } from 'node:net';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
-import { mkdtemp, rm, mkdir, writeFile, readFile, lstat } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile, readFile, lstat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -242,18 +242,22 @@ try {
     const repository = join(profile, 'terminal-repository');
     await mkdir(repository);
     await promisify(execFile)('git', ['init', repository]);
-    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
     const xdo = (...args) =>
       promisify(execFile)(process.env.OPENKRAKEN_XDOTOOL, args, { timeout: 10000 });
-    const windows = await xdo('search', '--sync', '--onlyvisible', '--name', '^Open repository$');
-    const picker = windows.stdout.trim().split('\n').at(-1);
-    if (!picker || !/^\d+$/.test(picker)) throw new Error('Native repository picker was not found');
-    await xdo('windowfocus', '--sync', picker);
-    await xdo('mousemove', '--window', picker, '500', '400', 'click', '1');
-    await xdo('key', '--clearmodifiers', 'ctrl+l');
-    await xdo('key', '--clearmodifiers', 'ctrl+a');
-    await xdo('type', '--clearmodifiers', '--delay', '1', repository);
-    await xdo('key', '--clearmodifiers', 'alt+o');
+    const pickFolder = async (button, path) => {
+      await page.getByRole('button', { name: button, exact: true }).click();
+      const windows = await xdo('search', '--sync', '--onlyvisible', '--name', '^Open repository$');
+      const picker = windows.stdout.trim().split('\n').at(-1);
+      if (!picker || !/^\d+$/.test(picker))
+        throw new Error('Native repository picker was not found');
+      await xdo('windowfocus', '--sync', picker);
+      await xdo('mousemove', '--window', picker, '500', '400', 'click', '1');
+      await xdo('key', '--clearmodifiers', 'ctrl+l');
+      await xdo('key', '--clearmodifiers', 'ctrl+a');
+      await xdo('type', '--clearmodifiers', '--delay', '1', path);
+      await xdo('key', '--clearmodifiers', 'alt+o');
+    };
+    await pickFolder('Open a repository', repository);
     await expect(
       page.getByRole('heading', { name: 'terminal-repository', exact: true }),
     ).toBeVisible();
@@ -299,6 +303,32 @@ try {
     await input.press('Enter');
     await expect(panel.getByRole('status')).toHaveText('Exited with code 0');
     await panel.getByRole('button', { name: 'Close terminal', exact: true }).click();
+    const selected = repository + '\r';
+    await promisify(execFile)('git', ['init', '--initial-branch=selected', selected]);
+    await promisify(execFile)('git', [
+      '-C',
+      selected,
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      '-c',
+      'commit.gpgSign=false',
+      'commit',
+      '--allow-empty',
+      '-m',
+      'Selected checkout',
+    ]);
+    const shortcut = join(profile, 'selected-checkout');
+    await symlink(selected, shortcut, 'dir');
+    await pickFolder('Open repository', shortcut);
+    await expect(page.locator('.repo-heading p')).toHaveAttribute('title', selected);
+    await expect(
+      page.getByRole('grid').getByText('Selected checkout', { exact: true }),
+    ).toBeVisible();
+    console.log(
+      'Native folder selection preserved the canonical path and history of the carriage-return checkout.',
+    );
     console.log(
       `Packaged native terminal opened the repository, tracked ${basename(packageShell)} commands, received native keyboard input and exited cleanly.`,
     );

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFixture, fixtureGit, fixtureKinds } from '../test-fixtures/src/index.js';
@@ -199,3 +199,19 @@ test('shallow, sparse, submodule and SHA-256 repositories', async () => {
   expect(shaRepo.head.oid).toHaveLength(64);
   expect((await service.snapshot(shaRepo.id)).commits[0]?.oid).toHaveLength(64);
 });
+
+test.skipIf(process.platform === 'win32')(
+  'opening a folder ending in a carriage return preserves its repository identity and history',
+  async () => {
+    const sibling = createFixture(join(root, 'peer'), 'linear', 2);
+    const selected = createFixture(join(root, 'peer\r'), 'linear', 4);
+    const peer = await service.open(sibling);
+    const repo = await service.open(selected);
+    expect(repo.path).toBe(realpathSync(selected));
+    expect(repo.id).not.toBe(peer.id);
+    const snapshot = await service.snapshot(repo.id);
+    expect(snapshot.repository.path).toBe(realpathSync(selected));
+    expect(snapshot.commits[0]?.oid).toBe(fixtureGit(selected, ['rev-parse', 'HEAD']));
+    expect(snapshot.commits[0]?.oid).not.toBe(fixtureGit(sibling, ['rev-parse', 'HEAD']));
+  },
+);
