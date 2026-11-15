@@ -1,3 +1,4 @@
+import { verifyLinuxPackage } from './linux-package.mjs';
 import { build, Platform, Arch } from 'electron-builder';
 import { buildAppImage } from './appimage.mjs';
 import { buildDmg, verifyMacBundle } from './dmg.mjs';
@@ -196,6 +197,10 @@ try {
     throw new Error('Expected exactly one installer artifact');
   const artifact = artifacts[0];
   if (target === 'msi') verifyMsiMetadata(await readMsiMetadata(artifact), { version, metadata });
+  const nativePackageVersion =
+    target === 'deb' || target === 'rpm'
+      ? await verifyLinuxPackage(artifact, { target, arch: process.arch, version }, work)
+      : undefined;
   const manifest = {
     schemaVersion: 1,
     target,
@@ -206,6 +211,7 @@ try {
     metadata,
     signed: false,
     source: buildSource,
+    nativePackageVersion,
     artifact: {
       file: basename(artifact),
       size: (await stat(artifact)).size,

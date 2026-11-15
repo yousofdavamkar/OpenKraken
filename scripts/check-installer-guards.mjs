@@ -52,12 +52,25 @@ try {
           ? /macOS bundle identity, version, executable or repository scheme differs/
           : original.target === 'msi'
             ? /MSI identity, version, architecture, per-user policy or launch metadata differs/
-            : /Packaged application identity or version differs/,
+            : ['deb', 'rpm'].includes(original.target)
+              ? /Linux package version differs from the release/
+              : /Packaged application identity or version differs/,
       );
       assert.doesNotMatch(error.stdout, /Packaged|verified/);
       return true;
     },
   );
+  if (original.nativePackageVersion !== undefined) {
+    await writeFile(fixture, JSON.stringify({ ...original, nativePackageVersion: '0:0.0.0-999' }));
+    await assert.rejects(
+      run(process.execPath, ['scripts/verify-installer.mjs', fixture]),
+      (error) => {
+        assert.match(error.stderr, /Linux package version differs from the release/);
+        assert.doesNotMatch(error.stdout, /Packaged|verified/);
+        return true;
+      },
+    );
+  }
   if (original.target === 'dmg')
     assert.deepEqual(
       await dmgChecks(),

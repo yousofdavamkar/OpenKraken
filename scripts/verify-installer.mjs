@@ -1,3 +1,4 @@
+import { verifyLinuxPackage } from './linux-package.mjs';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
@@ -55,6 +56,8 @@ async function verifyLinuxInstaller() {
   await mkdir('release', { recursive: true });
   const temporary = await mkdtemp(resolve('release/installer-check-'));
   try {
+    if (manifest.target === 'deb' || manifest.target === 'rpm')
+      await verifyLinuxPackage(artifact, manifest, temporary);
     let directory = join(temporary, 'opt/OpenKraken');
     let desktopPath = join(temporary, 'usr/share/applications/openkraken.desktop');
     if (manifest.target === 'AppImage') {
@@ -84,7 +87,6 @@ async function verifyLinuxInstaller() {
       }
     } else {
       const database = join(temporary, 'rpmdb');
-      await mkdir(database);
       // Even query-only RPM 6 can attempt to lock the system RPM database. Keep
       // this verification entirely inside the disposable extraction directory.
       const query = ['--dbpath', database, '-qp'];
