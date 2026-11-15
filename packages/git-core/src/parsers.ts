@@ -35,14 +35,11 @@ export class NulDecoder {
   }
 }
 /** UTF-8 records with byte limits; decode each read once instead of each field. */
-export class TextNulDecoder {
+class TextNulFields {
   private utf8 = new StringDecoder('utf8');
   private pending = '';
   private size = 0;
-  constructor(
-    private accept: (field: string) => void,
-    private maxFieldBytes = 2 * 1024 * 1024,
-  ) {}
+  constructor(private maxFieldBytes = 2 * 1024 * 1024) {}
   push(chunk: Buffer) {
     const first = chunk.indexOf(0);
     if (first < 0) {
@@ -63,7 +60,7 @@ export class TextNulDecoder {
     const fields = this.utf8.write(chunk).split('\0');
     fields[0] = this.pending + fields[0]!;
     this.pending = fields.pop()!;
-    for (const field of fields) this.accept(field);
+    return fields;
   }
   finish(allowFinalNewline = false) {
     if (allowFinalNewline && this.size === 1 && this.pending === '\n') {
@@ -71,6 +68,21 @@ export class TextNulDecoder {
       this.size = 0;
     }
     if (this.size) throw new Error('Truncated NUL record');
+  }
+}
+export class TextNulDecoder {
+  private fields: TextNulFields;
+  constructor(
+    private accept: (field: string) => void,
+    maxFieldBytes?: number,
+  ) {
+    this.fields = new TextNulFields(maxFieldBytes);
+  }
+  push(chunk: Buffer) {
+    for (const field of this.fields.push(chunk)) this.accept(field);
+  }
+  finish(allowFinalNewline = false) {
+    this.fields.finish(allowFinalNewline);
   }
 }
 function fieldsAndPath(record: Buffer, count: number): { fields: string[]; path: Buffer } {
@@ -155,13 +167,18 @@ const oid = (value: string) => {
 };
 export class RefsParser {
   readonly value: Ref[] = [];
-  private fields: string[] = [];
-  private decoder = new TextNulDecoder((field) => {
-    this.fields.push(field);
-    if (this.fields.length !== 8) return;
-    const [rawName, target, objectType, peeled, peeledType, upstream, track, head] = this
-      .fields as [string, string, string, string, string, string, string, string];
-    const name = rawName.replace(/^\n/, '');
+  private pendingFields: string[] = [];
+  private decoder = new TextNulFields();
+  private append(fields: string[], offset: number) {
+    const rawName = fields[offset]!;
+    const name = rawName.startsWith('\n') ? rawName.slice(1) : rawName;
+    const target = fields[offset + 1]!;
+    const objectType = fields[offset + 2]!;
+    const peeled = fields[offset + 3]!;
+    const peeledType = fields[offset + 4]!;
+    const upstream = fields[offset + 5]!;
+    const track = fields[offset + 6]!;
+    const head = fields[offset + 7]!;
     if (!name.startsWith('refs/')) throw new Error('Invalid ref name');
     const kind = name.startsWith('refs/heads/')
       ? 'local'
@@ -190,14 +207,18 @@ export class RefsParser {
         gone: track === '[gone]',
       };
     this.value.push(ref);
-    this.fields = [];
-  });
+  }
   push(chunk: Buffer) {
-    this.decoder.push(chunk);
+    // Read complete eight-field records directly from the decoded chunk.
+    const batch = this.decoder.push(chunk);
+    const fields = this.pendingFields.length ? this.pendingFields.concat(batch) : batch;
+    let offset = 0;
+    for (; offset + 8 <= fields.length; offset += 8) this.append(fields, offset);
+    this.pendingFields = fields.slice(offset);
   }
   finish() {
     this.decoder.finish(true);
-    if (this.fields.length) throw new Error('Truncated ref');
+    if (this.pendingFields.length) throw new Error('Truncated ref');
     return this.value;
   }
 }

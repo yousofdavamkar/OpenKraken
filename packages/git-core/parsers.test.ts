@@ -119,6 +119,59 @@ describe('stream parsers', () => {
       { numRuns: 300 },
     );
   });
+  test('ref batches keep rich fields attached to their record at every byte boundary', () => {
+    const target = 'b'.repeat(64);
+    const data = Buffer.from(
+      [
+        ['refs/heads/café', hash, 'commit', '', '', 'refs/remotes/origin/main', '[gone]', '*'],
+        ['refs/tags/雪', target, 'tag', hash, 'commit', '', '', ' '],
+        ['refs/stash', hash, 'commit', '', '', '', '', ' '],
+      ]
+        .map((fields) => fields.join('\0') + '\0\n')
+        .join(''),
+    );
+    const expected = [
+      {
+        name: 'refs/heads/café',
+        shortName: 'café',
+        kind: 'local',
+        target: hash,
+        objectType: 'commit',
+        peeledType: '',
+        isHead: true,
+        upstream: { ref: 'refs/remotes/origin/main', ahead: 0, behind: 0, gone: true },
+      },
+      {
+        name: 'refs/tags/雪',
+        shortName: '雪',
+        kind: 'tag',
+        target,
+        objectType: 'tag',
+        peeled: hash,
+        peeledType: 'commit',
+        isHead: false,
+      },
+      {
+        name: 'refs/stash',
+        shortName: 'refs/stash',
+        kind: 'stash',
+        target: hash,
+        objectType: 'commit',
+        peeledType: '',
+        isHead: false,
+      },
+    ];
+    for (let cut = 0; cut <= data.length; cut++) {
+      const parser = new RefsParser();
+      parser.push(data.subarray(0, cut));
+      parser.push(data.subarray(cut));
+      expect(parser.finish()).toEqual(expected);
+    }
+    const incomplete = new RefsParser();
+    incomplete.push(data);
+    incomplete.push(Buffer.from('refs/tags/unread\0'));
+    expect(() => incomplete.finish()).toThrow('Truncated ref');
+  });
   test('history empty parents/body, unicode and fake header in messages', () => {
     fc.assert(
       fc.property(
