@@ -2,6 +2,14 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Native RPM signing on Linux x64
+
+OpenKraken 0.1.0 from clean application build `a8c7276` was packaged with test metadata and a disposable OpenPGP signing key. Fedora 43’s DNF rejected the package with local-package signature checking enabled and an unrelated key installed. After importing the matching certificate, DNF installed and reinstalled it, checked its dependencies, and removed it while preserving the fixture user’s data. The Electron Updates dialog downloaded the signed RPM from a loopback HTTPS feed, rejected an incorrect digest and verified the saved bytes.
+
+The installer verifier checks the public certificate before launching the extracted app. Its tests exercise a missing key, an unrelated key, multiple certificates, an incorrect fingerprint, damaged package bytes and an unsigned RPM presented as signed. The last two fixtures carry recalculated outer checksums. A separate check moves the source RPM after native verification and launches the private copy that passed verification. [Build and verification procedure](../decisions/0088-native-rpm-lifecycle-and-release-version.md#authenticating-a-signed-rpm)
+
+The full unit and native suite passed 941 tests in 111 files with 14 skips. Lint and workflow YAML parsing passed locally. The CI job includes these RPM checks. Production publication and native Windows, macOS and Linux ARM64 acceptance remain open.
+
 ## Publishing a release and migrating its feed
 
 The offline signer's previous implementation left a 12-byte final manifest after a simulated short write and after process exit during that write. The publisher now syncs a temporary envelope on the destination filesystem and links it into place exclusively. Desktop publisher tests verify retry after a write error, sync error or process exit and check that only one concurrent signer wins. The winning envelope verifies with the corresponding release data.
@@ -769,7 +777,7 @@ Evidence: `/tmp/openkraken-supervisor-{red,green,native,hook,unit,e2e,types,buil
 
 - Native supervision runtime acceptance on Windows/macOS, further crash/write scenarios beyond the Linux fetch/PTY/prompt fixtures above, native lock handling and durable write recovery. POSIX processes that intentionally detach or daemonize beyond the active command's stream lifetime are not contained.
 - Durable drafts for working-file, conflict/native editors and provider composers; commit-form drafts are implemented within the bounds above. Crash-report coverage before reporting initialization, live receiver configuration/acceptance, hung-startup and interrupted-update recovery, non-AppImage installation/restart, signed installers/distribution, security review and beta evidence remain open. Signed release checks/downloads, opt-in automatic checks, supported AppImage desktop installation/restart and startup-exit restoration, opt-in process/JavaScript summaries and interrupted-session recovery are implemented within the bounds above.
-- Native DMG/MSI acceptance, broader RPM/AppImage distribution acceptance, Linux arm64 and macOS/Windows installer runtime checks, and real release metadata. DEB/RPM/AppImage artifacts in this checkpoint remain unsigned local test builds; native Debian 13 and Fedora 43 x64 version upgrades are verified within the bounds above.
+- Native DMG/MSI acceptance, broader RPM/AppImage distribution acceptance, Linux arm64 and macOS/Windows installer runtime checks, and real release metadata. Linux x64 has local DEB, RPM and AppImage test builds, including an RPM signed with a disposable key. Debian 13 and Fedora 43 x64 version upgrades are verified within the bounds above. Production signing and distribution remain open.
 - Broader real-repository and cross-platform performance/regression gates, plus the unresolved intermittent command exit-143 investigation recorded in M7 progress.
 
 Interrupted operations retain an unknown activity outcome. Process cleanup does not prove that a remote write failed, reverse completed changes or authorize an automatic retry. Linux fixtures and an unsigned local bundle do not establish production release readiness.

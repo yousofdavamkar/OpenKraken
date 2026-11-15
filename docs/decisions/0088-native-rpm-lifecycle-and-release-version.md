@@ -13,3 +13,9 @@ This is native Linux x64 package-manager evidence, not a graphical Fedora login 
 RPM replacement/removal script semantics follow the [RPM scriptlet manual](https://rpm-software-management.github.io/rpm/man/rpm-scriptlets.7). This extends the lifecycle boundary in [ADR 0074](0074-linux-installer-payload-verification.md) and keeps the Debian native-module baseline from [ADR 0075](0075-linux-native-build-baseline.md).
 
 The transfer bounds use DNF’s documented [minrate and timeout settings](https://dnf5.readthedocs.io/en/stable/dnf5.conf.5.html). Cached repository packages may be reused in a fresh container; they remain subject to DNF’s integrity and signature checks.
+
+## Authenticating a signed RPM
+
+The installer builder can select the RPM signing identity by the full primary fingerprint of one supplied OpenPGP certificate. It applies the native signature before calculating the artifact size and SHA-256. The receipt records the fingerprint, and the verifier takes the trusted certificate separately. Verification must fail against an empty RPM key database and pass after importing just the supplied certificate. The verifier copies the candidate into its private working directory so that native verification, extraction and launch use the same bytes throughout a concurrent rebuild. The empty-database check also detects RPM configurations that accept digest-only packages. [RPM signing](https://rpm.org/docs/4.20.x/man/rpmsign.8) and [RPM key management and verification](https://rpm.org/docs/4.20.x/man/rpmkeys.8)
+
+The Fedora signed-package test enables DNF local-package signature checking. It first imports an unrelated fixture key and checks that the OpenKraken transaction failed signature verification. It then imports the matching public certificate and exercises install, reinstall and removal. RPM and DNF authenticate the package with this OpenPGP key. OpenKraken’s updater authenticates the feed with its separately configured Ed25519 key.
