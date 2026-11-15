@@ -2,6 +2,18 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Graph worker startup, recovery and working-tree status
+
+The renderer starts the graph worker while Git opens the repository. It keeps the displayed worker until the replacement has produced its first layout. If the active worker fails, Refresh reconstructs the graph and reapplies the current search and selection. The Electron regression terminates the worker during search, refreshes, checks the selected row, appends history and finds a commit on the appended page.
+
+A staging-only update now reaches the working-tree controls without rebuilding a graph whose synthetic rows and searchable text are unchanged. The previous desktop build sent 7,001 rows to the worker after externally staging one file. The regression on the new build observed zero reset or refresh messages, the same active search result and all 7,000 loaded commits. Renderer-store tests also cover a changed path and a conflict transition, both of which update the synthetic row and search matches.
+
+In three paired openings of the 50,000-distinct-target fixture, median worker layout time moved from 44.7 to 33.5 ms and median first paint moved from 934.8 to 950.4 ms. Every opening exceeded 500 ms. All 18 page appends and all six scroll measurements passed. [Worker measurements](m8-reference-performance.md#starting-the-layout-worker-during-repository-opening)
+
+The complete Linux x64 desktop suite passed all 204 cases in 9.8 minutes under X11, including six Canvas visual comparisons, Gitea, native Git LFS and fish/zsh shell integrations. On full Linux history with one ref, the first 2,000 commits painted in 340.7 ms, the three 5,000-commit pages took 284.2 / 212.1 / 181.0 ms, and scroll p95 was 16.8 ms. On the two-million-commit checkout with 100,000 files, all ten watcher-warm status reads took 222.8–273.0 ms. An external edit became visible in 862.1 ms. Local benchmark artifacts are under `test-results/m8-graph-worker-full`.
+
+The final Linux native/unit suite passed 835 tests across 103 files with 14 skipped. TypeScript, the production build and full lint passed. The unsigned Linux x64 package passed fuse verification and packaged smoke checks for renderer isolation, native helpers, repository-link consent, the folder picker, Bash keyboard input and clean terminal exit. Logs for the benchmark, regressions, full desktop suite and package are under `/tmp/ok-graph-worker`.
+
 ## Snapshot startup and commit ID search
 
 Cache configuration now loads while Git enumerates refs. The displayed cursor remains pageable if the config read fails during enumeration. On the 50,000-distinct-target fixture, median first paint across four paired runs moved from 1,114.7 ms to 1,135.3 ms. All eight openings exceeded 500 ms. Seven of twelve pages following the new openings met 300 ms. [Measurements for every opening](m8-reference-performance.md#reading-history-cache-inputs-alongside-references)

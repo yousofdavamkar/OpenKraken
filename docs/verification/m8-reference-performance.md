@@ -2,6 +2,20 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Starting the layout worker during repository opening
+
+Three paired fresh-profile Electron runs used 50,000 distinct reference targets and 1,505,199 reachable commits on Linux x64, Git 2.53.0 and X11 under Xvfb. Only the renderer bundle changed. The order was baseline/change, change/baseline and baseline/change. OS caches were left populated between runs.
+
+| Measurement                     | Start after snapshot | Start during opening |
+| ------------------------------- | -------------------: | -------------------: |
+| Worker layout phase, median     |              44.7 ms |              33.5 ms |
+| First paint, median             |             934.8 ms |             950.4 ms |
+| First paints below 500 ms       |                  0/3 |                  0/3 |
+| 5,000-commit pages below 300 ms |                  9/9 |                  9/9 |
+| Graph scroll p95                |              16.8 ms |         16.7–16.8 ms |
+
+The worker phase includes commit projection, messaging and layout. The first baseline utility snapshot took 1,299.3 ms, compared with 407.6–453.1 ms for the other five openings. The shorter median worker phase did not produce a shorter median first paint. [Per-run measurements](m8-graph-worker-samples.csv)
+
 ## Reading history cache inputs alongside references
 
 Four paired fresh-profile openings on Linux x64 used the same 1,505,199-commit, 50,000-distinct-target fixture with Git 2.53.0, X11 under Xvfb and populated OS caches. The only bundle switched between runs was the Git utility. The order alternated between pairs. Each run drew 2,000 commits, appended three 5,000-commit pages and scrolled with 12,000 loaded rows.

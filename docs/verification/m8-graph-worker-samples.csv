@@ -1,0 +1,7 @@
+pair,worker_start,first_paint_ms,snapshot_ms,worker_ms,publish_ms,page_1_ms,page_2_ms,page_3_ms,scroll_p95_ms
+1,after snapshot,1824.6,1299.3,44.7,60.7,273.7,255,180.8,16.8
+1,during open,959.7,453.1,29.7,56.5,195.1,223.4,180.7,16.7
+2,during open,950.4,435.5,47.4,42.4,207.8,202.8,190.3,16.8
+2,after snapshot,934.8,414.6,44,58.8,198.3,218.8,188.2,16.8
+3,after snapshot,871.6,407.6,47.3,34.3,247.4,228.4,181.1,16.8
+3,during open,942,429.4,33.5,60.7,189.8,206.7,224.3,16.8
