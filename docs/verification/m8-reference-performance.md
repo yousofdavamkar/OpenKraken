@@ -2,6 +2,22 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Interleaved reference targets
+
+The Linux x64 fixture cycled 50,000 packed refs through 500 commits in name order, keeping master at the original Linux HEAD. The previous 8 KiB scheduling sample saw distinct targets and requested the type of each ref from Git. A second read can now extend the sample to 256 KiB. On this fixture, the resulting reader resolved each of the 500 types once and matched full Git enumeration for every ordered record. Git 2.38.0 and 2.53.0 also matched on 50,000 distinct targets, 500 targets grouped contiguously and one shared target.
+
+Fresh Electron profiles opened 2,000 commits from 1,505,199 reachable commits with warm OS caches. The benchmark alternated the previous and new Git utilities. Each run appended three pages of 5,000 commits.
+
+| 50,000 references       | Pairs | Median first paint before | Median first paint after | Median native snapshot before | Median native snapshot after |
+| ----------------------- | ----: | ------------------------: | -----------------------: | ----------------------------: | ---------------------------: |
+| 500 interleaved targets |     3 |                  846.6 ms |                 647.7 ms |                      442.8 ms |                     229.8 ms |
+| Distinct targets        |     3 |                  779.7 ms |                 735.2 ms |                      391.0 ms |                     360.1 ms |
+| One shared target       |     1 |                  585.1 ms |                 540.3 ms |                      222.9 ms |                     207.7 ms |
+
+All three interleaved openings improved. All 14 openings exceeded 500 ms. Three of 21 candidate appends exceeded 300 ms. Graph and sidebar scrolling were 16.7–16.8 ms p95 throughout. The distinct and shared fixtures retained their previous Git query strategy. [Individual measurements](m8-interleaved-ref-samples.csv)
+
+A separate disposable experiment ran a Git revision walk without traversal in parallel with reading ref names and upstreams. It verified that every one of the 50,000 distinct targets occurred in Git’s commit output. Over four alternating fresh-profile pairs, median first paint changed from 757.9 ms to 778.8 ms. The application keeps its original distinct-target reader.
+
 ## Memory retained during native ref enumeration
 
 Three paired native reads of the 50,000-distinct-target fixture each received 4,009,992 bytes from Git. A probe kept a weak reference to each stdout buffer, yielded to the event loop and forced GC after the native process finished but before the reader continued. At that point all 4,009,992 bytes were still reachable in each baseline run (`65d63dd`), and zero stdout bytes were reachable in each candidate run (`0714557`). The probe used fresh Node 24.22.2 processes in alternating order. This measures reachable input buffers at one point in the Git utility. Parsed refs still occupy memory.

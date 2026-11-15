@@ -2,6 +2,10 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Opening repositories with interleaved reference targets
+
+On full Linux history with 50,000 refs cycling through 500 targets, median first paint improved from 846.6 ms to 647.7 ms over three paired runs. The packaged app opened the graph, filtered by a full tag name, matched two commits’ ref counts and names against Git, observed native tag creation and deletion, and appended 5,000 commits. The native and unit suite passed 945 tests with 14 skips. The first-paint and paging gates remain open. [Timing samples and compatibility checks](m8-reference-performance.md#interleaved-reference-targets)
+
 ## Crash reporting during startup
 
 The Linux x64 desktop previously missed a main exception during its first asynchronous consent read and a GPU termination notification before Electron was ready. With the fixes in `50ec5ca` and `5007ad9`, the HTTPS fixture received one redacted summary per opted-in scenario. It received zero reports during the first launch and after opt-out. The GPU test injected the Electron notification. The main test threw an actual exception. [Consent and startup coverage](../decisions/0078-interrupted-session-and-javascript-reports.md#failures-while-the-main-process-is-starting)

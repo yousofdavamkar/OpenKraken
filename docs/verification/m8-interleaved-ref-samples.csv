@@ -1,0 +1,15 @@
+fixture,pair,build,first_paint_ms,snapshot_ms,response_ms,page1_ms,page2_ms,page3_ms,graph_p95_ms,sidebar_p95_ms
+distinct,1,baseline,795.2,404.3,561.1,297.8,261.8,193.7,16.8,16.8
+distinct,1,production,710.4,360.1,511.8,312.3,244.2,212.2,16.8,16.8
+interleaved,1,baseline,871.5,442.8,623,315.4,271.9,206.5,16.8,16.7
+interleaved,1,production,647.7,229.8,431.5,238,224.1,216.6,16.8,16.8
+shared,1,baseline,585.1,222.9,373.3,262.5,198,222.2,16.8,16.7
+shared,1,production,540.3,207.7,343.1,258.3,205.1,203.3,16.7,16.8
+distinct,2,production,746.8,356.9,533.5,277.6,220.7,194.7,16.8,16.7
+distinct,2,baseline,779.7,358.8,513.5,295.7,222,203.8,16.8,16.7
+interleaved,2,production,647.2,223.8,421.2,245.5,218.2,220.6,16.7,16.8
+interleaved,2,baseline,846.6,449.9,627,324.2,251.7,188.3,16.8,16.7
+distinct,3,baseline,736.2,391.0,543.9,294,219.4,196.8,16.7,16.8
+distinct,3,production,735.2,367.7,520.2,291.5,228.7,196.3,16.7,16.8
+interleaved,3,baseline,844.6,434.1,630,311,254.7,245.1,16.8,16.7
+interleaved,3,production,752.5,270.7,458.3,381.2,315.4,284.7,16.8,16.7
