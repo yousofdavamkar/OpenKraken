@@ -19,7 +19,28 @@ OPENKRAKEN_UPDATE_CONFIG="$(cat /path/to/beta-config.json)" pnpm package
 pnpm installer --target AppImage --metadata /path/to/installer-metadata.json
 ```
 
-For the next candidate, sign a descriptor with channel `beta`, the exact new package version, a higher sequence and the matching artifact. Use the offline signing command and publish the immutable artifact before its manifest. The first AppImage needs its own authenticated distribution and verification instructions for the intended audience. [Installer instructions](../README.md) · [Feed and signing procedure](decisions/0082-signed-update-release-protocol.md)
+Sign a descriptor for **each** candidate, including the first. Set its channel to `beta`, use the exact package version and increase the sequence for each release. From a POSIX signing machine with Node and jq, run the following commands in a fresh output directory. Set `arch` to the participant's architecture (`x64` or `arm64`).
+
+```sh
+arch=x64
+node /path/to/openkraken/scripts/sign-update.mjs descriptor.json private-key.pem release.json > receipt.json &&
+  jq -er --arg arch "$arch" '
+    .artifacts[] | select(.platform == "linux" and .arch == $arch and .format == "AppImage")
+    | "\(.sha256)  \(.name)"
+  ' receipt.json > SHA256SUMS
+```
+
+Publish the immutable, versioned AppImage before the signed manifest. In the invitation, give participants the candidate version, architecture, HTTPS artifact URL, feedback contact and the **one-line SHA256SUMS from the signing machine**. Deliver that line through an independently authenticated release-owner channel the participant already trusts. [Installer instructions](../README.md) · [Feed and signing procedure](decisions/0082-signed-update-release-protocol.md)
+
+## Verify the first Linux download
+
+Save the checksum line from the invitation as `SHA256SUMS` in an empty directory. Download the AppImage into the same directory with the exact filename from that line. Run this command there before making the file executable.
+
+```sh
+sha256sum --check --strict SHA256SUMS
+```
+
+Continue when the command exits successfully and prints the expected AppImage filename followed by `OK`. If the file is missing or the checksum differs, discard the download and contact the release owner. After a successful check, grant execute permission to that file and launch it. Subsequent checks in **Updates** verify the manifest using the key embedded in that build.
 
 ## Exercise a candidate
 

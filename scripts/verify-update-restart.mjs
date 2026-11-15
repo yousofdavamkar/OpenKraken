@@ -3,12 +3,13 @@ import { build } from 'esbuild';
 import { packager } from '@electron/packager';
 import { flipFuses, FuseVersion } from '@electron/fuses';
 import { chromium, expect } from '@playwright/test';
-import { execFileSync, spawn } from 'node:child_process';
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { execFile, execFileSync, spawn } from 'node:child_process';
+import { generateKeyPairSync } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:https';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
 import { buildAppImage } from './appimage.mjs';
@@ -74,16 +75,19 @@ try {
     { stdio: 'ignore' },
   );
   const keys = generateKeyPairSync('ed25519');
-  let envelope, artifact;
+  const images = [];
+  let envelope;
   server = createServer(
     { key: await readFile(key), cert: await readFile(cert) },
     (request, response) => {
       if (request.url === '/release.json' && envelope) response.end(envelope);
-      else if (request.url === '/OpenKraken.AppImage' && artifact)
-        createReadStream(artifact).pipe(response);
       else {
-        response.writeHead(404);
-        response.end();
+        const image = images.find((file) => request.url === '/' + basename(file));
+        if (image) createReadStream(image).pipe(response);
+        else {
+          response.writeHead(404);
+          response.end();
+        }
       }
     },
   );
@@ -93,7 +97,11 @@ try {
     feed: `https://127.0.0.1:${server.address().port}/release.json`,
     publicKey: keys.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
   };
-  const images = [];
+  const signingKey = join(root, 'release-key.pem');
+  await writeFile(signingKey, keys.privateKey.export({ format: 'pem', type: 'pkcs8' }), {
+    mode: 0o600,
+  });
+  const receipts = [];
   for (const version of [initialVersion, replacementVersion]) {
     const staging = join(root, version, 'staging');
     await mkdir(staging, { recursive: true });
@@ -208,45 +216,64 @@ try {
     await verifyFuses(join(bundle, 'openkraken'));
     const work = join(root, version, 'image');
     await mkdir(work);
-    images.push(
-      (await buildAppImage(bundle, work, 'OpenKraken.AppImage', { version, testOnly: true }))
-        .artifact,
+    const name = `OpenKraken-${version}-linux-${process.arch}.AppImage`;
+    const { artifact } = await buildAppImage(bundle, work, name, { version, testOnly: true });
+    images.push(artifact);
+    const now = Date.now();
+    const descriptor = join(work, 'release-input.json');
+    const manifest = join(work, 'release.json');
+    await writeFile(
+      descriptor,
+      JSON.stringify({
+        schemaVersion: 1,
+        product: 'org.openkraken.desktop',
+        channel: beta ? 'beta' : 'stable',
+        sequence: images.length,
+        version,
+        issuedAt: now - 1000,
+        expiresAt: now + 86400000,
+        artifacts: [{ platform: 'linux', arch: process.arch, format: 'AppImage', path: name }],
+      }),
     );
+    const { stdout } = await promisify(execFile)(process.execPath, [
+      resolve('scripts/sign-update.mjs'),
+      descriptor,
+      signingKey,
+      manifest,
+    ]);
+    receipts.push(JSON.parse(stdout));
+    envelope = await readFile(manifest, 'utf8');
   }
-  artifact = images[1];
-  const now = Date.now();
-  const payload = Buffer.from(
-    JSON.stringify({
-      schemaVersion: 1,
-      product: 'org.openkraken.desktop',
-      channel: beta ? 'beta' : 'stable',
-      sequence: 1,
-      version: replacementVersion,
-      issuedAt: now - 1000,
-      expiresAt: now + 86400000,
-      artifacts: [
-        {
-          platform: 'linux',
-          arch: process.arch,
-          format: 'AppImage',
-          name: 'OpenKraken.AppImage',
-          size: (await stat(artifact)).size,
-          sha256: await sha256(artifact),
-        },
-      ],
-    }),
+  const artifact = images[1];
+  const initialArtifact = receipts[0].artifacts[0];
+  const download = join(root, initialArtifact.name);
+  const checksum = `${initialArtifact.sha256}  ${initialArtifact.name}\n`;
+  const check = () =>
+    execFileSync('sha256sum', ['--check', '--strict', '-'], {
+      cwd: root,
+      input: checksum,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  await writeFile(download, 'incomplete download');
+  assert.throws(check, (error) => error.status === 1);
+  await promisify(execFile)('curl', [
+    '--fail',
+    '--silent',
+    '--show-error',
+    '--cacert',
+    cert,
+    '--output',
+    download,
+    new URL(initialArtifact.name, config.feed).href,
+  ]);
+  check();
+  console.log(
+    'First AppImage matched the publisher receipt before launch; incomplete download rejected.',
   );
-  envelope = JSON.stringify({
-    payload: payload.toString('base64'),
-    signature: sign(
-      null,
-      Buffer.concat([Buffer.from('OPENKRAKEN-UPDATE-V1\n'), payload]),
-      keys.privateKey,
-    ).toString('base64'),
-  });
+  const originalDigest = initialArtifact.sha256;
   const target = join(root, 'Installed OpenKraken.AppImage');
-  await cp(images[0], target);
-  const originalDigest = await sha256(target);
+  await rename(download, target);
+  await chmod(target, 0o755);
   const configHome = join(root, 'config');
   const profile = beta ? join(configHome, 'OpenKraken Beta') : join(root, 'profile');
   const stableUpdates = join(configHome, 'OpenKraken', 'updates');
@@ -421,7 +448,7 @@ try {
     );
     assert.equal(
       JSON.parse(await readFile(join(profile, 'updates/trusted-release.json'), 'utf8')).sequence,
-      1,
+      receipts[1].sequence,
     );
     await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
     if (interruptedCommit) {

@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## First AppImage download and release signing
+
+On Linux x64, three packaged runs used the offline release publisher for both the first AppImage and its successor. Each run rejected an incomplete first download, fetched the versioned file over local HTTPS, and matched its bytes to the signing receipt before granting execute permission. Healthy beta and stable upgrades passed under FUSE. A beta that exited during startup under extract-and-run restored its verified predecessor and retained sequence 2. The exact checksum command in the beta instructions also passed against the existing 0.1.0 test installer. These runs used temporary signing keys. [Participant instructions](../beta.md) · [Packaged test](../../scripts/verify-update-restart.mjs)
+
+All five publisher and release-protocol tests passed. Full lint passed. Both dependency audits returned zero reported advisories following the revised minimatch advisory. [Security review and audit evidence](m8-security-review.md#dependency-finding-and-remediation)
+
 ## Beta updates and Linux installer verification
 
 A Linux x64 AppImage configured for the beta channel upgraded from `0.2.0-beta.2` to `0.2.0-beta.10` through a signed local HTTPS feed and restarted under FUSE. A separate extract-and-run case made the new candidate exit before confirming startup. The helper restored the predecessor, retained the accepted release sequence and displayed the recovery notice. Both cases preserved the stable profile. The stable FUSE upgrade also passed. These runs used disposable keys. Public beta distribution and participant feedback remain open. [Beta runbook](../beta.md) · [Channel and profile decision](../decisions/0118-beta-update-channel.md)
