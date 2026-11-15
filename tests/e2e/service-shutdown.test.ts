@@ -76,7 +76,8 @@ test('a repeated quit still stops an unresponsive Git service before the app exi
       try {
         process.kill(service, 'SIGKILL');
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH')
+          console.warn('Could not clean up the fixture Git service', error);
       }
     }
     if (desktop.exitCode === null && desktop.signalCode === null) desktop.kill('SIGKILL');
