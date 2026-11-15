@@ -134,7 +134,7 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
         onFocusCapture={(event) => {
           if (event.target instanceof HTMLElement) {
             const row = event.target.closest<HTMLElement>('[data-reference-name]');
-            if (row) setFocused(row.dataset.referenceName);
+            setFocused(row?.dataset.referenceName);
           }
         }}
         onBlurCapture={(event) => {

@@ -77,12 +77,17 @@ test('large reference sidebar stays bounded and filtered actions survive scrolli
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
     await filter.fill('');
     const scroll = sidebar.getByRole('list', { name: 'Reference list', exact: true });
+    const mainAction = sidebar.getByRole('button', { name: 'Rename branch main', exact: true });
+    await mainAction.focus();
+    await scroll.focus();
+    await expect(scroll).toBeFocused();
     await scroll.evaluate((element) => {
       element.scrollTop = element.scrollHeight;
     });
     await expect(
       sidebar.getByRole('button', { name: 'Delete tag v0.1.0', exact: true }),
     ).toBeVisible();
+    await expect(mainAction).toHaveCount(0);
     expect(await sidebar.locator('.ref').count()).toBeLessThan(80);
     await scroll.evaluate((element) => {
       element.scrollTop = 0;
