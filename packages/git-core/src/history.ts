@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Commit } from '@openkraken/ipc-contract';
-import { HistoryParser, HISTORY_FORMAT } from './parsers.js';
+import { HistoryParser, HISTORY_WALK_FORMAT } from './parsers.js';
 import { GitError, runGit } from './runner.js';
 
 /** One retained rev-list, backpressured at page boundaries. No skip/refetch or full-history buffer. */
@@ -109,8 +109,9 @@ export class HistoryCursor {
             [
               'rev-list',
               '--date-order',
-              '--no-commit-header',
-              `--format=${HISTORY_FORMAT}`,
+              '--parents',
+              '--no-abbrev-commit',
+              `--format=${HISTORY_WALK_FORMAT}`,
               '--stdin',
             ],
             {

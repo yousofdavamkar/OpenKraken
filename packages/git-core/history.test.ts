@@ -25,6 +25,8 @@ test.each(['octopus', 'shallow', 'replacement'])(
       expect(fixtureGit(path, ['rev-parse', '--is-shallow-repository'])).toBe('true');
     }
     if (kind === 'replacement') fixtureGit(path, ['replace', '--graft', 'HEAD', 'HEAD~2']);
+    fixtureGit(path, ['config', 'log.abbrevCommit', 'true']);
+    fixtureGit(path, ['config', 'core.abbrev', '7']);
     const start = fixtureGit(path, ['rev-parse', 'HEAD']);
     const legacy = await runner.runGit(
       'git',

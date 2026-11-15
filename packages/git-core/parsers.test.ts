@@ -209,12 +209,16 @@ describe('stream parsers', () => {
       { numRuns: 300 },
     );
   });
-  test('headerless pages match the original history stream at every byte boundary', () => {
+  test('graph and log records match the original history stream at every byte boundary', () => {
     const second = 'b'.repeat(64);
-    const record = (id: string, parents: string, body: string, legacy: boolean) =>
+    const record = (id: string, parents: string, body: string, mode: 'log' | 'walk' | 'legacy') =>
       [
-        legacy ? `commit ${id}\n${id}` : id,
-        parents,
+        mode === 'walk'
+          ? `commit ${id}${parents ? ' ' + parents : ''}\n`
+          : mode === 'legacy'
+            ? `commit ${id}\n${id}`
+            : id,
+        mode === 'walk' ? '' : parents,
         'Zoë',
         '',
         '0',
@@ -227,24 +231,27 @@ describe('stream parsers', () => {
         '',
         '',
       ].join('\0');
-    const stream = (legacy: boolean) =>
+    const stream = (mode: 'log' | 'walk' | 'legacy') =>
       Buffer.from(
         [
-          record(second, hash, 'subject 🌱\n\ncommit fake\nbody', legacy),
-          record(hash, '', '', legacy),
+          record(second, hash, 'subject 🌱\n\ncommit fake\nbody', mode),
+          record(hash, '', '', mode),
           '',
         ].join('\n'),
       );
     const legacy = new HistoryParser();
-    legacy.push(stream(true));
+    legacy.push(stream('legacy'));
     const expected = legacy.finish();
-    const data = stream(false);
-    for (let cut = 0; cut <= data.length; cut++) {
-      const parser = new HistoryParser();
-      parser.push(data.subarray(0, cut));
-      parser.push(data.subarray(cut));
-      expect(parser.finish()).toEqual(expected);
+    for (const mode of ['walk', 'log'] as const) {
+      const data = stream(mode);
+      for (let cut = 0; cut <= data.length; cut++) {
+        const parser = new HistoryParser();
+        parser.push(data.subarray(0, cut));
+        parser.push(data.subarray(cut));
+        expect(parser.finish()).toEqual(expected);
+      }
     }
+    const data = stream('walk');
     expect(expected[0]).toMatchObject({ oid: second, parents: [hash], summary: 'subject 🌱' });
     const truncated = new HistoryParser();
     truncated.push(data.subarray(0, data.length - 2));

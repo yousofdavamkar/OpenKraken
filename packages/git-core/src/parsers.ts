@@ -223,8 +223,10 @@ export class RefsParser {
   }
 }
 // Fixed field count is essential: empty parent lists or bodies are valid fields.
-export const HISTORY_FORMAT =
-  '%H%x00%P%x00%an%x00%ae%x00%at%x00%ai%x00%cn%x00%ce%x00%ct%x00%ci%x00%B%x00%x00';
+const historyDetails = '%an%x00%ae%x00%at%x00%ai%x00%cn%x00%ce%x00%ct%x00%ci%x00%B%x00%x00';
+export const HISTORY_FORMAT = '%H%x00%P%x00' + historyDetails;
+// rev-list --parents supplies "commit <oid> <parents>\n" before this custom format.
+export const HISTORY_WALK_FORMAT = '%x00%x00' + historyDetails;
 function signature(name: string, email: string, time: string, date: string) {
   const zone = /([+-])(\d\d)(\d\d)$/.exec(date);
   if (!/^-?\d+$/.test(time) || !zone) throw new Error('Invalid commit timestamp');
@@ -243,12 +245,17 @@ export class HistoryParser {
   private append(fields: string[], offset: number) {
     const first = fields[offset]!;
     const header = first.startsWith('\n') ? first.slice(1) : first;
-    // The public parser also accepts the original "commit ...\n%H" format.
-    const id = header.startsWith('commit ')
-      ? /^commit [0-9a-f]+(?: [0-9a-f]+)*\n([0-9a-f]+)$/.exec(header)?.[1]
-      : header;
-    if (!id || fields[offset + 11] !== '') throw new Error('Malformed history record');
-    const parents = fields[offset + 1]!;
+    let id = header;
+    let parents = fields[offset + 1]!;
+    if (header.startsWith('commit ')) {
+      // A trailing formatted OID identifies the original stream, whose parents
+      // occupy the second field. The compact walk gets both from Git's header.
+      const match = /^commit ([0-9a-f]+)((?: [0-9a-f]+)*)\n([0-9a-f]*)$/.exec(header);
+      if (!match || (!match[3] && parents)) throw new Error('Malformed history header');
+      id = match[3] || match[1]!;
+      if (!match[3]) parents = match[2]!.slice(1);
+    }
+    if (fields[offset + 11] !== '') throw new Error('Malformed history record');
     const body = fields[offset + 10]!;
     const newline = body.indexOf('\n');
     const commit: Commit = {
