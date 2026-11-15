@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./worker": "./src/worker.ts",
     "./engine": "./src/engine.ts",
+    "./layout-message": "./src/layout-message.ts",
     "./canvas": "./src/canvas.ts"
   },
   "dependencies": {

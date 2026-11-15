@@ -12,6 +12,10 @@ The explicit mode shares immutable pass-edge objects across rows. Structured clo
 
 MiniSearch indexing runs in batches of 25 documents between worker messages. Searches flush outstanding documents before answering. This keeps long real-world commit messages from monopolizing the worker between layout requests. The renderer still receives a completed layout before indexing finishes.
 
+## Sending layout rows to the renderer
+
+The worker transfers two unsigned 32-bit buffers for node and edge records. A page-local string table carries each node or edge target ID once, including synthetic working-tree IDs. Each node records the end of its edges, and the renderer derives its row index from the reply offset. Passages, checkpoint indices and refresh reuse counts travel alongside the buffers. The renderer reconstructs the existing Canvas row objects before publishing the page. The worker retains its own checkpoints for subsequent appends.
+
 ## Git traversal limitation
 
 The benchmark clone has 87,206 commits and a shallow boundary at 2026-01-01. Profiling measured about 0.95–1.0 seconds in repository open/snapshot, before layout. The existing retained `rev-list --date-order` traversal and child-before-parent ordering remain unchanged.

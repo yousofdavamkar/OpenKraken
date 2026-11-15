@@ -1,5 +1,6 @@
 import GraphWorker from '@openkraken/graph/worker?worker';
 import type { GraphRequest, GraphResponse } from '@openkraken/graph/engine';
+import { unpackLayout, type WorkerResponse } from '@openkraken/graph/layout-message';
 type Input = GraphRequest extends infer R
   ? R extends GraphRequest
     ? Omit<R, 'id'>
@@ -18,13 +19,16 @@ export class GraphClient {
     }
   >();
   constructor() {
-    this.worker.onmessage = (event: MessageEvent<GraphResponse>) => {
+    this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       const pending = this.pending.get(event.data.id);
       if (!pending) return;
       this.pending.delete(event.data.id);
       clearTimeout(pending.timer);
       if (event.data.kind === 'error') pending.reject(new Error(event.data.message));
-      else pending.resolve(event.data);
+      else
+        pending.resolve(
+          event.data.kind === 'packed-layout' ? unpackLayout(event.data) : event.data,
+        );
     };
     this.worker.onerror = (event) => {
       this.failure = new Error(event.message || 'Graph worker failed');
