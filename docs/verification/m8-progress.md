@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Large reference snapshots in the Linux x64 desktop
+
+Three paired openings per fixture measured the new snapshot encoding against `31d5960`. With 50,000 refs sharing one target, median first paint fell from 741.3 to 698.6 ms. With 100 refs per target it fell from 759.0 to 720.6 ms. For distinct targets it moved from 811.1 to 807.8 ms. All eighteen openings exceeded 500 ms, and one of the 54 page appends exceeded 300 ms. The Linux x64 package built from `d00f8a7` opened the grouped fixture through a repository link, reported 100 refs on each of two adjacent commits and found the expected last ref in each dialog, and appended 5,000 rows. Native folder selection, terminal keyboard input, renderer isolation, helpers and fuse checks also passed. [Paired measurements and payload sizes](m8-reference-performance.md#transferring-consecutive-references)
+
+On the production build, single-ref Linux history painted in 350.4 ms. The two-million-commit, 100,000-file checkout painted in 301.8 ms, with ten watcher-warm status reads of 196.6–237.1 ms. On a separate synthetic history with 50,000 refs, three fresh profiles painted in 1,219.6 / 649.8 / 634.0 ms with distinct targets and 1,047.4 / 530.9 / 551.3 ms with a shared target. All eighteen synthetic appends met 300 ms. Reopening the full Linux shared-target fixture with 17,000 cached commits took 712.5 ms. Opening the distinct-target fixture with 10,000 saved hidden refs took 934.3 ms.
+
 ## Graph paging, search and repository switching
 
 Loading a page used to clear completed repository-wide search results or cancel a pending search. The two store regressions reproduced both failures. A separate pair reproduced the loss of an in-flight page when a repository picker was cancelled or opening the next repository failed. The Electron regression held a real page between its Git read and graph layout, opened the picker, released the append and cancelled the picker. It then loaded the final page from the same native cursor and selected the last commit with End. [Graph refresh behavior](../decisions/0005-graph-views-and-refresh.md#refresh)
