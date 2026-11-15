@@ -157,28 +157,45 @@ export class StatusParser {
 }
 export const REF_FORMAT =
   '%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00%(upstream)%00%(upstream:track)%00%(HEAD)%00';
-// Leave peeling slots empty until annotated tags are read separately. Asking
-// Git for dereferenced fields makes it parse even ordinary commit objects.
+// Existing callers can feed this unpeeled, eight-field stream to the default parser.
 export const REF_DIRECT_FORMAT =
   '%(refname)%00%(objectname)%00%(objecttype)%00%00%00%(upstream)%00%(upstream:track)%00%(HEAD)%00';
+const directRefFormat =
+  '%(refname)%00%(objectname)%00%(objecttype)%00%(upstream)%00%(upstream:track)%00%(HEAD)%00';
 const oid = (value: string) => {
   if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value)) throw new Error('Invalid object ID');
   return value;
 };
+const refPrefixLength = {
+  local: 'refs/heads/'.length,
+  remote: 'refs/remotes/'.length,
+  tag: 'refs/tags/'.length,
+  stash: 0,
+  other: 0,
+};
+
 export class RefsParser {
   readonly value: Ref[] = [];
   private pendingFields: string[] = [];
   private decoder = new TextNulFields();
+  private readonly width: 6 | 8;
+  constructor(format: 'full' | 'direct' = 'full') {
+    this.width = format === 'direct' ? 6 : 8;
+  }
+  get gitFormat() {
+    return this.width === 6 ? directRefFormat : REF_FORMAT;
+  }
   private append(fields: string[], offset: number) {
     const rawName = fields[offset]!;
     const name = rawName.startsWith('\n') ? rawName.slice(1) : rawName;
     const target = fields[offset + 1]!;
     const objectType = fields[offset + 2]!;
-    const peeled = fields[offset + 3]!;
-    const peeledType = fields[offset + 4]!;
-    const upstream = fields[offset + 5]!;
-    const track = fields[offset + 6]!;
-    const head = fields[offset + 7]!;
+    const peeled = this.width === 8 ? fields[offset + 3]! : '';
+    const peeledType = this.width === 8 ? fields[offset + 4]! : '';
+    const end = offset + this.width;
+    const upstream = fields[end - 3]!;
+    const track = fields[end - 2]!;
+    const head = fields[end - 1]!;
     if (!name.startsWith('refs/')) throw new Error('Invalid ref name');
     const kind = name.startsWith('refs/heads/')
       ? 'local'
@@ -194,7 +211,7 @@ export class RefsParser {
       target: oid(target),
       objectType,
       peeledType,
-      shortName: name.replace(/^refs\/(heads|remotes|tags)\//, ''),
+      shortName: name.slice(refPrefixLength[kind]),
       kind,
       isHead: head === '*',
     };
@@ -209,11 +226,11 @@ export class RefsParser {
     this.value.push(ref);
   }
   push(chunk: Buffer) {
-    // Read complete eight-field records directly from the decoded chunk.
+    // Read complete records directly from the decoded chunk.
     const batch = this.decoder.push(chunk);
     const fields = this.pendingFields.length ? this.pendingFields.concat(batch) : batch;
     let offset = 0;
-    for (; offset + 8 <= fields.length; offset += 8) this.append(fields, offset);
+    for (; offset + this.width <= fields.length; offset += this.width) this.append(fields, offset);
     this.pendingFields = fields.slice(offset);
   }
   finish() {

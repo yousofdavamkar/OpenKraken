@@ -1,6 +1,6 @@
 import type { Ref } from '@openkraken/ipc-contract';
 import { isUtf8 } from 'node:buffer';
-import { RefsParser, REF_FORMAT, REF_DIRECT_FORMAT } from './parsers.js';
+import { RefsParser, REF_FORMAT } from './parsers.js';
 import { GitError, type RunOptions, type runGit } from './runner.js';
 
 type Run = (args: string[], options: RunOptions) => ReturnType<typeof runGit>;
@@ -74,7 +74,7 @@ export class ReferenceReader {
   }
 
   private async readStable(cwd: string, signal: AbortSignal): Promise<Ref[]> {
-    const parser = new RefsParser();
+    const parser = new RefsParser('direct');
     const chunks: Buffer[] = [];
     let bytes = 0;
     const account = (chunk: Buffer) => {
@@ -82,7 +82,7 @@ export class ReferenceReader {
       if (bytes > this.maxBytes)
         throw new GitError('OUTPUT_LIMIT', 'Git output exceeded the safety limit');
     };
-    await this.run(['for-each-ref', `--format=${REF_DIRECT_FORMAT}`], {
+    await this.run(['for-each-ref', `--format=${parser.gitFormat}`], {
       cwd,
       signal,
       maxBytes: this.maxBytes,

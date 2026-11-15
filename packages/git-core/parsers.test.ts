@@ -172,6 +172,29 @@ describe('stream parsers', () => {
     incomplete.push(Buffer.from('refs/tags/unread\0'));
     expect(() => incomplete.finish()).toThrow('Truncated ref');
   });
+  test('direct reference records preserve tracking and HEAD across every chunk boundary', () => {
+    const hash = 'b'.repeat(64);
+    const fields = [
+      ['refs/heads/作業', hash, 'commit', 'refs/remotes/origin/main', '[ahead 2, behind 1]', '*'],
+      ['refs/tags/v1', hash, 'tag', '', '', ' '],
+    ];
+    const data = Buffer.from(fields.map((row) => row.join('\0') + '\0\n').join(''));
+    const full = Buffer.from(
+      fields
+        .map((row) => [...row.slice(0, 3), '', '', ...row.slice(3)].join('\0') + '\0\n')
+        .join(''),
+    );
+    const expected = feed(new RefsParser(), full, 7);
+    for (let cut = 0; cut <= data.length; cut++) {
+      const parser = new RefsParser('direct');
+      parser.push(data.subarray(0, cut));
+      parser.push(data.subarray(cut));
+      expect(parser.finish()).toEqual(expected);
+    }
+    const partial = new RefsParser('direct');
+    partial.push(Buffer.from(fields[0]!.slice(0, 5).join('\0') + '\0'));
+    expect(() => partial.finish()).toThrow('Truncated ref');
+  });
   test('history empty parents/body, unicode and fake header in messages', () => {
     fc.assert(
       fc.property(

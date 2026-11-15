@@ -77,8 +77,15 @@ test('ordinary refs finish in one native read with every field preserved', async
       calls.push(args);
       return runGit(git.path, args, options);
     });
-    expect(await reader.read(repository)).toEqual(await nativeRefs());
-    expect(calls).toEqual([['for-each-ref', `--format=${REF_DIRECT_FORMAT}`]]);
+    const expected = await nativeRefs();
+    expect(await reader.read(repository)).toEqual(expected);
+    expect(calls).toEqual([['for-each-ref', `--format=${new RefsParser('direct').gitFormat}`]]);
+    const legacy = new RefsParser();
+    await runGit(git.path, ['for-each-ref', `--format=${REF_DIRECT_FORMAT}`], {
+      cwd: repository,
+      onStdout: (chunk) => legacy.push(chunk),
+    });
+    expect(legacy.finish()).toEqual(expected);
   } finally {
     fixtureGit(
       repository,
@@ -433,9 +440,13 @@ test.skipIf(!modern).each(['cancel', 'failure'] as const)(
 
 test.skipIf(!modern)('output limits apply to all native pages together', async () => {
   return withDenseRefs(async () => {
-    const direct = await runGit(git.path, ['for-each-ref', `--format=${REF_DIRECT_FORMAT}`], {
-      cwd: repository,
-    });
+    const direct = await runGit(
+      git.path,
+      ['for-each-ref', `--format=${new RefsParser('direct').gitFormat}`],
+      {
+        cwd: repository,
+      },
+    );
     const full = await runGit(git.path, ['for-each-ref', `--format=${REF_FORMAT}`], {
       cwd: repository,
     });
