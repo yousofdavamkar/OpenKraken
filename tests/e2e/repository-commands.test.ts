@@ -13,6 +13,7 @@ test('branch palette finds offscreen refs and solos their native history while r
   );
   fixtureGit(repo, ['update-ref', '--stdin'], refs);
   fixtureGit(repo, ['branch', 'Ångström/topic', tip]);
+  fixtureGit(repo, ['branch', 'origin/main', tip]);
   const app = await electron.launch({
     args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
   });
@@ -33,7 +34,7 @@ test('branch palette finds offscreen refs and solos their native history while r
     await category.selectOption('Branches');
     const options = palette.getByRole('listbox').getByRole('option');
     await expect(options).toHaveCount(50);
-    await expect(palette.getByRole('status')).toContainText('50 of 123');
+    await expect(palette.getByRole('status')).toContainText('50 of 124');
     const search = palette.getByLabel('Search commands');
     await search.fill('Ångstr');
     await expect(options).toHaveCount(1);
@@ -48,6 +49,17 @@ test('branch palette finds offscreen refs and solos their native history while r
     await commands.click();
     await category.selectOption('Branches');
     await search.fill('origin/main');
+    const twins = palette.getByRole('option', {
+      name: 'Show only origin/main in graph',
+      exact: true,
+    });
+    await expect(twins).toHaveCount(2);
+    const names = await twins.evaluateAll((rows) =>
+      rows.map((row) => row.getAttribute('aria-description')).sort(),
+    );
+    expect(names).toEqual(['refs/heads/origin/main', 'refs/remotes/origin/main']);
+    await search.fill('refs/remotes/origin/main');
+    await expect(options.first()).toHaveAccessibleDescription('refs/remotes/origin/main');
     await search.press('Enter');
     await expect(page.getByLabel('Active graph view')).toContainText(
       'Solo: refs/remotes/origin/main',

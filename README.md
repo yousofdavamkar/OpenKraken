@@ -209,7 +209,7 @@ Merge queues/stacks, thread resolution, multi-line comment creation, repository 
 
 ## Commands and keyboard shortcuts (M7 in progress)
 
-Use **Commands** or **Ctrl/Cmd+P** to open the command palette. Search by action or alias, filter by category, move with arrow keys, and press Enter. Recently and frequently used commands rise in empty-search results. Unavailable commands remain visible. Commands open the same review dialogs and use the same availability checks as their toolbar controls.
+Use **Commands** or **Ctrl/Cmd+P** to open the command palette. Search by action or alias, filter by category, move with arrow keys, and press Enter. Recently and frequently used commands rise in empty-search results. With a repository open, choose **Branches** to show a local or remote branch in the graph, or **Changed files** to open its staged or unstaged diff. Unavailable commands remain visible. Commands open the same review dialogs and use the same availability checks as their toolbar controls.
 
 Use **Keybindings** to edit the JSON map. Missing entries inherit defaults; `null` disables a binding. `Mod` means Command on macOS and Control elsewhere. For example:
 

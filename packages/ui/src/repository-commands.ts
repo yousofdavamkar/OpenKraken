@@ -58,7 +58,12 @@ export function useRepositoryCommands(category: string, query: string) {
   const { targets, total } = useMemo(() => {
     const term = query.trim();
     if (!term) return { targets: candidates.slice(0, limit), total: candidates.length };
-    const matches = fuzzysort.go(term, candidates, { key: 'search', limit, threshold: 0.1 });
+    const matches = fuzzysort.go(term, candidates, {
+      key: (target) =>
+        target.kind === 'branch' && term.startsWith('refs/') ? target.name : target.search,
+      limit,
+      threshold: 0.1,
+    });
     return { targets: matches.map((match) => match.obj), total: matches.total };
   }, [candidates, query]);
 

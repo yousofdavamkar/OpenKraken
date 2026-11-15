@@ -477,6 +477,7 @@ function Palette({ close }: { close: () => void }) {
             data-command-index={i}
             role="option"
             aria-label={command.label}
+            aria-description={command.description}
             aria-selected={i === index}
             aria-disabled={!command.available}
             onMouseDown={(event) => event.preventDefault()}
