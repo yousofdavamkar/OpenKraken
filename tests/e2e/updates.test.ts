@@ -171,6 +171,27 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     await expect(dialog.getByRole('status')).toContainText('download verified');
     expect(await readFile(join(profile, 'updates/artifact.ready'), 'utf8')).toBe('fixture');
     await page.screenshot({ path: 'test-results/signed-update-verified.png' });
+    const exported = join(root, 'OpenKraken.AppImage');
+    await app.evaluate(({ dialog }, path) => {
+      let first = true;
+      dialog.showSaveDialog = async (...args: unknown[]) => {
+        const options = args.at(-1) as Electron.SaveDialogOptions;
+        if (!options.defaultPath?.endsWith('/OpenKraken.AppImage'))
+          throw new Error('Missing signed default filename');
+        if (first) {
+          first = false;
+          return { canceled: true, filePath: '' };
+        }
+        return { canceled: false, filePath: path };
+      };
+    }, exported);
+    const save = dialog.getByRole('button', { name: 'Save installer…' });
+    await save.click();
+    await expect(save).toBeEnabled();
+    await expect(stat(exported)).rejects.toMatchObject({ code: 'ENOENT' });
+    await save.click();
+    await expect(dialog.getByRole('status')).toHaveText('Version 0.2.0 installer saved.');
+    expect(await readFile(exported, 'utf8')).toBe('fixture');
     slow = true;
     await dialog.getByRole('button', { name: 'Check for updates' }).click();
     await dialog.getByRole('button', { name: 'Download AppImage' }).click();

@@ -29,7 +29,7 @@ import {
   shell,
 } from 'electron';
 import type { IpcMainInvokeEvent, UtilityProcess } from 'electron';
-import { join } from 'node:path';
+import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   CHANNEL,
@@ -425,6 +425,27 @@ else {
             code: 'UPDATE_SETTINGS',
             message:
               'Automatic update settings could not be saved. Refresh the dialog and check the storage warning before trying again.',
+          };
+        }
+      }
+      if (request.method === 'updatesSave') {
+        try {
+          const state = await updates!.save(request.saveId, async (name) => {
+            if (!window || window.isDestroyed()) return;
+            const result = await dialog.showSaveDialog(window, {
+              title: 'Save verified installer',
+              defaultPath: join(app.getPath('downloads'), name),
+              filters: [{ name: 'Installer', extensions: [extname(name).slice(1)] }],
+              properties: ['showOverwriteConfirmation', 'createDirectory'],
+            });
+            return result.canceled ? undefined : result.filePath;
+          });
+          return { kind: 'updates', state: updatesStateSchema.parse(state) };
+        } catch {
+          return {
+            kind: 'error',
+            code: 'UPDATE_SAVE',
+            message: 'The installer save dialog could not be completed.',
           };
         }
       }

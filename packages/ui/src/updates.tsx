@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { UpdateState } from '@openkraken/ipc-contract';
 
 const failures: Record<NonNullable<UpdateState['error']>, string> = {
+  save: 'The installer could not be saved. Choose a writable location and keep the installer extension.',
   network: 'The update server could not be reached securely. Try checking again.',
   'invalid-release': 'The release signature or validity period could not be verified.',
   rollback: 'The server returned older or conflicting release metadata. The update was rejected.',
@@ -12,6 +13,41 @@ const failures: Record<NonNullable<UpdateState['error']>, string> = {
   installation:
     'The update could not be prepared or confirmed. Existing recovery files were retained.',
 };
+
+function updateStatus(state?: UpdateState): string {
+  if (!state) return 'Loading update status…';
+  if (state.error) return failures[state.error];
+  switch (state.phase) {
+    case 'preparing':
+      return 'Verifying and preparing the update…';
+    case 'restart-ready':
+      return 'The update is ready. Waiting for restart approval…';
+    case 'installed':
+      return 'Update installed. Restarting…';
+    case 'disabled':
+      return 'This build has no update feed configured.';
+    case 'checking':
+      return 'Checking the release signature…';
+    case 'current':
+      return 'You are up to date with the signed release feed.';
+    case 'unsupported':
+      return `Version ${state.version} has no download for this platform.`;
+    case 'available':
+      return `Version ${state.version} is available.`;
+    case 'downloading':
+      return `Downloading version ${state.version}…`;
+    case 'verified':
+      return `Version ${state.version} download verified. ${state.installId ? 'Ready to install and restart.' : 'Choose where to save the installer.'}`;
+    case 'saving':
+      return 'Verifying and saving the installer…';
+    case 'saved':
+      return `Version ${state.version} installer saved.`;
+    case 'error':
+      return failures.network;
+    case 'idle':
+      return 'Check for a newer signed release.';
+  }
+}
 
 function UpdatesDialog({
   onClose,
@@ -85,6 +121,7 @@ function UpdatesDialog({
       | 'updatesCheck'
       | 'updatesCancel'
       | 'updatesDownload'
+      | 'updatesSave'
       | 'updatesInstall'
       | 'updatesDismissRecovery',
     format?: UpdateState['selected'],
@@ -92,22 +129,24 @@ function UpdatesDialog({
     setDispatching(true);
     setError('');
     try {
-      const result =
-        method === 'updatesInstall' && state?.installId
-          ? await window.openkraken.request({
-              id: crypto.randomUUID(),
-              method,
-              installId: state.installId,
-            })
-          : method === 'updatesDownload' && format
-            ? await window.openkraken.request({ id: crypto.randomUUID(), method, format })
-            : await window.openkraken.request({
-                id: crypto.randomUUID(),
-                method:
-                  method === 'updatesCancel' || method === 'updatesDismissRecovery'
-                    ? method
-                    : 'updatesCheck',
-              });
+      const id = crypto.randomUUID();
+      let result;
+      switch (method) {
+        case 'updatesInstall':
+          if (!state?.installId) return;
+          result = await window.openkraken.request({ id, method, installId: state.installId });
+          break;
+        case 'updatesSave':
+          if (!state?.saveId) return;
+          result = await window.openkraken.request({ id, method, saveId: state.saveId });
+          break;
+        case 'updatesDownload':
+          if (!format) return;
+          result = await window.openkraken.request({ id, method, format });
+          break;
+        default:
+          result = await window.openkraken.request({ id, method });
+      }
       if (result.kind === 'error') {
         setError(result.message);
         return;
@@ -121,33 +160,8 @@ function UpdatesDialog({
       setDispatching(false);
     }
   };
-  const running =
-    state?.phase === 'checking' || state?.phase === 'downloading' || state?.phase === 'preparing';
-  const status = !state
-    ? 'Loading update status…'
-    : state.phase === 'preparing'
-      ? 'Verifying and preparing the update…'
-      : state.phase === 'restart-ready'
-        ? 'The update is ready. Waiting for restart approval…'
-        : state.phase === 'installed'
-          ? 'Update installed. Restarting…'
-          : state.phase === 'disabled'
-            ? 'This build has no update feed configured.'
-            : state.phase === 'checking'
-              ? 'Checking the release signature…'
-              : state.phase === 'current'
-                ? 'You are up to date with the signed release feed.'
-                : state.phase === 'unsupported'
-                  ? `Version ${state.version} has no download for this platform.`
-                  : state.phase === 'available'
-                    ? `Version ${state.version} is available.`
-                    : state.phase === 'downloading'
-                      ? `Downloading version ${state.version}…`
-                      : state.phase === 'verified'
-                        ? `Version ${state.version} download verified. ${state.installId ? 'Ready to install and restart.' : 'Installation is not available in this build.'}`
-                        : state.phase === 'error'
-                          ? failures[state.error ?? 'network']
-                          : 'Check for a newer signed release.';
+  const running = state && ['checking', 'downloading', 'preparing', 'saving'].includes(state.phase);
+  const status = updateStatus(state);
   return (
     <dialog
       ref={dialog}
@@ -209,6 +223,11 @@ function UpdatesDialog({
       )}
       {running && <p>Transfers continue while this dialog is closed.</p>}
       <div className="dialog-actions">
+        {state?.phase === 'verified' && state.saveId && (
+          <button disabled={dispatching} onClick={() => void act('updatesSave')}>
+            Save installer…
+          </button>
+        )}
         {state?.phase === 'verified' && state.installId && (
           <button disabled={dispatching} onClick={() => void act('updatesInstall')}>
             Install and restart
@@ -226,7 +245,7 @@ function UpdatesDialog({
           ))}
         {running ? (
           <button
-            disabled={dispatching && state?.phase !== 'preparing'}
+            disabled={dispatching && state?.phase !== 'preparing' && state?.phase !== 'saving'}
             onClick={() => void act('updatesCancel')}
           >
             Cancel transfer
