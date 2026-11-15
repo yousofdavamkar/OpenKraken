@@ -27,14 +27,21 @@ const failStartup = process.argv.includes('--failed-startup') || delayedDescenda
 const helperUnavailable = process.argv.includes('--helper-unavailable');
 const slowCommit = process.argv.includes('--slow-commit');
 const stalledCommit = process.argv.includes('--stalled-commit');
+const syncError = process.argv.includes('--sync-error-after-rename');
 const beforeRename = process.argv.includes('--interrupt-before-rename');
 const afterRename = process.argv.includes('--interrupt-after-rename');
 const predecessorInstalled = beforeRename || stalledCommit;
 const interruptedCommit = predecessorInstalled || afterRename;
 assert.ok(
-  [failStartup, helperUnavailable, beforeRename, afterRename, slowCommit, stalledCommit].filter(
-    Boolean,
-  ).length <= 1,
+  [
+    failStartup,
+    helperUnavailable,
+    beforeRename,
+    afterRename,
+    slowCommit,
+    stalledCommit,
+    syncError,
+  ].filter(Boolean).length <= 1,
   'Select one failure scenario',
 );
 const beta = process.argv.includes('--beta');
@@ -126,6 +133,24 @@ try {
       fixtureBoots.push(${JSON.stringify(version)});
       require('node:fs').writeFileSync(fixtureBootsPath, JSON.stringify(fixtureBoots));
       const fixtureReturning = ${predecessorReturns && version === initialVersion} && require('node:fs').existsSync(${JSON.stringify(failedMarker)});
+      if (${syncError && version === initialVersion}) {
+        const files = require('node:fs/promises');
+        const rename = files.rename.bind(files);
+        const open = files.open.bind(files);
+        let syncParent;
+        files.rename = async (from, to) => {
+          await rename(from, to);
+          if (from === to + '.openkraken-update/next.AppImage') syncParent = require('node:path').dirname(to);
+        };
+        files.open = async (path, ...args) => {
+          const file = await open(path, ...args);
+          if (path === syncParent) file.sync = async () => {
+            require('node:fs').writeFileSync(${JSON.stringify(join(root, 'sync-failed'))}, 'replacement renamed');
+            throw new Error('Fixture directory sync failure');
+          };
+          return file;
+        };
+      }
       if (${slowCommit && version === initialVersion}) {
         if (fixtureBoots.length > 1) {
           require('node:fs').writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ version: fixtureElectron.app.getVersion(), pid: process.pid }));
@@ -454,6 +479,10 @@ try {
     await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
     const started = JSON.parse(await waitForFile(marker, slowCommit ? 60000 : 30000));
     assert.equal(started.version, predecessorReturns ? initialVersion : replacementVersion);
+    if (syncError) {
+      assert.equal(await readFile(join(root, 'sync-failed'), 'utf8'), 'replacement renamed');
+      console.log('The parent reported a directory sync failure after replacing the AppImage.');
+    }
     if (slowCommit)
       assert.equal(await readFile(join(root, 'slow-commit'), 'utf8'), 'rename resumed');
     if (delayedDescendant)

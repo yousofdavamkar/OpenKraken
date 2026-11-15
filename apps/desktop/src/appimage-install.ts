@@ -258,6 +258,9 @@ export async function stageAppImageUpdate(
     };
   };
   return {
+    get replaced() {
+      return committed;
+    },
     recovery: {
       previous: { ...previous },
       journalSha256: createHash('sha256').update(JSON.stringify(transaction)).digest('hex'),
@@ -359,6 +362,10 @@ export async function recoverAppImageUpdate(
   if (await exists(staged)) {
     if (!matches(await imageDigest(staged, transaction.arch, signal), transaction.next)) fail();
   }
+  // A parent or helper can exit after a rename but before syncing either directory.
+  // Keep the rollback files until the currently verified image is durable.
+  await syncDirectory(dirname(target));
+  await syncDirectory(folder);
   signal.throwIfAborted();
   if (hasBackup) await unlink(backup);
   if (await exists(staged)) await unlink(staged);

@@ -1,10 +1,11 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import {
   chmod,
   link,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   rm,
   stat,
@@ -28,6 +29,48 @@ function image(text: string) {
   return Buffer.concat([bytes, Buffer.from(text)]);
 }
 
+test.skipIf(process.platform !== 'linux')(
+  'startup retains the predecessor and journal until the replacement directory can sync',
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-appimage-sync-'));
+    const target = join(root, 'OpenKraken.AppImage');
+    const source = join(root, 'artifact.ready');
+    const folder = target + '.openkraken-update';
+    try {
+      await writeFile(target, oldImage, { mode: 0o700 });
+      await writeFile(source, newImage, { mode: 0o600 });
+      const staged = await stageAppImageUpdate(
+        { target, source, artifact, version: '0.2.0', arch: 'x64' },
+        new AbortController().signal,
+      );
+      await staged.commit();
+      const journal = await readFile(join(folder, 'transaction.json'));
+      const directory = await open(root, 'r');
+      const prototype: typeof directory = Object.getPrototypeOf(directory);
+      await directory.close();
+      for (const failSecondDirectory of [false, true]) {
+        const originalSync = prototype.sync;
+        const sync = vi.spyOn(prototype, 'sync');
+        if (failSecondDirectory) sync.mockImplementationOnce(originalSync);
+        sync.mockRejectedValue(new Error('Directory sync failed'));
+        try {
+          await expect(recoverAppImageUpdate(target, '0.2.0')).rejects.toThrow(
+            'Directory sync failed',
+          );
+          expect(await readFile(join(folder, 'previous.AppImage'))).toEqual(oldImage);
+          expect(await readFile(join(folder, 'transaction.json'))).toEqual(journal);
+        } finally {
+          sync.mockRestore();
+        }
+      }
+      expect(await recoverAppImageUpdate(target, '0.2.0')).toBe('confirmed');
+      expect(await readFile(target)).toEqual(newImage);
+      await expect(stat(folder)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 test.skipIf(process.platform !== 'linux')(
   'a failed replacement can restore the exact retained image without overwriting a changed target',
   async () => {

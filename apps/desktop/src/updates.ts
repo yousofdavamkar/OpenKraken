@@ -696,15 +696,17 @@ export class Updates {
       validateUpdateRelease(this.release, this.now());
       await installation.commit();
       this.state.phase = 'installed';
-      this.installation = null;
-      this.installController = null;
       return plan;
     } catch {
-      await this.installation?.discard().catch(() => {});
+      this.state = { ...this.empty('error'), error: 'installation' };
+      // The executable already changed if a directory sync failed after rename.
+      // Keep the armed helper and journal for verification at the next startup.
+      if (installation.replaced) return plan;
+      await installation.discard().catch(() => {});
+      return null;
+    } finally {
       this.installation = null;
       this.installController = null;
-      this.state = { ...this.empty('error'), error: 'installation' };
-      return null;
     }
   }
   cancel() {
