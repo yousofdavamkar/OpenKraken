@@ -2,6 +2,28 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Repeated targets and the first watcher check
+
+Three alternating pairs per fixture compared `42b4423` with `a8e90ba` on Linux x64, Git 2.53.0 and an Intel Core i7-9750H. Each fresh Electron profile opened the same 2,000 commits from full Linux history and appended three 5,000-commit pages. OS caches were retained. The two apps used the same renderer asset and physically separate main and Git utility bundles. Each opening checked the renderer URL and asset.
+
+| 50,000 refs      | Native snapshot before | Native snapshot after | First paint before | First paint after |
+| ---------------- | ---------------------: | --------------------: | -----------------: | ----------------: |
+| Distinct targets |               360.7 ms |              365.3 ms |           737.2 ms |          712.8 ms |
+| 500 targets      |               289.8 ms |              204.3 ms |           662.0 ms |          528.2 ms |
+| One target       |               253.5 ms |              203.0 ms |           627.0 ms |          564.7 ms |
+
+All values in the table are medians. All eighteen openings exceeded 500 ms. The combined build had 26 of 27 appends under 300 ms. The first append on the third distinct-target run took 301.6 ms. All 27 baseline appends passed. Graph and sidebar scrolling measured 16.7–16.8 ms p95. [Individual openings and appends](m8-repeated-target-samples.csv)
+
+Two additional comparisons isolated the changes. With the new Git reader alone, median first paint changed from 671.2 to 591.6 ms for 500 targets, from 597.3 to 558.8 ms for one target and from 726.8 to 746.8 ms for distinct targets. A disposable utility then compared eager watcher hashing with capturing the opening values and hashing them on the first active check. This shortened first paint in all twelve pairs across the three fixtures. The native regression changes a tag between capture and comparison while also mutating the returned snapshot, and verifies that the watcher reports the tag change. [Native reader](../decisions/0098-direct-first-reference-enumeration.md#repositories-with-many-refs-pointing-to-the-same-objects) · [Watcher capture](../decisions/0104-snapshot-reference-watcher-baseline.md#hashing-a-large-opening-snapshot-at-the-first-check)
+
+Git 2.38.0 and 2.53.0 each produced the same 50,000 complete ordered records as full native enumeration on all three fixtures. When the distinct fixture was deliberately given the repeated-target hint, the reader fell back to direct enumeration and matched every record. The SHA-256 native fixture also covered per-worktree HEAD, upstream tracking, annotated and Unicode tags, tree and blob targets, replacements, output limits, cancellation, incomplete or failed batch reads and a tag moving during lookup.
+
+A separate disposable build serialized the staged reference array to JSON in the utility and parsed it before the existing main-process validation. Across four alternating pairs per fixture, median first paint changed from 740.6 to 733.9 ms for distinct targets, from 554.4 to 563.5 ms for 500 targets and from 584.2 to 562.5 ms for the shared target. The production transfer still uses the validated array.
+
+Separate openings of the full Linux history with one ref took 424.6, 362.1 and 345.4 ms. The two-million-commit, 100,000-file checkout took 287.2, 326.1 and 316.8 ms. All eighteen appends on those six openings passed. On an earlier opening with the grouped reader alone, the same synthetic checkout took 1,123.2 ms, including 916.6 ms in the native snapshot. Three fresh profiles on the final build completed all 30 watcher-warm clean and dirty status reads in 198.6–248.2 ms.
+
+The shared-target repository with 17,000 cached commits took 543.2 ms to reopen. On the distinct-target repository with 10,000 saved hidden refs, first paint took 879.4 ms and the first append took 308.9 ms. The other five appends across those two openings passed.
+
 ## Reference sidebar measurements and commit badge grouping
 
 Three alternating pairs per fixture compared `93d1b05` with `d648174` on Linux x64 using Git 2.53.0 and an Intel Core i7-9750H. Both builds used the same main process and Git utility. Each fresh profile opened 2,000 commits from full Linux history and appended three 5,000-commit pages. The harness checked the renderer file URL and the loaded JavaScript asset for each build. The OS caches remained populated.
