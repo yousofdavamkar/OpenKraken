@@ -460,10 +460,14 @@ export const useRepository = create<State>()(
         });
       }
     },
-    select: (oid, mode) =>
+    select: (oid, mode) => {
+      const { rows, selection } = get();
+      const next = selectRow(rows, selection, oid, mode);
+      if (next === selection) return;
       set((s) => {
-        s.selection = selectRow(s.rows, s.selection, oid, mode);
-      }),
+        s.selection = next;
+      });
+    },
     navigate: async (target) => {
       const sequence = ++navigationSequence;
       const { snapshot, selection } = get();

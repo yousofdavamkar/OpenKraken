@@ -155,6 +155,37 @@ test('appending keeps previous rows and selection intact', async () => {
   await useRepository.getState().search('Second');
   expect(useRepository.getState().matches).toEqual(['b'.repeat(40)]);
 });
+test('deep range selection preserves the loaded page and ignores a missing target', async () => {
+  const snapshot = fixture();
+  await open(snapshot);
+  const previous = snapshot.commits[0]!;
+  const commits = Array.from({ length: 5000 }, (_, i) => ({
+    ...previous,
+    oid: (i + 1).toString(16).padStart(40, '0'),
+  }));
+  request.mockResolvedValueOnce({
+    kind: 'page',
+    cursor: snapshot.cursor,
+    offset: 1,
+    commits,
+    hasMore: false,
+  });
+  await useRepository.getState().loadMore();
+  const { rows, select } = useRepository.getState();
+  const last = commits.at(-1)!.oid;
+  const start = commits.at(-3)!.oid;
+  select(start);
+  select(last, 'range');
+  const state = useRepository.getState();
+  expect(state.rows).toBe(rows);
+  expect(state.selection).toEqual({
+    anchor: start,
+    focus: last,
+    selected: commits.slice(-3).map((row) => row.oid),
+  });
+  select('missing', 'range');
+  expect(useRepository.getState()).toBe(state);
+});
 test('a pending jump to unloaded history preserves a newer row selection', async () => {
   const snapshot = fixture();
   const second = { ...snapshot.commits[0]!, oid: 'b'.repeat(40), parents: ['c'.repeat(40)] };
