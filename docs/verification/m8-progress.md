@@ -2,6 +2,14 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## AppImage shutdown, slow storage and interrupted confirmation
+
+The packaged Linux x64 regression delayed the final rename by 22 seconds and requested quit again while it was pending. The previous build reopened 0.1.0 after accepting 0.2.0. The fixed FUSE build started 0.2.0 and confirmed its digest and sequence. A beta extract-and-run build also completed the delayed upgrade. With the rename stalled indefinitely, the disposable build accelerated the ten-minute finalization deadline to four seconds. Its verified predecessor reopened and cleared staging. Separate tests killed the parent immediately before and after the rename. Both reopened the expected version.
+
+When the final directory sync failed after rename, the previous build reported an installation error and exited with no replacement running. The fixed build launched and confirmed the signed replacement. Native tests failed each of the two directory syncs during startup, verified the retained predecessor bytes and journal, and confirmed successful cleanup on retry. A failed beta startup also restored the exact predecessor. These filesystem-error tests use injected failures on a live Linux filesystem. [Shutdown and recovery decision](../decisions/0120-appimage-shutdown-and-confirmation.md)
+
+The full Linux native/unit suite passed 840 tests across 104 files with 14 skipped. Six desktop tests passed across update and shutdown flows, including a suspended Git utility during repeated quit. TypeScript, the production build and Go vet passed. The packaged runs used temporary signing keys and local HTTPS. Logs are under `/tmp/ok-m8-commit`.
+
 ## Reference parser and CI scale gates
 
 The reference parser now reads complete records from each decoded chunk. On the 50,000-distinct-ref Linux-history fixture, isolated decoding improved from 59.1 to 44.3 ms median. First paint moved from 915.9 to 904.7 ms median across three paired openings, with one slower paired result. CI also runs the graph benchmark against 50,000 shared-target and distinct-target refs built from synthetic history. All six local openings of those fixtures missed 500 ms. All 18 synthetic page appends passed 300 ms. The CI workflow passed actionlint locally. [Benchmark results](m8-reference-performance.md#reading-fixed-width-ref-records-in-batches) · [Reproduction instructions](../decisions/0119-reference-parser-and-scale-gates.md)
