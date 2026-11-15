@@ -1,4 +1,4 @@
-import { Welcome } from './welcome.js';
+import { Welcome, completeWelcomeGuide } from './welcome.js';
 import { Activity } from './activity.js';
 import { DiagnosticsControl } from './diagnostics.js';
 import { UpdatesControl } from './updates.js';
@@ -18,7 +18,7 @@ import { WorkingTreePanel } from './working-tree.js';
 import { History } from './history.js';
 import { NewReferences } from './references.js';
 import { GitProgress } from './git-progress.js';
-import { Clone } from './clone.js';
+import { CloneDialog } from './clone.js';
 import { Issues } from './issues.js';
 import { PullRequests } from './pull-requests.js';
 import { ProviderAccountsControl } from './providers.js';
@@ -59,6 +59,23 @@ function App() {
   } = useRepository();
   const busy = syncing ? undefined : active;
   const [init, setInit] = useState(false);
+  const repositoryOpen = !!snapshot;
+  useEffect(() => {
+    if (repositoryOpen) completeWelcomeGuide();
+  }, [repositoryOpen]);
+  const [clone, setClone] = useState(false);
+  const openClone = () => {
+    useRepository.setState({ error: undefined });
+    setClone(true);
+  };
+  const branchInput = useRef<HTMLInputElement>(null);
+  const initLauncher = useRef<HTMLElement | null>(null);
+  const beginInit = () => {
+    initLauncher.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setInit(true);
+    branchInput.current?.focus();
+  };
   const [branch, setBranch] = useState('main');
   const [terminal, setTerminal] = useState<TerminalSession>();
   const [terminalHidden, setTerminalHidden] = useState(false);
@@ -83,7 +100,9 @@ function App() {
           <DiagnosticsControl />
           <UpdatesControl />
           <AvatarSettings />
-          <Clone />
+          <CommandButton command="repository.clone" disabled={!!busy} onClick={openClone}>
+            Clone
+          </CommandButton>
           <ProviderAccountsControl />
           <PullRequests />
           <Issues />
@@ -117,7 +136,11 @@ function App() {
           <CommandButton command="repository.open" onClick={open} disabled={!!busy}>
             Open repository
           </CommandButton>
-          <CommandButton command="repository.init" onClick={() => setInit(!init)} disabled={!!busy}>
+          <CommandButton
+            command="repository.init"
+            onClick={() => (init ? setInit(false) : beginInit())}
+            disabled={!!busy}
+          >
             Initialize
           </CommandButton>
           {snapshot && (
@@ -138,6 +161,7 @@ function App() {
           {(busy || paging || searching) && <button onClick={() => void cancel()}>Cancel</button>}
         </div>
       </header>
+      {clone && <CloneDialog close={() => setClone(false)} />}
       <GitProgress />
       <Authentication />
       <GitEditors />
@@ -154,6 +178,8 @@ function App() {
           <label>
             Initial branch{' '}
             <input
+              ref={branchInput}
+              autoFocus
               value={branch}
               onChange={(event) => setBranch(event.target.value)}
               required
@@ -161,6 +187,15 @@ function App() {
             />
           </label>
           <button disabled={!!busy}>Choose folder and initialize</button>
+          <button
+            type="button"
+            onClick={() => {
+              setInit(false);
+              initLauncher.current?.focus();
+            }}
+          >
+            Cancel initialization
+          </button>
         </form>
       )}
       {error && (
@@ -243,7 +278,14 @@ function App() {
           </footer>
         </>
       ) : (
-        <Welcome open={open} busy={!!busy} />
+        <Welcome
+          actions={{
+            open,
+            clone: openClone,
+            init: beginInit,
+          }}
+          busy={!!busy}
+        />
       )}
       {busy && (
         <div className="activity" role="status">

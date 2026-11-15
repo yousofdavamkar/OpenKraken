@@ -1,9 +1,8 @@
-import { CommandButton } from './commands.js';
 import { useEffect, useRef, useState } from 'react';
 import { ProviderRepositoryPicker } from './provider-repositories.js';
 import { GitProgress } from './git-progress.js';
 import { useRepository } from './store.js';
-function CloneDialog({ close }: { close: () => void }) {
+export function CloneDialog({ close }: { close: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const { run, cancel, error } = useRepository();
   const [url, setUrl] = useState('');
@@ -183,24 +182,5 @@ function CloneDialog({ close }: { close: () => void }) {
         </div>
       </form>
     </dialog>
-  );
-}
-export function Clone() {
-  const { busy, syncing } = useRepository();
-  const [opened, setOpened] = useState(false);
-  return (
-    <>
-      <CommandButton
-        command="repository.clone"
-        disabled={!!busy && !syncing}
-        onClick={() => {
-          useRepository.setState({ error: undefined });
-          setOpened(true);
-        }}
-      >
-        Clone
-      </CommandButton>
-      {opened && <CloneDialog close={() => setOpened(false)} />}
-    </>
   );
 }
