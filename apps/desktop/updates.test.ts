@@ -1,6 +1,7 @@
 import { expect, test, vi } from 'vitest';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Updates } from './src/updates.js';
@@ -31,6 +32,154 @@ const release = (sequence = 7, version = '0.2.0') => ({
     },
   ],
 });
+
+test.each([
+  ['linux', 'deb'],
+  ['linux', 'rpm'],
+  ['darwin', 'dmg'],
+  ['darwin', 'zip'],
+  ['win32', 'msi'],
+  ['linux', 'AppImage'],
+])('exports the signed %s %s installer to a chosen file', async (platform, format) => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-export-'));
+  const metadata = release();
+  const name = 'OpenKraken-0.2.0.' + format;
+  Object.assign(metadata.artifacts[0]!, { platform, format, name });
+  const updater = new Updates(
+    join(root, 'updates'),
+    configuration,
+    { ...runtime, platform },
+    async (url) => new Response(String(url) === configuration.feed ? signed(metadata) : 'fixture'),
+  );
+  try {
+    await updater.check();
+    const verified = await updater.download(format);
+    expect(verified.saveId).toBeTruthy();
+    const path = join(root, name);
+    await writeFile(path, 'old file');
+    const choose = vi.fn(async () => path);
+    await updater.save('stale', choose);
+    expect(choose).not.toHaveBeenCalled();
+    expect((await updater.save(verified.saveId!, async () => undefined)).phase).toBe('verified');
+    expect((await updater.save(verified.saveId!, choose)).phase).toBe('saved');
+    expect(choose).toHaveBeenCalledWith(name);
+    expect(await readFile(path, 'utf8')).toBe('fixture');
+  } finally {
+    await updater.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test.each([
+  'changed bytes',
+  'expired release',
+  'changed trust',
+  'invalid destination',
+  'replaced selection',
+])('preserves the destination after %s during installer export', async (scenario) => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-export-failure-'));
+  const cache = join(root, 'updates');
+  const destination = join(root, 'OpenKraken.AppImage');
+  let clock = now;
+  const updater = new Updates(
+    cache,
+    configuration,
+    runtime,
+    async (url) => new Response(String(url) === configuration.feed ? signed(release()) : 'fixture'),
+    () => clock,
+  );
+  try {
+    await writeFile(destination, 'keep');
+    await updater.check();
+    const { saveId } = await updater.download('AppImage');
+    expect(saveId).toBeTruthy();
+    const result = await updater.save(saveId!, async () => {
+      if (scenario === 'changed bytes') await writeFile(join(cache, 'artifact.ready'), 'altered');
+      if (scenario === 'expired release') clock = release().expiresAt + 1;
+      if (scenario === 'changed trust') await writeFile(join(cache, 'trusted-release.json'), '{}');
+      if (scenario === 'replaced selection') {
+        const secondPicker = vi.fn(async () => destination);
+        await updater.save(saveId!, secondPicker);
+        expect(secondPicker).not.toHaveBeenCalled();
+        await updater.check();
+        await updater.download('AppImage');
+      }
+      if (scenario === 'invalid destination') return join(cache, 'installer.AppImage');
+      return destination;
+    });
+    expect(await readFile(destination, 'utf8')).toBe('keep');
+    expect((await readdir(root)).sort()).toEqual(['OpenKraken.AppImage', 'updates']);
+    switch (scenario) {
+      case 'changed bytes':
+        expect(result.error).toBe('integrity');
+        break;
+      case 'changed trust':
+        expect(result.error).toBe('storage');
+        break;
+      case 'expired release':
+        expect(result.error).toBe('invalid-release');
+        break;
+      case 'replaced selection':
+        expect(result.phase).toBe('verified');
+        expect(result.saveId).not.toBe(saveId);
+        break;
+      case 'invalid destination':
+        expect(result).toMatchObject({ phase: 'verified', error: 'save', saveId });
+        expect((await updater.save(saveId!, async () => destination + '.txt')).error).toBe('save');
+        expect((await updater.save(saveId!, async () => destination)).phase).toBe('saved');
+        expect(await readFile(destination, 'utf8')).toBe('fixture');
+        break;
+    }
+  } finally {
+    await updater.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test.each(['cancel', 'destination changed', 'release expired'])(
+  'checks for %s before publishing the staged installer',
+  async (scenario) => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-export-publish-'));
+    const destination = join(root, 'Installer.AppImage');
+    const cache = join(root, 'updates');
+    // The clock is consulted when the signed release is revalidated before publication.
+    const updater = new Updates(
+      cache,
+      configuration,
+      runtime,
+      async (url) =>
+        new Response(String(url) === configuration.feed ? signed(release()) : 'fixture'),
+      () => {
+        if (readdirSync(root).some((entry) => entry.startsWith('.openkraken-'))) {
+          if (scenario === 'cancel') updater.cancel();
+          if (scenario === 'destination changed')
+            writeFileSync(destination, 'new external contents');
+          if (scenario === 'release expired') return release().expiresAt;
+        }
+        return now;
+      },
+    );
+    try {
+      await writeFile(destination, 'existing');
+      await updater.check();
+      const { saveId } = await updater.download('AppImage');
+      const result = await updater.save(saveId!, async () => destination);
+      const expected = scenario === 'destination changed' ? 'new external contents' : 'existing';
+      expect(await readFile(destination, 'utf8')).toBe(expected);
+      expect((await readdir(root)).sort()).toEqual(['Installer.AppImage', 'updates']);
+      if (scenario === 'release expired') expect(result.error).toBe('invalid-release');
+      else
+        expect(result).toMatchObject({
+          phase: 'verified',
+          saveId,
+          error: scenario === 'cancel' ? 'cancelled' : 'save',
+        });
+    } finally {
+      await updater.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test('a native restoration notice survives restart until explicitly dismissed', async () => {
   const root = await mkdtemp(join(tmpdir(), 'openkraken-update-restored-notice-'));
@@ -132,8 +281,9 @@ test('background checks preserve verified downloads and changed consent stops au
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
   vi.setSystemTime(now);
   const directory = join(root, 'updates');
+  const envelope = signed({ ...release(), expiresAt: now + 2 * 86_400_000 });
   const send = vi.fn<typeof fetch>(
-    async (url) => new Response(String(url).endsWith('.json') ? signed(release()) : 'fixture'),
+    async (url) => new Response(String(url).endsWith('.json') ? envelope : 'fixture'),
   );
   const updater = new Updates(directory, configuration, runtime, send);
   try {
@@ -148,12 +298,17 @@ test('background checks preserve verified downloads and changed consent stops au
     expect(send).toHaveBeenCalledTimes(2);
     expect((await updater.read()).phase).toBe('verified');
     expect(await readFile(join(directory, 'artifact.ready'), 'utf8')).toBe('fixture');
+    const { saveId } = await updater.read();
+    await updater.save(saveId!, async () => join(root, 'Installer.AppImage'));
+    await vi.advanceTimersByTimeAsync(36_000_000);
+    await expect.poll(async () => (await updater.read()).phase).toBe('available');
+    expect(send).toHaveBeenCalledTimes(3);
     await writeFile(join(directory, 'automatic-checks.json'), '{}', { mode: 0o600 });
     await vi.advanceTimersByTimeAsync(36_000_000);
     await expect
       .poll(async () => (await updater.read()).automatic)
       .toMatchObject({ enabled: false, warning: 'storage' });
-    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledTimes(3);
     expect((await updater.check()).phase).toBe('available');
     expect(await readFile(join(directory, 'automatic-checks.json'), 'utf8')).toBe('{}');
   } finally {

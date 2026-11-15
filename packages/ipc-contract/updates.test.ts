@@ -8,6 +8,7 @@ test('updates stay in main and renderer requests cannot choose trust or download
     'updatesCancel',
     'updatesDownload',
     'updatesStarted',
+    'updatesSave',
     'updatesInstall',
     'updatesAutomatic',
     'updatesDismissRecovery',
@@ -16,6 +17,7 @@ test('updates stay in main and renderer requests cannot choose trust or download
       id: crypto.randomUUID(),
       method,
       ...(method === 'updatesDownload' ? { format: 'AppImage' } : {}),
+      ...(method === 'updatesSave' ? { saveId: crypto.randomUUID() } : {}),
       ...(method === 'updatesInstall' ? { installId: crypto.randomUUID() } : {}),
       ...(method === 'updatesAutomatic' ? { enabled: true, revision: null } : {}),
     };

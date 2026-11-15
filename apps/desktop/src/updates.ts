@@ -1,7 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
-import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  realpath,
+  rename,
+  rmdir,
+  unlink,
+  type FileHandle,
+} from 'node:fs/promises';
+import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
 import { gt, valid } from 'semver';
 import { z } from 'zod';
 import type { UpdateState } from '@openkraken/ipc-contract';
@@ -12,6 +22,7 @@ import {
   updateEnvelopeLimit,
   validateUpdateRelease,
   verifyUpdateRelease,
+  type UpdateArtifact,
   type UpdateConfiguration,
   type UpdateRelease,
 } from './update-protocol.js';
@@ -39,6 +50,84 @@ const automaticSchema = z.strictObject({
   nextCheckAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
 });
 
+/** Keep the existing destination intact until the complete signed file is ready. */
+async function exportInstaller(
+  input: FileHandle,
+  artifact: UpdateArtifact,
+  path: string,
+  cacheDirectory: string,
+  signal: AbortSignal,
+  validate: () => Promise<void>,
+) {
+  const parent = await realpath(dirname(path));
+  const inside = relative(await realpath(cacheDirectory), parent);
+  if (!isAbsolute(inside) && inside !== '..' && !inside.startsWith('..' + sep))
+    throw new UpdateFailure('save');
+  const destination = join(parent, basename(path));
+  const current = () =>
+    lstat(destination).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+      return undefined;
+    });
+  const before = await current();
+  if (before && !before.isFile()) throw new UpdateFailure('save');
+  const staging = await mkdtemp(join(parent, '.openkraken-'));
+  const temporary = join(staging, 'installer.part');
+  let staged: Stats | undefined;
+  const matchesStagedFile = (info: Stats | undefined) =>
+    !!info && !!staged && info.isFile() && info.dev === staged.dev && info.ino === staged.ino;
+  try {
+    const output = await open(temporary, 'wx', 0o600);
+    try {
+      staged = await output.stat();
+      const hash = createHash('sha256');
+      let size = 0;
+      for await (const chunk of input.createReadStream({ autoClose: false })) {
+        signal.throwIfAborted();
+        size += chunk.length;
+        if (size > artifact.size) throw new UpdateFailure('integrity');
+        hash.update(chunk);
+        await output.writeFile(chunk);
+      }
+      if (size !== artifact.size || hash.digest('hex') !== artifact.sha256)
+        throw new UpdateFailure('integrity');
+      await output.sync();
+      staged = await output.stat();
+    } finally {
+      await output.close();
+    }
+    await validate();
+    const copy = await lstat(temporary);
+    if (
+      !matchesStagedFile(copy) ||
+      copy.nlink !== 1 ||
+      copy.size !== artifact.size ||
+      copy.ctimeMs !== staged.ctimeMs
+    )
+      throw new UpdateFailure('save');
+    const latest = await current();
+    if (
+      before?.dev !== latest?.dev ||
+      before?.ino !== latest?.ino ||
+      before?.size !== latest?.size ||
+      before?.mtimeMs !== latest?.mtimeMs ||
+      before?.ctimeMs !== latest?.ctimeMs
+    )
+      throw new UpdateFailure('save');
+    signal.throwIfAborted();
+    await rename(temporary, destination);
+    staged = undefined;
+  } finally {
+    try {
+      if (staged && matchesStagedFile(await lstat(temporary).catch(() => undefined)))
+        await unlink(temporary);
+    } finally {
+      // A published installer stays usable if its empty staging directory cannot be removed.
+      await rmdir(staging).catch(() => {});
+    }
+  }
+}
+
 /** Main-owned updater. No renderer-provided URL, path, key or executable is accepted. */
 export class Updates {
   private config: UpdateConfiguration | null;
@@ -62,6 +151,7 @@ export class Updates {
   private automaticTimer: ReturnType<typeof setTimeout> | null = null;
   private schedulingReady = false;
   private checkingAutomatically = false;
+  private choosingDestination = false;
   private recoveryNotice: string | null = null;
   private abandonment: Promise<UpdateState> | null = null;
   constructor(
@@ -242,7 +332,7 @@ export class Updates {
         this.automatic?.enabled &&
         !this.automaticFailure &&
         !this.work &&
-        ['idle', 'current', 'unsupported', 'available', 'error'].includes(this.state.phase)
+        ['idle', 'current', 'unsupported', 'available', 'saved', 'error'].includes(this.state.phase)
       )
         await this.check(true);
     } catch {
@@ -382,7 +472,7 @@ export class Updates {
     });
   }
   private start(
-    phase: 'checking' | 'downloading' | 'preparing',
+    phase: 'checking' | 'downloading' | 'preparing' | 'saving',
     timeout: number,
     action: (signal: AbortSignal) => Promise<void>,
   ): Promise<UpdateState> {
@@ -402,11 +492,14 @@ export class Updates {
         await action(controller.signal);
       } catch (error) {
         const failure = controller.signal.aborted ? controller.signal.reason : error;
-        this.state = {
-          ...this.empty('error'),
-          error: failure instanceof UpdateFailure ? failure.code : 'network',
-        };
-        this.release = null;
+        const code = failure instanceof UpdateFailure ? failure.code : 'network';
+        if (phase === 'saving' && (code === 'save' || code === 'cancelled' || code === 'timeout')) {
+          this.state.phase = 'verified';
+          this.state.error = code;
+        } else {
+          this.state = { ...this.empty('error'), error: code };
+          this.release = null;
+        }
       } finally {
         clearTimeout(timer);
         // Also release an unread body if local validation/storage failed after headers.
@@ -563,10 +656,90 @@ export class Updates {
         this.state.phase = 'verified';
         this.state.installId =
           artifact.format === 'AppImage' && this.runtime.appImage ? randomUUID() : null;
+        if (!this.state.installId) this.state.saveId = randomUUID();
       } finally {
         if (created) await this.removeOwned('artifact.part', 2 * 1024 ** 3);
       }
     });
+  }
+  async save(saveId: string, choose: (signedName: string) => Promise<string | undefined>) {
+    if (
+      this.closed ||
+      this.work ||
+      this.choosingDestination ||
+      this.state.phase !== 'verified' ||
+      this.state.saveId !== saveId ||
+      !this.release
+    )
+      return this.read();
+    const release = this.release;
+    const artifact = release.artifacts.find(
+      (item) =>
+        item.format === this.state.selected &&
+        item.platform === this.runtime.platform &&
+        item.arch === this.runtime.arch,
+    )!;
+    this.choosingDestination = true;
+    try {
+      const path = await choose(artifact.name);
+      if (
+        !path ||
+        this.closed ||
+        this.work ||
+        this.state.phase !== 'verified' ||
+        this.state.saveId !== saveId
+      )
+        return this.read();
+      return await this.start('saving', 10 * 60_000, async (signal) => {
+        const validate = () => {
+          try {
+            validateUpdateRelease(release, this.now());
+          } catch {
+            throw new UpdateFailure('invalid-release');
+          }
+        };
+        validate();
+        if (
+          !isAbsolute(path) ||
+          extname(path).toLowerCase() !== '.' + artifact.format.toLowerCase()
+        )
+          throw new UpdateFailure('save');
+        const source = this.file('artifact.ready');
+        const original = await lstat(source).catch(() => {
+          throw new UpdateFailure('storage');
+        });
+        if (!this.safeFile(original, artifact.size) || original.size !== artifact.size)
+          throw new UpdateFailure('integrity');
+        const input = await open(
+          source,
+          constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        ).catch(() => {
+          throw new UpdateFailure('storage');
+        });
+        try {
+          const info = await input.stat();
+          if (
+            !this.safeFile(info, artifact.size) ||
+            info.dev !== original.dev ||
+            info.ino !== original.ino
+          )
+            throw new UpdateFailure('integrity');
+          await exportInstaller(input, artifact, path, this.directory, signal, async () => {
+            await this.checkStorage();
+            validate();
+          });
+          this.state.phase = 'saved';
+          delete this.state.saveId;
+        } catch (error) {
+          if (error instanceof UpdateFailure) throw error;
+          throw new UpdateFailure('save');
+        } finally {
+          await input.close();
+        }
+      });
+    } finally {
+      this.choosingDestination = false;
+    }
   }
   async started() {
     if (!this.startup) {

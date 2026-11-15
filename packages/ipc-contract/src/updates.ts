@@ -12,6 +12,8 @@ export const updatesStateSchema = z.strictObject({
     'available',
     'downloading',
     'verified',
+    'saving',
+    'saved',
     'preparing',
     'restart-ready',
     'installed',
@@ -36,6 +38,7 @@ export const updatesStateSchema = z.strictObject({
     .int()
     .min(0)
     .max(2 * 1024 ** 3),
+  saveId: z.uuid().optional(),
   installId: z.uuid().nullable().default(null),
   recovery: z.literal('restored').nullable().default(null),
   automatic: z
@@ -57,6 +60,7 @@ export const updatesStateSchema = z.strictObject({
       'cancelled',
       'timeout',
       'installation',
+      'save',
     ])
     .nullable(),
 });
@@ -70,6 +74,7 @@ export const updatesRequests = [
     revision: z.uuid().nullable(),
   }),
   z.strictObject({ id: z.uuid(), method: z.literal('updatesStarted') }),
+  z.strictObject({ id: z.uuid(), method: z.literal('updatesSave'), saveId: z.uuid() }),
   z.strictObject({ id: z.uuid(), method: z.literal('updatesInstall'), installId: z.uuid() }),
   z.strictObject({ id: z.uuid(), method: z.literal('updatesRead') }),
   z.strictObject({ id: z.uuid(), method: z.literal('updatesCheck') }),
