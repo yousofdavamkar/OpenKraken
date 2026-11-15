@@ -25,7 +25,12 @@ assert.ok(
 const version = `${parts[0]}.${parts[1] + 1}.0`;
 if (target === 'msi') msiVersion(version);
 await writeFile(join(fixture, 'package.json'), JSON.stringify({ ...source, version }));
-await cp(join(root, 'apps/desktop/dist'), join(fixture, 'apps/desktop/dist'), { recursive: true });
+// Simulate leftovers from interrupted developer builds and Electron tests.
+for (const directory of ['', 'helpers', 'shell-integration', 'node_modules']) {
+  const path = join(fixture, 'apps/desktop/dist', directory);
+  await mkdir(path, { recursive: true });
+  await writeFile(join(path, 'stale-release-fixture.cjs'), '// fixture only');
+}
 await cp(join(root, 'build-resources'), join(fixture, 'build-resources'), { recursive: true });
 await symlink(
   join(root, 'node_modules'),
@@ -48,13 +53,23 @@ async function run(script, args = []) {
 try {
   await run('package.mjs');
   const require = createRequire(import.meta.url);
-  const { extractFile } = createRequire(require.resolve('@electron/packager'))('@electron/asar');
-  const bundled = JSON.parse(
-    extractFile(
-      join(fixture, `release/OpenKraken-${process.platform}-${process.arch}/resources/app.asar`),
-      'package.json',
-    ).toString('utf8'),
+  const { extractFile, listPackage } = createRequire(require.resolve('@electron/packager'))(
+    '@electron/asar',
   );
+  const archive = join(
+    fixture,
+    `release/OpenKraken-${process.platform}-${process.arch}/resources/app.asar`,
+  );
+  const entries = listPackage(archive).map((path) => path.replaceAll('\\', '/'));
+  assert.ok(
+    !entries.some((path) => path.endsWith('/stale-release-fixture.cjs')),
+    'Stale development output in installer payload',
+  );
+  assert.ok(
+    !entries.includes('/dist/tsconfig.tsbuildinfo') && !entries.includes('/dist/types'),
+    'Compiler output in installer payload',
+  );
+  const bundled = JSON.parse(extractFile(archive, 'package.json').toString('utf8'));
   assert.equal(
     bundled.version,
     version,

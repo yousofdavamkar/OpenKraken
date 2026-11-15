@@ -25,9 +25,8 @@ export async function locateGo() {
   }
   return go;
 }
-export async function buildAskpass() {
+export async function buildAskpass(output = resolve('apps/desktop/dist/helpers')) {
   const go = await locateGo();
-  const output = resolve('apps/desktop/dist/helpers');
   await mkdir(output, { recursive: true });
   await exec(
     go,

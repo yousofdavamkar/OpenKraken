@@ -2,13 +2,17 @@ import { packager } from '@electron/packager';
 import { flipFuses, FuseVersion } from '@electron/fuses';
 import { packageFuses, payloadManifest, verifyFuses } from './package-security.mjs';
 import { buildLinuxNative } from './linux-native.mjs';
-import { cp, mkdir, readFile, writeFile, rm, lstat, readdir, chmod } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm, lstat, readdir, chmod } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
 const staging = resolve('release/staging');
 const { version } = JSON.parse(await readFile('package.json', 'utf8'));
 await rm(staging, { recursive: true, force: true });
 await mkdir(staging, { recursive: true });
-await cp('apps/desktop/dist', join(staging, 'dist'), { recursive: true });
+execFileSync(process.execPath, [join(import.meta.dirname, 'build.mjs'), join(staging, 'dist')], {
+  cwd: resolve(import.meta.dirname, '..'),
+  stdio: 'inherit',
+});
 await buildLinuxNative(staging);
 await writeFile(
   join(staging, 'package.json'),

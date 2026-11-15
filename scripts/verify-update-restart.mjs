@@ -128,10 +128,12 @@ try {
     ]);
     return { receipt: JSON.parse(stdout), envelope: await readFile(manifest, 'utf8') };
   }
+  const runtime = join(root, 'runtime');
+  execFileSync(process.execPath, [resolve('scripts/build.mjs'), runtime], { stdio: 'inherit' });
   for (const version of [initialVersion, replacementVersion]) {
     const staging = join(root, version, 'staging');
     await mkdir(staging, { recursive: true });
-    await cp('apps/desktop/dist', join(staging, 'dist'), { recursive: true });
+    await cp(runtime, join(staging, 'dist'), { recursive: true });
     // Test trust and dialog responses are compiled into disposable fixture apps.
     // Production has no TLS bypass, test key or runtime test switch.
     const banner = `
