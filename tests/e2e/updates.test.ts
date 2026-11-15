@@ -1,5 +1,6 @@
 import { _electron as electron, expect, test } from '@playwright/test';
 import { build } from 'esbuild';
+import type { UpdateConfiguration } from '../../apps/desktop/src/update-protocol.js';
 import { execFileSync } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -8,6 +9,22 @@ import { createServer } from 'node:https';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+
+async function buildFixture(main: string, config: UpdateConfiguration) {
+  await build({
+    entryPoints: ['apps/desktop/src/main.ts'],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    external: ['electron', '@parcel/watcher', 'node-pty'],
+    target: 'node24',
+    outfile: main,
+    define: {
+      __OPENKRAKEN_SENTRY_DSN__: 'null',
+      __OPENKRAKEN_UPDATE_CONFIG__: JSON.stringify(config),
+    },
+  });
+}
 
 test('the default build stays disconnected and offers no update download', async () => {
   const profile = await mkdtemp(join(tmpdir(), 'openkraken-updates-disabled-'));
@@ -91,7 +108,7 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
   test.setTimeout(manifestPath ? 180000 : 90000);
   const { format, filename, version, size, sha256, path } = await updatePackage(manifestPath);
   const channel = version.includes('-beta.') ? 'beta' : 'stable';
-  const feedPath = `/${channel}/release.json`;
+  let feedPath = `/${channel}/release.json`;
   const root = await mkdtemp(join(tmpdir(), 'openkraken-update-e2e-'));
   const main = resolve(`apps/desktop/dist/update-test-${randomUUID()}.cjs`);
   let server: ReturnType<typeof createServer> | undefined;
@@ -101,6 +118,8 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     const key = join(root, 'key.pem');
     execFileSync(process.execPath, [resolve('scripts/create-loopback-certificate.mjs'), root]);
     const keys = generateKeyPairSync('ed25519');
+    let signingKey = keys.privateKey;
+    let publishedEnvelope: string | undefined;
     let sequence = 6;
     // A trusted signer can publish the wrong digest. Check it against the downloaded bytes.
     const wrongDigest = (sha256.startsWith('0') ? '1' : '0') + sha256.slice(1);
@@ -114,6 +133,10 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
       (request, response) => {
         requests.push(request.url!);
         if (request.url === feedPath) {
+          if (publishedEnvelope) {
+            response.end(publishedEnvelope);
+            return;
+          }
           const payload = Buffer.from(
             JSON.stringify({
               schemaVersion: 1,
@@ -138,7 +161,7 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
           const signature = sign(
             null,
             Buffer.concat([Buffer.from('OPENKRAKEN-UPDATE-V1\n'), payload]),
-            keys.privateKey,
+            signingKey,
           );
           if (tamper) signature[0] = signature[0]! ^ 1;
           response.end(
@@ -147,7 +170,7 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
               signature: signature.toString('base64'),
             }),
           );
-        } else if (request.url === `/${channel}/${filename}`) {
+        } else if (request.url === feedPath.slice(0, feedPath.lastIndexOf('/') + 1) + filename) {
           if (slow) response.write('fix');
           else if (path)
             void pipeline(createReadStream(path), response).catch(() => response.destroy());
@@ -161,24 +184,12 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Missing TLS fixture');
-    const config = {
+    const config: UpdateConfiguration = {
       channel,
       feed: `https://127.0.0.1:${address.port}${feedPath}`,
       publicKey: keys.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
     };
-    await build({
-      entryPoints: ['apps/desktop/src/main.ts'],
-      bundle: true,
-      platform: 'node',
-      format: 'cjs',
-      external: ['electron', '@parcel/watcher', 'node-pty'],
-      target: 'node24',
-      outfile: main,
-      define: {
-        __OPENKRAKEN_SENTRY_DSN__: 'null',
-        __OPENKRAKEN_UPDATE_CONFIG__: JSON.stringify(config),
-      },
-    });
+    await buildFixture(main, config);
     await mkdir(join(root, 'app'));
     await writeFile(
       join(root, 'app/package.json'),
@@ -326,6 +337,11 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     ).not.toBeChecked();
     await dialog.getByRole('button', { name: 'Check for updates' }).click();
     await expect(dialog.getByRole('status')).toContainText('older or conflicting release metadata');
+    const previousConsent = dialog.getByRole('checkbox', {
+      name: 'Automatically check every 10 hours',
+    });
+    await previousConsent.check();
+    await expect(previousConsent).toBeEnabled();
     sequence = 8;
     slow = true;
     await dialog.getByRole('button', { name: 'Check for updates' }).click();
@@ -341,6 +357,80 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     await expect(stat(join(profile, 'updates/artifact.part'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
+
+    // A newly installed build owns the migration. The renderer cannot supply trust roots.
+    const previous = { feed: config.feed, publicKey: config.publicKey };
+    const nextKeys = generateKeyPairSync('ed25519');
+    feedPath = `/${channel}/next/release.json`;
+    const nextConfig = {
+      channel: config.channel,
+      feed: new URL(feedPath, config.feed).href,
+      publicKey: nextKeys.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
+    };
+    await buildFixture(main, { ...nextConfig, migrateFrom: previous });
+    const countBeforeMigration = requests.length;
+    app = await electron.launch({ args, env });
+    page = await app.firstWindow();
+    await page.getByRole('button', { name: 'Updates', exact: true }).click();
+    dialog = page.getByRole('dialog', { name: 'App updates' });
+    const newConsent = dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' });
+    await expect(newConsent).not.toBeChecked();
+    expect(requests.length).toBe(countBeforeMigration);
+    const check = dialog.getByRole('button', { name: 'Check for updates' });
+    await check.click();
+    await expect(dialog.getByRole('status')).toContainText('signature or validity period');
+    signingKey = nextKeys.privateKey;
+    sequence = 7;
+    await check.click();
+    await expect(dialog.getByRole('status')).toContainText('older or conflicting release metadata');
+    sequence = 9;
+    const descriptor = join(root, 'release-input.json');
+    const signingPem = join(root, 'signing.pem');
+    const output = join(root, 'release.json');
+    await writeFile(
+      descriptor,
+      JSON.stringify({
+        schemaVersion: 1,
+        product: 'org.openkraken.desktop',
+        channel,
+        version,
+        sequence,
+        issuedAt,
+        expiresAt,
+        artifacts: [{ platform: process.platform, arch: process.arch, format, path: exported }],
+      }),
+    );
+    await writeFile(signingPem, nextKeys.privateKey.export({ type: 'pkcs8', format: 'pem' }), {
+      mode: 0o600,
+    });
+    execFileSync(process.execPath, [
+      resolve('scripts/sign-update.mjs'),
+      descriptor,
+      signingPem,
+      output,
+    ]);
+    publishedEnvelope = await readFile(output, 'utf8');
+    await check.click();
+    await expect(dialog.getByRole('status')).toHaveText(`Version ${version} is available.`);
+    expect(requests.slice(countBeforeMigration)).toEqual([feedPath, feedPath, feedPath]);
+    slow = false;
+    await dialog.getByRole('button', { name: `Download ${format}` }).click();
+    await expect(dialog.getByRole('status')).toContainText('download verified', { timeout: 60000 });
+    expect(await fileDigest(join(profile, 'updates/artifact.ready'))).toBe(sha256);
+    expect(requests.at(-1)).toBe(`/${channel}/next/${filename}`);
+    await newConsent.check();
+    await expect(newConsent).toBeEnabled();
+    await app.close();
+    await buildFixture(main, nextConfig);
+    app = await electron.launch({ args, env });
+    page = await app.firstWindow();
+    await page.getByRole('button', { name: 'Updates', exact: true }).click();
+    dialog = page.getByRole('dialog', { name: 'App updates' });
+    await expect(
+      dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' }),
+    ).toBeChecked();
+    await dialog.getByRole('button', { name: 'Check for updates' }).click();
+    await expect(dialog.getByRole('status')).toHaveText(`Version ${version} is available.`);
   } finally {
     await app?.close();
     server?.closeAllConnections();
