@@ -3,11 +3,18 @@ import { GraphEngine } from '../graph/src/engine.js';
 import type { GraphRequest } from '../graph/src/engine.js';
 import { encodeHistoryPage } from '@openkraken/ipc-contract';
 import type { Result, Snapshot } from '@openkraken/ipc-contract';
+const workers = vi.hoisted(() => ({ start: vi.fn(), close: vi.fn(), layout: vi.fn() }));
 vi.mock('./src/graph-client.js', () => ({
   GraphClient: class {
     private engine = new GraphEngine(true);
-    close() {}
+    constructor() {
+      workers.start(this);
+    }
+    close() {
+      workers.close(this);
+    }
     async request(request: GraphRequest) {
+      if (request.method === 'reset') workers.layout();
       return this.engine.handle({ ...request, id: 1 });
     }
   },
@@ -74,6 +81,37 @@ async function open(snapshot: Snapshot) {
   request.mockResolvedValueOnce({ kind: 'snapshot', snapshot });
   await useRepository.getState().run({ id: crypto.randomUUID(), method: 'open' });
 }
+test.each(['snapshot', 'layout'] as const)(
+  'failed %s during a switch keeps the displayed graph searchable',
+  async (failure) => {
+    const first = fixture();
+    await open(first);
+    workers.start.mockClear();
+    workers.close.mockClear();
+    const read = deferred();
+    request.mockReturnValueOnce(read.promise);
+    const switching = useRepository.getState().run({ id: crypto.randomUUID(), method: 'open' });
+    try {
+      expect(workers.start).toHaveBeenCalledTimes(1);
+      expect(workers.close).not.toHaveBeenCalled();
+    } finally {
+      if (failure === 'layout') {
+        workers.layout.mockImplementationOnce(() => {
+          throw new Error('Layout failed');
+        });
+        read.resolve({ kind: 'snapshot', snapshot: fixture() });
+      } else {
+        read.resolve({ kind: 'error', code: 'GIT_FAILED', message: 'Snapshot failed' });
+      }
+      await switching;
+    }
+    expect(workers.close.mock.calls).toEqual(workers.start.mock.calls);
+    expect(useRepository.getState().snapshot?.cursor).toBe(first.cursor);
+    await useRepository.getState().search('First');
+    expect(useRepository.getState().matches).toEqual([first.commits[0]!.oid]);
+  },
+);
+
 test('appending keeps previous rows and selection intact', async () => {
   const snapshot = fixture();
   await open(snapshot);

@@ -187,6 +187,7 @@ export const useRepository = create<State>()(
       if (previousSearch) await window.openkraken.cancel(previousSearch);
       querySequence++;
       performance.mark('repository-open-start');
+      let candidate: GraphClient | undefined;
       try {
         if (
           request.method === 'refresh' &&
@@ -194,6 +195,8 @@ export const useRepository = create<State>()(
           get().snapshot?.repository.id === request.repoId
         )
           request = { ...request, view: get().snapshot!.view };
+        if (request.method !== 'refresh' || get().snapshot?.repository.id !== request.repoId)
+          candidate = new GraphClient();
         const result = expandGitServiceResult(
           JSON.parse(await window.openkraken.request(request, 'snapshot-json')),
         );
@@ -207,11 +210,8 @@ export const useRepository = create<State>()(
             sameRepository =
               request.method === 'refresh' &&
               previous.snapshot?.repository.id === result.snapshot.repository.id;
-          if (!sameRepository) {
-            client?.close();
-            client = new GraphClient();
-          }
-          const layout = await graph().request({
+          const target = sameRepository ? graph() : (candidate ??= new GraphClient());
+          const layout = await target.request({
             ...(sameRepository
               ? ({ method: 'refresh', baseGeneration: previous.snapshot!.cursor } as const)
               : ({ method: 'reset' } as const)),
@@ -221,6 +221,7 @@ export const useRepository = create<State>()(
             pinnedOid: result.snapshot.pinnedOid,
           });
           if (layout.kind !== 'layout') throw new Error('Invalid graph response');
+          if (get().busy !== request.id) return;
           performance.mark('repository-layout-response');
           querySequence++;
           const nextLayout = [
@@ -238,6 +239,11 @@ export const useRepository = create<State>()(
           );
           freeze(nextPassages, true);
           const query = sameRepository ? previous.query : '';
+          if (target === candidate) {
+            client?.close();
+            client = target;
+            candidate = undefined;
+          }
           set((s) => {
             s.snapshot = result.snapshot;
             // Invalidate an outdated review, but keep matching state usable while
@@ -288,6 +294,7 @@ export const useRepository = create<State>()(
           s.error = error instanceof Error ? error.message : String(error);
         });
       } finally {
+        candidate?.close();
         set((s) => {
           if (s.busy === request.id) s.busy = undefined;
           if (s.syncing === request.id) s.syncing = undefined;

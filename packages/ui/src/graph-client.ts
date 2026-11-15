@@ -8,6 +8,7 @@ type Input = GraphRequest extends infer R
 export class GraphClient {
   private worker = new GraphWorker();
   private sequence = 0;
+  private failure?: Error;
   private pending = new Map<
     number,
     {
@@ -26,9 +27,10 @@ export class GraphClient {
       else pending.resolve(event.data);
     };
     this.worker.onerror = (event) => {
+      this.failure = new Error(event.message || 'Graph worker failed');
       for (const p of this.pending.values()) {
         clearTimeout(p.timer);
-        p.reject(new Error(event.message || 'Graph worker failed'));
+        p.reject(this.failure);
       }
       this.pending.clear();
     };
@@ -42,6 +44,7 @@ export class GraphClient {
     this.pending.clear();
   }
   request(input: Input): Promise<GraphResponse> {
+    if (this.failure) return Promise.reject(this.failure);
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
