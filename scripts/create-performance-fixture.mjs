@@ -5,6 +5,27 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { pathToFileURL } from 'node:url';
 
+function performanceGitEnvironment() {
+  return {
+    ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))),
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+    GIT_TERMINAL_PROMPT: '0',
+  };
+}
+
+export function performanceGit(cwd, args, input) {
+  return execFileSync('git', args, {
+    cwd,
+    env: performanceGitEnvironment(),
+    stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+    input,
+    encoding: 'utf8',
+    timeout: 600000,
+    maxBuffer: 32 * 1024 * 1024,
+  }).trim();
+}
+
 // Synthetic scale, not a copy of Chromium's topology, paths or object distribution.
 function* importData(commits, files) {
   let chunk = 'blob\nmark :1\ndata 5\nbase\n\n';
@@ -61,21 +82,8 @@ export async function createPerformanceFixture(destination, options = {}) {
   await mkdir(root);
   const repository = join(root, 'repository');
   await mkdir(repository);
-  const env = {
-    ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))),
-    GIT_CONFIG_NOSYSTEM: '1',
-    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
-    GIT_TERMINAL_PROMPT: '0',
-  };
-  const git = (...args) =>
-    execFileSync('git', args, {
-      cwd: repository,
-      env,
-      encoding: 'utf8',
-      timeout: 600000,
-      maxBuffer: 32 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }).trim();
+  const env = performanceGitEnvironment();
+  const git = (...args) => performanceGit(repository, args);
   git('init', '--template=', '-b', 'main');
   git('config', 'core.autocrlf', 'false');
   git('config', 'gc.auto', '0');

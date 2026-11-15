@@ -41,6 +41,27 @@ jobs:
           OPENKRAKEN_STATUS_BENCH_FIXTURE="$RUNNER_TEMP/openkraken-scale/fixture.json" \
             xvfb-run -a pnpm exec playwright test tests/e2e/status-benchmark.test.ts --repeat-each=3 --reporter=list \
             --output=test-results/performance/status > test-results/performance/status.log 2>&1
+      - name: Generate and verify 50,000-reference fixtures
+        id: references
+        if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
+        run: |
+          for mode in distinct shared; do
+            node scripts/create-reference-performance-fixture.mjs "$RUNNER_TEMP/openkraken-scale/repository" \
+              "$RUNNER_TEMP/refs-$mode" "$mode" > "test-results/performance/refs-$mode-fixture.log" 2>&1
+            cp "$RUNNER_TEMP/refs-$mode/fixture.json" "test-results/performance/refs-$mode-fixture.json"
+          done
+      - name: 50,000 references with distinct targets, three fresh profiles
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.references.outcome == 'success' }}
+        run: |
+          OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/refs-distinct/repository.git" GIT_NO_LAZY_FETCH=1 \
+            xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --workers=1 --reporter=list \
+            --output=test-results/performance/refs-distinct > test-results/performance/refs-distinct.log 2>&1
+      - name: 50,000 references with shared targets, three fresh profiles
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.references.outcome == 'success' }}
+        run: |
+          OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/refs-shared/repository.git" GIT_NO_LAZY_FETCH=1 \
+            xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --workers=1 --reporter=list \
+            --output=test-results/performance/refs-shared > test-results/performance/refs-shared.log 2>&1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
