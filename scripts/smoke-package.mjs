@@ -323,9 +323,15 @@ try {
     await symlink(selected, shortcut, 'dir');
     await pickFolder('Open repository', shortcut);
     await expect(page.locator('.repo-heading p')).toHaveAttribute('title', selected);
-    await expect(
-      page.getByRole('grid').getByText('Selected checkout', { exact: true }),
-    ).toBeVisible();
+    const { stdout: selectedHead } = await promisify(execFile)('git', [
+      '-C',
+      selected,
+      'rev-parse',
+      'HEAD',
+    ]);
+    const selectedRow = page.getByRole('grid').locator(`[data-oid="${selectedHead.trim()}"]`);
+    await expect(selectedRow).toBeVisible();
+    await expect(selectedRow).toContainText('Selected checkout');
     console.log(
       'Native folder selection preserved the canonical path and history of the carriage-return checkout.',
     );
