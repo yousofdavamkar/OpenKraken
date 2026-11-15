@@ -1843,7 +1843,14 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
     .refine((request) => !request.credential || request.options.url === request.credential.url),
   ...workingRequests,
   ...historyRequests,
-  z.object({ id: requestId, method: z.literal('open'), path: repositoryPath }).strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('open'),
+      path: repositoryPath,
+      transferId: requestId.optional(),
+    })
+    .strict(),
   z
     .object({
       id: requestId,
@@ -2156,6 +2163,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
     retryAt: providerRetryAtSchema.optional(),
   }),
 ]);
+const compactRefThreshold = 10000;
 const compactRefsSchema = z.array(z.unknown()).transform((rows, ctx) => {
   let hasTarget = false;
   const refs: (string | Ref)[] = [];
@@ -2186,23 +2194,48 @@ const compactSnapshotResult = z.object({
   kind: z.literal('compactSnapshot'),
   snapshot: snapshotSchema.extend({ refs: compactRefsSchema }),
 });
+export const snapshotPartSchema = z.discriminatedUnion('snapshotPart', [
+  z
+    .object({
+      id: requestId,
+      transferId: requestId,
+      snapshotPart: z.literal('refs'),
+      refs: compactRefsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      transferId: requestId,
+      snapshotPart: z.literal('complete'),
+      refCount: z.number().int().min(compactRefThreshold),
+      snapshot: snapshotSchema.omit({ refs: true }).strict(),
+    })
+    .strict(),
+]);
 export const serviceResponseSchema = z.object({
   id: requestId,
   result: z.union([resultSchema, compactSnapshotResult]),
 });
 
-export function encodeGitServiceResult(result: Result) {
-  if (result.kind !== 'snapshot' || result.snapshot.refs.length < 10000) return result;
+export function encodeSnapshotRefs(source: Ref[]) {
+  if (source.length < compactRefThreshold) return;
   let previousTarget: string | undefined;
   let compactCount = 0;
-  const refs = result.snapshot.refs.map((ref) => {
+  const refs = source.map((ref) => {
     if (!canCompactRef(ref)) return ref;
     compactCount++;
     if (ref.target === previousTarget) return ref.name;
     previousTarget = ref.target;
     return ref.target + ':' + ref.name;
   });
-  if (compactCount * 2 < refs.length) return result;
+  if (compactCount * 2 >= refs.length) return refs;
+}
+
+export function encodeGitServiceResult(result: Result) {
+  if (result.kind !== 'snapshot') return result;
+  const refs = encodeSnapshotRefs(result.snapshot.refs);
+  if (!refs) return result;
   return { kind: 'compactSnapshot' as const, snapshot: { ...result.snapshot, refs } };
 }
 
