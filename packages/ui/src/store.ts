@@ -201,7 +201,7 @@ export const useRepository = create<State>()(
           client?.failed
         )
           candidate = new GraphClient();
-        const serialized = await window.openkraken.request(request, 'snapshot-json');
+        const serialized = await window.openkraken.request(request, 'snapshot-transfer');
         const receivedAt = performance.now();
         const decoded = JSON.parse(serialized);
         const parsedAt = performance.now();
