@@ -156,6 +156,56 @@ test('searching a hexadecimal branch name opens the commit with the matching obj
     await close();
   }
 });
+test('cancelling the folder picker keeps an in-flight append and the next native page usable', async () => {
+  const { app, page, close } = await launch('linear', 7200);
+  try {
+    await page.getByLabel('Refresh on focus', { exact: true }).uncheck();
+    await expect(page.getByText('Watching for changes', { exact: true })).toBeVisible();
+    const picker = await app.evaluateHandle(({ dialog }) => {
+      let cancel!: () => void;
+      const cancelled = new Promise<void>((resolve) => {
+        cancel = resolve;
+      });
+      dialog.showOpenDialog = async () => {
+        await cancelled;
+        return { canceled: true, filePaths: [] };
+      };
+      return { cancel };
+    });
+    await page.evaluate(() => {
+      const send = Worker.prototype.postMessage;
+      Worker.prototype.postMessage = new Proxy(send, {
+        apply(target, worker, args) {
+          if (args[0].method !== 'append') return Reflect.apply(target, worker, args);
+          Worker.prototype.postMessage = send;
+          window.addEventListener(
+            'test-release-append',
+            () => Reflect.apply(target, worker, args),
+            { once: true },
+          );
+          performance.mark('test-append-pending');
+        },
+      });
+    });
+    const more = page.getByRole('button', { name: 'Load more commits', exact: true });
+    await more.click();
+    await page.waitForFunction(() => performance.getEntriesByName('test-append-pending').length);
+    const open = page.getByRole('button', { name: 'Open repository', exact: true });
+    await open.click();
+    await expect(open).toBeDisabled();
+    await page.evaluate(() => window.dispatchEvent(new Event('test-release-append')));
+    await expect(page.getByTestId('commit-count')).toHaveText('7,000 commits · more available');
+    await picker.evaluate(({ cancel }) => cancel());
+    await expect(open).toBeEnabled();
+    await more.click();
+    await expect(page.getByTestId('commit-count')).toHaveText('7,200 commits');
+    await page.getByRole('grid').press('End');
+    await expect(page.getByRole('row', { selected: true })).toContainText('Commit 1 — linear');
+  } finally {
+    await close();
+  }
+});
+
 test('external staging preserves an active search without resending the loaded graph', async () => {
   const { page, repository, close } = await launch('linear', 7200, (path) => {
     writeFileSync(join(path, 'stage-me.txt'), 'new file\n');

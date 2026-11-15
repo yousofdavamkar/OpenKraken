@@ -181,16 +181,11 @@ export const useRepository = create<State>()(
     run: async (request, background = false) => {
       if (!background && get().syncing) await waitForBackground();
       if (get().busy) return;
-      const previousPage = get().paging,
-        previousSearch = get().searching;
       set((s) => {
         s.busy = request.id;
         if (background) s.syncing = request.id;
         if (!background) s.error = undefined;
       });
-      if (previousPage) await window.openkraken.cancel(previousPage);
-      if (previousSearch) await window.openkraken.cancel(previousSearch);
-      querySequence++;
       performance.mark('repository-open-start');
       let candidate: GraphClient | undefined;
       try {
@@ -226,7 +221,10 @@ export const useRepository = create<State>()(
             sameRepository =
               request.method === 'refresh' &&
               previous.snapshot?.repository.id === result.snapshot.repository.id;
-          const existing = sameRepository && !client?.failed ? client : undefined;
+          // An append can advance the current worker while the picker or snapshot is pending.
+          // Start a separate layout if that append has not reached the store yet.
+          const existing =
+            sameRepository && !previous.paging && !client?.failed ? client : undefined;
           const target = existing ?? (candidate ??= new GraphClient());
           const layout = await target.request({
             ...(existing
@@ -255,7 +253,8 @@ export const useRepository = create<State>()(
             layout.passages,
           );
           freeze(nextPassages, true);
-          const query = sameRepository ? previous.query : '';
+          const query = sameRepository ? get().query : '';
+          const previousSearch = get().searching;
           if (target === candidate) {
             client?.close();
             client = target;
@@ -303,6 +302,7 @@ export const useRepository = create<State>()(
               selected: selected.length ? selected : focus ? [focus] : [],
             };
           });
+          if (previousSearch) void window.openkraken.cancel(previousSearch);
           performance.mark('repository-state-published');
           if (query) await get().search(query);
         } else if (result.kind === 'error') throw new Error(result.message);
@@ -348,7 +348,7 @@ export const useRepository = create<State>()(
           ),
         );
         performance.mark('history-page-response');
-        if (get().snapshot?.cursor !== cursor || get().busy) return;
+        if (get().snapshot?.cursor !== cursor || get().paging !== id) return;
         if (result.kind === 'error') throw new Error(result.message);
         if (result.kind !== 'page') return;
         if (result.cursor !== cursor || result.offset !== get().snapshot?.commits.length)
@@ -361,7 +361,7 @@ export const useRepository = create<State>()(
           commits: rows,
         });
         performance.mark('history-page-worker');
-        if (get().snapshot?.cursor !== cursor || get().busy) return;
+        if (get().snapshot?.cursor !== cursor || get().paging !== id) return;
         if (layout.kind !== 'layout') throw new Error('Invalid graph response');
         const current = get();
         const nextSnapshot = {

@@ -227,6 +227,47 @@ test('the newest keyboard jump uses the page already in flight', async () => {
   expect(useRepository.getState().selection.focus).toBe(second.oid);
   expect(request).toHaveBeenCalledTimes(2); // Open and one page.
 });
+test.each(['cancelled', 'error'] as const)(
+  'a %s repository switch preserves the page arriving during the picker',
+  async (kind) => {
+    const snapshot = fixture();
+    await open(snapshot);
+    const page = deferred(),
+      picker = deferred();
+    request.mockReturnValueOnce(page.promise).mockReturnValueOnce(picker.promise);
+    const loading = useRepository.getState().loadMore();
+    const switching = useRepository.getState().run({ id: crypto.randomUUID(), method: 'open' });
+    const second = { ...snapshot.commits[0]!, oid: 'b'.repeat(40), summary: 'Second' };
+    page.resolve({
+      kind: 'page',
+      cursor: snapshot.cursor,
+      offset: 1,
+      commits: [second],
+      hasMore: true,
+    });
+    await loading;
+    picker.resolve(
+      kind === 'cancelled' ? { kind } : { kind, code: 'GIT_FAILED', message: 'Open failed' },
+    );
+    await switching;
+    expect(window.openkraken.cancel).not.toHaveBeenCalled();
+    expect(useRepository.getState().snapshot?.commits.at(-1)).toEqual(second);
+    const third = { ...second, oid: 'c'.repeat(40), summary: 'Third' };
+    request.mockResolvedValueOnce({
+      kind: 'page',
+      cursor: snapshot.cursor,
+      offset: 2,
+      commits: [third],
+      hasMore: false,
+    });
+    await useRepository.getState().loadMore();
+    expect(useRepository.getState().layout.map((row) => row.oid)).toEqual([
+      snapshot.commits[0]!.oid,
+      second.oid,
+      third.oid,
+    ]);
+  },
+);
 test('late page after refresh cannot append to the new generation', async () => {
   const old = fixture();
   await open(old);
@@ -287,6 +328,37 @@ test.each(['complete', 'pending'])(
   },
 );
 
+test.each(['cancelled', 'snapshot'] as const)(
+  'a picker returning %s retires search only on repository replacement',
+  async (kind) => {
+    const snapshot = fixture();
+    await open(snapshot);
+    await useRepository.getState().search('First');
+    const read = deferred(),
+      picker = deferred();
+    request.mockReturnValueOnce(read.promise).mockReturnValueOnce(picker.promise);
+    const searching = useRepository.getState().searchAll();
+    const searchId = useRepository.getState().searching;
+    const switching = useRepository.getState().run({ id: crypto.randomUUID(), method: 'open' });
+    expect(window.openkraken.cancel).not.toHaveBeenCalled();
+    picker.resolve(kind === 'snapshot' ? { kind, snapshot: fixture() } : { kind });
+    await switching;
+    read.resolve({
+      kind: 'search',
+      cursor: snapshot.cursor,
+      commits: snapshot.commits,
+      truncated: false,
+    });
+    await searching;
+    if (kind === 'cancelled') {
+      expect(useRepository.getState().searchResults).toEqual(snapshot.commits);
+      expect(window.openkraken.cancel).not.toHaveBeenCalled();
+    } else {
+      expect(useRepository.getState().searchResults).toBeUndefined();
+      expect(window.openkraken.cancel).toHaveBeenCalledWith(searchId);
+    }
+  },
+);
 test('late all-history search is discarded after query changes', async () => {
   const snapshot = fixture();
   await open(snapshot);
