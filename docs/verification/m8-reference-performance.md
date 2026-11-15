@@ -2,6 +2,21 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Reading fixed-width ref records in batches
+
+On the 1,505,199-commit Linux-history fixture with 50,000 distinct targets, direct native ref enumeration took 182–189 ms over four runs. Omitting object types in a diagnostic command reduced this to 78–89 ms. Walking 2,000 commits from all 50,000 pinned OIDs took 148–172 ms, compared with 64–89 ms from HEAD alone. These diagnostic commands used populated OS caches and a reduced history output format. The app still reads object types and walks the full set of visible roots.
+
+Replaying the native ref stream in 64 KiB chunks took a median 59.1 ms with the original parser and 44.3 ms with batched decoding across 60 runs per parser. Three paired fresh-profile Electron openings with only the Git utility bundle switched gave the following results. Pair order alternated. Each opening loaded 2,000 commits and appended three 5,000-commit pages.
+
+| Median in milliseconds | Original | Batched |
+| ---------------------- | -------: | ------: |
+| Utility snapshot       |    427.4 |   413.8 |
+| First paint            |    915.9 |   904.7 |
+
+The initial unpaired opening took 1,697.9 ms. One paired opening with the batched parser took 1,010.3 ms, slower than its control. All six paired openings missed 500 ms. All 18 pages passed 300 ms, and scroll p95 was 16.8 ms throughout. [Per-opening measurements](m8-ref-parser-samples.csv)
+
+CI now also constructs two bare reference repositories from the synthetic scale checkout. Each borrows its source's objects and has 50,000 packed refs. One uses the same commit for every ref, the other uses 50,000 distinct commits reachable from HEAD. The generator verifies both counts with Git. On Linux x64, three fresh-profile first paints on the synthetic fixtures had medians of **636.5 ms shared** and **777.0 ms distinct**. All six missed 500 ms. All 18 page appends passed. Each fixture had 1,999,999 commits reachable from HEAD. The source checkout also contains a separate topic tip. [Generator and reproduction](../decisions/0119-reference-parser-and-scale-gates.md) · [Per-opening measurements](m8-ref-parser-samples.csv)
+
 ## Starting the layout worker during repository opening
 
 Three paired fresh-profile Electron runs used 50,000 distinct reference targets and 1,505,199 reachable commits on Linux x64, Git 2.53.0 and X11 under Xvfb. Only the renderer bundle changed. The order was baseline/change, change/baseline and baseline/change. OS caches were left populated between runs.

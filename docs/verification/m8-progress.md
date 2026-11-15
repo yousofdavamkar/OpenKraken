@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Reference parser and CI scale gates
+
+The reference parser now reads complete records from each decoded chunk. On the 50,000-distinct-ref Linux-history fixture, isolated decoding improved from 59.1 to 44.3 ms median. First paint moved from 915.9 to 904.7 ms median across three paired openings, with one slower paired result. CI also runs the graph benchmark against 50,000 shared-target and distinct-target refs built from synthetic history. All six local openings of those fixtures missed 500 ms. All 18 synthetic page appends passed 300 ms. The CI workflow passed actionlint locally. [Benchmark results](m8-reference-performance.md#reading-fixed-width-ref-records-in-batches) · [Reproduction instructions](../decisions/0119-reference-parser-and-scale-gates.md)
+
+The Linux x64 native/unit suite passed 839 tests across 104 files with 14 skipped. All six Electron regressions for the large sidebar, complete snapshot transfer and watcher startup passed. On Git 2.38, four fixture tests and 27 parser/reference-reader tests passed, with 12 skips. TypeScript, the production build and full lint passed. Local evidence is under `/tmp/ok-m8-ref-read`.
+
 ## First AppImage download and release signing
 
 On Linux x64, three packaged runs used the offline release publisher for both the first AppImage and its successor. Each run rejected an incomplete first download, fetched the versioned file over local HTTPS, and matched its bytes to the signing receipt before granting execute permission. Healthy beta and stable upgrades passed under FUSE. A beta that exited during startup under extract-and-run restored its verified predecessor and retained sequence 2. The exact checksum command in the beta instructions also passed against the existing 0.1.0 test installer. These runs used temporary signing keys. [Participant instructions](../beta.md) · [Packaged test](../../scripts/verify-update-restart.mjs)
