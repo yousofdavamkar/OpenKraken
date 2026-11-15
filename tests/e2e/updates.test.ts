@@ -99,7 +99,9 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     const key = join(root, 'key.pem');
     execFileSync(process.execPath, [resolve('scripts/create-loopback-certificate.mjs'), root]);
     const keys = generateKeyPairSync('ed25519');
-    let sequence = 7;
+    let sequence = 6;
+    // A trusted signer can publish the wrong digest. Check it against the downloaded bytes.
+    const wrongDigest = (sha256.startsWith('0') ? '1' : '0') + sha256.slice(1);
     let tamper = false;
     let slow = false;
     const issuedAt = Date.now() - 1000;
@@ -126,7 +128,7 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
                   format,
                   name: filename,
                   size,
-                  sha256,
+                  sha256: sequence === 6 ? wrongDigest : sha256,
                 },
               ],
             }),
@@ -195,9 +197,22 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     await dialog.getByRole('button', { name: 'Check for updates' }).click();
     await expect(dialog.getByRole('status')).toHaveText(`Version ${version} is available.`);
     await dialog.getByRole('button', { name: `Download ${format}` }).click();
+    await expect(dialog.getByRole('status')).toContainText('did not match the signed release', {
+      timeout: 60000,
+    });
+    await expect(dialog.getByRole('button', { name: 'Save installer…' })).toHaveCount(0);
+    await expect(stat(join(profile, 'updates/artifact.ready'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expect(stat(join(profile, 'updates/artifact.part'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    sequence = 7;
+    await dialog.getByRole('button', { name: 'Check for updates' }).click();
+    await dialog.getByRole('button', { name: `Download ${format}` }).click();
     await expect(dialog.getByRole('status')).toContainText('download verified', { timeout: 60000 });
     expect(await fileDigest(join(profile, 'updates/artifact.ready'))).toBe(sha256);
-    await page.screenshot({ path: 'test-results/signed-update-verified.png' });
+    await page.screenshot({ path: test.info().outputPath('signed-update-verified.png') });
     const exported = join(root, filename);
     const downloads = await app.evaluate(({ app }) => app.getPath('downloads'));
     await app.evaluate(
@@ -287,7 +302,7 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
       'title',
       `OpenKraken ${version} is available`,
     );
-    await page.screenshot({ path: 'test-results/automatic-updates.png' });
+    await page.screenshot({ path: test.info().outputPath('automatic-updates.png') });
     await dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' }).uncheck();
     await expect(
       dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' }),
