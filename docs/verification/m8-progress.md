@@ -2,6 +2,18 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Publishing a release and migrating its feed
+
+The offline signer's previous implementation left a 12-byte final manifest after a simulated short write and after process exit during that write. The publisher now syncs a temporary envelope on the destination filesystem and links it into place exclusively. Desktop publisher tests verify retry after a write error, sync error or process exit and check that only one concurrent signer wins. The winning envelope verifies with the corresponding release data.
+
+A build can declare the preceding HTTPS feed and Ed25519 key for the same channel. The replacement carries forward the highest authenticated sequence and exact payload digest. Automatic checks start disabled until the user consents again. Unit tests cover existing stable and beta profile hashes, an unauthorized predecessor, channel mismatch, a same-sequence conflict, consent-only profiles, and retry after an unusable settings file. [Migration design](../decisions/0082-signed-update-release-protocol.md#moving-a-feed-or-rotating-a-release-key)
+
+On Linux x64, Electron checked, downloaded and exported a 115,245,596-byte beta DEB and a 98,969,065-byte stable RPM using loopback HTTPS and temporary keys. The offline publisher signed the exported bytes for the new feed. After migration, the desktop rejected a retired key and lower sequence, downloaded the installer from its new URL, checked its digest, and retained fresh consent across a later build that omitted the predecessor declaration.
+
+The packaged stable AppImage upgraded from 0.1.0 to 0.2.0 in extract-and-run mode. Cancelling restart preserved the original image. Accepting it launched the replacement, cleaned its recovery journal and retained sequence 2. The new app opened with automatic checks disabled, rejected the old key on the new feed, then verified the new key's sequence 3. The native beta AppImage also upgraded from 0.2.0-beta.2 to 0.2.0-beta.10 with the same checks and preserved the isolated stable profile. The CI restart job now exercises this transition.
+
+The full native/unit run passed 941 tests in 111 files with 14 skips. The focused update run passed 81 tests in seven files. Typechecking, the production build, lint, and the parsed CI workflow passed locally. These fixtures used temporary signing keys and locally trusted HTTPS. Production publication, native Windows/macOS and Linux ARM64 acceptance, and beta participant evidence remain open.
+
 ## Streaming reference validation
 
 The Git reader now releases native stdout chunks during enumeration. Three paired runs on the 50,000-distinct-target fixture reduced reachable input buffers at the end of the native read from 4,009,992 bytes to zero. Native tests compare a literal replacement character and malformed UTF-8 across chunk boundaries against Git's full ref enumeration.
