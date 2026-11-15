@@ -2,6 +2,10 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Cold opens with 50,000 references
+
+The Git utility can start reading the first history page while it collects full ref metadata. It compares the complete ordered start commits before adopting the early walk. Native tests compare both pages with the ordinary walk after refs move or change order, and cover replaced commits, annotated tags, failure, cache reuse and filtered views. Three paired desktop runs per fixture reduced median first paint from 893.8 to 793.5 ms for distinct targets and from 783.5 to 739.5 ms for a shared target. The 500 ms target remains open. A shared-target append also exceeded its 300 ms budget. [Measurements and raw samples](m8-reference-performance.md#overlapping-reference-enumeration-and-history)
+
 ## Release payload and installer version checks
 
 The old Linux package contained TypeScript declarations and incremental compiler state. A fixture also placed stale files in the development output, including the native helper directory, and found them in the packaged archive. The release build now emits its runtime directly into clean staging. The rebuilt Linux x64 archive excluded those files and passed the packaged native Git, terminal, renderer isolation and repository-link smoke checks.

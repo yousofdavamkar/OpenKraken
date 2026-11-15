@@ -1,0 +1,13 @@
+fixture,pair,service,first_paint_ms,snapshot_ms,response_ms,page1_ms,page2_ms,page3_ms,graph_p95_ms,sidebar_p95_ms
+distinct,1,baseline,909.6,414.6,682.2,190.5,211.4,183.4,16.7,16.8
+distinct,1,candidate,793.5,319.5,573,265.5,211.4,198.6,16.7,16.8
+shared,1,baseline,783.5,262.0,530.2,260,201.6,189,16.8,16.8
+shared,1,candidate,702.9,237.9,471.7,228.6,201.4,199.5,16.8,16.7
+distinct,2,candidate,760.4,295.7,552.1,281.6,205.9,192.6,16.8,16.7
+distinct,2,baseline,893.8,424.5,669.8,199.8,217.4,200.8,16.8,16.8
+shared,2,candidate,739.5,244.0,513.3,327.5,216.1,208.2,16.8,16.7
+shared,2,baseline,775.5,268.6,538.5,269.6,235.9,195.1,16.7,16.8
+distinct,3,baseline,877.1,413.2,668.4,298.6,245,191,16.7,16.8
+distinct,3,candidate,803.4,329.3,583.7,271.5,224,186,16.7,16.8
+shared,3,baseline,785.7,262.2,548.1,290.4,205.7,190.5,16.7,16.7
+shared,3,candidate,776.2,251.0,513,257,214.5,201.4,16.7,16.8

@@ -2,6 +2,19 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Overlapping reference enumeration and history
+
+Three paired Linux x64 openings per fixture switched only the Git utility bundle between baseline `8d2c620` and the overlapping walk. Each opening used a fresh app profile and populated OS caches, with a single Electron worker. The order was baseline first in pairs one and three and candidate first in pair two. Both fixtures borrow the same full Linux history. Each has 50,000 refs. [All twelve openings and 36 page appends](m8-history-prefetch-samples.csv)
+
+| Ref targets     | Median snapshot before | Median snapshot after | Median first paint before | Median first paint after |
+| --------------- | ---------------------: | --------------------: | ------------------------: | -----------------------: |
+| 50,000 distinct |               414.6 ms |              319.5 ms |                  893.8 ms |                 793.5 ms |
+| One shared      |               262.2 ms |              244.0 ms |                  783.5 ms |                 739.5 ms |
+
+All six paired comparisons improved first paint. Every large-ref opening still exceeded 500 ms. The first append on distinct targets took 265.5–281.6 ms with the new walk and 190.5–298.6 ms on baseline. One of the eighteen new appends exceeded 300 ms, at 327.5 ms on shared targets. Graph and sidebar scrolling measured 16.7–16.8 ms p95 throughout.
+
+One separate opening of full Linux history with a single ref painted in 330.4 ms and appended pages in 261.3, 206.6 and 196.1 ms. After priming the history cache and reopening the distinct-target fixture, first paint took 809.9 ms and appends took 259.0, 269.8 and 217.2 ms. These runs exercise paths that skip the optional walk. [Scheduling and cursor adoption](../decisions/0122-overlap-reference-and-history-reads.md)
+
 ## Graph selection and reference sidebar measurements
 
 Three alternating pairs opened full Linux history in fresh Electron profiles on Linux x64. Each loaded 32,000 commits and dispatched End and Home eleven times each to the focused grid. The viewport was held still to prevent automatic paging. The following medians cover the ten cycles after the first. They measure synchronous dispatch through the renderer's keyboard handler. A separate 12,000-row desktop regression uses the real scroll behavior and checks the visible selection after End.
