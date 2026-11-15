@@ -14,6 +14,7 @@ import fuzzysort from 'fuzzysort';
 import { commandCatalog, commandIds, isCommandId, type CommandId } from './command-catalog.js';
 import { bindingFor, emptyKeymap, parseKeymap } from './keymap.js';
 import type { Bindings, CommandPreferences } from '@openkraken/ipc-contract';
+import { useRepositoryCommands, type PaletteItem } from './repository-commands.js';
 const usageKey = 'openkraken.commandUsage.v1';
 const halfLife = 14 * 24 * 60 * 60 * 1000;
 type Usage = { weight: number; time: number };
@@ -369,7 +370,7 @@ function Palette({ close }: { close: () => void }) {
         .go(query.trim(), candidates, { keys: ['label', 'keywords'], threshold: 0.1, limit: 0 })
         .map((result) => ({ command: result.obj, score: result.score }))
     : candidates.map((command) => ({ command, score: 0 }));
-  const results = matches.sort((a, b) => {
+  const ranked = matches.sort((a, b) => {
     if (query.trim() && Math.floor(a.score * 100) !== Math.floor(b.score * 100))
       return Math.floor(b.score * 100) - Math.floor(a.score * 100);
     return (
@@ -377,20 +378,31 @@ function Palette({ close }: { close: () => void }) {
       a.command.label.localeCompare(b.command.label)
     );
   });
+  const repository = useRepositoryCommands(category, query);
+  const repositoryDomain = category === 'Branches' || category === 'Changed files';
+  const results: PaletteItem[] = repositoryDomain
+    ? repository.items
+    : ranked.map(({ command }) => ({
+        key: command.id,
+        label: command.label,
+        description: [command.category, registry.shortcut(command.id)].filter(Boolean).join(' · '),
+        available: registry.available(command.id),
+        execute: () => registry.execute(command.id),
+      }));
   const index = Math.max(0, Math.min(active, results.length - 1));
   useEffect(() => {
     dialog.current
       ?.querySelector(`[data-command-index="${index}"]`)
       ?.scrollIntoView({ block: 'nearest' });
-  }, [index, query, category]);
-  const execute = (id: CommandId) => {
-    if (!registry.available(id)) {
+  }, [index, query, category, results[index]?.key]);
+  const execute = (item: PaletteItem) => {
+    if (!item.available) {
       setNotice('This command is unavailable in the current context.');
       return;
     }
     dialog.current?.close();
     restoreFocus.current = false;
-    if (registry.execute(id)) close();
+    if (item.execute()) close();
     else {
       restoreFocus.current = true;
       dialog.current?.showModal();
@@ -420,9 +432,7 @@ function Palette({ close }: { close: () => void }) {
           maxLength={256}
           autoComplete="off"
           aria-controls="command-results"
-          aria-activedescendant={
-            results[index] ? `command-${results[index]!.command.id}` : undefined
-          }
+          aria-activedescendant={results[index] ? `command-result-${index}` : undefined}
           onChange={(event) => {
             setQuery(event.target.value);
             setActive(0);
@@ -435,7 +445,7 @@ function Palette({ close }: { close: () => void }) {
             else if (event.key === 'Home') setActive(0);
             else if (event.key === 'End') setActive(Math.max(0, results.length - 1));
             else if (event.key === 'Enter') {
-              if (results[index]) execute(results[index]!.command.id);
+              if (results[index]) execute(results[index]!);
             } else return;
             event.preventDefault();
           }}
@@ -447,6 +457,7 @@ function Palette({ close }: { close: () => void }) {
           value={category}
           onChange={(event) => {
             setCategory(event.target.value);
+            setNotice('');
             setActive(0);
           }}
         >
@@ -454,39 +465,42 @@ function Palette({ close }: { close: () => void }) {
           {[...new Set(commandIds.map((id) => commandCatalog[id].category))].map((item) => (
             <option key={item}>{item}</option>
           ))}
+          {repository.repoId && <option>Branches</option>}
+          {repository.repoId && <option>Changed files</option>}
         </select>
       </label>
       <div role="listbox" aria-label="Commands" id="command-results" className="command-results">
-        {results.map(({ command }, i) => (
+        {results.map((command, i) => (
           <div
-            id={`command-${command.id}`}
-            key={command.id}
+            id={`command-result-${i}`}
+            key={command.key}
             data-command-index={i}
             role="option"
             aria-label={command.label}
             aria-selected={i === index}
-            aria-disabled={!registry.available(command.id)}
+            aria-disabled={!command.available}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => {
               setActive(i);
-              execute(command.id);
+              execute(command);
             }}
           >
             <strong>{command.label}</strong>
             <span>
-              {command.category}
-              {registry.shortcut(command.id) ? ` · ${registry.shortcut(command.id)}` : ''}
-              {!registry.available(command.id) ? ' · Unavailable' : ''}
+              {command.description}
+              {!command.available ? ' · Unavailable' : ''}
             </span>
           </div>
         ))}
       </div>
+      {repositoryDomain && repository.total > results.length && (
+        <p role="status">
+          Showing {results.length} of {repository.total} matches. Type more to narrow the list.
+        </p>
+      )}
       {!results.length && <p>No commands match.</p>}
       {notice && <p role="status">{notice}</p>}
-      <p className="muted">
-        Arrow keys choose a command; Enter runs it. Frequently and recently used commands appear
-        first when the search is empty.
-      </p>
+      <p className="muted">Use the arrow keys to choose a result and Enter to open it.</p>
       <button onClick={close}>Close</button>
     </dialog>
   );

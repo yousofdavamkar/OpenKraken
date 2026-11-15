@@ -1,3 +1,4 @@
+import { diffButtonId } from './repository-commands.js';
 import { CommandButton } from './commands.js';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type {
@@ -333,6 +334,11 @@ export function WorkingTreePanel() {
                   )}
                   <button
                     disabled={!!busy || previewBusy}
+                    id={diffButtonId(
+                      repoId,
+                      action === 'stage' ? 'worktree' : 'index',
+                      entry.pathBytes,
+                    )}
                     aria-label={`View ${action === 'stage' ? 'unstaged' : 'staged'} ${entry.path}`}
                     onClick={() =>
                       void showDiff(entry.pathBytes, action === 'stage' ? 'worktree' : 'index')

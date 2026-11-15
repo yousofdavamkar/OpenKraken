@@ -5,6 +5,7 @@ import {
   refsByTarget,
   groupRefBadges,
   selectRow,
+  soloRefView,
   refNavigationTargets,
 } from './src/history-model.js';
 import type { DisplayCommit } from './src/history-model.js';
@@ -211,4 +212,19 @@ test('a capped badge preview counts matching branches even after later labels ov
     overflow: true,
   });
   expect(groupRefBadges(nested, 0)).toEqual({ badges: [], overflow: true });
+});
+
+test('soloing a ref reveals it and retains a pin only when it points to that ref', () => {
+  const original = { hiddenRefs: ['topic', 'other'], pinnedRef: 'main' };
+  expect(soloRefView(original, 'topic')).toEqual({
+    soloRef: 'topic',
+    hiddenRefs: ['other'],
+    pinnedRef: undefined,
+  });
+  expect(soloRefView(original, 'main')).toEqual({
+    soloRef: 'main',
+    hiddenRefs: ['topic', 'other'],
+    pinnedRef: 'main',
+  });
+  expect(original).toEqual({ hiddenRefs: ['topic', 'other'], pinnedRef: 'main' });
 });

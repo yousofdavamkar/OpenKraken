@@ -283,6 +283,7 @@ export function History() {
           }}
         />
         <div
+          id="commit-history"
           className="history-scroll"
           ref={viewport}
           role="grid"

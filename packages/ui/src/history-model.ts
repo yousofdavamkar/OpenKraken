@@ -5,6 +5,15 @@ import {
   type Ref,
   type Snapshot,
 } from '@openkraken/ipc-contract';
+export function soloRefView(view: GraphView, name: string): GraphView {
+  return {
+    ...view,
+    soloRef: name,
+    hiddenRefs: view.hiddenRefs.filter((ref) => ref !== name),
+    pinnedRef: view.pinnedRef === name ? name : undefined,
+  };
+}
+
 export interface DisplayCommit extends Commit {
   kind: 'commit' | 'wip' | 'conflict' | 'worktree';
 }

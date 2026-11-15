@@ -1,5 +1,6 @@
 import type { GraphView, Ref } from '@openkraken/ipc-contract';
 import { useRepository } from './store.js';
+import { soloRefView } from './history-model.js';
 
 export function RefControls({ reference }: { reference: Ref }) {
   const { snapshot, busy: active, syncing, setView } = useRepository();
@@ -36,12 +37,15 @@ export function RefControls({ reference }: { reference: Ref }) {
         aria-label={`Solo ${reference.name}`}
         aria-pressed={solo}
         onClick={() =>
-          change({
-            ...view,
-            soloRef: solo ? undefined : name,
-            hiddenRefs: view.hiddenRefs.filter((r) => r !== name),
-            pinnedRef: !solo && !pinned ? undefined : view.pinnedRef,
-          })
+          change(
+            solo
+              ? {
+                  ...view,
+                  soloRef: undefined,
+                  hiddenRefs: view.hiddenRefs.filter((ref) => ref !== name),
+                }
+              : soloRefView(view, name),
+          )
         }
       >
         Solo
