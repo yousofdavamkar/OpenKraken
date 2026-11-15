@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Opt-out across restart
+
+Linux desktop tests confirmed that turning off crash reporting survives an abrupt exit even when the session marker has changed. A failed first opt-in also stays off after restart. The tests delivered one redacted JavaScript report to a loopback HTTPS receiver while consent was on and observed no further delivery after revocation. Shutdown also finishes accepted opt-outs for both crash reporting and automatic update checks. Four reporting controller regressions and one updater regression reproduced the failures on the previous code. [Consent and recovery decision](../decisions/0078-interrupted-session-and-javascript-reports.md#saving-consent-during-marker-failures-and-shutdown)
+
+The Linux x64 suite passed 863 native/unit tests across 104 files, with 14 skipped. All 20 selected Electron tests passed, covering crash reporting, updates and the Canvas graph. TypeScript, the production build and lint passed. macOS, Windows, Linux arm64 and live-service acceptance remain open.
+
 ## History paging and native installer export
 
 The current Git utility passed all 18 page-append checks on full Linux history with one and 50,000 refs. All three ordinary first paints passed at 363.5–380.0 ms. With 50,000 refs they took 953.8–988.2 ms. A 17,000-commit comparison and native shallow, octopus and replacement fixtures preserved every commit field. [Per-opening results](m8-reference-performance.md#reading-ancestry-from-gits-traversal-header)
