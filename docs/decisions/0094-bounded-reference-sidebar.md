@@ -9,3 +9,9 @@ This bounds mounted UI, not reference data: the full authoritative snapshot and 
 Extend the opt-in repository benchmark with reference count, mounted reference count and first-paint phase timings. Service time includes opening, observer initialization, snapshot work and transport; the separately reported snapshot duration is a subset, not an additional phase. Preserve failed measurements alongside passing samples. Native Git enumeration remains the main measured startup cost for the large-reference fixture; the sidebar correction alone does not close that gate.
 
 See the [performance report](../verification/m8-reference-performance.md) for the dataset, measurements, reproduction and remaining limits.
+
+## Measuring several refs together
+
+The virtualizer measures up to four adjacent refs from one section together. The first block in a section includes its heading. A transparent CSS grid item spans each mounted block so the browser reports its total height, including wrapped controls and inline errors. A spacer covers skipped blocks when scrolling or retaining a focused action. Each reference remains a separately keyed list item with its own position in the filtered result. Keeping those items under one parent allows React to preserve a dialog and its draft when newly inserted refs shift it into a different block.
+
+The desktop regression resizes the last ref in a block and checks that the next ref stays adjacent. It opens a rename dialog there, inserts an earlier branch through Git, and checks that the original draft and input focus survive the watcher's refresh. [Measurements](../verification/m8-reference-performance.md#reference-sidebar-measurements-and-commit-badge-grouping)

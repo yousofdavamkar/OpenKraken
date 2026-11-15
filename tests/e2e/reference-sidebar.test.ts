@@ -51,6 +51,36 @@ test('large reference sidebar stays bounded and filtered actions survive scrolli
     await expect(sidebar.getByRole('status')).toHaveText(
       `${refCount.toLocaleString()} matching references`,
     );
+    const edge = sidebar.locator('[data-reference-name="refs/heads/topic-0006"]');
+    const next = sidebar.locator('[data-reference-name="refs/heads/topic-0007"]');
+    await edge.scrollIntoViewIfNeeded();
+    for (const minHeight of ['260px', '']) {
+      await edge.evaluate((element, height) => {
+        element.style.minHeight = height;
+      }, minHeight);
+      await expect
+        .poll(async () => {
+          const bottom = await edge.evaluate((element) => element.getBoundingClientRect().bottom);
+          const top = await next.evaluate((element) => element.getBoundingClientRect().top);
+          return Math.abs(top - bottom);
+        })
+        .toBeLessThan(1);
+    }
+    await edge.getByRole('button', { name: 'Rename branch topic-0006' }).click();
+    const pendingRename = page.getByRole('dialog', { name: 'Rename branch', exact: true });
+    const draft = pendingRename.getByRole('textbox', { name: 'Branch name' });
+    await draft.fill('pending-name');
+    fixtureGit(repository, ['branch', 'a-before-main']);
+    await expect(sidebar.locator('.reference-match-count')).toHaveText(
+      `${(refCount + 1).toLocaleString()} matching references`,
+    );
+    await expect(draft).toBeFocused();
+    await expect(draft).toHaveValue('pending-name');
+    await pendingRename.getByRole('button', { name: 'Cancel', exact: true }).click();
+    fixtureGit(repository, ['branch', '-D', 'a-before-main']);
+    await expect(sidebar.getByRole('status')).toHaveText(
+      `${refCount.toLocaleString()} matching references`,
+    );
     await filter.fill('  ÅNGSTRÖM  ');
     await expect(
       sidebar.getByRole('button', { name: 'Rename branch Ångström', exact: true }),

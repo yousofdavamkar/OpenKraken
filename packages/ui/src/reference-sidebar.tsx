@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react';
 import { defaultRangeExtractor, measureElement, useVirtualizer } from '@tanstack/react-virtual';
 import type { Ref, Snapshot } from '@openkraken/ipc-contract';
 import { RefControls } from './ref-controls.js';
@@ -13,7 +13,9 @@ const groups = [
   ['stash', 'Stashes'],
   ['other', 'Other refs'],
 ] as const;
-type Row = { kind: 'heading'; title: string } | { kind: 'ref'; reference: Ref; position: number };
+type ReferenceBlock = { refs: Ref[]; title?: string; firstPosition: number };
+const refsPerBlock = 4;
+const headingHeightEstimate = 48;
 
 function ReferenceRow({
   reference,
@@ -54,61 +56,107 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState<string>();
   const scroll = useRef<HTMLDivElement>(null);
-  const { rows, count } = useMemo(() => {
+  const { blocks, count } = useMemo(() => {
     const search = query.trim().toLocaleLowerCase();
     const buckets = new Map<Ref['kind'], Ref[]>(groups.map(([kind]) => [kind, []]));
     for (const ref of snapshot.refs) {
       if (!search || ref.name.toLocaleLowerCase().includes(search))
         buckets.get(ref.kind)!.push(ref);
     }
-    const rows: Row[] = [];
+    const blocks: ReferenceBlock[] = [];
     let count = 0;
     for (const [kind, title] of groups) {
-      const refs = buckets.get(kind)!;
-      if (!refs.length) continue;
-      rows.push({ kind: 'heading', title });
-      for (const reference of refs) rows.push({ kind: 'ref', reference, position: ++count });
+      const matches = buckets.get(kind)!;
+      for (let start = 0; start < matches.length; start += refsPerBlock) {
+        const refs = matches.slice(start, start + refsPerBlock);
+        blocks.push({ refs, title: start === 0 ? title : undefined, firstPosition: count + 1 });
+        count += refs.length;
+      }
     }
-    return { rows, count };
+    return { blocks, count };
   }, [snapshot.refs, query]);
-  const focusedIndex = useMemo(() => {
-    const index = focused
-      ? rows.findIndex((row) => row.kind === 'ref' && row.reference.name === focused)
-      : -1;
-    return index < 0 ? undefined : index;
-  }, [rows, focused]);
-  const getItemKey = useCallback(
-    (index: number) => {
-      const row = rows[index]!;
-      return row.kind === 'ref' ? row.reference.name : row.title;
-    },
-    [rows],
+  const focusedBlock = useMemo(
+    () =>
+      focused ? blocks.findIndex((block) => block.refs.some((ref) => ref.name === focused)) : -1,
+    [blocks, focused],
   );
-  const estimatedHeights = useRef(new Map<Ref['kind'] | 'heading', number>());
-  const rowKind = (row: Row) => (row.kind === 'ref' ? row.reference.kind : row.kind);
+  const getItemKey = useCallback((index: number) => blocks[index]!.refs[0]!.name, [blocks]);
+  const estimatedHeights = useRef(new Map<Ref['kind'], number>());
   const virtual = useVirtualizer({
-    count: rows.length,
+    count: blocks.length,
     getScrollElement: () => scroll.current,
     getItemKey,
-    estimateSize: (index) =>
-      estimatedHeights.current.get(rowKind(rows[index]!)) ??
-      (rows[index]!.kind === 'heading' ? 48 : 120),
+    estimateSize: (index) => {
+      const block = blocks[index]!;
+      return (
+        (block.title ? headingHeightEstimate : 0) +
+        block.refs.length * (estimatedHeights.current.get(block.refs[0]!.kind) ?? 120)
+      );
+    },
     measureElement: (element, entry, instance) => {
       const height = measureElement(element, entry, instance);
-      const row = rows[instance.indexFromElement(element)];
-      if (row && height > 0) estimatedHeights.current.set(rowKind(row), height);
+      const block = blocks[instance.indexFromElement(element)];
+      if (block && height > 0) {
+        const refHeight = (height - (block.title ? headingHeightEstimate : 0)) / block.refs.length;
+        if (refHeight > 0) estimatedHeights.current.set(block.refs[0]!.kind, refHeight);
+      }
       return height;
     },
-    overscan: 4,
+    overscan: 1,
     // A focused action or its modal must survive scrolling offscreen.
     rangeExtractor: (range) =>
       [
-        ...new Set([
-          ...defaultRangeExtractor(range),
-          ...(focusedIndex === undefined ? [] : [focusedIndex]),
-        ]),
+        ...new Set([...defaultRangeExtractor(range), ...(focusedBlock < 0 ? [] : [focusedBlock])]),
       ].sort((a, b) => a - b),
   });
+  // One element measures all grid rows in a block. The controls share a parent
+  // so React keeps a focused dialog mounted when a ref moves to another block.
+  const cells: ReactElement[] = [];
+  let track = 1;
+  let previousEnd = 0;
+  for (const item of virtual.getVirtualItems()) {
+    const gap = item.start - previousEnd;
+    if (gap > 0) {
+      cells.push(
+        <div
+          key={'gap-' + item.key}
+          aria-hidden="true"
+          style={{ gridRow: track++, height: gap }}
+        />,
+      );
+    }
+    const firstTrack = track;
+    const block = blocks[item.index]!;
+    if (block.title)
+      cells.push(
+        <div key={block.title} style={{ gridRow: track++ }}>
+          <h3>{block.title}</h3>
+        </div>,
+      );
+    for (const [index, reference] of block.refs.entries()) {
+      cells.push(
+        <div
+          key={reference.name}
+          style={{ gridRow: track++ }}
+          role="listitem"
+          aria-posinset={block.firstPosition + index}
+          aria-setsize={count}
+        >
+          <ReferenceRow reference={reference} snapshot={snapshot} busy={busy} />
+        </div>,
+      );
+    }
+    cells.push(
+      <div
+        key={'measure-' + item.key}
+        aria-hidden="true"
+        ref={virtual.measureElement}
+        data-index={item.index}
+        style={{ gridRow: firstTrack + ' / ' + track, pointerEvents: 'none' }}
+      />,
+    );
+    previousEnd = item.end;
+  }
   return (
     <>
       <label className="reference-filter">
@@ -145,32 +193,8 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
             setFocused(undefined);
         }}
       >
-        <div style={{ height: virtual.getTotalSize(), position: 'relative' }}>
-          {virtual.getVirtualItems().map((item) => {
-            const row = rows[item.index]!;
-            return (
-              <div
-                key={item.key}
-                ref={virtual.measureElement}
-                data-index={item.index}
-                role={row.kind === 'ref' ? 'listitem' : undefined}
-                aria-posinset={row.kind === 'ref' ? row.position : undefined}
-                aria-setsize={row.kind === 'ref' ? count : undefined}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  width: '100%',
-                  transform: `translateY(${item.start}px)`,
-                }}
-              >
-                {row.kind === 'heading' ? (
-                  <h3>{row.title}</h3>
-                ) : (
-                  <ReferenceRow reference={row.reference} snapshot={snapshot} busy={busy} />
-                )}
-              </div>
-            );
-          })}
+        <div className="reference-grid" style={{ height: virtual.getTotalSize() }}>
+          {cells}
         </div>
       </div>
     </>

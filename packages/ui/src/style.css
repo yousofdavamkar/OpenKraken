@@ -184,6 +184,14 @@ aside {
   font-size: 11px;
   color: var(--muted);
 }
+.reference-grid {
+  display: grid;
+  align-content: start;
+  grid-template-columns: minmax(0, 1fr);
+}
+.reference-grid > * {
+  grid-column: 1;
+}
 .reference-scroll {
   flex: 1;
   min-height: 0;
