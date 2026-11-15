@@ -2,6 +2,16 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Full Linux history and direct reference reads
+
+The production parser reads six fields on the initial ref query. It preserved every ordered ref in a 50,000-record replay. The median first paint across three paired openings fell from 925.0 to 867.7 ms for distinct targets and from 781.9 to 753.2 ms for a shared target. All 36 page appends in those comparisons passed the 300 ms budget. All twelve first paints missed 500 ms. [Per-opening results](m8-reference-performance.md#reading-six-fields-for-unpeeled-references)
+
+CI now measures full Linux history alongside the synthetic fixtures. Locally, a fresh upstream fetch produced one 823.15 MiB pack containing 1,505,199 commits. Preparation also passed using restored packs in a fresh bare repository. With the remote removed and lazy fetching disabled, the three Electron first paints took 350.9, 345.6 and 351.5 ms. All nine page appends passed at 178.3–231.0 ms. This verifies the workflow commands on Linux x64. Hosted Actions and its cache service remain unverified. [CI fixture and gates](../decisions/0119-reference-parser-and-scale-gates.md#full-linux-history-in-ci)
+
+The full Linux x64 suite passed 864 native/unit tests with 14 skipped. All 19 selected Electron tests passed, including six graph visual comparisons, native reference transfer, sidebar and watcher recovery. Git 2.38.0 passed 29 parser and reference-reader tests, with 12 conditional skips. Git 2.53.0 passed all 41. TypeScript, build, lint and actionlint passed.
+
+## Timing snapshot receipt
+
 With 50,000 distinct targets the renderer received its snapshot at 651.3–680.9 ms, already past the 500 ms first-paint deadline. Parsing and expanding it added 30.6–35.8 ms. All three one-ref first paints and all 18 page appends met budget. [Per-opening measurements](m8-reference-performance.md#time-to-receive-and-decode-the-snapshot)
 
 ## Opt-out across restart

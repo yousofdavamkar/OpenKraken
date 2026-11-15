@@ -2,6 +2,21 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Reading six fields for unpeeled references
+
+The initial ref query omits two empty peeling fields. The parser also uses the known namespace length to extract each short name. On the full Linux history fixture with 50,000 distinct targets, native output shrank from 4,109,992 to 4,009,992 bytes. Replay in 64 KiB chunks returned the same 50,000 records in order. Across 32 alternating pairs with garbage collection before each run, median parsing took 38.5 ms before and 34.2 ms after. [Git format and coverage](../decisions/0119-reference-parser-and-scale-gates.md)
+
+Three paired Electron openings per fixture switched only the Git utility. Each used a fresh profile, loaded 2,000 commits and appended three 5,000-commit pages. The OS caches stayed populated. Both fixtures used the same full Linux history at `46fec1c3029b552ec63b2d01af9d43a386f043ea` with Git 2.53.0 on Linux x64. [All samples](m8-direct-ref-samples.csv)
+
+| 50,000 references | Previous median first paint | Six-field median first paint | Previous median Git snapshot | Six-field median Git snapshot |
+| ----------------- | --------------------------: | ---------------------------: | ---------------------------: | ----------------------------: |
+| Distinct targets  |                    925.0 ms |                     867.7 ms |                     400.9 ms |                      388.1 ms |
+| Shared target     |                    781.9 ms |                     753.2 ms |                     293.8 ms |                      269.9 ms |
+
+All twelve openings missed the 500 ms first-paint budget. The first shared-target baseline took 1,313.8 ms and the change was slower in one shared-target pair. All 36 page appends met 300 ms. The slowest took 289.9 ms.
+
+A separate experiment sent up to 512 compact ref strings per block between the utility and main, then validated each row in main. On the distinct-target fixture, median first paint across four pairs rose from 872.7 to 903.3 ms. The time from opening to receipt, after subtracting Git snapshot preparation, increased in all four pairs. The app retains the existing IPC format.
+
 ## Time to receive and decode the snapshot
 
 The Electron benchmark now times receipt of the snapshot string, JSON parsing and expansion of compact references separately. Six fresh-profile openings used the same 1,505,199-commit Linux history on Linux x64, Git 2.53.0 and Xvfb. The operating system caches were left populated. Each opening appended three 5,000-commit pages.
