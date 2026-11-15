@@ -2,6 +2,20 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Transferring consecutive references
+
+Three alternating pairs per fixture opened 2,000 commits of full Linux history in fresh Electron profiles on Linux x64. The OS caches stayed populated. Baseline used `31d5960`. The new build omitted repeated object IDs on the Git utility and renderer boundaries. Each opening appended three 5,000-commit pages. The grouped fixture borrowed the same Linux object store and distributed 50,000 refs across the first 500 commits from HEAD, with 100 refs per target. Git verified the target and ref counts before testing.
+
+| 50,000 refs      | Baseline ref JSON |    New ref JSON | Median baseline first paint | Median new first paint |
+| ---------------- | ----------------: | --------------: | --------------------------: | ---------------------: |
+| Distinct targets |   3,510,101 bytes | 3,510,101 bytes |                    811.1 ms |               807.8 ms |
+| 500 targets      |   3,310,100 bytes | 1,280,641 bytes |                    759.0 ms |               720.6 ms |
+| One target       |   3,360,104 bytes | 1,310,186 bytes |                    741.3 ms |               698.6 ms |
+
+All six comparisons with repeated targets improved first paint. All eighteen openings exceeded 500 ms. One new distinct-target append took 305.6 ms. The other 53 appends met 300 ms, and both scroll measurements stayed at 16.7–16.8 ms p95. The byte counts cover UTF-8 JSON for the reference array alone. A separate replay expanded both forms and compared every ordered ref against Git service output on all three fixtures.
+
+Two earlier experiments each used three pairs on the shared and distinct fixtures. Sending a single shared target to main and reconstructing every object ID there moved shared-target median first paint from 708.0 to 735.6 ms. Keeping that single target through the renderer moved it from 720.9 to 702.6 ms. The shipped consecutive encoding also handles multiple targets in one snapshot. [All 42 paired openings](m8-ref-run-samples.csv) · [Wire format and compatibility](../decisions/0116-validated-snapshot-references.md#consecutive-refs-with-the-same-target)
+
 ## Reading tentative roots with rev-parse
 
 Three paired fresh-profile openings per fixture compared the optional `git rev-parse --all` read with `git for-each-ref --format=%(objectname)`. Only the Git utility bundle changed. Each opening used the full Linux history on Linux x64 with populated OS caches and appended three pages of 5,000 commits.
