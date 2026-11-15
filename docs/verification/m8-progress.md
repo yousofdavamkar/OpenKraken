@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Crash reporting during startup
+
+The Linux x64 desktop previously missed a main exception during its first asynchronous consent read and a GPU termination notification before Electron was ready. With the fixes in `50ec5ca` and `5007ad9`, the HTTPS fixture received one redacted summary per opted-in scenario. It received zero reports during the first launch and after opt-out. The GPU test injected the Electron notification. The main test threw an actual exception. [Consent and startup coverage](../decisions/0078-interrupted-session-and-javascript-reports.md#failures-while-the-main-process-is-starting)
+
+The native and unit suite passed 944 tests with 14 skips. All 16 selected Electron tests passed, covering crash reporting, diagnostics, process death and repository links. Typechecking, production build and lint passed. The Linux x64 package from clean `5007ad9` passed its fuse checks and desktop smoke, including the default-off reporting check. Production receiver and native cross-platform acceptance remain open.
+
 ## Native RPM signing on Linux x64
 
 OpenKraken 0.1.0 from clean application build `a8c7276` was packaged with test metadata and a disposable OpenPGP signing key. Fedora 43’s DNF rejected the package with local-package signature checking enabled and an unrelated key installed. After importing the matching certificate, DNF installed and reinstalled it, checked its dependencies, and removed it while preserving the fixture user’s data. The Electron Updates dialog downloaded the signed RPM from a loopback HTTPS feed, rejected an incorrect digest and verified the saved bytes.
