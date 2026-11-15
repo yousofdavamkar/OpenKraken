@@ -238,6 +238,29 @@ test('automatic checks require saved consent and stale preference changes cannot
   }
 });
 
+test('shutdown finishes an admitted opt-out before restarting automatic update checks', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'openkraken-update-opt-out-'));
+  const send = vi.fn<typeof fetch>();
+  let updater = new Updates(directory, configuration, runtime, send);
+  try {
+    await updater.started();
+    const { automatic } = await updater.setAutomatic(true, null);
+    const saving = updater.setAutomatic(false, automatic.revision);
+    const closing = updater.close();
+    const [saved] = await Promise.all([saving, closing]);
+    expect(saved.automatic).toMatchObject({ enabled: false, nextCheckAt: null });
+    await expect(updater.setAutomatic(true, saved.automatic.revision)).rejects.toThrow(
+      'unavailable',
+    );
+    updater = new Updates(directory, configuration, runtime, send);
+    expect((await updater.started()).automatic).toEqual(saved.automatic);
+    expect(send).not.toHaveBeenCalled();
+  } finally {
+    await updater.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('consented checks wait for startup, repeat every ten hours and retain their deadline across restart', async () => {
   const root = await mkdtemp(join(tmpdir(), 'openkraken-update-schedule-'));
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });

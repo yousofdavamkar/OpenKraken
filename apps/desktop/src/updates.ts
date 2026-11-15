@@ -379,8 +379,11 @@ export class Updates {
     }
   }
   setAutomatic(enabled: boolean, revision: string | null): Promise<UpdateState> {
+    if (!this.config || this.closed)
+      return Promise.reject(new Error('Automatic updates are unavailable.'));
     return this.savePreferences(async () => {
-      if (!this.config || this.closed) throw new Error('Automatic updates are unavailable.');
+      // Shutdown drains revocations accepted before close and stops scheduling new checks.
+      if (enabled && this.closed) throw new Error('Automatic updates are unavailable.');
       if (revision !== (this.automatic?.revision ?? null))
         throw new Error('Automatic update settings changed. Reopen the dialog before saving.');
       if (!enabled) {
