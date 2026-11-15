@@ -2,6 +2,24 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Reference sidebar measurements and commit badge grouping
+
+Three alternating pairs per fixture compared `93d1b05` with `d648174` on Linux x64 using Git 2.53.0 and an Intel Core i7-9750H. Both builds used the same main process and Git utility. Each fresh profile opened 2,000 commits from full Linux history and appended three 5,000-commit pages. The harness checked the renderer file URL and the loaded JavaScript asset for each build. The OS caches remained populated.
+
+| 50,000 refs      | Median first paint before | Median first paint after | Store publication to paint before | Store publication to paint after |
+| ---------------- | ------------------------: | -----------------------: | --------------------------------: | -------------------------------: |
+| Distinct targets |                  734.5 ms |                 733.6 ms |                          114.7 ms |                          97.7 ms |
+| 500 targets      |                  689.1 ms |                 678.4 ms |                          125.5 ms |                         103.5 ms |
+| One target       |                  674.9 ms |                 634.5 ms |                          146.2 ms |                         101.3 ms |
+
+The time from store publication to first paint fell in all nine comparisons. Five of nine full openings improved, and all eighteen exceeded 500 ms. All 54 page appends met 300 ms. The candidate's appends took 179.1–278.9 ms and graph and sidebar scrolling measured 16.7–16.8 ms p95. Eight reference controls were mounted in the candidate's resting viewport and six in the baseline. [Raw samples](m8-sidebar-block-samples.csv) · [Sidebar measurement](../decisions/0094-bounded-reference-sidebar.md#measuring-several-refs-together)
+
+A separate renderer comparison retained the first real, validated snapshot response in the test main process and delivered it on the next open in the same fresh profile. Each timed open still parsed the response, computed the worker layout, published the store and rendered the graph and sidebar. Every run verified the 2,000-commit count, 50,000-ref count and renderer bundle. Across five alternating pairs per fixture, median replay time fell from 284.2 to 256.2 ms for distinct targets and from 262.6 to 228.6 ms for a shared target. All ten pairs improved. These replay times exclude native repository opening.
+
+An eight-row prototype shortened the publication-to-paint phase in nine of nine native pairs and mounted fifteen refs. Four refs per section block shortened that phase in eight of nine pairs and mounted eight. Deferring the first measurement of individual rows to ResizeObserver shortened the paint phase in five of ten replay pairs. The shipped sidebar groups four refs together. Badge grouping also avoids constructing a map key for every undisplayed label. An isolated Node comparison checked the full and capped badge records across the first 32 visible commits. With 50,000 refs on one commit, the median three-badge preview took 7.57 ms before and 1.23 ms after. [Badge behavior](../decisions/0113-visible-commit-badges-and-reference-row-heights.md)
+
+Separate fresh-profile openings painted single-ref Linux history in 370.9 ms and the two-million-commit, 100,000-file checkout in 307.2 ms. The shared-target Linux repository reopened with 17,000 cached commits in 666.8 ms. Opening the distinct fixture with 10,000 saved hidden refs took 887.4 ms. All twelve appends met 300 ms.
+
 ## Validating refs before the first page is ready
 
 Three alternating pairs per fixture compared the previous one-message Git utility (`d00f8a7`) with the staged transfer in `38213be`. Each opened 2,000 commits from the same full Linux history in a fresh Electron profile and appended three pages of 5,000. The benchmark used Linux x64, Git 2.53.0 and an Intel Core i7-9750H, with populated OS caches and no concurrent build or test suite. Both used the same renderer. The benchmark's app directory pointed to the main and utility bundles under test.
