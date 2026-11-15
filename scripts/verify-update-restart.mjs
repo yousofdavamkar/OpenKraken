@@ -23,7 +23,10 @@ let completed = false;
 let launchOutput = '';
 const marker = join(root, 'started.json');
 const delayedDescendant = process.argv.includes('--delayed-descendant');
-const failStartup = process.argv.includes('--failed-startup') || delayedDescendant;
+const rollbackSyncError = process.argv.includes('--rollback-sync-error');
+const failStartup =
+  process.argv.includes('--failed-startup') || delayedDescendant || rollbackSyncError;
+const installFolder = rollbackSyncError ? join(root, 'install') : root;
 const helperUnavailable = process.argv.includes('--helper-unavailable');
 const unchangedImage = process.argv.includes('--unchanged-image');
 const slowCommit = process.argv.includes('--slow-commit');
@@ -206,6 +209,7 @@ try {
       if (fixtureReturning && ${failStartup}) fixtureElectron.app.commandLine.appendSwitch('remote-debugging-port', '0');
       if (${failStartup && version === replacementVersion}) {
         require('node:fs').writeFileSync(${JSON.stringify(failedMarker)}, 'replacement reached main');
+        if (${rollbackSyncError}) require('node:fs').chmodSync(${JSON.stringify(installFolder)}, 0o300);
         if (${delayedDescendant}) {
           const descendant = require('node:child_process').spawn('/bin/sleep', ['3'], { stdio: 'ignore' });
           if (!descendant.pid) throw new Error('Delayed descendant did not start');
@@ -241,7 +245,7 @@ try {
         }
         if ((${!failStartup && version === replacementVersion} || fixtureReturning) && args[1]?.method === 'updatesStarted') {
           require('node:fs').writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ version: fixtureElectron.app.getVersion(), pid: process.pid, state: result }));
-          if (!fixtureReturning || ${interruptedCommit}) setTimeout(() => fixtureElectron.app.quit(), 100);
+          if (!fixtureReturning || ${interruptedCommit} || (${rollbackSyncError} && result.state?.error === 'installation')) setTimeout(() => fixtureElectron.app.quit(), 100);
         }
         return result;
       });
@@ -326,7 +330,8 @@ try {
     'First AppImage matched the publisher receipt before launch; incomplete download rejected.',
   );
   const originalDigest = initialArtifact.sha256;
-  const target = join(root, 'Installed OpenKraken.AppImage');
+  if (rollbackSyncError) await mkdir(installFolder, { mode: 0o700 });
+  const target = join(installFolder, 'Installed OpenKraken.AppImage');
   await rename(download, target);
   await chmod(target, 0o755);
   const configHome = join(root, 'config');
@@ -496,7 +501,43 @@ try {
       window.removeEventListener('beforeunload', Reflect.get(window, 'fixtureUnload')),
     );
     await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
-    const started = JSON.parse(await waitForFile(marker, slowCommit ? 60000 : 30000));
+    let started = JSON.parse(await waitForFile(marker, slowCommit ? 60000 : 30000));
+    if (rollbackSyncError) {
+      assert.equal(started.version, initialVersion);
+      assert.equal(started.state.state.error, 'installation');
+      assert.equal(started.state.state.recovery, 'restored');
+      assert.equal(await sha256(target), originalDigest);
+      const journal = JSON.parse(
+        await readFile(target + '.openkraken-update/transaction.json', 'utf8'),
+      );
+      assert.equal(journal.previous.sha256, originalDigest);
+      assert.equal(journal.next.sha256, receipts[1].artifacts[0].sha256);
+      const firstPid = started.pid;
+      await expect
+        .poll(
+          async () => {
+            try {
+              return /\) [ZXx] /.test(await readFile(`/proc/${firstPid}/stat`, 'utf8'));
+            } catch (error) {
+              if (error.code !== 'ENOENT') throw error;
+              return true;
+            }
+          },
+          { timeout: 30000 },
+        )
+        .toBe(true);
+      await chmod(installFolder, 0o700);
+      await rm(marker);
+      child = spawn(target, [`--user-data-dir=${profile}`], {
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, TMPDIR: root, XDG_CONFIG_HOME: configHome },
+      });
+      started = JSON.parse(await waitForFile(marker));
+      console.log(
+        'The restored app retained its journal while directory sync was unavailable and retried startup after access was restored.',
+      );
+    }
     assert.equal(started.version, predecessorReturns ? initialVersion : replacementVersion);
     if (syncError) {
       assert.equal(await readFile(join(root, 'sync-failed'), 'utf8'), 'replacement renamed');
@@ -523,11 +564,13 @@ try {
     );
     assert.deepEqual(
       JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')),
-      predecessorInstalled
-        ? [initialVersion, initialVersion]
-        : failStartup
-          ? [initialVersion, replacementVersion, initialVersion]
-          : [initialVersion, replacementVersion],
+      rollbackSyncError
+        ? [initialVersion, replacementVersion, initialVersion, initialVersion]
+        : predecessorInstalled
+          ? [initialVersion, initialVersion]
+          : failStartup
+            ? [initialVersion, replacementVersion, initialVersion]
+            : [initialVersion, replacementVersion],
     );
     assert.equal(
       JSON.parse(await readFile(join(profile, 'updates/trusted-release.json'), 'utf8')).sequence,
@@ -605,6 +648,7 @@ try {
   server?.closeAllConnections();
   if (server) await new Promise((resolve) => server.close(resolve));
   await delay(300);
+  if (rollbackSyncError) await chmod(installFolder, 0o700).catch(() => {});
   if (completed) await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   else console.error('Retained disposable failure fixture:', root);
 }
