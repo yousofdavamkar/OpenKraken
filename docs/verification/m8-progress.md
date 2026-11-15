@@ -2,6 +2,14 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Linux beta packages and native release identity
+
+A local DEB with native version `0.2.0` and bundled version `0.1.0` passed the previous installer verifier and launched. The new verifier rejected it before extraction when the manifest claimed `0.1.0`. Changing the manifest to match the native `0.2.0` header reached the independent ASAR check, which also rejected it before launch. The builder and verifier now read the actual DEB/RPM package name, architecture and version. New manifests record the complete native package version. [Version checks and fixture commands](../decisions/0074-linux-installer-payload-verification.md#native-package-versions)
+
+On Linux x64, disposable Debian 13 and Fedora 43 installations upgraded from `0.1.0` to `0.2.0-beta.1` and then to `0.2.0`. Each package manager installed the expected version, replaced the ASAR, preserved the launcher and fixture user data, and removed the package. All four extracted beta/final installers passed desktop smoke checks. From a separate `0.2.0-beta.9` fixture checkout, the DEB builder produced candidate `0.2.0-beta.10` and final `0.2.0`. Native dpkg ordered the built versions as `0.2.0~beta.1 < 0.2.0~beta.10 < 0.2.0`.
+
+The Electron beta-feed tests used temporary keys and loopback HTTPS. They rejected an incorrect signed digest, downloaded the real beta DEB and RPM, and verified the saved bytes against each packaging digest. The stable update suite passed separately. Build, lint, actionlint and the full native/unit suite passed with 897 tests and 14 skips. These test-only artifacts cover Linux x64. [Linux beta procedure](../beta.md)
+
 ## Cold opens with 50,000 references
 
 The Git utility can start reading the first history page while it collects full ref metadata. It compares the complete ordered start commits before adopting the early walk. Native tests compare both pages with the ordinary walk after refs move or change order, and cover replaced commits, annotated tags, failure, cache reuse and filtered views. Three paired desktop runs per fixture reduced median first paint from 893.8 to 793.5 ms for distinct targets and from 783.5 to 739.5 ms for a shared target. The 500 ms target remains open. A shared-target append also exceeded its 300 ms budget. [Measurements and raw samples](m8-reference-performance.md#overlapping-reference-enumeration-and-history)
