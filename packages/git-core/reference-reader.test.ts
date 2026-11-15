@@ -506,6 +506,48 @@ test.skipIf(process.platform === 'win32')(
   },
 );
 
+test.skipIf(process.platform === 'win32').each([
+  { description: 'a valid replacement character', suffix: Buffer.from('�'), fallback: false },
+  {
+    description: 'an incomplete UTF-8 sequence',
+    suffix: Buffer.from([0xe2, 0x82]),
+    fallback: true,
+  },
+])('split ref output preserves $description', async ({ suffix, fallback }) => {
+  const name = Buffer.concat([Buffer.from('refs/tags/split-'), suffix]);
+  const tip = fixtureGit(repository, ['rev-parse', 'refs/tags/annotated']);
+  await runGit(git.path, ['update-ref', '--stdin'], {
+    cwd: repository,
+    readOnly: false,
+    stdin: Buffer.concat([Buffer.from('create '), name, Buffer.from(` ${tip}\n`)]),
+  });
+  let first = true;
+  let fullReads = 0;
+  const reader = new ReferenceReader(async (args, options) => {
+    if (args.length === 2 && args[1] === `--format=${REF_FORMAT}`) fullReads++;
+    if (!first) return runGit(git.path, args, options);
+    first = false;
+    const result = await runGit(git.path, args, { ...options, onStdout: undefined });
+    const at = result.stdout.indexOf(name);
+    expect(at).toBeGreaterThanOrEqual(0);
+    const split = at + name.length - suffix.length + 1;
+    await options.onStdout!(result.stdout.subarray(0, split));
+    await options.onStdout!(result.stdout.subarray(split, split + 1));
+    await options.onStdout!(result.stdout.subarray(split + 1));
+    return result;
+  });
+  try {
+    expect(await reader.read(repository)).toEqual(await nativeRefs());
+    expect(fullReads).toBe(fallback ? 1 : 0);
+  } finally {
+    await runGit(git.path, ['update-ref', '--stdin'], {
+      cwd: repository,
+      readOnly: false,
+      stdin: Buffer.concat([Buffer.from('delete '), name, Buffer.from('\n')]),
+    });
+  }
+});
+
 describe('repeated targets in a packed SHA-256 repository', () => {
   const cwd = join(root, 'grouped');
   const commonDir = join(cwd, '.git');

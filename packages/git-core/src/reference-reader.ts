@@ -142,7 +142,19 @@ export class ReferenceReader {
 
   private async readStable(cwd: string, signal: AbortSignal, grouped = false): Promise<Ref[]> {
     const parser = new RefsParser('direct');
-    const chunks: Buffer[] = [];
+    // Independently valid chunks start and end on UTF-8 code point boundaries.
+    // A split character needs streaming validation from that chunk onward.
+    let decoder: TextDecoder | undefined;
+    let validUtf8 = true;
+    const checkUtf8 = (chunk?: Buffer) => {
+      if (!validUtf8 || (!decoder && (!chunk || isUtf8(chunk)))) return;
+      decoder ??= new TextDecoder('utf-8', { fatal: true });
+      try {
+        decoder.decode(chunk, { stream: chunk !== undefined });
+      } catch {
+        validUtf8 = false;
+      }
+    };
     let bytes = 0;
     const account = (chunk: Buffer) => {
       bytes += chunk.length;
@@ -156,7 +168,7 @@ export class ReferenceReader {
       maxBytes: this.maxBytes,
       onStdout: (chunk) => {
         account(chunk);
-        chunks.push(chunk);
+        checkUtf8(chunk);
         parser.push(chunk);
       },
       onStderr: account,
@@ -171,7 +183,8 @@ export class ReferenceReader {
         throw new GitError('OUTPUT_LIMIT', 'Git output exceeded the safety limit');
     }
     if (!refs.some((ref) => ref.objectType === 'tag')) return refs;
-    if (!isUtf8(Buffer.concat(chunks))) return this.all(cwd, signal);
+    checkUtf8();
+    if (!validUtf8) return this.all(cwd, signal);
     const expected: Key[] = refs.map((ref) => [
       ref.name,
       ref.target,
