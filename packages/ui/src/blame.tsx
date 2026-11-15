@@ -1,3 +1,4 @@
+import { subscribeDesktopEvents } from './desktop-events.js';
 import { useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { BlameLine } from '@openkraken/ipc-contract';
@@ -30,7 +31,7 @@ export function BlamePanel({
         setLines((current) => [...current, ...rows]);
       }
     };
-    const unsubscribe = window.openkraken.subscribe((event) => {
+    const unsubscribe = subscribeDesktopEvents((event) => {
       if (event.type !== 'blameLines' || event.id !== id || !alive) return;
       pending.push(...event.lines);
       frame ??= requestAnimationFrame(flush);

@@ -1,3 +1,4 @@
+import { subscribeDesktopEvents } from './desktop-events.js';
 import { useEffect, useRef, useState } from 'react';
 import {
   activityActions,
@@ -32,7 +33,7 @@ export function ActivityToast() {
   const previousFocus = useRef<HTMLElement | null>(null);
   useEffect(
     () =>
-      window.openkraken.subscribe((event) => {
+      subscribeDesktopEvents((event) => {
         if (event.type !== 'activityChanged' || !event.completed) return;
         const completed = event.completed;
         if (
@@ -128,7 +129,7 @@ function ActivityDialog({ close }: { close: () => void }) {
     mounted.current = true;
     dialog.current?.showModal();
     closeButton.current?.focus();
-    const unsubscribe = window.openkraken.subscribe((event) => {
+    const unsubscribe = subscribeDesktopEvents((event) => {
       if (event.type === 'activityChanged') void load();
     });
     void load();

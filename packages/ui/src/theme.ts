@@ -1,3 +1,4 @@
+import { subscribeDesktopEvents } from './desktop-events.js';
 import { useSyncExternalStore } from 'react';
 import {
   darkColors,
@@ -42,7 +43,7 @@ export function subscribeTheme(listener: () => void) {
 }
 export const useTheme = () => useSyncExternalStore(subscribeTheme, getTheme);
 media.addEventListener('change', refresh);
-window.openkraken.subscribe((event) => {
+subscribeDesktopEvents((event) => {
   if (event.type === 'appearanceChanged') acceptAppearance(event.state);
 });
 export const themeReady = window.openkraken

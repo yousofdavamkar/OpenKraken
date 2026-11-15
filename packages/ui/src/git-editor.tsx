@@ -1,3 +1,4 @@
+import { subscribeDesktopEvents } from './desktop-events.js';
 import { useEffect, useRef, useState } from 'react';
 import type { DesktopEvent } from '@openkraken/ipc-contract';
 type Prompt = Extract<DesktopEvent, { type: 'editorPrompt' }> & { interrupted?: boolean };
@@ -102,7 +103,7 @@ export function GitEditors() {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   useEffect(
     () =>
-      window.openkraken.subscribe((event) => {
+      subscribeDesktopEvents((event) => {
         if (event.type === 'editorPrompt')
           setPrompts((current) => [
             ...current.filter((item) => item.promptId !== event.promptId),

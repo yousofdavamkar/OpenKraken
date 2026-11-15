@@ -1,3 +1,4 @@
+import { subscribeDesktopEvents } from './desktop-events.js';
 import {
   createContext,
   useContext,
@@ -146,7 +147,7 @@ class CommandRegistry {
       attributes: true,
       attributeFilter: ['open', 'disabled'],
     });
-    const unsubscribeEvents = window.openkraken.subscribe((event) => {
+    const unsubscribeEvents = subscribeDesktopEvents((event) => {
       if (event.type !== 'commandExecute' || event.revision !== this.revision) return;
       const target = document.activeElement;
       const typing =

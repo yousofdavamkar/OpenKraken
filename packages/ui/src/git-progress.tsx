@@ -1,3 +1,4 @@
+import { subscribeDesktopEvents } from './desktop-events.js';
 import { useEffect, useState } from 'react';
 import { useRepository } from './store.js';
 export function GitProgress() {
@@ -5,7 +6,7 @@ export function GitProgress() {
   const [progress, setProgress] = useState<{ id: string; text: string }>();
   useEffect(
     () =>
-      window.openkraken.subscribe((event) => {
+      subscribeDesktopEvents((event) => {
         if (event.type === 'gitProgress' && event.id === useRepository.getState().busy)
           setProgress({ id: event.id, text: event.text });
       }),

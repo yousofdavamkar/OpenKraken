@@ -1,3 +1,4 @@
+import { subscribeDesktopEvents } from './desktop-events.js';
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -123,7 +124,7 @@ export default function TerminalPanel({
       }
       return true;
     });
-    const unsubscribe = window.openkraken.subscribe((event) => {
+    const unsubscribe = subscribeDesktopEvents((event) => {
       if (
         (event.type !== 'terminalData' && event.type !== 'terminalExit') ||
         event.id !== session.id ||

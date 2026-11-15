@@ -1,3 +1,4 @@
+import { subscribeDesktopEvents } from './desktop-events.js';
 import { useEffect, useRef, useState } from 'react';
 import type { LfsState, LfsPullPreview, LfsLocks, LfsSetupPreview } from '@openkraken/ipc-contract';
 import { CommandButton } from './commands.js';
@@ -36,7 +37,7 @@ function LfsDialog({ repoId, close }: { repoId: string; close: () => void }) {
   }
   useEffect(
     () =>
-      window.openkraken.subscribe((event) => {
+      subscribeDesktopEvents((event) => {
         if (event.type === 'gitProgress' && event.id === requestId.current) setProgress(event.text);
       }),
     [],

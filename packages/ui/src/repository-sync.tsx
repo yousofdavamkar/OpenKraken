@@ -1,3 +1,4 @@
+import { subscribeDesktopEvents } from './desktop-events.js';
 import { useEffect, useState } from 'react';
 import type { RepositoryEvent } from '@openkraken/ipc-contract';
 import { AutomaticFetch } from './automatic-fetch.js';
@@ -49,7 +50,7 @@ export function RepositorySync() {
         if (domains.size) schedule();
       }
     };
-    const unsubscribe = window.openkraken.subscribe((event) => {
+    const unsubscribe = subscribeDesktopEvents((event) => {
       if (event.type !== 'repositoryChanged' || event.repoId !== repoId) return;
       useRepository.setState({ watcherMode: event.mode });
       for (const domain of event.domains) domains.add(domain);

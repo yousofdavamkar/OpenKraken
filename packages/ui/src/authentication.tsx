@@ -1,3 +1,4 @@
+import { subscribeDesktopEvents } from './desktop-events.js';
 import { useEffect, useRef, useState } from 'react';
 import type { AuthenticationEvent, DesktopEvent } from '@openkraken/ipc-contract';
 import { useRepository } from './store.js';
@@ -122,7 +123,7 @@ export function Authentication() {
   const [problem, setProblem] = useState<TransportProblem>();
   useEffect(
     () =>
-      window.openkraken.subscribe((event) => {
+      subscribeDesktopEvents((event) => {
         if (event.type === 'transportProblem') setProblem(event);
         if (event.type === 'authenticationPrompt')
           setPrompts((current) => [

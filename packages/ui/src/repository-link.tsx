@@ -1,3 +1,4 @@
+import { subscribeDesktopEvents } from './desktop-events.js';
 import { useEffect, useRef, useState } from 'react';
 import type { RepositoryLink } from '@openkraken/ipc-contract';
 import { useRepository } from './store.js';
@@ -26,7 +27,7 @@ export function RepositoryLinkControl() {
         if (live) setError('The repository link could not be read.');
       }
     };
-    const unsubscribe = window.openkraken.subscribe((event) => {
+    const unsubscribe = subscribeDesktopEvents((event) => {
       if (event.type === 'repositoryLinkChanged') void read();
     });
     void read();

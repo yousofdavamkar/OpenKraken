@@ -1,3 +1,4 @@
+import { subscribeDesktopEvents } from './desktop-events.js';
 import { useEffect, useRef, useState } from 'react';
 import type {
   SubmoduleState,
@@ -37,7 +38,7 @@ function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void 
   const [error, setError] = useState('');
   useEffect(
     () =>
-      window.openkraken.subscribe((event) => {
+      subscribeDesktopEvents((event) => {
         if (event.type === 'gitProgress' && event.id === updateId.current) setProgress(event.text);
       }),
     [],
