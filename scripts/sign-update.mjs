@@ -1,6 +1,6 @@
 import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { constants } from 'node:fs';
-import { link, mkdtemp, open, readFile, rmdir, unlink } from 'node:fs/promises';
+import { link, mkdtemp, open, readFile, rm, rmdir } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
   updateEnvelopeLimit,
@@ -90,7 +90,7 @@ async function publish() {
     await link(temporary, outputPath);
   } finally {
     try {
-      await unlink(temporary);
+      await rm(temporary, { force: true });
       await rmdir(staging);
     } catch {
       // Cleanup cannot undo publication or mask the original signing result.

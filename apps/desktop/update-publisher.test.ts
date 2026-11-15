@@ -92,8 +92,8 @@ test('the release publisher signs actual artifact bytes and refuses invalid or o
   }
 });
 
-test.each(['write failure', 'process exit'])(
-  'a partial envelope is invisible after %s and the same release name can be retried',
+test.each(['write failure', 'sync failure', 'process exit'])(
+  'the final release name remains available for retry after %s',
   async (failure) => {
     const directory = await mkdtemp(join(tmpdir(), 'openkraken-update-interruption-'));
     try {
@@ -109,6 +109,11 @@ test.each(['write failure', 'process exit'])(
         const write = prototype.writeFile;
         prototype.writeFile = async function(data, ...args) {
           if (typeof data !== 'string' || !data.startsWith('{"payload":')) return write.call(this, data, ...args);
+          if (${failure === 'sync failure'}) {
+            await write.call(this, data, ...args);
+            this.sync = async () => { throw new Error('simulated sync failure'); };
+            return;
+          }
           await write.call(this, data.slice(0, 12));
           ${failure === 'process exit' ? 'process.exit(17)' : 'throw new Error("simulated write failure")'};
         };
@@ -119,7 +124,7 @@ test.each(['write failure', 'process exit'])(
       await expect(readFile(join(directory, 'release.json'))).rejects.toMatchObject({
         code: 'ENOENT',
       });
-      if (failure === 'write failure') expect((await readdir(directory)).sort()).toEqual(before);
+      if (failure !== 'process exit') expect((await readdir(directory)).sort()).toEqual(before);
       await invoke();
       const signed = await readFile(join(directory, 'release.json'), 'utf8');
       expect(
