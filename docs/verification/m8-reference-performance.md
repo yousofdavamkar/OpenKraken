@@ -2,6 +2,17 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Transferring Canvas rows from the graph worker
+
+The baseline at `18f0ef4` cloned the row and edge objects. The worker in `63a7e8e` transfers two typed buffers and the renderer reconstructs those objects. The benchmark used fresh Electron profiles, a Git commit-graph, uncleared OS caches and the same Linux x64 host. Each fixture had 1,505,199 reachable commits and 50,000 refs. Three pairs alternated build order. Each opening painted 2,000 commits and appended three pages of 5,000. The harness checked the active renderer path and bundle name before opening the repository.
+
+| Reference targets       | Median worker phase, before → after | Median full page, before → after | Full page range after | Median first paint, before → after |
+| ----------------------- | ----------------------------------: | -------------------------------: | --------------------: | ---------------------------------: |
+| 50,000 distinct commits |                      74.6 → 59.2 ms |                 228.2 → 208.7 ms |        167.0–259.6 ms |                   729.6 → 733.2 ms |
+| 500 interleaved commits |                      81.7 → 70.6 ms |                 209.6 → 211.8 ms |        189.3–235.0 ms |                   620.6 → 632.2 ms |
+
+The worker phase includes projection, dispatch, layout and receipt in the renderer. All 18 appends in each build passed the 300 ms budget. Every opening missed the 500 ms budget. Graph and sidebar p95 frame intervals were at most 16.8 ms in both builds. The full-page median on the interleaved fixture increased by 2.2 ms despite the lower worker time. [All paired runs](m8-layout-transfer-samples.csv)
+
 ## Renderer heap for commits with one reference
 
 The graph used to allocate a badge list for every target when opening a repository. It now holds a single ref directly until a row needs its list. Additional refs at the same target still form an ordered list. Four alternating pairs of fresh Electron profiles opened 2,000 commits from full Linux history with 50,000 distinct targets. After first paint, Chromium collected garbage and reported live renderer JavaScript heap through CDP.
