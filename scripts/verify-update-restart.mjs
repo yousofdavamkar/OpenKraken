@@ -65,7 +65,10 @@ async function waitForFile(path, timeout = 30000) {
 try {
   const cert = join(root, 'cert.pem'),
     key = join(root, 'key.pem');
-  await promisify(execFile)(process.execPath, [resolve('scripts/create-loopback-certificate.mjs'), root]);
+  await promisify(execFile)(process.execPath, [
+    resolve('scripts/create-loopback-certificate.mjs'),
+    root,
+  ]);
   const keys = generateKeyPairSync('ed25519');
   const images = [];
   let envelope;
