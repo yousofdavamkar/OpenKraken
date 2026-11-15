@@ -2,6 +2,14 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Streaming reference validation
+
+The Git reader now releases native stdout chunks during enumeration. Three paired runs on the 50,000-distinct-target fixture reduced reachable input buffers at the end of the native read from 4,009,992 bytes to zero. Native tests compare a literal replacement character and malformed UTF-8 across chunk boundaries against Git's full ref enumeration.
+
+Fresh Linux x64 desktop runs painted one ref in 365.9 ms, 50,000 refs sharing one target in 494.8 ms, and 50,000 distinct targets in 705.2 ms. All nine 5,000-commit appends and all three graph scrolling runs met their budgets. The distinct-target first-paint gate remains open. [Measurements and method](m8-reference-performance.md#memory-retained-during-native-ref-enumeration)
+
+The native/unit suite passed 932 tests in 111 files with 14 skips. All 38 reference-reader cases passed on Git 2.53.0. The minimum-version run on Git 2.38.0 passed 26 with 12 newer-Git cases skipped. Eight Electron palette tests passed on the final renderer, including full ref names that distinguish a local branch from a remote branch. Typechecking, production build and lint passed.
+
 ## Repeated reference targets, watcher startup and repository identity
 
 The Linux x64 build now resolves each repeated Git object type once on large packed repositories. The watcher captures the opening ref values before returning the graph and hashes them at its first active comparison. Against `42b4423`, median first paint at `a8e90ba` changed from 737.2 to 712.8 ms for 50,000 distinct targets, from 662.0 to 528.2 ms for 500 targets and from 627.0 to 564.7 ms for one target. Every opening remained over 500 ms. One of the new build’s 27 page appends took 301.6 ms. The other 26 met 300 ms. [Full measurements and individual samples](m8-reference-performance.md#repeated-targets-and-the-first-watcher-check)

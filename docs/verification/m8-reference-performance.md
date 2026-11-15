@@ -2,6 +2,20 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Memory retained during native ref enumeration
+
+Three paired native reads of the 50,000-distinct-target fixture each received 4,009,992 bytes from Git. A probe kept a weak reference to each stdout buffer, yielded to the event loop and forced GC after the native process finished but before the reader continued. At that point all 4,009,992 bytes were still reachable in each baseline run (`65d63dd`), and zero stdout bytes were reachable in each candidate run (`0714557`). The probe used fresh Node 24.22.2 processes in alternating order. This measures reachable input buffers at one point in the Git utility. Parsed refs still occupy memory.
+
+Fresh Linux x64 Electron profiles then opened full Linux history with Git 2.53.0 and warm OS caches. Each fixture has 1,505,199 reachable commits. Each row is a single opening.
+
+| Fixture                      | First paint | Three 5,000-commit appends | Graph scroll p95 |
+| ---------------------------- | ----------: | -------------------------- | ---------------: |
+| One ref                      |    365.9 ms | 253.9 / 208.6 / 177.9 ms   |          16.7 ms |
+| 50,000 distinct targets      |    705.2 ms | 250.6 / 199.7 / 189.2 ms   |          16.8 ms |
+| 50,000 refs sharing a target |    494.8 ms | 207.0 / 194.5 / 168.8 ms   |          16.7 ms |
+
+The distinct-target opening missed the 500 ms gate. The shared-target run met it once. The earlier three-run shared-target median was 564.7 ms. All nine appends met 300 ms. [Streaming validation decision](../decisions/0098-direct-first-reference-enumeration.md#streaming-utf-8-validation)
+
 ## Repeated targets and the first watcher check
 
 Three alternating pairs per fixture compared `42b4423` with `a8e90ba` on Linux x64, Git 2.53.0 and an Intel Core i7-9750H. Each fresh Electron profile opened the same 2,000 commits from full Linux history and appended three 5,000-commit pages. OS caches were retained. The two apps used the same renderer asset and physically separate main and Git utility bundles. Each opening checked the renderer URL and asset.
