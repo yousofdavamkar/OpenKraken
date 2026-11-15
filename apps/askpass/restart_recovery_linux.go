@@ -212,8 +212,18 @@ func reopenPredecessor(target, profile, nextHash string, nextSize int64, previou
 		}
 	}
 	if !beforeRename {
-		if os.Rename(backup, target) != nil || !restartSync(filepath.Dir(target)) || !restartSync(folder) {
+		if os.Rename(backup, target) != nil {
 			return 125
+		}
+		parentSynced := restartSync(filepath.Dir(target))
+		folderSynced := restartSync(folder)
+		if !parentSynced || !folderSynced {
+			// The rename already restored the predecessor. Its startup retries both
+			// syncs before clearing the journal. Recheck the installed file first.
+			restored, ok := restartVerifiedFile(target, previousHash, previousSize, 1, false)
+			if !ok || !os.SameFile(previous, restored) || !restartDirectory(filepath.Dir(target), false) {
+				return 125
+			}
 		}
 		restartRestorationNotice(profile)
 	}
