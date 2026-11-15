@@ -276,6 +276,53 @@ test('changing views sends explicit roots and only applies the returned snapshot
   expect(useRepository.getState().layout).toEqual([]);
   expect(useRepository.getState().selection.selected).toEqual([]);
 });
+test('staging a displayed path updates status and keeps the graph and active search', async () => {
+  const snapshot = fixture();
+  const path = 'notes.txt';
+  const entry = {
+    path,
+    pathBytes: Buffer.from(path).toString('base64'),
+    kind: 'ordinary' as const,
+    index: '.',
+    worktree: 'M',
+    submodule: 'N...',
+  };
+  snapshot.status.entries.push(entry);
+  await open(snapshot);
+  await useRepository.getState().search('notes');
+  const previous = useRepository.getState();
+  expect(previous.matches).toEqual([`wip:${snapshot.repository.id}`]);
+  const refresh = async (status: Snapshot['status']) => {
+    request.mockResolvedValueOnce({
+      kind: 'workingState',
+      state: { head: snapshot.repository.head, revision: '0'.repeat(64), status },
+    });
+    await useRepository.getState().refreshStatus();
+    return useRepository.getState();
+  };
+  const staged = { ...entry, index: 'M', worktree: '.' };
+  const updated = await refresh({ ...snapshot.status, entries: [staged] });
+  expect(updated.snapshot?.status.entries).toEqual([staged]);
+  expect(updated.workingState?.status.entries).toEqual([staged]);
+  expect(updated.layout).toBe(previous.layout);
+  expect(updated.rows).toBe(previous.rows);
+  expect(updated.matches).toBe(previous.matches);
+  const renamed = await refresh({
+    ...snapshot.status,
+    entries: [
+      { ...staged, path: 'other.txt', pathBytes: Buffer.from('other.txt').toString('base64') },
+    ],
+  });
+  expect(renamed.rows[0]?.body).toBe('other.txt');
+  expect(renamed.matches).toEqual([]);
+  const conflicted = await refresh({
+    ...snapshot.status,
+    entries: [{ ...staged, kind: 'conflict' }],
+  });
+  expect(conflicted.rows[0]?.kind).toBe('conflict');
+  expect(conflicted.matches).toEqual([`conflict:${snapshot.repository.id}`]);
+});
+
 test('status refresh preserves the append-only history cursor, loaded commits and selection', async () => {
   const snapshot = fixture();
   await open(snapshot);

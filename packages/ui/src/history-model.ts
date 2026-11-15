@@ -8,6 +8,16 @@ import {
 export interface DisplayCommit extends Commit {
   kind: 'commit' | 'wip' | 'conflict' | 'worktree';
 }
+const hasConflict = (status: Snapshot['status']) =>
+  status.entries.some((entry) => entry.kind === 'conflict');
+
+export function sameWorkingRow(before: Snapshot['status'], after: Snapshot['status']) {
+  return (
+    before.entries.length === after.entries.length &&
+    before.entries.every((entry, index) => entry.path === after.entries[index]!.path) &&
+    hasConflict(before) === hasConflict(after)
+  );
+}
 export function projectCommits(
   commits: Commit[],
   snapshot: Snapshot,
@@ -15,7 +25,7 @@ export function projectCommits(
 ): DisplayCommit[] {
   const result: DisplayCommit[] = [];
   const dirty = snapshot.status.entries.length > 0;
-  const conflict = snapshot.status.entries.some((e) => e.kind === 'conflict');
+  const conflict = hasConflict(snapshot.status);
   const worktrees = new Map<string | undefined, DisplayCommit[]>();
   for (const entry of snapshot.worktrees?.entries ?? []) {
     if (entry.current || entry.bare) continue;

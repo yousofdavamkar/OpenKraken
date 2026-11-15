@@ -1,6 +1,6 @@
 import { pressShortcut } from '../electron-shortcut.js';
 import { _electron as electron, expect, test } from '@playwright/test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createFixture, fixtureGit, fixtureKinds } from '../../packages/test-fixtures/src/index.js';
@@ -119,6 +119,48 @@ test('searching a hexadecimal branch name opens the commit with the matching obj
     await expect(results.getByRole('button')).toHaveCount(1);
     await results.getByRole('button', { name: /Commit 6 — linear/ }).click();
     await expect(page.getByRole('region', { name: 'Commit details' })).toContainText(oid);
+  } finally {
+    await close();
+  }
+});
+test('external staging preserves an active search without resending the loaded graph', async () => {
+  const { page, repository, close } = await launch('linear', 7200, (path) => {
+    writeFileSync(join(path, 'stage-me.txt'), 'new file\n');
+  });
+  try {
+    await page.getByLabel('Refresh on focus', { exact: true }).uncheck();
+    await expect(page.getByText('Watching for changes', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Load more commits', exact: true }).click();
+    await expect(page.getByTestId('commit-count')).toHaveText('7,000 commits · more available');
+    await page.getByRole('textbox', { name: 'Search commits' }).fill('stage-me');
+    const matches = page.getByText('1 loaded matches', { exact: true });
+    await expect(matches).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Stage stage-me.txt', exact: true }),
+    ).toBeVisible();
+    await page.evaluate(() => {
+      Worker.prototype.postMessage = new Proxy(Worker.prototype.postMessage, {
+        apply(send, worker, args) {
+          const [message] = args;
+          if (message.method === 'refresh' || message.method === 'reset')
+            performance.mark('test-graph-reload', { detail: message.commits.length });
+          return Reflect.apply(send, worker, args);
+        },
+      });
+    });
+    fixtureGit(repository, ['add', '--', 'stage-me.txt']);
+    await expect(
+      page.getByRole('button', { name: 'Unstage stage-me.txt', exact: true }),
+    ).toBeEnabled();
+    await expect(matches).toBeVisible();
+    await expect(page.getByTestId('commit-count')).toHaveText('7,000 commits · more available');
+    expect(
+      await page.evaluate(() =>
+        performance
+          .getEntriesByName('test-graph-reload')
+          .map((entry) => (entry as PerformanceMark).detail),
+      ),
+    ).toEqual([]);
   } finally {
     await close();
   }

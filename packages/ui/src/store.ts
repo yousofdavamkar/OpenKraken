@@ -13,7 +13,7 @@ import { decodeHistoryPage, expandGitServiceResult } from '@openkraken/ipc-contr
 import { patchPassages } from '@openkraken/graph';
 import type { GraphRow, GraphPassage } from '@openkraken/graph';
 import { GraphClient } from './graph-client.js';
-import { projectCommits, selectRow } from './history-model.js';
+import { projectCommits, sameWorkingRow, selectRow } from './history-model.js';
 import type { DisplayCommit, Selection } from './history-model.js';
 declare global {
   interface Window {
@@ -101,11 +101,17 @@ export const useRepository = create<State>()(
           fullRefresh = true;
           return;
         }
+        // HEAD and the worktree revision were checked above. Staging a path can
+        // change its status without changing the synthetic row or its search text.
         if (
-          JSON.stringify(snapshot.status) === JSON.stringify(result.state.status) &&
-          JSON.stringify(snapshot.worktrees) === JSON.stringify(worktrees)
+          (worktrees === snapshot.worktrees ||
+            JSON.stringify(worktrees) === JSON.stringify(snapshot.worktrees)) &&
+          sameWorkingRow(snapshot.status, result.state.status)
         ) {
+          const statusChanged =
+            JSON.stringify(snapshot.status) !== JSON.stringify(result.state.status);
           set((s) => {
+            if (statusChanged) s.snapshot = { ...snapshot, status: result.state.status };
             s.workingState = result.state;
           });
           return;
