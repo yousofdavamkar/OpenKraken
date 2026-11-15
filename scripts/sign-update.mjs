@@ -1,7 +1,7 @@
 import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { constants } from 'node:fs';
-import { open, readFile } from 'node:fs/promises';
-import { basename, dirname, resolve } from 'node:path';
+import { link, mkdtemp, open, readFile, rmdir, unlink } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import {
   updateEnvelopeLimit,
   updateSignatureContext,
@@ -75,13 +75,27 @@ async function publish() {
       signature: signature.toString('base64'),
     }) + '\n';
   if (Buffer.byteLength(envelope) > updateEnvelopeLimit) throw new Error('Release is too large');
-  // Exclusive creation prevents accidentally replacing a previously published sequence.
-  const output = await open(outputPath, 'wx', 0o644);
+  // Stage in the destination filesystem. Linking makes the complete envelope
+  // visible in one operation and preserves a concurrent publisher's output.
+  const staging = await mkdtemp(join(dirname(outputPath), '.openkraken-release-'));
+  const temporary = join(staging, 'envelope');
   try {
-    await output.writeFile(envelope);
-    await output.sync();
+    const output = await open(temporary, 'wx', 0o644);
+    try {
+      await output.writeFile(envelope);
+      await output.sync();
+    } finally {
+      await output.close();
+    }
+    await link(temporary, outputPath);
   } finally {
-    await output.close();
+    try {
+      await unlink(temporary);
+      await rmdir(staging);
+    } catch {
+      // Cleanup cannot undo publication or mask the original signing result.
+      console.error('The release staging directory could not be cleaned up.');
+    }
   }
   console.log(
     JSON.stringify({
