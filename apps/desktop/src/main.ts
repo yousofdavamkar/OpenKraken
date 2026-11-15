@@ -11,6 +11,7 @@ import {
 } from './update-restart.js';
 import { updatesStateSchema } from '@openkraken/ipc-contract';
 import { RepositoryLinks } from './repository-links.js';
+import { WorkingFileDrafts } from './working-file-drafts.js';
 import { CommitDrafts } from './commit-drafts.js';
 import { CommandMenu } from './command-menu.js';
 import { TerminalHost } from './terminal-host.js';
@@ -110,6 +111,7 @@ let avatars: AvatarCache | undefined;
 let appSettings: AppSettings | undefined;
 let activity: ActivityLog | undefined;
 let commitDrafts: CommitDrafts | undefined;
+let workingFileDrafts: WorkingFileDrafts | undefined;
 const draftRepositories = new Map<string, Repository>();
 let activeAppearance: AppearancePreferences = {
   revision: 0,
@@ -305,8 +307,10 @@ function createWindow() {
       detail: 'Editor drafts may be unsaved, or a terminal session may still be running.',
       noLink: true,
     });
-    if (choice === 1) event.preventDefault();
-    else if (updateHandoff) {
+    if (choice === 1) {
+      void workingFileDrafts?.close(undefined, true).catch(() => {});
+      event.preventDefault();
+    } else if (updateHandoff) {
       installOnQuit = false;
       void cancelPreparedRestart()
         .then(() => updates?.abandonInstall())
@@ -324,6 +328,7 @@ function createWindow() {
   };
   window.webContents.on('render-process-gone', cancelProviderSignIn);
   window.webContents.on('render-process-gone', (_event, details) => {
+    void workingFileDrafts?.close(undefined, false);
     diagnostics?.failure('renderer', details.reason);
     void crashReports?.capture('renderer', details.reason);
   });
@@ -592,6 +597,39 @@ else {
       )
         return await terminals.request(request, terminalRepository);
       try {
+        if (
+          request.method === 'workingDraftOpen' ||
+          request.method === 'workingDraftWrite' ||
+          request.method === 'workingDraftClose'
+        ) {
+          const drafts = (workingFileDrafts ??= new WorkingFileDrafts(app.getPath('userData')));
+          try {
+            if (request.method === 'workingDraftOpen') {
+              const repo = draftRepositories.get(request.repoId);
+              if (!repo)
+                return {
+                  kind: 'error',
+                  code: 'UNKNOWN_REPOSITORY',
+                  message: 'Open the repository before accessing its draft.',
+                };
+              return {
+                kind: 'workingDraft',
+                draft: await drafts.open(repo, request.pathBytes, request.session),
+              };
+            }
+            if (request.method === 'workingDraftWrite')
+              await drafts.write(request.session, request.draft);
+            else await drafts.close(request.session, request.discard);
+            return { kind: 'workingDraft', draft: null };
+          } catch {
+            return {
+              kind: 'error',
+              code: 'DRAFT_UNAVAILABLE',
+              message:
+                'Local draft storage is unavailable or changed elsewhere. Keep a copy of your edits.',
+            };
+          }
+        }
         if (request.method === 'commitDraftRead' || request.method === 'commitDraftSave') {
           const repository = draftRepositories.get(request.repoId);
           if (!repository)
@@ -1416,6 +1454,8 @@ else {
           'updatesRead',
           'updatesCancel',
           'commitDraftSave',
+          'workingDraftWrite',
+          'workingDraftClose',
           'terminalAck',
           'rendererFailure',
         ].includes(request.method)
@@ -1533,7 +1573,15 @@ else {
     providers?.deviceCancel();
     providers?.gitlabCancel();
     for (const controller of providerRequests.values()) controller.abort();
-    if (!service && !providers && !appSettings && !commitDrafts && !crashReports && !updates)
+    if (
+      !service &&
+      !providers &&
+      !appSettings &&
+      !commitDrafts &&
+      !workingFileDrafts &&
+      !crashReports &&
+      !updates
+    )
       return;
     event.preventDefault();
     quitState = 'draining';
@@ -1549,6 +1597,7 @@ else {
       crashReports?.idle(),
       diagnostics?.idle(),
       commitDrafts?.idle(),
+      workingFileDrafts?.idle(),
       terminals.close(),
     ]).then(() => activity?.idle());
     let serviceTimer: ReturnType<typeof setTimeout>;

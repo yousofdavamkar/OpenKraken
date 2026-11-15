@@ -612,6 +612,14 @@ export const saveWorkingFileSchema = z
       .refine((value) => !value.includes('\0')),
   })
   .strict();
+export const workingFileDraftSchema = z
+  .object({
+    token: workingFileSchema.shape.token,
+    text: saveWorkingFileSchema.shape.text,
+    newline: z.enum(['', 'lf', 'crlf', 'cr']),
+  })
+  .strict();
+export type WorkingFileDraft = z.infer<typeof workingFileDraftSchema>;
 export type WorkingFileOptions = z.infer<typeof workingFileOptionsSchema>;
 export type WorkingFile = z.infer<typeof workingFileSchema>;
 export type SaveWorkingFile = z.infer<typeof saveWorkingFileSchema>;
@@ -1285,6 +1293,31 @@ export const requestSchema = z.discriminatedUnion('method', [
     })
     .strict(),
   ...commitDraftRequests,
+  z
+    .object({
+      id: requestId,
+      method: z.literal('workingDraftOpen'),
+      repoId: z.string().min(1).max(128),
+      pathBytes: pathBytesSchema,
+      session: requestId,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('workingDraftWrite'),
+      session: requestId,
+      draft: workingFileDraftSchema.nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('workingDraftClose'),
+      session: requestId,
+      discard: z.boolean(),
+    })
+    .strict(),
   ...activityRequests,
   worktreeAddRequest,
   ...terminalRequests,
@@ -1876,6 +1909,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('diagnostics'), state: diagnosticsStateSchema }).strict(),
   z.object({ kind: z.literal('updates'), state: updatesStateSchema }).strict(),
   z.object({ kind: z.literal('repositoryLink'), link: repositoryLinkSchema.nullable() }).strict(),
+  z.object({ kind: z.literal('workingDraft'), draft: workingFileDraftSchema.nullable() }).strict(),
   z.object({ kind: z.literal('commitDraft'), state: commitDraftStateSchema }).strict(),
   z.object({ kind: z.literal('activity'), state: activityStateSchema }).strict(),
   z

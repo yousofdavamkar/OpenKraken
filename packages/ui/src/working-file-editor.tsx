@@ -1,10 +1,11 @@
 import { editorTheme } from './editor-theme.js';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { codeHighlighting, languageForPath } from './syntax.js';
-import type { SaveWorkingFile, WorkingFile } from '@openkraken/ipc-contract';
+import { WorkingFileDraftSession } from './working-file-draft.js';
+import type { SaveWorkingFile, WorkingFile, WorkingFileDraft } from '@openkraken/ipc-contract';
 const normalize = (text: string) => text.replace(/\r\n?|\n/g, '\n');
 function CodeEditor({
   initial,
@@ -68,24 +69,69 @@ function CodeEditor({
   }, [disabled]);
   return <div ref={host} className="working-code-editor" />;
 }
+type Loaded = {
+  file: WorkingFile;
+  recovered: WorkingFileDraft | null;
+  session: WorkingFileDraftSession;
+  storageError?: string;
+};
 function Draft({
-  file,
+  loaded: { file, recovered, session, storageError },
   busy,
   error,
   onClose,
   onSave,
 }: {
-  file: WorkingFile;
+  loaded: Loaded;
   busy: boolean;
   error?: string;
   onClose: () => void;
   onSave: (options: SaveWorkingFile) => Promise<boolean>;
 }) {
-  const [text, setText] = useState(normalize(file.text));
-  const [newline, setNewline] = useState(file.newline === 'mixed' ? '' : file.newline);
+  const original = normalize(file.text);
+  const originalNewline = file.newline === 'mixed' ? '' : file.newline;
+  const initialText = recovered?.text ?? original;
+  const [text, setText] = useState(initialText);
+  const [newline, setNewline] = useState(recovered?.newline ?? originalNewline);
   const [closing, setClosing] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+  const [cleanupError, setCleanupError] = useState('');
+  const [status, setStatus] = useState(recovered ? 'Recovered local draft' : '');
+  const [edited, setEdited] = useState(false);
+  const changeText = useCallback((next: string) => {
+    setEdited(true);
+    setText(next);
+  }, []);
   const dialog = useRef<HTMLDialogElement>(null);
-  const dirty = text !== normalize(file.text) || (!!newline && newline !== file.newline);
+  const stale = !!recovered && recovered.token !== file.token;
+  const dirty = stale || text !== original || newline !== originalNewline;
+  const locked = busy || finishing || !!cleanupError;
+  useEffect(() => {
+    if (!edited || storageError) return;
+    let live = true;
+    setStatus('Saving draft…');
+    session.change(
+      dirty ? { token: recovered?.token ?? file.token, text, newline } : null,
+      (message) => {
+        if (live) setStatus(message);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [dirty, edited, file.token, newline, recovered, session, storageError, text]);
+  const finish = async (discard: boolean) => {
+    setFinishing(true);
+    try {
+      await session.close(discard);
+      onClose();
+    } catch (error) {
+      setCleanupError(
+        error instanceof Error ? error.message : 'The saved draft could not be cleared.',
+      );
+      setFinishing(false);
+    }
+  };
   useLayoutEffect(() => {
     if (!dirty) return;
     const prevent = (event: BeforeUnloadEvent) => {
@@ -96,9 +142,13 @@ function Draft({
     return () => window.removeEventListener('beforeunload', prevent);
   }, [dirty]);
   const close = () => {
-    if (busy) return;
+    if (cleanupError) {
+      onClose();
+      return;
+    }
+    if (locked) return;
     if (dirty) setClosing(true);
-    else onClose();
+    else void finish(true);
   };
   useEffect(() => {
     dialog.current?.showModal();
@@ -115,7 +165,7 @@ function Draft({
     >
       <header>
         <h2>{file.path}</h2>
-        <button disabled={busy} onClick={close}>
+        <button disabled={busy || finishing} onClick={close}>
           Close editor
         </button>
       </header>
@@ -130,8 +180,14 @@ function Draft({
           <select
             aria-label="Line endings"
             value={newline}
-            disabled={busy}
-            onChange={(event) => setNewline(event.target.value)}
+            disabled={locked || closing}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (value === 'lf' || value === 'crlf' || value === 'cr') {
+                setEdited(true);
+                setNewline(value);
+              }
+            }}
           >
             <option value="" disabled>
               Choose format
@@ -143,7 +199,7 @@ function Draft({
         </label>
         <button
           className="primary"
-          disabled={busy || !dirty || !newline || closing}
+          disabled={locked || stale || !dirty || !newline || closing}
           onClick={() => {
             const output =
               newline === 'crlf'
@@ -153,7 +209,7 @@ function Draft({
                   : text;
             void onSave({ pathBytes: file.pathBytes, token: file.token, text: output }).then(
               (saved) => {
-                if (saved) onClose();
+                if (saved) void finish(true);
               },
             );
           }}
@@ -164,21 +220,32 @@ function Draft({
       {file.newline === 'mixed' && (
         <p>Mixed line endings. Choose a line ending format before saving.</p>
       )}
+      {stale && (
+        <p role="alert">
+          The file or checkout changed since this draft was captured. Copy the recovered text before
+          discarding it and reopening the current file.
+        </p>
+      )}
+      {storageError && <p role="alert">{storageError}</p>}
+      {status && <p role="status">{status}</p>}
+      {cleanupError && (
+        <p role="alert">{cleanupError} The earlier draft may appear when you reopen this file.</p>
+      )}
       {error && <p role="alert">{error}</p>}
       {closing && (
         <div className="editor-close-review">
           <p>Discard unsaved changes?</p>
           <button onClick={() => setClosing(false)}>Keep editing</button>
-          <button className="danger" onClick={onClose}>
+          <button className="danger" disabled={finishing} onClick={() => void finish(true)}>
             Discard draft
           </button>
         </div>
       )}
       <CodeEditor
-        initial={normalize(file.text)}
+        initial={initialText}
         path={file.path}
-        disabled={busy || closing}
-        onChange={setText}
+        disabled={locked || closing}
+        onChange={changeText}
       />
     </dialog>
   );
@@ -198,28 +265,49 @@ export function WorkingFileEditor({
   onClose: () => void;
   onSave: (options: SaveWorkingFile) => Promise<boolean>;
 }) {
-  const [file, setFile] = useState<WorkingFile>();
+  const [loaded, setLoaded] = useState<Loaded>();
   const [loadError, setLoadError] = useState('');
   useEffect(() => {
     const id = crypto.randomUUID();
+    const session = new WorkingFileDraftSession();
     let alive = true;
-    void window.openkraken
-      .request({ id, method: 'workingFile', repoId, options: { pathBytes } })
-      .then((result) => {
-        if (!alive) return;
-        if (result.kind === 'error') setLoadError(result.message);
-        if (result.kind === 'workingFile') setFile(result.file);
-      })
-      .catch((error: unknown) => {
-        if (alive) setLoadError(error instanceof Error ? error.message : String(error));
+    async function open() {
+      const result = await window.openkraken.request({
+        id,
+        method: 'workingFile',
+        repoId,
+        options: { pathBytes },
       });
+      if (!alive) return;
+      if (result.kind !== 'workingFile')
+        throw new Error(
+          result.kind === 'error' ? result.message : 'Working file could not be opened.',
+        );
+      const file = result.file;
+      try {
+        const recovered = await session.open(repoId, pathBytes);
+        if (alive) setLoaded({ file, session, recovered });
+      } catch (error) {
+        if (alive)
+          setLoaded({
+            file,
+            session,
+            recovered: null,
+            storageError: error instanceof Error ? error.message : 'Local drafts are unavailable.',
+          });
+      }
+    }
+    void open().catch((error: unknown) => {
+      if (alive) setLoadError(error instanceof Error ? error.message : String(error));
+    });
     return () => {
       alive = false;
       void window.openkraken.cancel(id);
+      void session.close(false).catch(() => {});
     };
   }, [repoId, pathBytes]);
-  return file ? (
-    <Draft file={file} busy={busy} error={error} onClose={onClose} onSave={onSave} />
+  return loaded ? (
+    <Draft loaded={loaded} busy={busy} error={error} onClose={onClose} onSave={onSave} />
   ) : (
     <div role={loadError ? 'alert' : 'status'}>
       {loadError || 'Loading working file…'} <button onClick={onClose}>Cancel editor</button>

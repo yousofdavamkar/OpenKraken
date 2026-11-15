@@ -1630,3 +1630,26 @@ test('commit drafts are bounded main-only data with no caller-selected filesyste
     }).success,
   ).toBe(false);
 });
+
+test('working-file recovery messages stay in main and validate the file identity and draft contents', () => {
+  const id = '00000000-0000-4000-8000-000000000000';
+  const open = { id, method: 'workingDraftOpen', session: id, repoId: 'opened', pathBytes: 'YQ==' };
+  const draft = { token: 'f'.repeat(64), text: 'draft', newline: 'crlf' };
+  const write = { id, method: 'workingDraftWrite', session: id, draft };
+  const close = { id, method: 'workingDraftClose', session: id, discard: true };
+  for (const request of [open, write, { ...write, draft: null }, close]) {
+    expect(requestSchema.safeParse(request).success).toBe(true);
+    expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+    expect(requestSchema.safeParse({ ...request, path: '/tmp/file' }).success).toBe(false);
+  }
+  for (const patch of [
+    { token: '' },
+    { text: '\0' },
+    { text: 'x'.repeat(2097153) },
+    { newline: 'mixed' },
+  ]) {
+    expect(requestSchema.safeParse({ ...write, draft: { ...draft, ...patch } }).success).toBe(
+      false,
+    );
+  }
+});
