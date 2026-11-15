@@ -1,7 +1,8 @@
+import { authenticateRpm } from './rpm-signature.mjs';
 import { verifyLinuxPackage } from './linux-package.mjs';
 import { execFile, spawn } from 'node:child_process';
-import { promisify } from 'node:util';
-import { readFile, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
+import { parseArgs, promisify } from 'node:util';
+import { copyFile, readFile, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
   comparePayload,
@@ -19,7 +20,13 @@ process.umask(0o022);
 
 // Only run this on artifacts built locally or independently authenticated.
 // SHA-256 detects corruption; this adjacent manifest is not a release signature.
-const manifestPath = resolve(process.argv[2] ?? '');
+const { positionals, values } = parseArgs({
+  allowPositionals: true,
+  options: { 'rpm-key': { type: 'string' } },
+});
+if (positionals.length !== 1) throw new Error('Provide one installer manifest');
+const rpmKey = values['rpm-key'];
+const manifestPath = resolve(positionals[0]);
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
 if (
   manifest.schemaVersion !== 1 ||
@@ -37,16 +44,26 @@ if (
   !manifest.artifact.file.endsWith(`.${manifest.target}`)
 )
   throw new Error('Expected a native platform installer manifest');
-const artifact = join(dirname(manifestPath), manifest.artifact.file);
+if (rpmKey !== undefined && (!rpmKey || manifest.target !== 'rpm'))
+  throw new Error('--rpm-key requires an RPM target and a public certificate file');
 if (
-  (await stat(artifact)).size !== manifest.artifact.size ||
-  (await sha256(artifact)) !== manifest.artifact.sha256
+  manifest.target === 'rpm' &&
+  (manifest.signed !== !!rpmKey || (!rpmKey && manifest.signingFingerprint !== undefined))
 )
-  throw new Error('Installer checksum or size mismatch');
+  throw new Error('Verifying a signed RPM requires --rpm-key with the trusted public certificate');
+async function verifyChecksum(file) {
+  if (
+    (await stat(file)).size !== manifest.artifact.size ||
+    (await sha256(file)) !== manifest.artifact.sha256
+  )
+    throw new Error('Installer checksum or size mismatch');
+}
+const source = join(dirname(manifestPath), manifest.artifact.file);
+if (!rpmKey) await verifyChecksum(source);
 if (manifest.target === 'dmg') {
-  await verifyDmg(artifact, manifest);
+  await verifyDmg(source, manifest);
 } else if (manifest.target === 'msi') {
-  await verifyMsi(artifact, manifest);
+  await verifyMsi(source, manifest);
 } else {
   await verifyLinuxInstaller();
 }
@@ -56,6 +73,18 @@ async function verifyLinuxInstaller() {
   await mkdir('release', { recursive: true });
   const temporary = await mkdtemp(resolve('release/installer-check-'));
   try {
+    let artifact = source;
+    if (rpmKey) {
+      // A concurrent build may replace the published file. Authenticate and
+      // extract the same private copy throughout this verification.
+      artifact = join(temporary, 'candidate.rpm');
+      await copyFile(source, artifact);
+      await verifyChecksum(artifact);
+      const fingerprint = await authenticateRpm(artifact, resolve(rpmKey), temporary);
+      if (fingerprint !== manifest.signingFingerprint)
+        throw new Error('RPM manifest signing fingerprint differs from trusted certificate');
+      console.log(`Verified RPM signature against trusted certificate ${fingerprint}`);
+    }
     if (manifest.target === 'deb' || manifest.target === 'rpm')
       await verifyLinuxPackage(artifact, manifest, temporary);
     let directory = join(temporary, 'opt/OpenKraken');

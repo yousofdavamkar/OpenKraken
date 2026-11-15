@@ -1,3 +1,4 @@
+import { authenticateRpm } from './rpm-signature.mjs';
 import { verifyLinuxPackage } from './linux-package.mjs';
 import { build, Platform, Arch } from 'electron-builder';
 import { buildAppImage } from './appimage.mjs';
@@ -21,9 +22,13 @@ const { values } = parseArgs({
     target: { type: 'string', default: { darwin: 'dmg', win32: 'msi' }[process.platform] ?? 'deb' },
     'test-metadata': { type: 'boolean', default: false },
     metadata: { type: 'string' },
+    'rpm-key': { type: 'string' },
   },
 });
 const target = values.target;
+const rpmKey = values['rpm-key'];
+if (rpmKey !== undefined && (!rpmKey || target !== 'rpm'))
+  throw new Error('--rpm-key requires an RPM target and a public certificate file');
 if (
   !['linux', 'darwin', 'win32'].includes(process.platform) ||
   !(process.platform === 'win32' ? ['x64'] : ['x64', 'arm64']).includes(process.arch)
@@ -77,7 +82,7 @@ if (target === 'dmg') await verifyMacBundle(source, version);
 const output = join(
   root,
   `release/installers/${process.platform}-${process.arch}`,
-  testMetadata ? 'test' : 'unsigned',
+  testMetadata ? (rpmKey ? 'test-signed' : 'test') : rpmKey ? 'signed' : 'unsigned',
   target,
 );
 await mkdir(output, { recursive: true });
@@ -124,7 +129,7 @@ try {
         npmRebuild: false,
         publish: null,
         directories: { output: join(work, 'output'), buildResources: 'build-resources' },
-        artifactName: `OpenKraken-${version}-linux-${process.arch}${testMetadata ? '-TEST-ONLY' : '-unsigned'}.\${ext}`,
+        artifactName: `OpenKraken-${version}-linux-${process.arch}${testMetadata ? '-TEST-ONLY' : rpmKey ? '' : '-unsigned'}.\${ext}`,
         extraMetadata: {
           name: 'openkraken',
           version,
@@ -196,6 +201,9 @@ try {
   if (artifacts.length !== 1 || !artifacts[0].endsWith(`.${target}`))
     throw new Error('Expected exactly one installer artifact');
   const artifact = artifacts[0];
+  const signer = rpmKey
+    ? await authenticateRpm(artifact, resolve(rpmKey), work, { sign: true })
+    : undefined;
   if (target === 'msi') verifyMsiMetadata(await readMsiMetadata(artifact), { version, metadata });
   const nativePackageVersion =
     target === 'deb' || target === 'rpm'
@@ -209,7 +217,8 @@ try {
     version,
     metadataMode: testMetadata ? 'test-only' : 'provided',
     metadata,
-    signed: false,
+    signed: !!signer,
+    ...(signer && { signingFingerprint: signer }),
     source: buildSource,
     nativePackageVersion,
     artifact: {
@@ -222,10 +231,10 @@ try {
   await cp(artifact, join(output, basename(artifact)));
   await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
   console.log(
-    `Unsigned ${testMetadata ? 'TEST-ONLY ' : ''}installer: ${join(output, basename(artifact))}`,
+    `${signer ? 'Signed' : 'Unsigned'} ${testMetadata ? 'TEST-ONLY ' : ''}installer: ${join(output, basename(artifact))}`,
   );
   console.log(
-    `Verify and smoke-test with: node scripts/verify-installer.mjs ${join(output, 'manifest.json')}`,
+    `Verify and smoke-test with: node scripts/verify-installer.mjs ${join(output, 'manifest.json')}${signer ? ' --rpm-key <trusted-certificate-file>' : ''}`,
   );
 } finally {
   await rm(work, { recursive: true, force: true });
