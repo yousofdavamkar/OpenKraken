@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Graph publication with 50,000 references
+
+Freezing flat reference records as the renderer decodes them reduced median state publication time from 66.6 to 30.9 ms in three paired openings. The new renderer painted in 924.8–1,141.9 ms, above the 500 ms gate. All 36 measured 5,000-commit appends across the ordinary, large-reference and paired cohorts passed 300 ms. The slowest took 283.9 ms. [Measurements and method](m8-reference-performance.md#publishing-compact-references-to-the-repository-store)
+
+The final build passed 854 native/unit tests with 14 skipped. All 18 Electron tests passed across the graph, reference sidebar, serialized IPC and updates. TypeScript, the production build and lint passed.
+
 ## Saving verified installers
 
 The Updates dialog offers **Save installer…** for verified manual packages. The Linux Electron regression used a signed local HTTPS feed, intercepted the native picker, cancelled once and then saved the exact expected bytes. Controller tests cover DEB, RPM, AppImage, DMG, ZIP and MSI, plus changed cache contents, invalidated trust, stale picker responses, expiry, cancellation during publication and a destination modified during the copy. Windows and macOS formats used simulated platform selection on Linux. [Installer export decision](../decisions/0121-save-verified-installers.md)

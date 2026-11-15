@@ -2,6 +2,19 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Publishing compact references to the repository store
+
+Three paired Electron openings loaded 2,000 commits from full Linux history with 50,000 distinct reference targets. Each opening used a fresh profile on Linux x64 with Git 2.53.0 and Xvfb. Only the renderer bundle switched between runs. Pair order alternated, and the OS caches were left populated. [All twelve measurements, including the initial ordinary and large-ref cohorts](m8-compact-ref-publication.csv)
+
+| Median in milliseconds           | Previous renderer | Freeze compact refs at decode |
+| -------------------------------- | ----------------: | ----------------------------: |
+| Renderer state publication       |              66.6 |                          30.9 |
+| First paint, including Git reads |           1,037.2 |                         932.3 |
+
+Publication was faster in every pair. End-to-end first paint improved in two pairs and rose from 1,037.2 to 1,141.9 ms in the third. All six missed the 500 ms target. All 18 page appends met 300 ms and all six scroll p95 measurements were 16.7–16.8 ms. An isolated Node replay constructed and published 50,000 flat refs through Immer in both orders across 18 pairs. Median combined construction and publication took 23.9 ms with recursive freezing and 10.9 ms with freezing at decode.
+
+Before the paired test, three fresh-profile openings of the one-ref Linux repository painted in 1,105.2, 385.1 and 351.3 ms. Git service snapshot time accounted for 806.7 ms on the first opening. The three initial large-ref openings painted in 1,509.2, 912.6 and 1,035.6 ms. All 18 appends in those two cohorts met 300 ms. [Renderer decoding decision](../decisions/0116-validated-snapshot-references.md#publishing-compact-records-in-the-repository-store)
+
 ## Reading fixed-width ref records in batches
 
 On the 1,505,199-commit Linux-history fixture with 50,000 distinct targets, direct native ref enumeration took 182–189 ms over four runs. Omitting object types in a diagnostic command reduced this to 78–89 ms. Walking 2,000 commits from all 50,000 pinned OIDs took 148–172 ms, compared with 64–89 ms from HEAD alone. These diagnostic commands used populated OS caches and a reduced history output format. The app still reads object types and walks the full set of visible roots.
