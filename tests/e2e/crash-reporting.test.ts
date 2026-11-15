@@ -43,62 +43,77 @@ test('the default build has no reporting destination and cannot be opted in', as
   }
 });
 
-reportingTest(
-  'a main exception during startup follows consent from the previous session',
-  async ({ receiver }) => {
-    const { root, received, launch } = receiver;
-    const descriptor = join(root, 'app/package.json');
-    const metadata = JSON.parse(await readFile(descriptor, 'utf8'));
-    // Throw on the next tick after the real main entry installs its monitor,
-    // before the asynchronous consent-file read can complete.
-    await writeFile(
-      join(root, 'app/startup-failure.cjs'),
-      [
-        `require(${JSON.stringify(metadata.main)});`,
-        "require('electron').dialog.showErrorBox = () => {};",
-        "process.nextTick(() => { throw new Error('PRIVATE startup fixture'); });",
-      ].join('\n'),
-    );
-    await writeFile(descriptor, JSON.stringify({ ...metadata, main: 'startup-failure.cjs' }));
-
-    let app = await launch();
-    try {
-      const reportingDialog = async () => {
-        const page = await app.firstWindow();
-        await page.getByRole('button', { name: 'Crash reporting', exact: true }).click();
-        return page.getByRole('dialog', { name: 'Crash reporting' });
-      };
-      let dialog = await reportingDialog();
-      const checkbox = { name: 'Send crash summaries' };
-      await dialog.getByRole('checkbox', checkbox).check();
-      await dialog.getByRole('button', { name: 'Apply' }).click();
-      await expect(dialog.getByRole('status')).toHaveText('Crash reporting is on.');
-      await app.close();
-      expect(received).toHaveLength(0);
-
-      app = await launch();
-      dialog = await reportingDialog();
-      await expect.poll(() => received.length).toBe(1);
-      const report = received[0]!;
-      expect(report.body).not.toContain('PRIVATE');
-      expect(JSON.parse(report.body.trim().split('\n')[2]!).tags).toMatchObject({
-        process: 'main',
-        reason: 'unhandled-exception',
-      });
-      await dialog.getByRole('checkbox', checkbox).uncheck();
-      await dialog.getByRole('button', { name: 'Apply' }).click();
-      await expect(dialog.getByRole('status')).toHaveText('Crash reporting is off.');
-      await app.close();
-
-      app = await launch();
-      dialog = await reportingDialog();
-      await expect(dialog.getByRole('checkbox', checkbox)).not.toBeChecked();
-    } finally {
-      await app.close();
-    }
-    expect(received).toHaveLength(1);
+for (const failure of [
+  {
+    name: 'a main exception',
+    component: 'main',
+    reason: 'unhandled-exception',
+    trigger: "throw new Error('PRIVATE startup fixture');",
   },
-);
+  {
+    name: 'a GPU termination event',
+    component: 'gpu',
+    reason: 'crashed',
+    trigger:
+      "require('electron').app.emit('child-process-gone', {}, { type: 'GPU', name: 'PRIVATE device', reason: 'crashed' });",
+  },
+]) {
+  reportingTest(
+    `${failure.name} during startup follows consent from the previous session`,
+    async ({ receiver }) => {
+      const { root, received, launch } = receiver;
+      const descriptor = join(root, 'app/package.json');
+      const metadata = JSON.parse(await readFile(descriptor, 'utf8'));
+      // Deliver the event on the next tick, before the consent read can complete.
+      await writeFile(
+        join(root, 'app/startup-failure.cjs'),
+        [
+          `require(${JSON.stringify(metadata.main)});`,
+          "require('electron').dialog.showErrorBox = () => {};",
+          `process.nextTick(() => { ${failure.trigger} });`,
+        ].join('\n'),
+      );
+      await writeFile(descriptor, JSON.stringify({ ...metadata, main: 'startup-failure.cjs' }));
+
+      let app = await launch();
+      try {
+        const reportingDialog = async () => {
+          const page = await app.firstWindow();
+          await page.getByRole('button', { name: 'Crash reporting', exact: true }).click();
+          return page.getByRole('dialog', { name: 'Crash reporting' });
+        };
+        let dialog = await reportingDialog();
+        const checkbox = { name: 'Send crash summaries' };
+        await dialog.getByRole('checkbox', checkbox).check();
+        await dialog.getByRole('button', { name: 'Apply' }).click();
+        await expect(dialog.getByRole('status')).toHaveText('Crash reporting is on.');
+        await app.close();
+        expect(received).toHaveLength(0);
+
+        app = await launch();
+        dialog = await reportingDialog();
+        await expect.poll(() => received.length).toBe(1);
+        const report = received[0]!;
+        expect(report.body).not.toContain('PRIVATE');
+        expect(JSON.parse(report.body.trim().split('\n')[2]!).tags).toMatchObject({
+          process: failure.component,
+          reason: failure.reason,
+        });
+        await dialog.getByRole('checkbox', checkbox).uncheck();
+        await dialog.getByRole('button', { name: 'Apply' }).click();
+        await expect(dialog.getByRole('status')).toHaveText('Crash reporting is off.');
+        await app.close();
+
+        app = await launch();
+        dialog = await reportingDialog();
+        await expect(dialog.getByRole('checkbox', checkbox)).not.toBeChecked();
+      } finally {
+        await app.close();
+      }
+      expect(received).toHaveLength(1);
+    },
+  );
+}
 
 reportingTest('crashes and interrupted sessions respect consent', async ({ receiver }) => {
   const { root, address, launch, received } = receiver;

@@ -354,23 +354,9 @@ if (
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  diagnostics = new Diagnostics(join(app.getPath('userData'), 'diagnostics'), {
-    version: app.getVersion(),
-    platform: process.platform,
-    arch: process.arch,
-  });
-  // macOS may deliver a URL before ready. No path is opened until renderer consent.
-  app.on('open-url', (event, url) => {
-    event.preventDefault();
-    repositoryLinks.receive(url);
-    focusForLink();
-  });
-  for (const argument of process.argv) repositoryLinks.receive(argument);
-  crashReports = new CrashReports(app.getPath('userData'), __OPENKRAKEN_SENTRY_DSN__, {
-    version: app.getVersion(),
-    platform: process.platform,
-    arch: process.arch,
-  });
+  const profile = app.getPath('userData');
+  const runtime = { version: app.getVersion(), platform: process.platform, arch: process.arch };
+  crashReports = new CrashReports(profile, __OPENKRAKEN_SENTRY_DSN__, runtime);
   const reportingReady = crashReports.start();
   // Observe failures without replacing Node/Electron's exception handling or
   // inspecting the error object. Fatal exits are recovered through the marker.
@@ -384,6 +370,28 @@ else {
       origin === 'unhandledRejection' ? 'unhandled-rejection' : 'unhandled-exception',
     );
   });
+  app.on('child-process-gone', (_event, details) => {
+    const kind =
+      details.name === 'OpenKraken Git'
+        ? 'git'
+        : details.name === 'OpenKraken Terminal'
+          ? 'terminal'
+          : details.type === 'GPU'
+            ? 'gpu'
+            : null;
+    if (kind) {
+      diagnostics?.failure(kind, details.reason);
+      void crashReports?.capture(kind, details.reason);
+    }
+  });
+  diagnostics = new Diagnostics(join(profile, 'diagnostics'), runtime);
+  // macOS may deliver a URL before ready. No path is opened until renderer consent.
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    repositoryLinks.receive(url);
+    focusForLink();
+  });
+  for (const argument of process.argv) repositoryLinks.receive(argument);
   app.on('second-instance', (_event, commandLine) => {
     for (const argument of commandLine) repositoryLinks.receive(argument);
     focusForLink();
@@ -1469,20 +1477,6 @@ else {
       }
     });
     appSettings ??= new AppSettings(app.getPath('userData'));
-    app.on('child-process-gone', (_event, details) => {
-      const kind =
-        details.name === 'OpenKraken Git'
-          ? 'git'
-          : details.name === 'OpenKraken Terminal'
-            ? 'terminal'
-            : details.type === 'GPU'
-              ? 'gpu'
-              : null;
-      if (kind) {
-        diagnostics?.failure(kind, details.reason);
-        void crashReports?.capture(kind, details.reason);
-      }
-    });
     activateAppearance(await appSettings.readAppearance());
     nativeTheme.on('updated', updateWindowBackground);
     activity = new ActivityLog(app.getPath('userData'), (completed) => {
