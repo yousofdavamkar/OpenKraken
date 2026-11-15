@@ -6,7 +6,7 @@ import { performanceGit as git } from './create-performance-fixture.mjs';
 // Keep the source's object store in place for the lifetime of the benchmark.
 export async function createReferenceFixture(source, destination, mode, count = 50000) {
   if (
-    !['shared', 'distinct'].includes(mode) ||
+    !['shared', 'grouped', 'distinct'].includes(mode) ||
     !Number.isSafeInteger(count) ||
     count < 2 ||
     count > 50000
@@ -19,13 +19,10 @@ export async function createReferenceFixture(source, destination, mode, count = 
   const objects = git(original, ['rev-parse', '--path-format=absolute', '--git-path', 'objects']);
   if (/[\r\n]/.test(objects)) throw new Error('Unsupported alternate object directory');
   const format = git(original, ['rev-parse', '--show-object-format']);
-  const commits = git(original, [
-    'rev-list',
-    '--max-count=' + (mode === 'shared' ? 1 : count),
-    'HEAD',
-  ]).split('\n');
-  if (commits.length !== (mode === 'shared' ? 1 : count))
-    throw new Error('Insufficient source history');
+  const refsPerTarget = { shared: count, grouped: 100, distinct: 1 }[mode];
+  const targetCount = Math.ceil(count / refsPerTarget);
+  const commits = git(original, ['rev-list', '--max-count=' + targetCount, 'HEAD']).split('\n');
+  if (commits.length !== targetCount) throw new Error('Insufficient source history');
 
   await mkdir(root);
   const repository = join(root, 'repository.git');
@@ -43,7 +40,7 @@ export async function createReferenceFixture(source, destination, mode, count = 
   for (let index = 1; index < count; index++) {
     const group = index <= count / 10 ? 'heads' : index <= count / 5 ? 'remotes/fixture' : 'tags';
     const name = `refs/${group}/benchmark-${String(index - 1).padStart(5, '0')}`;
-    commands.push(`create ${name} ${mode === 'shared' ? commits[0] : commits[index]}`);
+    commands.push(`create ${name} ${commits[Math.floor(index / refsPerTarget)]}`);
   }
   git(repository, ['update-ref', '--stdin'], commands.join('\n') + '\n');
   git(repository, ['pack-refs', '--all']);
@@ -64,7 +61,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
   const [source, destination, mode, ...extra] = process.argv.slice(2);
   if (!source || !destination || !mode || extra.length)
     throw new Error(
-      'Usage: node scripts/create-reference-performance-fixture.mjs SOURCE NEW_DIRECTORY shared|distinct',
+      'Usage: node scripts/create-reference-performance-fixture.mjs SOURCE NEW_DIRECTORY shared|grouped|distinct',
     );
   console.log(JSON.stringify(await createReferenceFixture(source, destination, mode), null, 2));
 }

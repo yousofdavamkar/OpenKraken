@@ -47,7 +47,7 @@ jobs:
         id: references
         if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
         run: |
-          for mode in distinct shared; do
+          for mode in distinct grouped shared; do
             node scripts/create-reference-performance-fixture.mjs "$RUNNER_TEMP/openkraken-scale/repository" \
               "$RUNNER_TEMP/refs-$mode" "$mode" > "test-results/performance/refs-$mode-fixture.log" 2>&1
             cp "$RUNNER_TEMP/refs-$mode/fixture.json" "test-results/performance/refs-$mode-fixture.json"
@@ -58,6 +58,12 @@ jobs:
           OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/refs-distinct/repository.git" GIT_NO_LAZY_FETCH=1 \
             xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --workers=1 --reporter=list \
             --output=test-results/performance/refs-distinct > test-results/performance/refs-distinct.log 2>&1
+      - name: 50,000 references across 500 targets, three fresh profiles
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.references.outcome == 'success' }}
+        run: |
+          OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/refs-grouped/repository.git" GIT_NO_LAZY_FETCH=1 \
+            xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --workers=1 --reporter=list \
+            --output=test-results/performance/refs-grouped > test-results/performance/refs-grouped.log 2>&1
       - name: 50,000 references with shared targets, three fresh profiles
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.references.outcome == 'success' }}
         run: |

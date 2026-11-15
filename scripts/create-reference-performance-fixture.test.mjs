@@ -42,3 +42,29 @@ test('both reference distributions use the specified commits and preserve the so
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('grouped refs switch target every 100 refs, including a partial final group', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-grouped-refs-'));
+  try {
+    const { repository: source } = await createPerformanceFixture(join(root, 'source'), {
+      commits: 3,
+      files: 2,
+    });
+    const result = await createReferenceFixture(source, join(root, 'grouped'), 'grouped', 201);
+    const targets = git(result.repository, ['for-each-ref', '--format=%(objectname)']).split('\n');
+    const commits = git(source, ['rev-list', 'HEAD']).split('\n');
+    expect(result).toMatchObject({ refs: 201, distinctTargets: 3, head: commits[0] });
+    expect(commits.map((oid) => targets.filter((target) => target === oid).length)).toEqual([
+      100, 100, 1,
+    ]);
+    for (const [ref, target] of [
+      ['refs/tags/benchmark-00098', commits[0]],
+      ['refs/tags/benchmark-00099', commits[1]],
+      ['refs/tags/benchmark-00199', commits[2]],
+    ]) {
+      expect(git(result.repository, ['rev-parse', ref])).toBe(target);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
