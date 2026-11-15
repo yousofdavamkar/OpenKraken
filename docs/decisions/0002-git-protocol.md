@@ -15,3 +15,7 @@ A FIFO read/write queue is keyed by the common Git directory, with a four-reader
 Canonical paths identify repositories using SHA-256. Discovery has depth 2, skips symlinks and generated folders, and caps traversal at 5,000 directories. Permission failures are surfaced. Normal, bare, unborn, linked-worktree, shallow and sparse repositories are represented explicitly.
 
 Initial history is capped at 2,000 commits plus a hasMore probe. Starts are visible commit refs plus HEAD. Read up to 200 stash reflog entries separately, showing only their first-parent links. Hidden stash implementation parents do not enter history. A topological merge preserves child-before-parent order even with skewed timestamps. Larger stash histories and Git stream paging remain M1 work.
+
+## Decoding the graph traversal header
+
+The retained graph walk uses `rev-list --date-order --parents --no-abbrev-commit --format=… --stdin`. The first NUL terminates Git’s header, which contains the full commit ID and its ordered parent IDs. An empty second field keeps author, committer and message fields at the same offsets used by search and stash reads. Those reads use `git log` with explicit `%H` and `%P` fields. The public parser also accepts the earlier stream with both the header and the formatted IDs. The parser handles complete twelve-field records from each chunk and carries incomplete records across reads. [History stream measurements](../verification/m8-reference-performance.md#reading-ancestry-from-gits-traversal-header)

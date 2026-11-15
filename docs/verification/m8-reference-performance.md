@@ -2,6 +2,23 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Reading ancestry from Git's traversal header
+
+The Git utility reads full object and parent IDs from the header emitted by the existing date-ordered `rev-list --parents` traversal. Search and stash queries use the same twelve-field parser with explicit IDs. Linux-history replay compared all fields of 17,000 ordered commits, including every body and parent, against the previous production parser. The streams occupied 22,615,101 and 21,207,090 bytes. Native octopus, shallow and replacement fixtures also compared every returned commit against the earlier Git format. [Protocol decision](../decisions/0002-git-protocol.md#decoding-the-graph-traversal-header)
+
+In an isolated Node replay, 20 pairs alternated the old stream/parser and the new stream/parser, with garbage collection before each timing and 64 KiB input chunks. For the first 2,000 commits, median parsing took 18.3 ms before and 12.7 ms after. For the next 5,000 commits, it took 38.3 ms before and 26.7 ms after.
+
+Three paired fresh-profile Electron openings per fixture switched only the Git utility bundle. Each opening loaded 2,000 commits, appended three pages of 5,000 and measured scrolling at 12,000 rows. The fixtures contained the same 1,505,199-commit Linux history. Pair order alternated on Linux x64 with Git 2.53.0 and Xvfb. OS caches were left populated. [All twelve openings](m8-history-stream-samples.csv)
+
+| Fixture and measurement         | Previous utility | Traversal header |
+| ------------------------------- | ---------------: | ---------------: |
+| One ref, median first paint     |         374.0 ms |         376.8 ms |
+| One ref, median page append     |         241.4 ms |         228.2 ms |
+| 50,000 refs, median first paint |         968.7 ms |         973.7 ms |
+| 50,000 refs, median page append |         213.1 ms |         212.1 ms |
+
+The new utility passed all 18 paging checks at 185.4–298.9 ms. The previous utility missed once at 305.1 ms. Scroll p95 was 16.7–16.8 ms throughout. Both builds met 500 ms on each one-ref opening and missed on every 50,000-ref opening. In the three large-ref runs with the new utility, Git snapshot preparation took 451.9–469.9 ms. By the time the renderer received and decoded the snapshot, 751.4–777.8 ms had elapsed. The 500 ms budget was already exceeded before layout and painting.
+
 ## Publishing compact references to the repository store
 
 Three paired Electron openings loaded 2,000 commits from full Linux history with 50,000 distinct reference targets. Each opening used a fresh profile on Linux x64 with Git 2.53.0 and Xvfb. Only the renderer bundle switched between runs. Pair order alternated, and the OS caches were left populated. [All twelve measurements, including the initial ordinary and large-ref cohorts](m8-compact-ref-publication.csv)

@@ -2,6 +2,16 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## History paging and native installer export
+
+The current Git utility passed all 18 page-append checks on full Linux history with one and 50,000 refs. All three ordinary first paints passed at 363.5–380.0 ms. With 50,000 refs they took 953.8–988.2 ms. A 17,000-commit comparison and native shallow, octopus and replacement fixtures preserved every commit field. [Per-opening results](m8-reference-performance.md#reading-ancestry-from-gits-traversal-header)
+
+The signed HTTPS feed offered the existing 0.1.0 packages to an Electron fixture running as 0.0.0. The desktop Updates dialog downloaded and saved the 115,269,544-byte DEB and the 98,957,929-byte RPM. Both cache and export SHA-256 matched the packaging manifest. Each run first used signed metadata with a mismatched artifact hash and checked that verification removed the transfer and withheld the save action. Both also covered picker cancellation, tampered signatures, opt-in checks and shutdown during a transfer. The picker was intercepted to provide a deterministic destination. A separate packaged Linux x64 AppImage beta completed a signed HTTPS upgrade and restarted. All runs used temporary signing keys and a loopback TLS certificate.
+
+CI now selects actual native DEB, RPM, DMG or MSI artifacts after packaging and retains a receipt for each successful save. The local Linux x64 DEB and RPM runs passed. Native macOS, Windows and Linux arm64 results remain outstanding. [Test instructions](../decisions/0121-save-verified-installers.md#checking-the-native-installer-in-ci)
+
+The full Linux native/unit suite passed 858 tests across 104 files with 14 skipped. All 19 selected graph, serialized IPC, update and crash-reporting Electron tests passed. All 29 focused Git tests passed on Git 2.38.0. Logs and native replay output are under `/tmp/ok-m8-history-wire`.
+
 ## Graph publication with 50,000 references
 
 Freezing flat reference records as the renderer decodes them reduced median state publication time from 66.6 to 30.9 ms in three paired openings. The new renderer painted in 924.8–1,141.9 ms, above the 500 ms gate. All 36 measured 5,000-commit appends across the ordinary, large-reference and paired cohorts passed 300 ms. The slowest took 283.9 ms. [Measurements and method](m8-reference-performance.md#publishing-compact-references-to-the-repository-store)
