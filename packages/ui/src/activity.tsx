@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { activityActions, type ActivityEntry, type ActivityState } from '@openkraken/ipc-contract';
+import {
+  activityActions,
+  type ActivityAction,
+  type ActivityCompletion,
+  type ActivityEntry,
+  type ActivityState,
+} from '@openkraken/ipc-contract';
 import { CommandButton } from './commands.js';
 const outcomes: Record<ActivityEntry['outcome'], string> = {
   running: 'Running',
@@ -9,6 +15,86 @@ const outcomes: Record<ActivityEntry['outcome'], string> = {
   attention: 'Needs attention',
   unknown: 'Outcome unknown',
 };
+// These successes are already visible in the repository or staging panel.
+const quietSuccesses = new Set<ActivityAction>([
+  'open',
+  'repositoryLinkOpen',
+  'openWorktree',
+  'openSubmodule',
+  'files',
+  'patch',
+]);
+
+export function ActivityToast() {
+  const [notice, setNotice] = useState<ActivityCompletion>();
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const previousFocus = useRef<HTMLElement | null>(null);
+  useEffect(
+    () =>
+      window.openkraken.subscribe((event) => {
+        if (event.type !== 'activityChanged' || !event.completed) return;
+        const completed = event.completed;
+        if (
+          completed.outcome === 'cancelled' ||
+          (completed.outcome === 'succeeded' && quietSuccesses.has(completed.action))
+        )
+          return;
+        setNotice(completed);
+      }),
+    [],
+  );
+  useEffect(() => {
+    if (!notice || hovered || focused) return;
+    const timer = window.setTimeout(() => setNotice(undefined), 6000);
+    return () => window.clearTimeout(timer);
+  }, [notice, hovered, focused]);
+
+  return (
+    <div
+      className="operation-notifications"
+      role="log"
+      aria-label="Operation notifications"
+      aria-live="polite"
+      aria-relevant="additions text"
+    >
+      {notice && (
+        <div
+          className="operation-toast"
+          onPointerEnter={() => setHovered(true)}
+          onPointerLeave={() => setHovered(false)}
+        >
+          <span key={notice.id}>
+            {activityActions[notice.action]} · {outcomes[notice.outcome]}
+          </span>
+          <button
+            type="button"
+            aria-label="Dismiss notification"
+            onFocus={(event) => {
+              previousFocus.current =
+                event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null;
+              setFocused(true);
+            }}
+            onBlur={() => setFocused(false)}
+            onClick={(event) => {
+              if (
+                event.currentTarget === document.activeElement &&
+                previousFocus.current?.isConnected
+              )
+                previousFocus.current.focus();
+              setNotice(undefined);
+              setHovered(false);
+              setFocused(false);
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ActivityDialog({ close }: { close: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);

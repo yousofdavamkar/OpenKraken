@@ -30,11 +30,22 @@ test('activity records outcomes without content and survives renderer reload and
     await expect(
       page.getByRole('button', { name: 'Unstage tracked.txt', exact: true }),
     ).toBeEnabled();
+    const notifications = page.getByRole('log', { name: 'Operation notifications' });
+    await expect(notifications).toBeEmpty();
+    await page.clock.install();
     await page
       .getByRole('textbox', { name: 'Commit message', exact: true })
       .fill('private commit subject');
     await page.getByRole('button', { name: 'Commit staged changes', exact: true }).click();
     await expect(page.getByText('Working tree clean', { exact: true })).toBeVisible();
+    await expect(notifications).toContainText('Commit · Succeeded');
+    await expect(notifications).not.toContainText('private commit subject');
+    await notifications.getByRole('button', { name: 'Dismiss notification' }).focus();
+    await page.clock.fastForward(7000);
+    await expect(notifications).toContainText('Commit · Succeeded');
+    await page.getByRole('button', { name: 'Activity', exact: true }).focus();
+    await page.clock.fastForward(7000);
+    await expect(notifications).toBeEmpty();
     await page.getByRole('button', { name: 'Activity', exact: true }).click();
     let dialog = page.getByRole('dialog', { name: 'Activity', exact: true });
     await expect(dialog.getByRole('list', { name: 'Recent activity' })).toContainText('Commit');
@@ -44,6 +55,7 @@ test('activity records outcomes without content and survives renderer reload and
     await dialog.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Activity', exact: true })).toBeFocused();
     await page.reload();
+    await expect(notifications).toBeEmpty();
     await page.getByRole('button', { name: 'Activity', exact: true }).click();
     await expect(dialog).toContainText('Commit');
     await app.close();
@@ -115,6 +127,15 @@ test('activity distinguishes failed and cancelled attempts without retaining nat
       .fill('private rejected subject');
     await page.getByRole('button', { name: 'Commit staged changes', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText('private hook secret');
+    const notifications = page.getByRole('log', { name: 'Operation notifications' });
+    await expect(notifications).toContainText('Commit · Failed');
+    await expect(notifications).not.toContainText('private hook secret');
+    const message = page.getByRole('textbox', { name: 'Commit message', exact: true });
+    await message.focus();
+    await notifications.getByRole('button', { name: 'Dismiss notification' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(message).toBeFocused();
+    await expect(notifications).toBeEmpty();
     await app.evaluate(({ dialog }) => {
       dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] });
     });

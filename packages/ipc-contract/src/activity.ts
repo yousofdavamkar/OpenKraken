@@ -73,4 +73,11 @@ export const activityRequests = [
   z.object({ id: z.string().uuid(), method: z.literal('activityRead') }).strict(),
   z.object({ id: z.string().uuid(), method: z.literal('activityClear') }).strict(),
 ] as const;
-export const activityEventSchema = z.object({ type: z.literal('activityChanged') }).strict();
+const activityCompletionSchema = activityEntrySchema.pick({ id: true, action: true }).extend({
+  outcome: activityEntrySchema.shape.outcome.exclude(['running']),
+});
+export type ActivityCompletion = z.infer<typeof activityCompletionSchema>;
+export const activityEventSchema = z.strictObject({
+  type: z.literal('activityChanged'),
+  completed: activityCompletionSchema.optional(),
+});

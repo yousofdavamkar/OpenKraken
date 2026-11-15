@@ -1,5 +1,5 @@
 import { Welcome, completeWelcomeGuide } from './welcome.js';
-import { Activity } from './activity.js';
+import { Activity, ActivityToast } from './activity.js';
 import { DiagnosticsControl } from './diagnostics.js';
 import { UpdatesControl } from './updates.js';
 import { RepositoryLinkControl } from './repository-link.js';
@@ -287,6 +287,7 @@ function App() {
           busy={!!busy}
         />
       )}
+      <ActivityToast />
       {busy && (
         <div className="activity" role="status">
           Reading repository…

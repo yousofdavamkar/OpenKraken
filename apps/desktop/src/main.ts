@@ -1465,9 +1465,9 @@ else {
     });
     activateAppearance(await appSettings.readAppearance());
     nativeTheme.on('updated', updateWindowBackground);
-    activity = new ActivityLog(app.getPath('userData'), () => {
+    activity = new ActivityLog(app.getPath('userData'), (completed) => {
       if (window && !window.isDestroyed())
-        window.webContents.send(EVENT_CHANNEL, { type: 'activityChanged' });
+        window.webContents.send(EVENT_CHANNEL, { type: 'activityChanged', completed });
     });
     await activity.read();
     startService();

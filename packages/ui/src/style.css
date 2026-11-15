@@ -427,6 +427,28 @@ footer {
   background: var(--errorBackground);
   white-space: pre-wrap;
 }
+.operation-notifications {
+  position: fixed;
+  inset-inline-start: 16px;
+  bottom: 40px;
+  max-width: calc(100vw - 32px);
+  z-index: 2;
+  pointer-events: none;
+}
+.operation-toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--toastBackground);
+  color: var(--text);
+  pointer-events: auto;
+}
+.operation-toast button {
+  padding: 4px 8px;
+}
 .activity {
   position: fixed;
   bottom: 45px;

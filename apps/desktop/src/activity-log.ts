@@ -6,6 +6,7 @@ import {
   activityActions,
   activityEntrySchema,
   type ActivityAction,
+  type ActivityCompletion,
   type ActivityEntry,
   type ActivityState,
   type Request,
@@ -26,7 +27,7 @@ export class ActivityLog {
   private ready: Promise<void>;
   constructor(
     private directory: string,
-    private changed: () => void,
+    private changed: (completed?: ActivityCompletion) => void,
   ) {
     this.file = join(directory, 'activity.json');
     this.ready = this.load();
@@ -82,7 +83,7 @@ export class ActivityLog {
       await rm(temporary, { force: true });
     }
   }
-  private save() {
+  private save(completed?: ActivityCompletion) {
     this.writes = this.writes.then(async () => {
       try {
         await this.persist(structuredClone(this.entries));
@@ -92,7 +93,7 @@ export class ActivityLog {
       }
       this.changed();
     });
-    this.changed();
+    this.changed(completed);
   }
   async read(): Promise<ActivityState> {
     await this.ready;
@@ -142,9 +143,10 @@ export class ActivityLog {
       this.entries.splice(at < 0 ? this.entries.length - 1 : at, 1);
     }
     this.save();
+    let outcome: ActivityCompletion['outcome'] = 'unknown';
     try {
       const result = await execute();
-      entry.outcome =
+      outcome =
         result.kind === 'cancelled'
           ? 'cancelled'
           : result.kind === 'error'
@@ -157,16 +159,14 @@ export class ActivityLog {
         ((result.state.operation && result.state.operation.kind !== 'none') ||
           result.state.commitWarning)
       )
-        entry.outcome = 'attention';
+        outcome = 'attention';
       if ((result.kind === 'pushed' || result.kind === 'stashAction') && result.warning)
-        entry.outcome = 'attention';
+        outcome = 'attention';
       return result;
-    } catch (error) {
-      entry.outcome = 'unknown';
-      throw error;
     } finally {
+      entry.outcome = outcome;
       entry.finishedAt = Date.now();
-      this.save();
+      this.save({ id: entry.id, action: entry.action, outcome });
       await this.writes;
     }
   }
