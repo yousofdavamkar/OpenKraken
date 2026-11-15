@@ -759,14 +759,14 @@ test.skipIf(process.platform !== 'linux')(
     }
   },
 );
-function signed(value: unknown) {
+function signed(value: unknown, key = keys.privateKey) {
   const payload = Buffer.from(JSON.stringify(value));
   return JSON.stringify({
     payload: payload.toString('base64'),
     signature: sign(
       null,
       Buffer.concat([Buffer.from('OPENKRAKEN-UPDATE-V1\n'), payload]),
-      keys.privateKey,
+      key,
     ).toString('base64'),
   });
 }
@@ -825,5 +825,155 @@ test('signed downloads are verified and rollback protection survives an app rest
     await restarted.close();
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test.each(['stable', 'beta'] as const)(
+  'a trusted %s build moves the feed and verification key without resetting release history',
+  async (channel) => {
+    const directory = await mkdtemp(join(tmpdir(), 'openkraken-update-migration-'));
+    const old = { ...configuration, channel };
+    const keysNext = generateKeyPairSync('ed25519');
+    const next = {
+      channel,
+      feed: 'https://new.example.test/desktop/release.json',
+      publicKey: keysNext.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
+    };
+    const current = {
+      ...release(),
+      channel,
+      version: channel === 'beta' ? '0.2.0-beta.1' : '0.2.0',
+    };
+    let envelope = signed(current);
+    const send = vi.fn(async (_url: string | URL | Request) => new Response(envelope));
+    let updater = new Updates(directory, old, runtime, send);
+    try {
+      expect((await updater.check()).phase).toBe('available');
+      const enabled = await updater.setAutomatic(true, null);
+      await updater.close();
+      const watermark = join(directory, 'trusted-release.json');
+      const original = await readFile(watermark, 'utf8');
+      const consent = join(directory, 'automatic-checks.json');
+      const originalConsent = await readFile(consent, 'utf8');
+      // The release builds predating migration hashed these exact JSON fields in order.
+      const legacyBytes = JSON.stringify(
+        channel === 'stable' ? configuration : { channel, ...configuration },
+      );
+      const legacyBinding = createHash('sha256').update(legacyBytes).digest('hex');
+      expect(JSON.parse(original).configuration).toBe(legacyBinding);
+      expect(JSON.parse(originalConsent).configuration).toBe(legacyBinding);
+      send.mockClear();
+      for (const config of [
+        next,
+        { ...next, migrateFrom: { ...configuration, feed: next.feed } },
+        { ...next, channel: channel === 'beta' ? 'stable' : 'beta', migrateFrom: configuration },
+      ]) {
+        updater = new Updates(directory, config, runtime, send);
+        expect((await updater.check()).error).toBe('storage');
+        await updater.close();
+        expect(await readFile(watermark, 'utf8')).toBe(original);
+        expect(await readFile(consent, 'utf8')).toBe(originalConsent);
+      }
+      updater = new Updates(directory, { ...next, migrateFrom: configuration }, runtime, send);
+      expect((await updater.started()).automatic).toMatchObject({
+        host: 'new.example.test',
+        enabled: false,
+        revision: null,
+        warning: null,
+      });
+      expect(send).not.toHaveBeenCalled();
+      await expect(updater.setAutomatic(true, enabled.automatic.revision)).rejects.toThrow(
+        'changed',
+      );
+      expect((await updater.check()).error).toBe('invalid-release');
+      envelope = signed({ ...current, sequence: 6 }, keysNext.privateKey);
+      expect((await updater.check()).error).toBe('rollback');
+      envelope = signed({ ...current, expiresAt: current.expiresAt + 1 }, keysNext.privateKey);
+      expect((await updater.check()).error).toBe('rollback');
+      expect(await readFile(watermark, 'utf8')).toBe(original);
+      envelope = signed(current, keysNext.privateKey);
+      expect((await updater.check()).phase).toBe('available');
+      const migrated = JSON.parse(await readFile(watermark, 'utf8'));
+      expect(migrated).toMatchObject({ sequence: 7, digest: JSON.parse(original).digest });
+      expect(migrated.configuration).not.toBe(JSON.parse(original).configuration);
+      expect(send.mock.calls.every(([url]) => String(url) === next.feed)).toBe(true);
+      await updater.close();
+      updater = new Updates(directory, next, runtime, send);
+      expect((await updater.started()).automatic).toMatchObject({ enabled: false, warning: null });
+      envelope = signed({ ...current, sequence: 8 }, keysNext.privateKey);
+      expect((await updater.check()).phase).toBe('available');
+      expect((await updater.setAutomatic(true, null)).automatic.enabled).toBe(true);
+      await updater.close();
+      updater = new Updates(directory, old, runtime, send);
+      expect((await updater.check()).error).toBe('storage');
+      expect(JSON.parse(await readFile(watermark, 'utf8')).sequence).toBe(8);
+    } finally {
+      await updater.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test('migrating a profile with only scheduling consent leaves fresh consent available without a release check', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'openkraken-update-migrate-consent-'));
+  const send = vi.fn(async () => new Response(signed(release())));
+  const next = { ...configuration, feed: 'https://new.example.test/desktop/release.json' };
+  let updater = new Updates(directory, configuration, runtime, send);
+  try {
+    const previous = await updater.setAutomatic(true, null);
+    await updater.close();
+    updater = new Updates(directory, { ...next, migrateFrom: configuration }, runtime, send);
+    expect((await updater.started()).automatic).toMatchObject({
+      enabled: false,
+      revision: null,
+      warning: null,
+    });
+    await expect(updater.setAutomatic(true, previous.automatic.revision)).rejects.toThrow();
+    await updater.close();
+    updater = new Updates(directory, next, runtime, send);
+    expect((await updater.started()).automatic).toMatchObject({
+      enabled: false,
+      revision: null,
+      warning: null,
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect((await updater.setAutomatic(true, null)).automatic.enabled).toBe(true);
+  } finally {
+    await updater.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('unusable scheduling storage preserves the preceding consent for a migration retry', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'openkraken-migration-retry-'));
+  const next = {
+    ...configuration,
+    feed: 'https://new.example.test/release.json',
+    migrateFrom: configuration,
+  };
+  const send = vi.fn(async () => new Response(signed(release())));
+  let updater = new Updates(directory, configuration, runtime, send);
+  try {
+    await updater.setAutomatic(true, null);
+    await updater.close();
+    const consent = join(directory, 'automatic-checks.json');
+    const before = await readFile(consent);
+    const temporary = join(directory, 'automatic-checks.tmp');
+    await mkdir(temporary);
+    updater = new Updates(directory, next, runtime, send);
+    expect((await updater.started()).automatic).toMatchObject({
+      enabled: false,
+      warning: 'storage',
+    });
+    expect(await readFile(consent)).toEqual(before);
+    await updater.close();
+    await rm(temporary, { recursive: true });
+    updater = new Updates(directory, next, runtime, send);
+    expect((await updater.started()).automatic).toMatchObject({ enabled: false, warning: null });
+    await expect(stat(consent)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(send).not.toHaveBeenCalled();
+  } finally {
+    await updater.close();
+    await rm(directory, { recursive: true, force: true });
   }
 });

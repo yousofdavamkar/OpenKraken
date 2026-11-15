@@ -7,10 +7,15 @@ const payloadLimit = 32 * 1024;
 export const updateSignatureContext = 'OPENKRAKEN-UPDATE-V1\n';
 
 const channelSchema = z.enum(['stable', 'beta']);
-const configurationSchema = z.strictObject({
-  channel: channelSchema.optional(),
+const trustRootSchema = z.strictObject({
   feed: z.string().min(1).max(2048),
   publicKey: z.string().min(1).max(128),
+});
+
+const configurationSchema = z.strictObject({
+  channel: channelSchema.optional(),
+  ...trustRootSchema.shape,
+  migrateFrom: trustRootSchema.optional(),
 });
 
 function base64(raw: string, limit: number): Buffer {
@@ -21,10 +26,7 @@ function base64(raw: string, limit: number): Buffer {
   return bytes;
 }
 
-/** Build-owned trust root. A missing configuration disables update networking. */
-export function updateConfiguration(raw: unknown) {
-  if (raw === null) return null;
-  const config = configurationSchema.parse(raw);
+function validateTrustRoot(config: z.infer<typeof trustRootSchema>) {
   const url = new URL(config.feed);
   if (
     url.protocol !== 'https:' ||
@@ -44,6 +46,21 @@ export function updateConfiguration(raw: unknown) {
     !key.export({ type: 'spki', format: 'der' }).equals(der)
   )
     throw new Error('Updates require an Ed25519 public key');
+}
+
+/** Both the active root and the optional predecessor are fixed in the trusted build. */
+export function updateConfiguration(raw: unknown) {
+  if (raw === null) return null;
+  const config = configurationSchema.parse(raw);
+  validateTrustRoot(config);
+  if (config.migrateFrom) {
+    validateTrustRoot(config.migrateFrom);
+    if (
+      config.migrateFrom.feed === config.feed &&
+      config.migrateFrom.publicKey === config.publicKey
+    )
+      throw new Error('Update migration requires a different preceding feed or key');
+  }
   // Existing stable profiles bind their watermark to the original two-field configuration.
   if (config.channel === 'stable') delete config.channel;
   return config;

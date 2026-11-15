@@ -132,3 +132,23 @@ test('build channel and signed channel must match even when the signing key is s
     expect(() => verifyUpdateRelease(envelope({ ...candidate, version }), beta, now)).toThrow();
   expect(updateConfiguration({ ...stable, channel: 'stable' })).toEqual(stable);
 });
+
+test('a build can name one canonical preceding trust root for its own channel', () => {
+  const active = config();
+  const previous = { ...active, feed: 'https://previous.example.test/release.json' };
+  expect(updateConfiguration({ ...active, channel: 'stable', migrateFrom: previous })).toEqual({
+    ...active,
+    migrateFrom: previous,
+  });
+  for (const migrateFrom of [
+    active,
+    { ...previous, publicKey: 'invalid' },
+    { ...previous, feed: 'http://previous.example.test/release.json' },
+    { ...previous, channel: 'beta' },
+    { ...previous, migrateFrom: active },
+  ])
+    expect(() => updateConfiguration({ ...active, migrateFrom })).toThrow();
+  expect(() =>
+    verifyUpdateRelease(envelope({ ...release, migrateFrom: previous }), active, now),
+  ).toThrow();
+});

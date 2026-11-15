@@ -209,6 +209,15 @@ export class Updates {
     if (initial) this.directoryIdentity = identity;
     else if (identity !== this.directoryIdentity) throw new UpdateFailure('storage');
   }
+  private async syncDirectory() {
+    if (process.platform === 'win32') return;
+    const directory = await open(this.directory, 'r');
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  }
   private safeFile(info: Stats, limit: number) {
     return (
       info.isFile() &&
@@ -256,15 +265,25 @@ export class Updates {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new UpdateFailure('storage');
     }
   }
-  private binding() {
-    return digest(JSON.stringify(this.config));
+  private binding(root = this.config!) {
+    const { feed, publicKey } = root;
+    // Match the original stable and beta profile hashes, including field order.
+    return digest(JSON.stringify({ channel: this.config!.channel, feed, publicKey }));
+  }
+  private matchesPredecessor(binding: string) {
+    const previous = this.config?.migrateFrom;
+    return !!previous && binding === this.binding(previous);
   }
   private async load() {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     await this.checkDirectory(true);
     this.source = await this.readSource();
     this.watermark = this.source === null ? null : watermarkSchema.parse(JSON.parse(this.source));
-    if (this.watermark && this.watermark.configuration !== this.binding())
+    if (
+      this.watermark &&
+      this.watermark.configuration !== this.binding() &&
+      !this.matchesPredecessor(this.watermark.configuration)
+    )
       throw new UpdateFailure('storage');
     // A prior verified file is never trusted after restart without a fresh check/download.
     await this.removeOwned('trusted-release.tmp', 4096);
@@ -279,12 +298,25 @@ export class Updates {
     this.recoveryNotice = recoveryNotice;
     try {
       this.automaticSource = await this.readSource('automatic-checks.json');
-      if (this.automaticSource !== null) {
-        this.automatic = automaticSchema.parse(JSON.parse(this.automaticSource));
-        if (this.automatic.configuration !== this.binding())
-          throw new Error('Configuration changed');
-      }
+      const saved =
+        this.automaticSource === null
+          ? null
+          : automaticSchema.parse(JSON.parse(this.automaticSource));
+      const migrate = saved !== null && saved.configuration !== this.binding();
+      if (migrate && !this.matchesPredecessor(saved.configuration))
+        throw new Error('Configuration changed');
       await this.removeOwned('automatic-checks.tmp', 4096);
+      if (migrate) {
+        // Consent belongs to the old feed and key. Restore the default-off state.
+        await this.checkDirectory();
+        if ((await this.readSource('automatic-checks.json')) !== this.automaticSource)
+          throw new Error('Automatic update settings changed');
+        await unlink(this.file('automatic-checks.json'));
+        await this.syncDirectory();
+        this.automaticSource = null;
+      } else {
+        this.automatic = saved;
+      }
     } catch {
       this.automaticFailure = true;
     }
@@ -364,14 +396,7 @@ export class Updates {
         throw new Error('Automatic update settings changed');
       await this.checkDirectory();
       await rename(this.file('automatic-checks.tmp'), this.file('automatic-checks.json'));
-      if (process.platform !== 'win32') {
-        const directory = await open(this.directory, 'r');
-        try {
-          await directory.sync();
-        } finally {
-          await directory.close();
-        }
-      }
+      await this.syncDirectory();
       this.automaticSource = raw;
       this.automatic = next;
     } catch {
@@ -435,7 +460,8 @@ export class Updates {
         (sequence === this.watermark.sequence && releaseDigest !== this.watermark.digest))
     )
       throw new UpdateFailure('rollback');
-    if (sequence === this.watermark?.sequence) return;
+    if (sequence === this.watermark?.sequence && this.watermark.configuration === this.binding())
+      return;
     const next = {
       schemaVersion: 1 as const,
       configuration: this.binding(),
@@ -456,14 +482,7 @@ export class Updates {
       this.source = raw;
       this.watermark = next;
       // Persist the rename before offering an eligible release on POSIX.
-      if (process.platform !== 'win32') {
-        const directory = await open(this.directory, 'r');
-        try {
-          await directory.sync();
-        } finally {
-          await directory.close();
-        }
-      }
+      await this.syncDirectory();
     } catch {
       this.failedStorage = true;
       throw new UpdateFailure('storage');
