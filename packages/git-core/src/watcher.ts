@@ -123,6 +123,7 @@ export class RepositoryWatcher {
   private paused = 0;
   private closed = false;
   private baseline?: Record<RefreshDomain, string>;
+  private initialBaseline?: () => Record<RefreshDomain, string>;
   private checking?: Promise<void>;
   private starting?: Promise<void>;
   private priming?: Promise<Snapshot>;
@@ -162,13 +163,22 @@ export class RepositoryWatcher {
       if (this.closed) throw new Error('Watcher closed before snapshot');
       if (!metadata) this.fallback();
       const { snapshot, statusHash } = await read();
-      if (!this.closed && metadata && statusHash)
-        this.baseline = this.hashes(
-          referenceHashes(snapshotReferenceLines(snapshot.refs)),
-          metadata,
-          statusHash,
-          snapshot.worktrees,
-        );
+      if (!this.closed && metadata && statusHash) {
+        if (snapshot.refs.length >= 10000) {
+          // Keep the captured values independent of both Git and the returned snapshot.
+          const lines = Array.from(snapshotReferenceLines(snapshot.refs));
+          const worktrees = structuredClone(snapshot.worktrees);
+          this.initialBaseline = () =>
+            this.hashes(referenceHashes(lines), metadata, statusHash, worktrees);
+        } else {
+          this.baseline = this.hashes(
+            referenceHashes(snapshotReferenceLines(snapshot.refs)),
+            metadata,
+            statusHash,
+            snapshot.worktrees,
+          );
+        }
+      }
       return snapshot;
     })();
     try {
@@ -459,6 +469,10 @@ export class RepositoryWatcher {
     }
     this.checking = (async () => {
       try {
+        if (this.initialBaseline) {
+          this.baseline = this.initialBaseline();
+          this.initialBaseline = undefined;
+        }
         const next = await this.fingerprint();
         if (this.closed || this.paused) return;
         await this.syncCheckouts();
@@ -486,6 +500,7 @@ export class RepositoryWatcher {
   }
   async close() {
     this.closed = true;
+    this.initialBaseline = undefined;
     this.controller.abort();
     clearTimeout(this.timer);
     clearInterval(this.poll);

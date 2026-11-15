@@ -81,7 +81,7 @@ test('large Unicode reference baselines distinguish tag-only updates from branch
   const path = createFixture(join(root, 'large-observed-refs'));
   const head = fixtureGit(path, ['rev-parse', 'HEAD']);
   const names = Array.from(
-    { length: 2000 },
+    { length: 10000 },
     (_, i) => 'refs/' + (i % 2 ? 'tags/' : 'heads/') + '猫-🌱-' + i,
   );
   fixtureGit(
@@ -94,9 +94,15 @@ test('large Unicode reference baselines distinguish tag-only updates from branch
   const events: string[][] = [];
   const watch = new RepositoryWatcher('git', repo, (event) => events.push(event.domains));
   try {
-    await watch.primeObservedSnapshot(() => service.observeInitialSnapshot(repo.id));
+    const snapshot = await watch.primeObservedSnapshot(() =>
+      service.observeInitialSnapshot(repo.id),
+    );
+    const changed = snapshot.refs.find((ref) => ref.name === names[1])!;
+    const parent = fixtureGit(path, ['rev-parse', 'HEAD~1']);
+    changed.target = parent;
+    fixtureGit(path, ['update-ref', names[1]!, parent]);
     await watch.check();
-    expect(events).toEqual([]);
+    expect(events.splice(0)).toEqual([['refs']]);
     fixtureGit(path, ['update-ref', '-d', names[1]!]);
     await watch.check();
     expect(events).toEqual([['refs']]);
