@@ -6,6 +6,7 @@ import type { Result, Snapshot } from '@openkraken/ipc-contract';
 const workers = vi.hoisted(() => ({ start: vi.fn(), close: vi.fn(), layout: vi.fn() }));
 vi.mock('./src/graph-client.js', () => ({
   GraphClient: class {
+    failed = false;
     private engine = new GraphEngine(true);
     constructor() {
       workers.start(this);
@@ -14,6 +15,7 @@ vi.mock('./src/graph-client.js', () => ({
       workers.close(this);
     }
     async request(request: GraphRequest) {
+      if (this.failed) throw new Error('Graph worker failed');
       if (request.method === 'reset') workers.layout();
       return this.engine.handle({ ...request, id: 1 });
     }
@@ -111,6 +113,29 @@ test.each(['snapshot', 'layout'] as const)(
     expect(useRepository.getState().matches).toEqual([first.commits[0]!.oid]);
   },
 );
+
+test('refresh replaces a failed graph worker and restores the active query and selection', async () => {
+  const first = fixture();
+  await open(first);
+  await useRepository.getState().search('First');
+  const current = workers.start.mock.lastCall![0];
+  current.failed = true;
+  workers.close.mockClear();
+  const fresh = { ...first, cursor: crypto.randomUUID() };
+  request.mockResolvedValueOnce({ kind: 'snapshot', snapshot: fresh });
+  await useRepository.getState().run({
+    id: crypto.randomUUID(),
+    method: 'refresh',
+    repoId: first.repository.id,
+  });
+  const state = useRepository.getState();
+  expect(state.error).toBeUndefined();
+  expect(state.snapshot?.cursor).toBe(fresh.cursor);
+  expect(state.layout.map((row) => row.oid)).toEqual(first.commits.map((commit) => commit.oid));
+  expect(state.selection.focus).toBe(first.commits[0]!.oid);
+  expect(state.matches).toEqual([first.commits[0]!.oid]);
+  expect(workers.close).toHaveBeenCalledWith(current);
+});
 
 test('appending keeps previous rows and selection intact', async () => {
   const snapshot = fixture();

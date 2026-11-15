@@ -35,6 +35,9 @@ export class GraphClient {
       this.pending.clear();
     };
   }
+  get failed() {
+    return this.failure !== undefined;
+  }
   close() {
     this.worker.terminate();
     for (const pending of this.pending.values()) {

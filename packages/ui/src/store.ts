@@ -201,7 +201,11 @@ export const useRepository = create<State>()(
           get().snapshot?.repository.id === request.repoId
         )
           request = { ...request, view: get().snapshot!.view };
-        if (request.method !== 'refresh' || get().snapshot?.repository.id !== request.repoId)
+        if (
+          request.method !== 'refresh' ||
+          get().snapshot?.repository.id !== request.repoId ||
+          client?.failed
+        )
           candidate = new GraphClient();
         const result = expandGitServiceResult(
           JSON.parse(await window.openkraken.request(request, 'snapshot-json')),
@@ -216,9 +220,10 @@ export const useRepository = create<State>()(
             sameRepository =
               request.method === 'refresh' &&
               previous.snapshot?.repository.id === result.snapshot.repository.id;
-          const target = sameRepository ? graph() : (candidate ??= new GraphClient());
+          const existing = sameRepository && !client?.failed ? client : undefined;
+          const target = existing ?? (candidate ??= new GraphClient());
           const layout = await target.request({
-            ...(sameRepository
+            ...(existing
               ? ({ method: 'refresh', baseGeneration: previous.snapshot!.cursor } as const)
               : ({ method: 'reset' } as const)),
             generation: result.snapshot.cursor,

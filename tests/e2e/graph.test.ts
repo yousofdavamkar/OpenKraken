@@ -165,6 +165,38 @@ test('external staging preserves an active search without resending the loaded g
     await close();
   }
 });
+test('Refresh recovers a terminated graph worker and resumes search and paging', async () => {
+  const { page, repository, close } = await launch('linear', 2200);
+  try {
+    const grid = page.getByRole('grid');
+    await grid.press('ArrowDown');
+    const selected = await grid.getByRole('row', { selected: true }).getAttribute('data-oid');
+    await page.evaluate(() => {
+      const original = Worker.prototype.postMessage;
+      Worker.prototype.postMessage = new Proxy(original, {
+        apply(send, worker: Worker, args) {
+          if (args[0].method !== 'search') return Reflect.apply(send, worker, args);
+          Worker.prototype.postMessage = original;
+          worker.terminate();
+          worker.dispatchEvent(new ErrorEvent('error', { message: 'Graph stopped during search' }));
+        },
+      });
+    });
+    await page.getByRole('textbox', { name: 'Search commits' }).fill('Commit 2199');
+    await expect(page.getByText(/Graph stopped during search/)).toBeVisible();
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
+    await expect(grid.getByRole('row', { selected: true })).toHaveAttribute('data-oid', selected!);
+    await page.getByRole('button', { name: 'Load more commits' }).click();
+    await expect(page.getByTestId('commit-count')).toHaveText('2,200 commits');
+    await page
+      .getByRole('textbox', { name: 'Search commits' })
+      .fill(fixtureGit(repository, ['rev-parse', 'HEAD~2100']).slice(0, 12));
+    await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
+  } finally {
+    await close();
+  }
+});
 test('one Down key moves past the last initially loaded commit', async () => {
   const { page, close } = await launch('linear', 2003);
   try {

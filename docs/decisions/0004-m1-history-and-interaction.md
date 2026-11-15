@@ -33,3 +33,5 @@ Down on the last loaded row selects the first appended row when more history exi
 ## Starting the graph worker on repository open
 
 Start the candidate worker while the repository request is pending. A same-repository refresh uses the existing worker and its lane checkpoints. During a switch, keep the displayed worker until the candidate has returned its first layout. Close the candidate if opening, layout or cancellation ends the request before publication. A worker load failure is retained so the first layout request can report the error immediately.
+
+If the displayed worker reports a fatal error, the next repository refresh builds a fresh worker from the returned snapshot. The renderer retains the query and selection for the same checkout and reconstructs the search index and lane checkpoints. The desktop regression terminates the worker during a search, reports its error, refreshes and reads the next native page.
