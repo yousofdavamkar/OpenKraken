@@ -87,6 +87,7 @@ export class CrashReports {
       const saved = diskSchema.parse(JSON.parse(this.source));
       this.state.revision = digest(this.source);
       this.state.enabled =
+        this.generation === 0 &&
         !!this.config &&
         saved.version === 2 &&
         saved.enabled &&
@@ -221,13 +222,16 @@ export class CrashReports {
     // object can cross this boundary. Unknown events are discarded.
     if (!processSchema.safeParse(process).success || !reasonSchema.safeParse(reason).success)
       return;
-    if (!this.state.enabled || this.closed) return;
+    if (!this.config || this.closed) return;
     const generation = this.generation;
+    // A startup event may precede the consent-file read. Only consent already
+    // in force when the event occurred can authorize its delivery.
     await this.ready;
+    if (!this.state.enabled || generation !== this.generation) return;
     await this.writes.catch(() => {});
     if (
-      !this.config ||
       !this.state.enabled ||
+      generation !== this.generation ||
       this.active ||
       this.attempts >= 5 ||
       this.seen.has(`${process}:${reason}`)

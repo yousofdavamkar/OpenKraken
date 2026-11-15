@@ -12,6 +12,56 @@ afterEach(async () => {
   );
 });
 
+test('an early main failure uses consent from the preceding launch', async () => {
+  const directory = await fixture();
+  const first = new CrashReports(directory, dsn, runtime);
+  await first.start();
+  await first.save(true, null);
+  first.close();
+  await first.idle();
+  const send = vi.fn<typeof fetch>(async () => new Response(null));
+  const next = new CrashReports(directory, dsn, runtime, send);
+  const starting = next.start();
+  const event = next.capture('main', 'unhandled-exception');
+  await Promise.all([starting, event]);
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(String(send.mock.calls[0]![1]?.body).trim().split('\n')[2]!)).toMatchObject({
+    tags: { process: 'main', reason: 'unhandled-exception' },
+  });
+  next.close();
+  await next.idle();
+});
+
+test('a first opt-in cannot authorize an event observed during consent loading', async () => {
+  const send = vi.fn<typeof fetch>(async () => new Response(null));
+  const reports = new CrashReports(await fixture(), dsn, runtime, send);
+  const starting = reports.start();
+  const enabling = reports.save(true, null);
+  await Promise.all([starting, enabling, reports.capture('main', 'unhandled-exception')]);
+  expect(send).not.toHaveBeenCalled();
+  await reports.capture('main', 'unhandled-exception');
+  expect(send).toHaveBeenCalledTimes(1);
+  reports.close();
+  await reports.idle();
+});
+
+test('closing or revoking while loading saved consent suppresses startup reports', async () => {
+  for (const action of ['close', 'revoke'] as const) {
+    const directory = await fixture();
+    const first = new CrashReports(directory, dsn, runtime);
+    const consent = await first.save(true, null);
+    const send = vi.fn<typeof fetch>(async () => new Response(null));
+    const next = new CrashReports(directory, dsn, runtime, send);
+    const starting = next.start();
+    const event = next.capture('main', 'unhandled-exception');
+    if (action === 'close') next.close();
+    else await next.save(false, consent.revision);
+    await Promise.all([starting, event, next.idle()]);
+    expect(await next.read()).toMatchObject({ enabled: false, delivery: 'idle' });
+    expect(send).not.toHaveBeenCalled();
+  }
+});
+
 test('interrupted main sessions are attempted once after restart with the original release', async () => {
   const directory = await fixture();
   const first = new CrashReports(directory, dsn, runtime);
