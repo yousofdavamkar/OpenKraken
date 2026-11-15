@@ -4,8 +4,7 @@ import { buildDmg, verifyMacBundle } from './dmg.mjs';
 import { buildMsi, readMsiMetadata, verifyMsiMetadata } from './msi.mjs';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
-import { parseArgs, promisify } from 'node:util';
-import { execFile } from 'node:child_process';
+import { parseArgs } from 'node:util';
 import {
   comparePayload,
   payloadManifest,
@@ -14,7 +13,6 @@ import {
   verifyPackagedApplication,
 } from './package-security.mjs';
 
-const run = promisify(execFile);
 // Generated desktop/AppArmor files must not inherit a group-writable build umask.
 process.umask(0o022);
 const { values } = parseArgs({
@@ -75,8 +73,6 @@ const executableName = target === 'msi' ? 'openkraken.exe' : 'openkraken';
 await verifyFuses(target === 'dmg' ? source : join(source, executableName));
 const { version } = JSON.parse(await readFile('package.json', 'utf8'));
 if (target === 'dmg') await verifyMacBundle(source, version);
-const git = (await run('git', ['rev-parse', 'HEAD'])).stdout.trim();
-const dirty = Boolean((await run('git', ['status', '--porcelain'])).stdout.trim());
 const output = join(
   root,
   `release/installers/${process.platform}-${process.arch}`,
@@ -89,7 +85,7 @@ try {
   const prepackaged = join(work, target === 'dmg' ? 'OpenKraken.app' : 'app');
   await cp(source, prepackaged, { recursive: true, verbatimSymlinks: true });
   comparePayload(original, await payloadManifest(prepackaged));
-  verifyPackagedApplication(prepackaged, version);
+  const buildSource = verifyPackagedApplication(prepackaged, version);
   let artifacts;
   let appdir;
   if (target === 'msi') {
@@ -209,7 +205,7 @@ try {
     metadataMode: testMetadata ? 'test-only' : 'provided',
     metadata,
     signed: false,
-    source: { commit: git, dirty },
+    source: buildSource,
     artifact: {
       file: basename(artifact),
       size: (await stat(artifact)).size,

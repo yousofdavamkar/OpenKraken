@@ -221,7 +221,7 @@ export async function verifyMsi(artifact, manifest) {
     const directory = dirname(executable);
     comparePayload(manifest.payload, await payloadManifest(directory));
     await verifyFuses(executable);
-    verifyPackagedApplication(directory, manifest.version);
+    verifyPackagedApplication(directory, manifest.version, manifest.source ?? null);
     console.log('MSI tables, extracted payload, Windows access and Electron fuses verified');
     const smoke = spawn(process.execPath, ['scripts/smoke-package.mjs'], {
       stdio: 'inherit',

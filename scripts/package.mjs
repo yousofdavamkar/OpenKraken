@@ -5,12 +5,31 @@ import { buildLinuxNative } from './linux-native.mjs';
 import { mkdir, readFile, writeFile, rm, lstat, readdir, chmod } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
+const workspace = resolve(import.meta.dirname, '..');
+function readBuildSource() {
+  const git = (args) =>
+    execFileSync('git', args, {
+      cwd: workspace,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  try {
+    return {
+      commit: git(['rev-parse', '--verify', 'HEAD']).trim(),
+      dirty: Boolean(git(['status', '--porcelain'])),
+    };
+  } catch {
+    // A source export can be packaged without its Git checkout.
+    return null;
+  }
+}
+const source = readBuildSource();
 const staging = resolve('release/staging');
 const { version } = JSON.parse(await readFile('package.json', 'utf8'));
 await rm(staging, { recursive: true, force: true });
 await mkdir(staging, { recursive: true });
 execFileSync(process.execPath, [join(import.meta.dirname, 'build.mjs'), join(staging, 'dist')], {
-  cwd: resolve(import.meta.dirname, '..'),
+  cwd: workspace,
   stdio: 'inherit',
 });
 await buildLinuxNative(staging);
@@ -22,6 +41,7 @@ await writeFile(
     version,
     main: 'dist/main.cjs',
     desktopName: 'openkraken.desktop',
+    openkrakenSource: source,
   }),
 );
 const outputs = await packager({

@@ -52,6 +52,9 @@ async function run(script, args = []) {
   });
 }
 try {
+  const sourceCommit = (
+    await promisify(execFile)('git', ['rev-parse', 'HEAD'], { cwd: root })
+  ).stdout.trim();
   await run('package.mjs');
   const require = createRequire(import.meta.url);
   const { extractFile, listPackage } = createRequire(require.resolve('@electron/packager'))(
@@ -98,6 +101,8 @@ try {
   );
   await writeFile(join(fixture, 'package.json'), JSON.stringify({ ...source, version }));
   await rm(staging, { recursive: true });
+  // An installer workspace can have a different checkout or no source history.
+  await promisify(execFile)('git', ['init', '--quiet'], { cwd: fixture });
   await run('installers.mjs', ['--test-metadata', '--target', target]);
   const manifestPath = join(
     fixture,
@@ -105,6 +110,8 @@ try {
   );
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   assert.equal(manifest.version, version);
+  assert.equal(manifest.source?.commit, sourceCommit);
+  assert.deepEqual(manifest.source, bundled.openkrakenSource);
   const pointer = JSON.stringify({ fixture, target, version, manifestPath }, null, 2) + '\n';
   // Keep the last-built pointer for local callers; CI consumes per-format
   // pointers so building an RPM cannot replace the Debian upgrade fixture.

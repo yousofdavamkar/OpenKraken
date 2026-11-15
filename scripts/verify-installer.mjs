@@ -111,7 +111,7 @@ async function verifyLinuxInstaller() {
     if (manifest.target !== 'AppImage')
       comparePayload(manifest.payload, await payloadManifest(directory));
     await verifyFuses(join(directory, 'openkraken'));
-    verifyPackagedApplication(directory, manifest.version);
+    verifyPackagedApplication(directory, manifest.version, manifest.source ?? null);
     const desktop = await readFile(desktopPath, 'utf8');
     const expectedExec =
       manifest.target === 'AppImage'

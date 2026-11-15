@@ -101,7 +101,7 @@ export async function verifyDmg(artifact, manifest) {
       const mounted = join(mountpoint, 'OpenKraken.app');
       comparePayload(manifest.payload, await payloadManifest(mounted));
       await verifyMacBundle(mounted, manifest.version);
-      verifyPackagedApplication(mounted, manifest.version);
+      verifyPackagedApplication(mounted, manifest.version, manifest.source ?? null);
       await run('/usr/bin/ditto', [mounted, copied], commandOptions);
       comparePayload(manifest.payload, await payloadManifest(copied));
       await verifyMacBundle(copied, manifest.version);

@@ -9,7 +9,7 @@ import { readWindowsPayloadAccess } from './windows-payload.mjs';
 const require = createRequire(import.meta.url);
 const { extractFile } = createRequire(require.resolve('@electron/packager'))('@electron/asar');
 
-export function verifyPackagedApplication(directory, version) {
+export function verifyPackagedApplication(directory, version, claimedSource) {
   const resources = process.platform === 'darwin' ? 'Contents/Resources' : 'resources';
   const archive = join(directory, resources, 'app.asar');
   const app = JSON.parse(extractFile(archive, 'package.json').toString('utf8'));
@@ -24,6 +24,25 @@ export function verifyPackagedApplication(directory, version) {
     throw new Error(
       'Packaged application identity or version differs. Rebuild the platform bundle with pnpm package.',
     );
+  const source = app.openkrakenSource;
+  if (
+    source !== null &&
+    source !== undefined &&
+    (typeof source.commit !== 'string' ||
+      !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(source.commit) ||
+      typeof source.dirty !== 'boolean')
+  )
+    throw new Error('Invalid packaged application source');
+  // Older archives predate the embedded source record.
+  if (
+    source !== undefined &&
+    claimedSource !== undefined &&
+    (source === null
+      ? claimedSource !== null
+      : source.commit !== claimedSource?.commit || source.dirty !== claimedSource?.dirty)
+  )
+    throw new Error('Packaged application source differs from installer manifest');
+  return source ? { commit: source.commit, dirty: source.dirty } : null;
 }
 
 export const packageFuses = {
