@@ -38,6 +38,7 @@ import {
   EVENT_CHANNEL,
   encodeHistoryPage,
   expandGitServiceResult,
+  serializeLegacySnapshot,
   desktopEventSchema,
   requestSchema,
   cancelSchema,
@@ -1434,7 +1435,8 @@ else {
         }
         // Serialize after validation and before both renderer IPC and isolated-world copying.
         if (format === 'history-page' && result.kind === 'page') return encodeHistoryPage(result);
-        if (format === 'snapshot-json') return JSON.stringify(result);
+        if (format === 'snapshot-transfer') return JSON.stringify(result);
+        if (format === 'snapshot-json') return serializeLegacySnapshot(result);
         const expanded = expandGitServiceResult(result);
         return format === 'json' ? JSON.stringify(expanded) : expanded;
       },

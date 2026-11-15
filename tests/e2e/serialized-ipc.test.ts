@@ -99,22 +99,22 @@ test('serialized responses retain Git text, paging and errors through the sandbo
     }, pageRequest);
     expect(decodeHistoryPage(split.transferred)).toEqual({ ...next, cursor: split.cursor });
     expect(split.stale).toMatchObject({ kind: 'error', code: 'STALE_PAGE' });
-    await expect(
-      page.evaluate(() =>
-        Reflect.apply(window.openkraken.request, window.openkraken, [
-          { id: crypto.randomUUID(), method: 'open' },
-          'history-page',
-        ]),
-      ),
-    ).rejects.toThrow('Invalid response format');
-    await expect(
-      page.evaluate(() =>
-        Reflect.apply(window.openkraken.request, window.openkraken, [
-          { id: crypto.randomUUID(), method: 'commandPreferences' },
-          'snapshot-json',
-        ]),
-      ),
-    ).rejects.toThrow('Invalid response format');
+    for (const [method, format] of [
+      ['open', 'history-page'],
+      ['commandPreferences', 'snapshot-json'],
+      ['commandPreferences', 'snapshot-transfer'],
+    ]) {
+      await expect(
+        page.evaluate(
+          ([method, format]) =>
+            Reflect.apply(window.openkraken.request, window.openkraken, [
+              { id: crypto.randomUUID(), method },
+              format,
+            ]),
+          [method, format],
+        ),
+      ).rejects.toThrow('Invalid response format');
+    }
     const preferences = await page.evaluate(async () => {
       const request = { id: crypto.randomUUID(), method: 'commandPreferences' as const };
       return {
@@ -131,7 +131,7 @@ test('serialized responses retain Git text, paging and errors through the sandbo
   }
 });
 
-test('large Git snapshots round-trip their ordered reference records through all three response formats', async () => {
+test('large Git snapshots round-trip their ordered reference records through all snapshot response formats', async () => {
   const root = mkdtempSync(join(tmpdir(), 'openkraken-large-refs-ipc-'));
   const repository = createFixture(join(root, 'repo'), 'linear', 5);
   const head = fixtureGit(repository, ['rev-parse', 'HEAD']);
@@ -167,6 +167,10 @@ test('large Git snapshots round-trip their ordered reference records through all
           { id: crypto.randomUUID(), method: 'refresh', repoId: opened.snapshot.repository.id },
           'snapshot-json',
         ),
+        transfer: await window.openkraken.request(
+          { id: crypto.randomUUID(), method: 'refresh', repoId: opened.snapshot.repository.id },
+          'snapshot-transfer',
+        ),
         same: JSON.stringify(opened.snapshot.refs) === JSON.stringify(refreshed.snapshot.refs),
         branch: opened.snapshot.refs.find((ref) => ref.shortName === 'Ångström/🌱'),
         annotated: opened.snapshot.refs.find((ref) => ref.name === 'refs/tags/annotated'),
@@ -174,10 +178,17 @@ test('large Git snapshots round-trip their ordered reference records through all
     });
     const wire: ServiceResult = JSON.parse(result.compact);
     expect(wire.kind).toBe('compactSnapshot');
-    if (wire.kind !== 'compactSnapshot') throw new Error('Expected compact snapshot');
+    if (wire.kind !== 'compactSnapshot') throw new Error('Expected self-contained ref rows');
     expect(
       wire.snapshot.refs.filter((row) => typeof row === 'string').length,
     ).toBeGreaterThanOrEqual(10000);
+    const transfer: ServiceResult = JSON.parse(result.transfer);
+    if (transfer.kind !== 'compactSnapshot') throw new Error('Expected compact renderer transfer');
+    expect(transfer.snapshot.refs).toContain('refs/tags/fixture-9999');
+    expect(wire.snapshot.refs).toContain(head + ':refs/tags/fixture-9999');
+    const displayed = expandGitServiceResult(transfer);
+    if (displayed.kind !== 'snapshot') throw new Error('Expected expanded renderer snapshot');
+    expect(displayed.snapshot.refs).toEqual(result.refs);
     const expanded = expandGitServiceResult(wire);
     if (expanded.kind !== 'snapshot') throw new Error('Expected reference records');
     expect(expanded.snapshot.refs).toEqual(result.refs);

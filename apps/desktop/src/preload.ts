@@ -21,12 +21,15 @@ async function request(
   input: HistoryPageRequest,
   format: 'history-page',
 ): Promise<HistoryPageReply>;
-async function request(input: SnapshotRequest, format: 'snapshot-json'): Promise<string>;
+async function request(
+  input: SnapshotRequest,
+  format: 'snapshot-json' | 'snapshot-transfer',
+): Promise<string>;
 async function request(input: Request, format: 'json'): Promise<string>;
 async function request(input: Request): Promise<Result>;
 async function request(
   input: Request,
-  format?: 'json' | 'history-page' | 'snapshot-json',
+  format?: 'json' | 'history-page' | 'snapshot-json' | 'snapshot-transfer',
 ): Promise<Result | string | HistoryPageReply> {
   const request = requestSchema.parse(input);
   validateResponseFormat(format, request.method);

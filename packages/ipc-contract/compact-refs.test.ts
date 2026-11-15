@@ -3,6 +3,7 @@ import {
   encodeGitServiceResult,
   expandGitServiceResult,
   resultSchema,
+  serializeLegacySnapshot,
   serviceResponseSchema,
   type Ref,
   type Snapshot,
@@ -94,6 +95,66 @@ test('a large Git reply round-trips ordered refs and retains exceptional metadat
   expect(store.snapshot.refs).toStrictEqual(refs);
   expect(expandGitServiceResult(JSON.parse(JSON.stringify(checked)))).toStrictEqual(original);
   expect(resultSchema.safeParse(encoded).success).toBe(false);
+});
+
+test.each([40, 64])(
+  'a shared %i-digit target preserves names, exceptions and the renderer wire format',
+  (length) => {
+    const target = 'b'.repeat(length);
+    const refs: Ref[] = Array.from({ length: 10000 }, (_, i) => {
+      const shortName = '共有/' + i;
+      return { ...tag, target, name: 'refs/tags/' + shortName, shortName };
+    });
+    refs[1] = { ...tag, objectType: 'tag', peeled: target, peeledType: 'commit' };
+    refs[2] = { ...refs[2]!, target: oid, isHead: true };
+    const nextTarget = 'c'.repeat(length);
+    refs[4] = { ...refs[4]!, target: nextTarget };
+    refs[5] = { ...refs[5]!, target: nextTarget };
+    const original = { kind: 'snapshot' as const, snapshot: snapshot(refs) };
+    const wire = encodeGitServiceResult(original);
+    if (wire.kind !== 'compactSnapshot') throw new Error('Expected compact utility reply');
+    expect(wire.snapshot.refs.slice(0, 7)).toStrictEqual([
+      target + ':' + refs[0]!.name,
+      refs[1],
+      refs[2],
+      refs[3]!.name,
+      nextTarget + ':' + refs[4]!.name,
+      refs[5]!.name,
+      target + ':' + refs[6]!.name,
+    ]);
+    wire.snapshot.refs[1] = Object.assign({}, refs[1]!, { extra: 'strip me' });
+    const checked = serviceResponseSchema.parse({ id, result: wire }).result;
+    if (checked.kind !== 'compactSnapshot') throw new Error('Expected compact renderer reply');
+    const legacy = JSON.parse(serializeLegacySnapshot(checked));
+    expect(legacy.snapshot.refs.slice(0, 4)).toStrictEqual([
+      target + ':' + refs[0]!.name,
+      refs[1],
+      refs[2],
+      target + ':' + refs[3]!.name,
+    ]);
+    expect(expandGitServiceResult(legacy)).toStrictEqual(original);
+    const expanded = expandGitServiceResult(checked, { freezeCompactRefs: true });
+    expect(expanded).toStrictEqual(original);
+    if (expanded.kind !== 'snapshot') throw new Error('Expected decoded snapshot');
+    expect(Object.isFrozen(expanded.snapshot.refs[3])).toBe(true);
+  },
+);
+
+test('rejects invalid shared targets, names and exceptional records', () => {
+  for (const refs of [
+    ['refs/tags/a'],
+    [tag, 'refs/heads/a'],
+    ['bad:refs/tags/a', 'refs/tags/b'],
+    [oid + ':refs/tags/a', 'refs/tag/b'],
+    [oid + ':refs/tags/a', { ...tag, peeled: 'bad' }],
+  ]) {
+    expect(
+      serviceResponseSchema.safeParse({
+        id,
+        result: { kind: 'compactSnapshot', snapshot: { ...snapshot([]), refs } },
+      }).success,
+    ).toBe(false);
+  }
 });
 
 test('small snapshots and other result types use the ordinary reply', () => {

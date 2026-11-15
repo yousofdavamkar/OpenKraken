@@ -1,6 +1,6 @@
 import type { HistoryPageReply } from './page-transfer.js';
-import { compactRef, objectIdPattern, validCompactRef } from './compact-refs.js';
-export { expandGitServiceResult } from './compact-refs.js';
+import { canCompactRef, objectIdPattern, packedRefKind, validCompactRef } from './compact-refs.js';
+export { expandGitServiceResult, serializeLegacySnapshot } from './compact-refs.js';
 import { crashReportingStateSchema } from './crash-reports.js';
 import { updatesRequests, updatesStateSchema } from './updates.js';
 export * from './updates.js';
@@ -2157,10 +2157,16 @@ export const resultSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 const compactRefsSchema = z.array(z.unknown()).transform((rows, ctx) => {
+  let hasTarget = false;
   const refs: (string | Ref)[] = [];
   for (const [index, row] of rows.entries()) {
     if (typeof row === 'string') {
-      if (validCompactRef(row)) {
+      if (
+        row.startsWith('refs/')
+          ? hasTarget && packedRefKind(row) !== undefined
+          : validCompactRef(row)
+      ) {
+        hasTarget = true;
         refs.push(row);
         continue;
       }
@@ -2187,14 +2193,15 @@ export const serviceResponseSchema = z.object({
 
 export function encodeGitServiceResult(result: Result) {
   if (result.kind !== 'snapshot' || result.snapshot.refs.length < 10000) return result;
-  const refs: (Ref | string)[] = [];
+  let previousTarget: string | undefined;
   let compactCount = 0;
-  for (const ref of result.snapshot.refs) {
-    const row = compactRef(ref);
-    refs.push(row);
-    if (typeof row === 'string') compactCount++;
-  }
-  // Rich refs need their full records. Keep the normal array validator for those repositories.
+  const refs = result.snapshot.refs.map((ref) => {
+    if (!canCompactRef(ref)) return ref;
+    compactCount++;
+    if (ref.target === previousTarget) return ref.name;
+    previousTarget = ref.target;
+    return ref.target + ':' + ref.name;
+  });
   if (compactCount * 2 < refs.length) return result;
   return { kind: 'compactSnapshot' as const, snapshot: { ...result.snapshot, refs } };
 }
@@ -2227,7 +2234,10 @@ export function validateResponseFormat(format: unknown, method: string): void {
   if (
     format !== undefined &&
     format !== 'json' &&
-    !(format === 'snapshot-json' && snapshotMethods.some((item) => item === method)) &&
+    !(
+      (format === 'snapshot-json' || format === 'snapshot-transfer') &&
+      snapshotMethods.some((item) => item === method)
+    ) &&
     !(format === 'history-page' && method === 'page')
   )
     throw new Error('Invalid response format');
@@ -2236,7 +2246,7 @@ export function validateResponseFormat(format: unknown, method: string): void {
 export type HistoryPageRequest = Extract<Request, { method: 'page' }>;
 export interface DesktopApi {
   request(request: HistoryPageRequest, format: 'history-page'): Promise<HistoryPageReply>;
-  request(request: SnapshotRequest, format: 'snapshot-json'): Promise<string>;
+  request(request: SnapshotRequest, format: 'snapshot-json' | 'snapshot-transfer'): Promise<string>;
   /** Main-validated result as JSON, avoiding nested object copies across contextBridge. */
   request(request: Request, format: 'json'): Promise<string>;
   request(request: Request): Promise<Result>;
