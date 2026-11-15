@@ -119,6 +119,13 @@ test('main rejects malformed packed rows and validates the enclosing snapshot an
     {},
     oid,
     'x'.repeat(40) + ':refs/tags/x',
+    'a'.repeat(39) + ':refs/tags/x',
+    'a'.repeat(41) + ':refs/tags/x',
+    'a'.repeat(63) + ':refs/tags/x',
+    'a'.repeat(65) + ':refs/tags/x',
+    'a'.repeat(63) + 'G:refs/heads/main',
+    'a'.repeat(39) + '\n:refs/heads/main',
+    oid + ':refs/heads-suffix/main',
     oid + ':refs/unknown/x',
     { ...tag, target: 'bad' },
   ]) {
