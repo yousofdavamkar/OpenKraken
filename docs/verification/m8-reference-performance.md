@@ -2,6 +2,21 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Renderer heap for commits with one reference
+
+The graph used to allocate a badge list for every target when opening a repository. It now holds a single ref directly until a row needs its list. Additional refs at the same target still form an ordered list. Four alternating pairs of fresh Electron profiles opened 2,000 commits from full Linux history with 50,000 distinct targets. After first paint, Chromium collected garbage and reported live renderer JavaScript heap through CDP.
+
+| Pair | Previous renderer heap (bytes) | New renderer heap (bytes) |
+| ---: | -----------------------------: | ------------------------: |
+|    1 |                     31,063,484 |                29,398,944 |
+|    2 |                     30,838,556 |                29,444,584 |
+|    3 |                     31,067,172 |                29,399,104 |
+|    4 |                     31,065,096 |                29,386,836 |
+
+In a separate Node probe, five fresh-process pairs built the index from the same native refs and accessed the first 50 targets. Median added heap for 50,000 distinct targets fell from 4,328,216 to 1,533,216 bytes. For 500 interleaved targets it rose from 315,720 to 330,064 bytes. For a single shared target it rose from 113,608 to 124,192 bytes. Traversing every group after the measurement produced identical ordered ref-name and target digests.
+
+The desktop timing comparison used the same Git utility for both renderers. Distinct-target median first paint changed from 822.5 to 783.2 ms in three pairs. The interleaved median rose from 624.0 to 662.5 ms in three pairs. One shared-target pair measured 603.8 and 582.7 ms. All 14 openings missed 500 ms and two of 21 candidate page appends missed 300 ms. The change reduced heap on the distinct fixture. The timing samples do not establish a general opening speedup. [Individual timings](m8-badge-index-pairs.csv)
+
 ## Interleaved reference targets
 
 The Linux x64 fixture cycled 50,000 packed refs through 500 commits in name order, keeping master at the original Linux HEAD. The previous 8 KiB scheduling sample saw distinct targets and requested the type of each ref from Git. A second read can now extend the sample to 256 KiB. On this fixture, the resulting reader resolved each of the 500 types once and matched full Git enumeration for every ordered record. Git 2.38.0 and 2.53.0 also matched on 50,000 distinct targets, 500 targets grouped contiguously and one shared target.

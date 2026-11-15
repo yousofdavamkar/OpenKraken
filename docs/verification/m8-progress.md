@@ -2,6 +2,10 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Memory used by commit badges
+
+At `071e6cf`, the Linux x64 renderer retained 1.33–1.60 MiB less JavaScript heap after first paint across four paired openings with 50,000 distinct reference targets. The packaged app matched single badges to native Git, showed a second badge after an external tag was created, removed it after deletion and appended 5,000 commits. It also verified multiple refs per commit on the interleaved fixture. The unit and native suite passed 945 tests with 14 skips, and all 22 selected Electron tests passed, including the graph goldens. First-paint timings varied by fixture and all measured openings exceeded 500 ms. [Heap and timing results](m8-reference-performance.md#renderer-heap-for-commits-with-one-reference)
+
 ## Opening repositories with interleaved reference targets
 
 On full Linux history with 50,000 refs cycling through 500 targets, median first paint improved from 846.6 ms to 647.7 ms over three paired runs. The packaged app opened the graph, filtered by a full tag name, matched two commits’ ref counts and names against Git, observed native tag creation and deletion, and appended 5,000 commits. The native and unit suite passed 945 tests with 14 skips. The first-paint and paging gates remain open. [Timing samples and compatibility checks](m8-reference-performance.md#interleaved-reference-targets)
