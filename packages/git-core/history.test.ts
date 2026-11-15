@@ -2,16 +2,52 @@ import { afterAll, expect, test, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
 import { RepositoryService } from './src/repository.js';
 import * as runner from './src/runner.js';
 import { HistoryCursor } from './src/history.js';
+import { HISTORY_FORMAT, HistoryParser } from './src/parsers.js';
 const root = mkdtempSync(join(tmpdir(), 'openkraken-pages-'));
 const service = new RepositoryService('git');
 afterAll(async () => {
   await service.dispose();
   rmSync(root, { recursive: true, force: true });
 });
+test.each(['octopus', 'shallow', 'replacement'])(
+  'paged %s history preserves the full native records and traversal order',
+  async (kind) => {
+    let path = createFixture(join(root, 'wire-' + kind), 'octopus');
+    if (kind === 'shallow') {
+      const shallow = join(root, 'depth-two');
+      fixtureGit(path, ['clone', '--depth=2', pathToFileURL(path).href, shallow]);
+      path = shallow;
+      expect(fixtureGit(path, ['rev-parse', '--is-shallow-repository'])).toBe('true');
+    }
+    if (kind === 'replacement') fixtureGit(path, ['replace', '--graft', 'HEAD', 'HEAD~2']);
+    const start = fixtureGit(path, ['rev-parse', 'HEAD']);
+    const legacy = await runner.runGit(
+      'git',
+      ['rev-list', '--date-order', '--parents', `--format=${HISTORY_FORMAT}`, '--stdin'],
+      { cwd: path, stdin: start + '\n' },
+    );
+    const parser = new HistoryParser();
+    parser.push(legacy.stdout);
+    const expected = parser.finish();
+    const cursor = new HistoryCursor('git', path, [start]);
+    try {
+      const commits = [];
+      for (;;) {
+        const page = await cursor.page(commits.length, 2);
+        commits.push(...page.commits);
+        if (!page.hasMore) break;
+      }
+      expect(commits).toEqual(expected);
+    } finally {
+      await cursor.close();
+    }
+  },
+);
 test('same cursor pages match Git without duplicates, skips or moved-ref contamination', async () => {
   const path = createFixture(join(root, 'large'), 'linear', 7300);
   const expected = fixtureGit(path, ['rev-list', '--date-order', '--all']).split('\n');

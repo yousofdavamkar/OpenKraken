@@ -238,45 +238,51 @@ function signature(name: string, email: string, time: string, date: string) {
 export class HistoryParser {
   constructor(private accept?: (commit: Commit) => void) {}
   readonly value: Commit[] = [];
-  private fields: string[] = [];
-  private decoder = new TextNulDecoder((field) => {
-    this.fields.push(field);
-    if (this.fields.length !== 12) return;
-    const [header, parents, an, ae, at, ai, cn, ce, ct, ci, body, end] = this.fields as [
-      string,
-      string,
-      string,
-      string,
-      string,
-      string,
-      string,
-      string,
-      string,
-      string,
-      string,
-      string,
-    ];
-    const match = /^\n?commit [0-9a-f]+(?: [0-9a-f]+)*\n([0-9a-f]+)$/.exec(header);
-    if (!match || end !== '') throw new Error('Malformed history record');
+  private pendingFields: string[] = [];
+  private decoder = new TextNulFields();
+  private append(fields: string[], offset: number) {
+    const first = fields[offset]!;
+    const header = first.startsWith('\n') ? first.slice(1) : first;
+    // The public parser also accepts the original "commit ...\n%H" format.
+    const id = header.startsWith('commit ')
+      ? /^commit [0-9a-f]+(?: [0-9a-f]+)*\n([0-9a-f]+)$/.exec(header)?.[1]
+      : header;
+    if (!id || fields[offset + 11] !== '') throw new Error('Malformed history record');
+    const parents = fields[offset + 1]!;
+    const body = fields[offset + 10]!;
+    const newline = body.indexOf('\n');
     const commit: Commit = {
-      oid: oid(match[1]!),
+      oid: oid(id),
       parents: parents ? parents.split(' ').map(oid) : [],
-      author: signature(an, ae, at, ai),
-      committer: signature(cn, ce, ct, ci),
-      summary: body.split('\n')[0]!,
+      author: signature(
+        fields[offset + 2]!,
+        fields[offset + 3]!,
+        fields[offset + 4]!,
+        fields[offset + 5]!,
+      ),
+      committer: signature(
+        fields[offset + 6]!,
+        fields[offset + 7]!,
+        fields[offset + 8]!,
+        fields[offset + 9]!,
+      ),
+      summary: newline < 0 ? body : body.slice(0, newline),
       body,
       isStash: false,
     };
     if (this.accept) this.accept(commit);
     else this.value.push(commit);
-    this.fields = [];
-  });
+  }
   push(chunk: Buffer) {
-    this.decoder.push(chunk);
+    const batch = this.decoder.push(chunk);
+    const fields = this.pendingFields.length ? this.pendingFields.concat(batch) : batch;
+    let offset = 0;
+    for (; offset + 12 <= fields.length; offset += 12) this.append(fields, offset);
+    this.pendingFields = fields.slice(offset);
   }
   finish() {
     this.decoder.finish(true);
-    if (this.fields.length) throw new Error('Truncated commit');
+    if (this.pendingFields.length) throw new Error('Truncated commit');
     return this.value;
   }
 }

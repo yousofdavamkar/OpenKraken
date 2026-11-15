@@ -106,7 +106,13 @@ export class HistoryCursor {
       starts.length
         ? runGit(
             git,
-            ['rev-list', '--date-order', '--parents', `--format=${HISTORY_FORMAT}`, '--stdin'],
+            [
+              'rev-list',
+              '--date-order',
+              '--no-commit-header',
+              `--format=${HISTORY_FORMAT}`,
+              '--stdin',
+            ],
             {
               cwd,
               stdin: starts.join('\n') + '\n',

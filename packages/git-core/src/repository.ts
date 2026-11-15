@@ -452,10 +452,11 @@ export class RepositoryService {
     let stashCommits: Commit[] = [];
     if (hasStash) {
       const stashes = new HistoryParser();
-      await this.run(
-        ['log', '-g', '--max-count=200', `--format=commit %H%n${HISTORY_FORMAT}`, 'refs/stash'],
-        { cwd: repository.path, signal, onStdout: (b) => stashes.push(b) },
-      );
+      await this.run(['log', '-g', '--max-count=200', `--format=${HISTORY_FORMAT}`, 'refs/stash'], {
+        cwd: repository.path,
+        signal,
+        onStdout: (b) => stashes.push(b),
+      });
       stashCommits = stashes
         .finish()
         .map((c) => ({ ...c, parents: c.parents.slice(0, 1), isStash: true }));
@@ -526,7 +527,7 @@ export class RepositoryService {
             '--regexp-ignore-case',
             '--fixed-strings',
             filter,
-            `--format=commit %H%n${HISTORY_FORMAT}`,
+            `--format=${HISTORY_FORMAT}`,
             '--stdin',
           ],
           {
@@ -565,7 +566,7 @@ export class RepositoryService {
       }
       if (reachable && !exact) {
         const parser = new HistoryParser();
-        await this.run(['log', '-1', `--format=commit %H%n${HISTORY_FORMAT}`, resolved, '--'], {
+        await this.run(['log', '-1', `--format=${HISTORY_FORMAT}`, resolved, '--'], {
           cwd: repo.path,
           signal,
           onStdout: (b) => parser.push(b),

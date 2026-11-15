@@ -209,6 +209,47 @@ describe('stream parsers', () => {
       { numRuns: 300 },
     );
   });
+  test('headerless pages match the original history stream at every byte boundary', () => {
+    const second = 'b'.repeat(64);
+    const record = (id: string, parents: string, body: string, legacy: boolean) =>
+      [
+        legacy ? `commit ${id}\n${id}` : id,
+        parents,
+        'Zoë',
+        '',
+        '0',
+        '1970-01-01 01:00:00 +0100',
+        'C',
+        'c@example.test',
+        '0',
+        '1970-01-01 00:00:00 +0000',
+        body,
+        '',
+        '',
+      ].join('\0');
+    const stream = (legacy: boolean) =>
+      Buffer.from(
+        [
+          record(second, hash, 'subject 🌱\n\ncommit fake\nbody', legacy),
+          record(hash, '', '', legacy),
+          '',
+        ].join('\n'),
+      );
+    const legacy = new HistoryParser();
+    legacy.push(stream(true));
+    const expected = legacy.finish();
+    const data = stream(false);
+    for (let cut = 0; cut <= data.length; cut++) {
+      const parser = new HistoryParser();
+      parser.push(data.subarray(0, cut));
+      parser.push(data.subarray(cut));
+      expect(parser.finish()).toEqual(expected);
+    }
+    expect(expected[0]).toMatchObject({ oid: second, parents: [hash], summary: 'subject 🌱' });
+    const truncated = new HistoryParser();
+    truncated.push(data.subarray(0, data.length - 2));
+    expect(() => truncated.finish()).toThrow();
+  });
   test('streamed history decodes invalid UTF-8 per field and enforces the message byte limit', () => {
     const prefix = Buffer.from(
       [
