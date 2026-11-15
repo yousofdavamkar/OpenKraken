@@ -90,6 +90,8 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
   const manifestPath = process.env.OPENKRAKEN_UPDATE_TEST_MANIFEST;
   test.setTimeout(manifestPath ? 180000 : 90000);
   const { format, filename, version, size, sha256, path } = await updatePackage(manifestPath);
+  const channel = version.includes('-beta.') ? 'beta' : 'stable';
+  const feedPath = `/${channel}/release.json`;
   const root = await mkdtemp(join(tmpdir(), 'openkraken-update-e2e-'));
   const main = resolve(`apps/desktop/dist/update-test-${randomUUID()}.cjs`);
   let server: ReturnType<typeof createServer> | undefined;
@@ -111,12 +113,12 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
       { key: await readFile(key), cert: await readFile(cert) },
       (request, response) => {
         requests.push(request.url!);
-        if (request.url === '/stable/release.json') {
+        if (request.url === feedPath) {
           const payload = Buffer.from(
             JSON.stringify({
               schemaVersion: 1,
               product: 'org.openkraken.desktop',
-              channel: 'stable',
+              channel,
               sequence,
               version,
               issuedAt,
@@ -145,7 +147,7 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
               signature: signature.toString('base64'),
             }),
           );
-        } else if (request.url === '/stable/' + filename) {
+        } else if (request.url === `/${channel}/${filename}`) {
           if (slow) response.write('fix');
           else if (path)
             void pipeline(createReadStream(path), response).catch(() => response.destroy());
@@ -160,7 +162,8 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Missing TLS fixture');
     const config = {
-      feed: `https://127.0.0.1:${address.port}/stable/release.json`,
+      channel,
+      feed: `https://127.0.0.1:${address.port}${feedPath}`,
       publicKey: keys.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
     };
     await build({
@@ -194,6 +197,7 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     let dialog = page.getByRole('dialog', { name: 'App updates' });
     await expect(dialog.getByRole('status')).toHaveText('Check for a newer signed release.');
     expect(requests).toHaveLength(0);
+    await expect(dialog.getByText(/Beta channel/)).toHaveCount(channel === 'beta' ? 1 : 0);
     await dialog.getByRole('button', { name: 'Check for updates' }).click();
     await expect(dialog.getByRole('status')).toHaveText(`Version ${version} is available.`);
     await dialog.getByRole('button', { name: `Download ${format}` }).click();
@@ -244,6 +248,7 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     expect((await stat(exported)).size).toBe(size);
     if (manifestPath) {
       const receipt = {
+        channel,
         platform: process.platform,
         arch: process.arch,
         format,

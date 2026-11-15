@@ -351,12 +351,17 @@ jobs:
           platform=$(node -p 'process.platform + "-" + process.arch')
           display=()
           case "$RUNNER_OS" in
-            Linux) targets=(deb rpm); display=(xvfb-run -a) ;;
+            Linux) targets=(deb rpm deb-beta rpm-beta); display=(xvfb-run -a) ;;
             macOS) targets=(dmg) ;;
             Windows) targets=(msi) ;;
           esac
           for target in "${targets[@]}"; do
-            export OPENKRAKEN_UPDATE_TEST_MANIFEST="release/installers/$platform/test/$target/manifest.json"
+            if [[ "$target" == *-beta ]]; then
+              OPENKRAKEN_UPDATE_TEST_MANIFEST=$(node -p 'require("./release/installer-upgrade-" + process.argv[1] + ".json").manifestPath' "$target")
+            else
+              OPENKRAKEN_UPDATE_TEST_MANIFEST="release/installers/$platform/test/$target/manifest.json"
+            fi
+            export OPENKRAKEN_UPDATE_TEST_MANIFEST
             "${display[@]}" pnpm exec playwright test tests/e2e/updates.test.ts -g 'signed update UI' \
               --reporter=list --output="test-results/update-export-$target"
           done
