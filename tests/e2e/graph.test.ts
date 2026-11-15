@@ -307,6 +307,11 @@ test('5000-commit pages append without changing previous lanes; unloaded search 
       }));
     expect(canvas.height).toBeLessThanOrEqual(canvas.viewport * canvas.ratio + 1);
     await page.screenshot({ path: 'test-results/graph-large.png' });
+    // The scroll sample moved the viewport away from the selected last commit.
+    await expect(grid).not.toHaveAttribute('aria-activedescendant', /.+/);
+    await grid.press('End');
+    await expect(grid).toHaveAttribute('aria-activedescendant', 'commit-row-11999');
+    await expect(grid.getByRole('row', { selected: true })).toBeInViewport();
     fixtureGit(repository, ['commit', '--allow-empty', '-m', 'After paging']);
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await expect(page.getByTestId('commit-count')).toHaveText('2,000 commits · more available');

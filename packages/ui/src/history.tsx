@@ -140,10 +140,13 @@ export function History() {
       cancelAnimationFrame(second);
     };
   }, [snapshot?.cursor]);
+  const focused = useMemo(
+    () => (selection.focus ? rows.findIndex((row) => row.oid === selection.focus) : -1),
+    [rows, selection.focus],
+  );
   useEffect(() => {
-    const index = rows.findIndex((r) => r.oid === selection.focus);
-    if (index >= 0) virtual.scrollToIndex(index, { align: 'auto' });
-  }, [selection.focus, snapshot?.cursor]);
+    if (focused >= 0) virtual.scrollToIndex(focused, { align: 'auto' });
+  }, [focused, selection.focus, snapshot?.cursor]);
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (!snapshot) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
@@ -183,10 +186,11 @@ export function History() {
     );
     if (target) {
       event.preventDefault();
+      if (target === selection.focus && focused >= 0)
+        virtual.scrollToIndex(focused, { align: 'auto' });
       void state.navigate(target);
     }
   }
-  const focused = rows.findIndex((r) => r.oid === selection.focus);
   const activeVisible = virtual.getVirtualItems().some((item) => item.index === focused);
   return (
     <>
