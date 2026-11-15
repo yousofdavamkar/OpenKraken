@@ -97,7 +97,7 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
               artifacts: [
                 {
                   platform: 'linux',
-                  arch: 'x64',
+                  arch: process.arch,
                   format: 'AppImage',
                   name: 'OpenKraken.AppImage',
                   size: 7,

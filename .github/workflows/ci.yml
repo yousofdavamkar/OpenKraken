@@ -47,7 +47,11 @@ jobs:
           name: evidence-scale-performance-linux
           path: test-results/performance/
   minimum-git:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     defaults:
       run:
@@ -94,7 +98,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: evidence-minimum-git-linux
+          name: evidence-minimum-git-${{ matrix.os }}
           path: test-results/
   verify:
     env:
@@ -102,7 +106,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -143,6 +147,9 @@ jobs:
           tests/e2e/gitea.test.ts
           tests/e2e/provider-push.test.ts
           tests/e2e/provider-delete.test.ts
+      - if: runner.os == 'Linux'
+        name: Locate native Linux installer manifests
+        run: echo "INSTALLER_ROOT=release/installers/linux-$(node -p 'process.arch')/test" >> "$GITHUB_ENV"
       - run: pnpm package
       - if: runner.os == 'Linux'
         env:
@@ -195,7 +202,7 @@ jobs:
           node scripts/check-installer-upgrade.mjs deb
           node scripts/check-installer-upgrade.mjs rpm
           pnpm installer --test-metadata --target AppImage
-          node scripts/check-installer-guards.mjs release/installers/linux-x64/test/AppImage/manifest.json
+          node scripts/check-installer-guards.mjs "$INSTALLER_ROOT/AppImage/manifest.json"
           node scripts/verify-appimage-update.mjs
       - if: runner.os == 'Linux'
         name: AppImage preflight, cancellation, restart and startup recovery
@@ -219,42 +226,42 @@ jobs:
         env:
           OPENKRAKEN_XDOTOOL: xdotool
         run: |
-          xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/deb/manifest.json
-          xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/rpm/manifest.json
+          xvfb-run -a pnpm smoke:installer "$INSTALLER_ROOT/deb/manifest.json"
+          xvfb-run -a pnpm smoke:installer "$INSTALLER_ROOT/rpm/manifest.json"
           for target in deb rpm; do
             upgrade_manifest=$(node -p 'require("./release/installer-upgrade-" + process.argv[1] + ".json").manifestPath' "$target")
             xvfb-run -a pnpm smoke:installer "$upgrade_manifest"
           done
-          xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/AppImage/manifest.json
-          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test/AppImage/manifest.json
+          xvfb-run -a pnpm smoke:installer "$INSTALLER_ROOT/AppImage/manifest.json"
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a pnpm smoke:installer "$INSTALLER_ROOT/AppImage/manifest.json"
       - if: runner.os == 'Linux'
         name: Debian install, version upgrade and removal in a disposable container
         timeout-minutes: 15
         run: |
-          artifact=$(node -p 'require("./release/installers/linux-x64/test/deb/manifest.json").artifact.file')
+          artifact=$(node -p 'require("./" + process.env.INSTALLER_ROOT + "/deb/manifest.json").artifact.file')
           upgrade_dir=$(node -p 'require("node:path").dirname(require("./release/installer-upgrade-deb.json").manifestPath)')
           upgrade_artifact=$(node -p 'require(require("./release/installer-upgrade-deb.json").manifestPath).artifact.file')
           mkdir -p test-results
           docker run --rm \
             --env OPENKRAKEN_DISPOSABLE_INSTALL_TEST=1 \
-            --volume "$PWD/release/installers/linux-x64/test/deb:/artifacts:ro" \
+            --volume "$PWD/$INSTALLER_ROOT/deb:/artifacts:ro" \
             --volume "$upgrade_dir:/upgrade:ro" \
             --volume "$PWD/scripts/check-deb-lifecycle.sh:/check.sh:ro" \
-            docker.io/library/debian@sha256:1e1a22175fbf1b32157ddaf0219e1db4e5401fab2b94ed285add64d18587cd2d \
+            docker.io/library/debian@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4 \
             timeout 12m bash /check.sh "/artifacts/$artifact" "/upgrade/$upgrade_artifact" 2>&1 | tee test-results/deb-lifecycle.log
       - if: runner.os == 'Linux'
         name: Fedora RPM install, upgrade and removal in a disposable container
         timeout-minutes: 15
         run: |
-          artifact=$(node -p 'require("./release/installers/linux-x64/test/rpm/manifest.json").artifact.file')
+          artifact=$(node -p 'require("./" + process.env.INSTALLER_ROOT + "/rpm/manifest.json").artifact.file')
           upgrade_dir=$(node -p 'require("node:path").dirname(require("./release/installer-upgrade-rpm.json").manifestPath)')
           upgrade_artifact=$(node -p 'require(require("./release/installer-upgrade-rpm.json").manifestPath).artifact.file')
           docker run --rm \
             --env OPENKRAKEN_DISPOSABLE_INSTALL_TEST=1 \
-            --volume "$PWD/release/installers/linux-x64/test/rpm:/artifacts:ro" \
+            --volume "$PWD/$INSTALLER_ROOT/rpm:/artifacts:ro" \
             --volume "$upgrade_dir:/upgrade:ro" \
             --volume "$PWD/scripts/check-rpm-lifecycle.sh:/check.sh:ro" \
-            quay.io/fedora/fedora@sha256:d3fd3803b17d57bb219abebc265aaea197fb4952e650317b6a5d0abea5902ee9 \
+            quay.io/fedora/fedora@sha256:086bb30fc7dd0f84b266b9c93d14298f06e30d04421dcd6813629ea00542fa8a \
             timeout 12m bash /check.sh "/artifacts/$artifact" "/upgrade/$upgrade_artifact"
       - uses: actions/upload-artifact@v4
         if: always()
