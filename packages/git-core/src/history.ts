@@ -46,7 +46,9 @@ export class HistoryCursor {
     starts: string[],
     readonly stashes: Commit[] = [],
     seed?: HistorySeed,
+    prefetchUnreplaced?: number,
   ) {
+    if (prefetchUnreplaced) this.demand = prefetchUnreplaced + 1;
     this.starts = [...starts];
     if (seed) {
       this.cached = [...seed.commits];
@@ -116,6 +118,7 @@ export class HistoryCursor {
             ],
             {
               cwd,
+              env: prefetchUnreplaced ? { GIT_NO_REPLACE_OBJECTS: '1' } : undefined,
               stdin: starts.join('\n') + '\n',
               signal: this.controller.signal,
               timeoutMs: 0,

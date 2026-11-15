@@ -6,7 +6,8 @@ import { z } from 'zod';
 import { commitSchema, type Commit } from '@openkraken/ipc-contract';
 import type { HistorySeed } from './history.js';
 const tailNames = ['tail-0.json', 'tail-1.json', 'tail-2.json'];
-const cacheNames = ['prefix.json', ...tailNames];
+const prefixName = 'prefix.json';
+const cacheNames = [prefixName, ...tailNames];
 const pageSchema = z.object({
   key: z.string(),
   offset: z.number().int().nonnegative(),
@@ -25,6 +26,12 @@ export class HistoryCache {
   private dirty = false;
   private disabled = false;
   private directory: string;
+  static async hasPrefix(root: string, repoId: string) {
+    return stat(join(root, 'history', repoId, prefixName)).then(
+      () => true,
+      () => false,
+    );
+  }
   constructor(
     private root: string,
     private repoId: string,
@@ -60,7 +67,7 @@ export class HistoryCache {
     }
   }
   async load(): Promise<HistorySeed | undefined> {
-    const prefix = await this.read('prefix.json', 8 * 1024 * 1024);
+    const prefix = await this.read(prefixName, 8 * 1024 * 1024);
     if (!prefix || prefix.offset !== 0 || !prefix.commits.length || prefix.commits.length > 2000)
       return;
     this.records = [...prefix.commits];
@@ -136,13 +143,7 @@ export class HistoryCache {
         if (this.disabled) return;
         await mkdir(this.directory, { recursive: true, mode: 0o700 });
         for (const [name, offset, commits, hasMore, limit] of [
-          [
-            'prefix.json',
-            0,
-            records.slice(0, first),
-            records.length > first || more,
-            8 * 1024 * 1024,
-          ],
+          [prefixName, 0, records.slice(0, first), records.length > first || more, 8 * 1024 * 1024],
           ...tailNames.map((name, i) => {
             const offset = first + i * 5000;
             return [

@@ -58,6 +58,8 @@ import { SubmoduleSync, type SubmoduleSyncPlan } from './submodule-sync.js';
 import type { GitEditor } from './editor-document.js';
 import { RepositoryQueue } from './queue.js';
 
+const FIRST_PAGE_SIZE = 2000;
+
 async function exists(path: string) {
   try {
     await access(path);
@@ -324,9 +326,28 @@ export class RepositoryService {
         );
         const statusRead = this.readSnapshotStatus(repository, readSignal, observeStatus);
         const cacheReads = this.cacheFingerprintReads(repository, readSignal);
+        const probeStop = new AbortController();
+        const prefetch = refresh
+          ? Promise.resolve(undefined)
+          : this.prefetchHistory(
+              repository,
+              view,
+              AbortSignal.any([readSignal, probeStop.signal]),
+            ).catch(() => undefined);
         const graphRead = Promise.all([refRead, worktreeRead, Promise.all(cacheReads)]).then(
-          ([refs, worktrees, cacheInputs]) =>
-            this.prepareHistory(repository, view, refs, worktrees, cacheInputs, readSignal),
+          async ([refs, worktrees, cacheInputs]) => {
+            // The normal snapshot can start now. Only reuse a walk already in progress.
+            probeStop.abort();
+            return this.prepareHistory(
+              repository,
+              view,
+              refs,
+              worktrees,
+              cacheInputs,
+              readSignal,
+              await prefetch,
+            );
+          },
         );
         let graph: Awaited<typeof graphRead>;
         let status: Snapshot['status'];
@@ -344,6 +365,7 @@ export class RepositoryService {
             ...cacheReads,
           ]);
           if (candidate.status === 'fulfilled') await candidate.value.history.close();
+          else await (await prefetch)?.close();
           throw error;
         }
         const { history, cache, page, refs, worktrees, pinnedOid } = graph;
@@ -415,6 +437,42 @@ export class RepositoryService {
       ),
     ];
   }
+  private async prefetchHistory(repository: Repository, view: GraphView, signal: AbortSignal) {
+    if (
+      view.soloRef ||
+      view.hiddenRefs.length ||
+      repository.isShallow ||
+      process.env.GIT_REPLACE_REF_BASE ||
+      process.env.GIT_SHALLOW_FILE ||
+      process.env.GIT_GRAFT_FILE
+    )
+      return;
+    // File size is only a scheduling hint. Git supplies every tentative root.
+    const packed = await stat(join(repository.commonDir, 'packed-refs')).catch(() => undefined);
+    if (!packed || packed.size < 512 * 1024) return;
+    if (
+      (await exists(join(repository.commonDir, 'info/grafts'))) ||
+      (this.dataDir && (await HistoryCache.hasPrefix(this.dataDir, repository.id)))
+    )
+      return;
+    const { stdout } = await this.run(['for-each-ref', '--format=%(objectname)'], {
+      cwd: repository.path,
+      signal,
+      maxBytes: 8 * 1024 * 1024,
+    });
+    if (signal.aborted) return;
+    const starts = new Set(stdout.toString('utf8').trimEnd().split('\n'));
+    for (const oid of starts) if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid)) return;
+    if (repository.head.oid) starts.add(repository.head.oid);
+    return new HistoryCursor(
+      this.git,
+      repository.path,
+      [...starts],
+      [],
+      undefined,
+      FIRST_PAGE_SIZE,
+    );
+  }
   private async prepareHistory(
     repository: Repository,
     view: GraphView,
@@ -422,6 +480,7 @@ export class RepositoryService {
     worktrees: Snapshot['worktrees'],
     cacheInputs: string[],
     signal: AbortSignal,
+    candidate?: HistoryCursor,
   ) {
     // Keep missing ref preferences: a deleted solo ref must not silently reveal all history.
     const isVisible = graphRefVisibility(view);
@@ -482,9 +541,29 @@ export class RepositoryService {
       cache = new HistoryCache(this.dataDir, repository.id, key);
     }
     const seed = await cache?.load();
-    const history = new HistoryCursor(this.git, repository.path, [...starts], stashCommits, seed);
+    const ordered = [...starts];
+    if (candidate) {
+      if (
+        !seed &&
+        !hasStash &&
+        !refs.some((ref) => ref.name.startsWith('refs/replace/')) &&
+        candidate.starts.length === ordered.length &&
+        ordered.every((oid, i) => candidate.starts[i] === oid) &&
+        !(await exists(join(repository.commonDir, 'shallow'))) &&
+        !(await exists(join(repository.commonDir, 'info/grafts')))
+      ) {
+        try {
+          const page = await candidate.page(0, FIRST_PAGE_SIZE, signal);
+          return { history: candidate, cache, page, refs, worktrees, pinnedOid };
+        } catch (error) {
+          if (signal.aborted) throw error;
+        }
+      }
+      await candidate.close();
+    }
+    const history = new HistoryCursor(this.git, repository.path, ordered, stashCommits, seed);
     try {
-      const page = await history.page(0, 2000, signal);
+      const page = await history.page(0, FIRST_PAGE_SIZE, signal);
       return { history, cache, page, refs, worktrees, pinnedOid };
     } catch (error) {
       await history.close();
