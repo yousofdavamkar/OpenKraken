@@ -199,4 +199,16 @@ test('a capped badge preview counts matching branches even after later labels ov
     'refs/tags/v1',
   ]);
   expect(groupRefBadges(refs.slice(0, 3), 3).overflow).toBe(false);
+  const nested = [
+    ref('local', 'release/v1'),
+    ref('tag', 'release/v1'),
+    ref('remote', 'upstream/release/v1'),
+  ];
+  expect(groupRefBadges(nested, 1)).toEqual({
+    badges: [
+      { kind: 'branch', label: 'release/v1', names: ['refs/heads/release/v1'], nameCount: 2 },
+    ],
+    overflow: true,
+  });
+  expect(groupRefBadges(nested, 0)).toEqual({ badges: [], overflow: true });
 });

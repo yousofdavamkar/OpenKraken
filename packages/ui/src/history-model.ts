@@ -100,25 +100,39 @@ interface RefBadge {
 
 // Keep counting names on the displayed badges after the preview fills.
 export function groupRefBadges(refs: readonly Ref[], limit = Infinity) {
-  const groups = new Map<string, RefBadge>();
+  const badges: RefBadge[] = [];
+  const byKind = new Map<string, Map<string, RefBadge>>();
   let overflow = false;
   for (const ref of refs) {
-    const label =
-      ref.kind === 'remote' ? ref.shortName.split('/').slice(1).join('/') : ref.shortName;
     const kind = ref.kind === 'local' || ref.kind === 'remote' ? 'branch' : ref.kind;
-    const key = kind + '\0' + label;
-    const badge = groups.get(key);
+    let labels = byKind.get(kind);
+    if (!labels) {
+      if (badges.length >= limit) {
+        overflow = true;
+        continue;
+      }
+      labels = new Map();
+      byKind.set(kind, labels);
+    }
+    let label = ref.shortName;
+    if (ref.kind === 'remote') {
+      const separator = label.indexOf('/');
+      label = separator < 0 ? '' : label.slice(separator + 1);
+    }
+    const badge = labels.get(label);
     if (badge) {
       badge.nameCount++;
       if (badge.names.length < limit) badge.names.push(ref.name);
       else overflow = true;
-    } else if (groups.size < limit) {
-      groups.set(key, { label, kind, names: [ref.name], nameCount: 1 });
+    } else if (badges.length < limit) {
+      const added = { label, kind, names: [ref.name], nameCount: 1 };
+      labels.set(label, added);
+      badges.push(added);
     } else {
       overflow = true;
     }
   }
-  return { badges: [...groups.values()], overflow };
+  return { badges, overflow };
 }
 export interface Selection {
   focus?: string;
