@@ -1,11 +1,10 @@
 import { _electron as electron, expect, test } from '@playwright/test';
-import { build } from 'esbuild';
-import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { createServer } from 'node:https';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+
+import { reportingTest } from './reporting-fixture.js';
 
 test('the default build has no reporting destination and cannot be opted in', async () => {
   const profile = await mkdtemp(join(tmpdir(), 'openkraken-no-reporting-'));
@@ -44,72 +43,19 @@ test('the default build has no reporting destination and cannot be opted in', as
   }
 });
 
-test('crashes, JavaScript failures and interrupted sessions reach TLS only with consent', async () => {
-  test.skip(process.platform !== 'linux', 'Exercises Linux native process crash signals');
-  const root = await mkdtemp(join(tmpdir(), 'openkraken-reporting-tls-'));
-  const main = resolve(`apps/desktop/dist/reporting-test-${randomUUID()}.cjs`);
-  const cert = join(root, 'cert.pem');
-  const key = join(root, 'key.pem');
-  execFileSync(process.execPath, [resolve('scripts/create-loopback-certificate.mjs'), root]);
-  const received: { url: string; body: string; cookie?: string; authorization?: string }[] = [];
-  const server = createServer(
-    { key: await readFile(key), cert: await readFile(cert) },
-    (request, response) => {
-      let body = '';
-      request.on('data', (chunk) => {
-        body += chunk;
-        if (body.length > 4096) request.destroy();
-      });
-      request.on('end', () => {
-        received.push({
-          url: request.url!,
-          body,
-          cookie: request.headers.cookie,
-          authorization: request.headers.authorization,
-        });
-        response.end('{}');
-      });
-    },
-  );
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('Missing TLS receiver');
-  const dsn = `https://0123456789abcdef0123456789abcdef@127.0.0.1:${address.port}/123`;
+reportingTest('crashes and interrupted sessions respect consent', async ({ receiver }) => {
+  const { root, address, launch, received } = receiver;
+  reportingTest.setTimeout(90000);
   let app: Awaited<ReturnType<typeof electron.launch>> | undefined;
   try {
-    // Build a fixture entry point with a fixed test destination. Production has
-    // no environment/runtime override and its default compiled destination is null.
-    await build({
-      entryPoints: ['apps/desktop/src/main.ts'],
-      bundle: true,
-      platform: 'node',
-      format: 'cjs',
-      external: ['electron', '@parcel/watcher', 'node-pty'],
-      target: 'node24',
-      outfile: main,
-      define: {
-        __OPENKRAKEN_SENTRY_DSN__: JSON.stringify(dsn),
-        __OPENKRAKEN_UPDATE_CONFIG__: 'null',
-      },
-    });
-    await mkdir(join(root, 'app'));
-    await writeFile(
-      join(root, 'app/package.json'),
-      JSON.stringify({ name: 'openkraken', version: '0.1.0', main }),
-    );
-    const launch = () =>
-      electron.launch({
-        args: [join(root, 'app'), `--user-data-dir=${join(root, 'profile')}`],
-        env: { ...process.env, NODE_EXTRA_CA_CERTS: cert },
-      });
     const crash = async () =>
       app!.evaluate(async ({ BrowserWindow }) => {
         const contents = BrowserWindow.getAllWindows()[0]!.webContents;
-        const gone = new Promise<void>((resolve) =>
-          contents.once('render-process-gone', () => resolve()),
+        const gone = new Promise<string>((resolve) =>
+          contents.once('render-process-gone', (_event, details) => resolve(details.reason)),
         );
         contents.forcefullyCrashRenderer();
-        await gone;
+        return gone;
       });
     app = await launch();
     let page = await app.firstWindow();
@@ -133,7 +79,7 @@ test('crashes, JavaScript failures and interrupted sessions reach TLS only with 
     page = await app.firstWindow();
     await page.getByRole('button', { name: 'Crash reporting', exact: true }).click();
     await expect(page.getByRole('checkbox', { name: 'Send crash summaries' })).toBeChecked();
-    await page.screenshot({ path: 'test-results/crash-reporting-consent.png' });
+    await page.screenshot({ path: test.info().outputPath('crash-reporting-consent.png') });
     await page.getByRole('button', { name: 'Close', exact: true }).click();
     await page.evaluate(() => {
       setTimeout(() => {
@@ -144,7 +90,7 @@ test('crashes, JavaScript failures and interrupted sessions reach TLS only with 
     expect(JSON.parse(received[0]!.body.trim().split('\n')[2]!).tags).toEqual({
       process: 'renderer',
       reason: 'unhandled-exception',
-      os: 'linux',
+      os: process.platform,
       arch: process.arch,
     });
     expect(received[0]!.body).not.toContain('PRIVATE');
@@ -168,49 +114,66 @@ test('crashes, JavaScript failures and interrupted sessions reach TLS only with 
     expect(JSON.parse(received[0]!.body.trim().split('\n')[2]!).tags).toEqual({
       process: 'main',
       reason: 'unhandled-exception',
-      os: 'linux',
+      os: process.platform,
       arch: process.arch,
     });
     expect(received[0]!.body).not.toContain('PRIVATE');
     received.splice(0);
-    const utilityFailure = await app.evaluate(async ({ app }) => {
-      const service = app.getAppMetrics().find((metric) => metric.name === 'OpenKraken Git');
-      if (!service) throw new Error('Missing Git utility');
-      const gone = new Promise<{ reason: string; name?: string; serviceName?: string }>((resolve) =>
-        app.once('child-process-gone', (_event, details) =>
-          resolve({ reason: details.reason, name: details.name, serviceName: details.serviceName }),
-        ),
-      );
-      process.kill(service.pid, 'SIGSEGV');
-      return gone;
-    });
-    expect(utilityFailure.reason).toBe('crashed');
-    await expect.poll(() => received.length).toBe(1);
-    expect(JSON.parse(received[0]!.body.trim().split('\n')[2]!).tags).toEqual({
-      process: 'git',
-      reason: 'crashed',
-      os: 'linux',
-      arch: process.arch,
-    });
-    received.splice(0);
-    await crash();
-    await expect.poll(() => received.length).toBe(1);
-    expect(received[0]).toMatchObject({
-      url: '/api/123/envelope/',
-      cookie: undefined,
-      authorization: undefined,
-    });
-    const payload = JSON.parse(received[0]!.body.trim().split('\n')[2]!);
-    expect(payload).toEqual({
-      event_id: expect.stringMatching(/^[a-f0-9]{32}$/),
-      platform: 'native',
-      level: 'fatal',
-      release: 'openkraken@0.1.0',
-      message: 'OpenKraken process failure',
-      tags: { process: 'renderer', reason: 'crashed', os: 'linux', arch: process.arch },
-    });
-    expect(received[0]!.body).not.toContain(root);
+    if (process.platform !== 'win32') {
+      const utilityFailure = await app.evaluate(async ({ app }) => {
+        const service = app.getAppMetrics().find((metric) => metric.name === 'OpenKraken Git');
+        if (!service) throw new Error('Missing Git utility');
+        const gone = new Promise<{ reason: string; name?: string; serviceName?: string }>(
+          (resolve) =>
+            app.once('child-process-gone', (_event, details) =>
+              resolve({
+                reason: details.reason,
+                name: details.name,
+                serviceName: details.serviceName,
+              }),
+            ),
+        );
+        process.kill(service.pid, 'SIGSEGV');
+        return gone;
+      });
+      expect(utilityFailure.reason).toBe('crashed');
+      await expect.poll(() => received.length).toBe(1);
+      expect(JSON.parse(received[0]!.body.trim().split('\n')[2]!).tags).toEqual({
+        process: 'git',
+        reason: 'crashed',
+        os: process.platform,
+        arch: process.arch,
+      });
+      received.splice(0);
+    }
+    const rendererReason = await crash();
+    expect(['crashed', 'killed']).toContain(rendererReason);
+    if (process.platform === 'linux') expect(rendererReason).toBe('crashed');
+    if (rendererReason === 'crashed') {
+      await expect.poll(() => received.length).toBe(1);
+      expect(received[0]).toMatchObject({
+        url: '/api/123/envelope/',
+        cookie: undefined,
+        authorization: undefined,
+      });
+      const payload = JSON.parse(received[0]!.body.trim().split('\n')[2]!);
+      expect(payload).toEqual({
+        event_id: expect.stringMatching(/^[a-f0-9]{32}$/),
+        platform: 'native',
+        level: 'fatal',
+        release: 'openkraken@0.1.0',
+        message: 'OpenKraken process failure',
+        tags: {
+          process: 'renderer',
+          reason: 'crashed',
+          os: process.platform,
+          arch: process.arch,
+        },
+      });
+      expect(received[0]!.body).not.toContain(root);
+    }
     await app.close();
+    expect(received).toHaveLength(rendererReason === 'crashed' ? 1 : 0);
     await expect(readFile(join(root, 'profile/reporting-session.json'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
@@ -231,7 +194,7 @@ test('crashes, JavaScript failures and interrupted sessions reach TLS only with 
     expect(recovered.tags).toEqual({
       process: 'main',
       reason: 'unclean-exit',
-      os: 'linux',
+      os: process.platform,
       arch: process.arch,
     });
     expect(recovered.level).toBe('warning');
@@ -263,9 +226,114 @@ test('crashes, JavaScript failures and interrupted sessions reach TLS only with 
     expect(received).toHaveLength(1);
   } finally {
     await app?.close();
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    await rm(main, { force: true });
-    await rm(root, { recursive: true, force: true });
+  }
+});
+
+for (const when of ['while running', 'before startup']) {
+  reportingTest(
+    `revoking reporting survives restart when the session marker changes ${when}`,
+    async ({ receiver }) => {
+      reportingTest.setTimeout(60000);
+      const { root, launch, received } = receiver;
+      let app = await launch();
+      try {
+        let page = await app.firstWindow();
+        const settings = () =>
+          page.getByRole('button', { name: 'Crash reporting', exact: true }).click();
+        const dialog = () => page.getByRole('dialog', { name: 'Crash reporting' });
+        const checkbox = () => dialog().getByRole('checkbox', { name: 'Send crash summaries' });
+        const apply = () => dialog().getByRole('button', { name: 'Apply' }).click();
+
+        await settings();
+        await checkbox().check();
+        await apply();
+        await expect(dialog().getByRole('status')).toHaveText('Crash reporting is on.');
+        await page.evaluate(() => {
+          void Promise.reject('PRIVATE-reporting-fixture');
+        });
+        await expect.poll(() => received.length).toBe(1);
+        expect(JSON.parse(received[0]!.body.trim().split('\n')[2]!).tags).toEqual({
+          process: 'renderer',
+          reason: 'unhandled-rejection',
+          os: process.platform,
+          arch: process.arch,
+        });
+        expect(received[0]!.body).not.toContain('PRIVATE');
+
+        const marker = join(root, 'profile/reporting-session.json');
+        if (when === 'before startup') await app.close();
+        const changed =
+          when === 'before startup'
+            ? 'unreadable session'
+            : JSON.stringify({
+                ...JSON.parse(await readFile(marker, 'utf8')),
+                session: randomUUID(),
+              });
+        await writeFile(marker, changed);
+        if (when === 'before startup') {
+          app = await launch();
+          page = await app.firstWindow();
+          await settings();
+          await expect(checkbox()).not.toBeChecked();
+          await expect(dialog().getByRole('alert')).toContainText('off for this launch');
+        } else {
+          await checkbox().uncheck();
+        }
+        await apply();
+        await expect(dialog().getByRole('status')).toHaveText('Crash reporting is off.');
+        await expect(dialog().getByRole('alert')).toContainText('session marker may remain');
+        expect(await readFile(marker, 'utf8')).toBe(changed);
+
+        // Exit without the clean-shutdown handler after the opt-out was acknowledged.
+        const closed = app.waitForEvent('close');
+        await app.evaluate(({ app }) => {
+          setTimeout(() => app.exit(0), 10);
+        });
+        await closed;
+        app = await launch();
+        page = await app.firstWindow();
+        await settings();
+        await expect(checkbox()).not.toBeChecked();
+        await page.evaluate(() => {
+          void Promise.reject('PRIVATE-after-restart');
+        });
+        await app.close();
+        expect(received).toHaveLength(1);
+        expect(await readFile(marker, 'utf8')).toBe(changed);
+      } finally {
+        await app.close().catch(() => {});
+      }
+    },
+  );
+}
+
+reportingTest('a failed opt-in does not enable reporting on restart', async ({ receiver }) => {
+  const { root, launch, received } = receiver;
+  let app = await launch();
+  try {
+    let page = await app.firstWindow();
+    const settings = () =>
+      page.getByRole('button', { name: 'Crash reporting', exact: true }).click();
+    const dialog = () => page.getByRole('dialog', { name: 'Crash reporting' });
+    const marker = join(root, 'profile/reporting-session.json');
+    await settings();
+    await writeFile(marker, 'unreadable session');
+    await dialog().getByRole('checkbox', { name: 'Send crash summaries' }).check();
+    await dialog().getByRole('button', { name: 'Apply' }).click();
+    await expect(dialog().getByText(/off for this launch/)).toBeVisible();
+    await expect(dialog().getByRole('checkbox')).not.toBeChecked();
+    await expect(dialog().getByRole('button', { name: 'Apply' })).toBeEnabled();
+    await expect(readFile(join(root, 'profile/crash-reporting.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await app.close();
+    await rm(marker);
+    app = await launch();
+    page = await app.firstWindow();
+    await settings();
+    await expect(dialog().getByRole('checkbox')).not.toBeChecked();
+    expect(received).toHaveLength(0);
+  } finally {
+    await app.close().catch(() => {});
   }
 });

@@ -29,10 +29,19 @@ function ReportingDialog({
         enabled,
         revision: state.revision,
       });
-      if (result.kind !== 'crashReporting')
+      if (result.kind !== 'crashReporting') {
+        const latest = await window.openkraken.request({
+          id: crypto.randomUUID(),
+          method: 'crashReporting',
+        });
+        if (latest.kind === 'crashReporting') {
+          setState(latest.state);
+          setEnabled(latest.state.enabled);
+        }
         throw new Error(
           result.kind === 'error' ? result.message : 'Crash reporting settings could not be saved.',
         );
+      }
       setState(result.state);
       setSaved(true);
     } catch (error) {
@@ -60,8 +69,8 @@ function ReportingDialog({
       </p>
       <p>
         After an interrupted session, the next launch can send one unclean-exit summary. This can
-        include a force-quit or power loss; it does not establish that the app crashed. Normal
-        shutdown and opting out clear the local session marker.
+        include a force-quit or power loss; it does not establish that the app crashed. A normal
+        shutdown removes the app’s session marker.
       </p>
       <p>
         Reports contain only the app version, operating system, architecture, process type and
@@ -92,7 +101,18 @@ function ReportingDialog({
         />
         Send crash summaries
       </label>
-      {state.warning && (
+      {state.warning === 'session' && (
+        <p role="alert">
+          The reporting session could not be verified. Reporting is off for this launch. Apply the
+          off setting to keep it off after restart.
+        </p>
+      )}
+      {state.warning === 'cleanup' && (
+        <p role="alert">
+          Crash reporting is off. A previous session marker may remain on this device.
+        </p>
+      )}
+      {(state.warning === 'changed' || state.warning === 'unreadable') && (
         <p role="alert">
           Saved reporting state cannot be verified. Reporting is off. Check the reporting settings
           and session data, then restart before enabling it.
@@ -103,7 +123,11 @@ function ReportingDialog({
       <div className="dialog-actions">
         <button
           onClick={() => void save()}
-          disabled={saving || !state.destination || !!state.warning}
+          disabled={
+            saving ||
+            !state.destination ||
+            (!!state.warning && (state.warning !== 'session' || enabled))
+          }
         >
           Apply
         </button>
