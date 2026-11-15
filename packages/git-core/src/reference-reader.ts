@@ -1,4 +1,7 @@
 import type { Ref } from '@openkraken/ipc-contract';
+import { constants } from 'node:fs';
+import { open } from 'node:fs/promises';
+import { join } from 'node:path';
 import { isUtf8 } from 'node:buffer';
 import { RefsParser, REF_FORMAT } from './parsers.js';
 import { GitError, type RunOptions, type runGit } from './runner.js';
@@ -8,6 +11,30 @@ type Key = [name: string, target: string, upstream: string, head: string];
 const KEY_FORMAT = '%(refname)%00%(objectname)%00%(upstream)%00%(HEAD)%00';
 const MAX_BYTES = 32 * 1024 * 1024;
 const PARALLEL_THRESHOLD = 10000;
+
+// This bounded sample selects a Git query. Only Git supplies the actual refs and types.
+export async function hasRepeatedPackedTargets(commonDir: string) {
+  if (process.env.GIT_REPLACE_REF_BASE) return false;
+  const flags = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW;
+  const file = await open(join(commonDir, 'packed-refs'), flags).catch(() => undefined);
+  if (!file) return false;
+  try {
+    const info = await file.stat();
+    if (!info.isFile() || info.size < 512 * 1024) return false;
+    const sample = Buffer.alloc(8192);
+    const { bytesRead } = await file.read(sample, 0, sample.length, 0);
+    const targets = [
+      ...sample.toString('latin1', 0, bytesRead).matchAll(/^([0-9a-f]{40}|[0-9a-f]{64}) refs\//gm),
+    ];
+    return (
+      targets.length >= 32 && new Set(targets.map((target) => target[1])).size <= targets.length / 4
+    );
+  } catch {
+    return false;
+  } finally {
+    await file.close();
+  }
+}
 
 function keys(data: Buffer): Key[] {
   const lines = data.toString('utf8').split('\n');
@@ -46,13 +73,13 @@ export class ReferenceReader {
       throw new Error('Invalid output limit');
   }
 
-  async read(cwd: string, signal?: AbortSignal): Promise<Ref[]> {
+  async read(cwd: string, signal?: AbortSignal, grouped = false): Promise<Ref[]> {
     const deadline = new AbortController();
     const timer = setTimeout(() => deadline.abort(), 30000);
     timer.unref();
     const active = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
     try {
-      return await this.readStable(cwd, active);
+      return await this.readStable(cwd, active, grouped);
     } catch (error) {
       if (deadline.signal.aborted && !signal?.aborted)
         throw new GitError('TIMEOUT', 'Reference enumeration timed out');
@@ -73,7 +100,47 @@ export class ReferenceReader {
     return parser.finish();
   }
 
-  private async readStable(cwd: string, signal: AbortSignal): Promise<Ref[]> {
+  private async resolveRepeatedTypes(cwd: string, signal: AbortSignal, refs: Ref[]) {
+    const targets = new Set<string>();
+    for (const ref of refs) {
+      if (ref.name.startsWith('refs/replace/')) return false;
+      targets.add(ref.target);
+      if (targets.size > 4096) return false;
+    }
+    if (!targets.size) return true;
+    const ids = [...targets];
+    const result = await this.run(
+      ['--no-replace-objects', 'cat-file', '--buffer', '--batch-check=%(objectname) %(objecttype)'],
+      {
+        cwd,
+        signal,
+        maxBytes: this.maxBytes,
+        stdin: ids.join('\n') + '\n',
+      },
+    ).catch((error: unknown) => {
+      if (error instanceof GitError && error.code === 'GIT_FAILED') return undefined;
+      throw error;
+    });
+    if (!result) return false;
+    const lines = result.stdout.toString('utf8').split('\n');
+    if (lines.pop() !== '' || lines.length !== ids.length) return false;
+    const types = new Map<string, string>();
+    for (const [index, id] of ids.entries()) {
+      const [oid, type, extra] = lines[index]!.split(' ');
+      if (
+        oid !== id ||
+        extra !== undefined ||
+        !type ||
+        !['commit', 'blob', 'tree', 'tag'].includes(type)
+      )
+        return false;
+      types.set(id, type);
+    }
+    for (const ref of refs) ref.objectType = types.get(ref.target)!;
+    return true;
+  }
+
+  private async readStable(cwd: string, signal: AbortSignal, grouped = false): Promise<Ref[]> {
     const parser = new RefsParser('direct');
     const chunks: Buffer[] = [];
     let bytes = 0;
@@ -82,7 +149,8 @@ export class ReferenceReader {
       if (bytes > this.maxBytes)
         throw new GitError('OUTPUT_LIMIT', 'Git output exceeded the safety limit');
     };
-    await this.run(['for-each-ref', `--format=${parser.gitFormat}`], {
+    const format = grouped ? parser.gitFormat.replace('%(objecttype)', '') : parser.gitFormat;
+    await this.run(['for-each-ref', `--format=${format}`], {
       cwd,
       signal,
       maxBytes: this.maxBytes,
@@ -94,6 +162,14 @@ export class ReferenceReader {
       onStderr: account,
     });
     let refs = parser.finish();
+    if (grouped) {
+      if (!(await this.resolveRepeatedTypes(cwd, signal, refs)))
+        return this.readStable(cwd, signal);
+      // Charge the same direct-record byte budget as the single native query.
+      for (const ref of refs) bytes += ref.objectType.length;
+      if (bytes > this.maxBytes)
+        throw new GitError('OUTPUT_LIMIT', 'Git output exceeded the safety limit');
+    }
     if (!refs.some((ref) => ref.objectType === 'tag')) return refs;
     if (!isUtf8(Buffer.concat(chunks))) return this.all(cwd, signal);
     const expected: Key[] = refs.map((ref) => [

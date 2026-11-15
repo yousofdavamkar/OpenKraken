@@ -22,6 +22,13 @@ beforeAll(() => {
 });
 afterAll(() => rm(root, { recursive: true, force: true }));
 
+// Both authoritative formats read tracking state and the worktree's HEAD marker.
+function readsSnapshotRefs(args: string[]) {
+  return (
+    args[0] === 'for-each-ref' && args.some((arg) => arg.includes('%(upstream:track)%00%(HEAD)'))
+  );
+}
+
 function gate() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => {
@@ -67,8 +74,7 @@ test.each([
     const early = vi.fn();
     const ordinary = vi.fn();
     const run = vi.spyOn(runner, 'runGit').mockImplementation(async (git, args, options) => {
-      if (args[0] === 'for-each-ref' && args.some((a) => a.includes('%(objecttype)')))
-        await full.promise;
+      if (readsSnapshotRefs(args)) await full.promise;
       if (args[0] === 'rev-list') {
         if (options?.env?.GIT_NO_REPLACE_OBJECTS) {
           early();
@@ -127,8 +133,7 @@ test('a slow optional ref read yields to the normal snapshot, and a warm prefix 
       completed();
       throw new Error('Optional read cancelled');
     }
-    if (args[0] === 'for-each-ref' && args.some((a) => a.includes('%(objecttype)')))
-      await probe.promise;
+    if (readsSnapshotRefs(args)) await probe.promise;
     return native(git, args, options);
   });
   const warm = new RepositoryService('git', profile);
@@ -157,7 +162,7 @@ test('a failed authoritative ref read closes the unpublished cursor', async () =
   const close = vi.spyOn(HistoryCursor.prototype, 'close');
   const run = vi.spyOn(runner, 'runGit').mockImplementation(async (git, args, options) => {
     if (args[0] === 'rev-list' && options?.env?.GIT_NO_REPLACE_OBJECTS) early.resolve();
-    if (args[0] === 'for-each-ref' && args.some((a) => a.includes('%(objecttype)'))) {
+    if (readsSnapshotRefs(args)) {
       await early.promise;
       throw new Error('Authoritative refs failed');
     }

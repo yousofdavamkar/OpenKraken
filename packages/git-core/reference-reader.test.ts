@@ -1,11 +1,11 @@
-import { afterAll, beforeAll, expect, test } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
-import { ReferenceReader } from './src/reference-reader.js';
+import { hasRepeatedPackedTargets, ReferenceReader } from './src/reference-reader.js';
 import { RefsParser, REF_FORMAT, REF_DIRECT_FORMAT } from './src/parsers.js';
-import { locateGit, runGit } from './src/runner.js';
+import { GitError, locateGit, runGit } from './src/runner.js';
 
 const root = mkdtempSync(join(tmpdir(), 'openkraken-ref-reader-'));
 const git = await locateGit();
@@ -505,3 +505,142 @@ test.skipIf(process.platform === 'win32')(
     }
   },
 );
+
+describe('repeated targets in a packed SHA-256 repository', () => {
+  const cwd = join(root, 'grouped');
+  const commonDir = join(cwd, '.git');
+  const directFormat = new RefsParser('direct').gitFormat;
+  let blob: string, tree: string, tagged: string, grouped: boolean;
+  beforeAll(async () => {
+    mkdirSync(cwd);
+    fixtureGit(cwd, ['init', '-b', 'main', '--object-format=sha256']);
+    fixtureGit(cwd, ['commit', '--allow-empty', '-m', 'First']);
+    fixtureGit(cwd, ['branch', 'peer']);
+    fixtureGit(cwd, ['branch', '--set-upstream-to=peer']);
+    fixtureGit(cwd, ['commit', '--allow-empty', '-m', 'Ahead of peer']);
+    fixtureGit(cwd, ['tag', '-a', 'annotated', '-m', 'Tag details', 'HEAD~1']);
+    const head = fixtureGit(cwd, ['rev-parse', 'HEAD']);
+    tagged = fixtureGit(cwd, ['rev-parse', 'refs/tags/annotated']);
+    tree = fixtureGit(cwd, ['rev-parse', 'HEAD^{tree}']);
+    blob = fixtureGit(cwd, ['hash-object', '-w', '--stdin'], 'grouped fixture');
+    fixtureGit(
+      cwd,
+      ['update-ref', '--stdin'],
+      [
+        ...Array.from({ length: 7000 }, (_, i) => `create refs/heads/grouped-${i} ${head}`),
+        `create refs/tags/猫-tree ${tree}`,
+        `create refs/tags/blob ${blob}`,
+      ].join('\n') + '\n',
+    );
+    fixtureGit(cwd, ['pack-refs', '--all']);
+    grouped = await hasRepeatedPackedTargets(commonDir);
+    expect(grouped).toBe(true);
+  });
+
+  test('resolves each object once and preserves native order, upstream, and peeled metadata', async () => {
+    const expected = await nativeRefs(cwd);
+    let queries = 0;
+    const reader = new ReferenceReader((args, options) => {
+      if (args.includes('cat-file')) {
+        queries++;
+        const ids = String(options.stdin).trimEnd().split('\n');
+        expect(ids).toEqual([...new Set(expected.map((ref) => ref.target))]);
+      }
+      return runGit(git.path, args, options);
+    });
+    expect(await reader.read(cwd, undefined, grouped)).toEqual(expected);
+    expect(queries).toBe(1);
+  });
+
+  test('reads per-worktree HEAD and upstream through the shared packed store', async () => {
+    const linked = join(root, 'linked-grouped');
+    fixtureGit(cwd, ['worktree', 'add', '-b', 'linked', linked, 'peer']);
+    const expected = await nativeRefs(linked);
+    expect(expected.find((ref) => ref.isHead)?.name).toBe('refs/heads/linked');
+    const reader = new ReferenceReader((args, options) => runGit(git.path, args, options));
+    expect(await reader.read(linked, undefined, grouped)).toEqual(expected);
+  });
+
+  test('rechecks annotated refs which move during the type lookup', async () => {
+    let moved = false;
+    const reader = new ReferenceReader((args, options) => {
+      if (args.includes('cat-file')) {
+        fixtureGit(cwd, ['update-ref', 'refs/tags/annotated', blob]);
+        moved = true;
+      }
+      return runGit(git.path, args, options);
+    });
+    try {
+      const refs = await reader.read(cwd, undefined, grouped);
+      expect(moved).toBe(true);
+      expect(refs).toEqual(await nativeRefs(cwd));
+    } finally {
+      fixtureGit(cwd, ['update-ref', 'refs/tags/annotated', tagged]);
+    }
+  });
+
+  test('uses the authoritative direct read for replacement refs and incomplete batch replies', async () => {
+    const calls: string[][] = [];
+    const reader = new ReferenceReader((args, options) => {
+      calls.push(args);
+      if (args.includes('cat-file'))
+        return Promise.resolve({
+          stdout: Buffer.from(blob + ' missing\n'),
+          stderr: '',
+          exitCode: 0,
+        });
+      return runGit(git.path, args, options);
+    });
+    expect(await reader.read(cwd, undefined, grouped)).toEqual(await nativeRefs(cwd));
+    expect(calls.some((args) => args.includes('cat-file'))).toBe(true);
+    expect(calls.some((args) => args.includes('--format=' + directFormat))).toBe(true);
+    calls.length = 0;
+    fixtureGit(cwd, ['replace', '-f', blob, tree]);
+    try {
+      expect(await reader.read(cwd, undefined, grouped)).toEqual(await nativeRefs(cwd));
+      expect(calls.some((args) => args.includes('cat-file'))).toBe(false);
+      expect(calls.some((args) => args.includes('--format=' + directFormat))).toBe(true);
+    } finally {
+      fixtureGit(cwd, ['replace', '-d', blob]);
+    }
+  });
+
+  test('retries the native direct query when the batch process fails', async () => {
+    let attempted = false;
+    const reader = new ReferenceReader((args, options) => {
+      if (args.includes('cat-file')) {
+        attempted = true;
+        return Promise.reject(new GitError('GIT_FAILED', 'Cannot resolve the current object'));
+      }
+      return runGit(git.path, args, options);
+    });
+    expect(await reader.read(cwd, undefined, grouped)).toEqual(await nativeRefs(cwd));
+    expect(attempted).toBe(true);
+  });
+
+  test('charges reconstructed type bytes and releases a cancelled lookup', async () => {
+    const full = await runGit(git.path, ['for-each-ref', '--format=' + directFormat], { cwd });
+    const calls: string[][] = [];
+    const limit = new ReferenceReader(
+      (args, options) => {
+        calls.push(args);
+        return runGit(git.path, args, options);
+      },
+      { maxBytes: full.stdout.length - 1 },
+    );
+    await expect(limit.read(cwd, undefined, grouped)).rejects.toMatchObject({
+      code: 'OUTPUT_LIMIT',
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toContain('cat-file');
+    const stop = new AbortController();
+    const reader = new ReferenceReader((args, options) => {
+      if (args.includes('cat-file')) stop.abort();
+      return runGit(git.path, args, options);
+    });
+    await expect(reader.read(cwd, stop.signal, grouped)).rejects.toMatchObject({
+      code: 'CANCELLED',
+    });
+    expect(await reader.read(cwd, undefined, grouped)).toEqual(await nativeRefs(cwd));
+  });
+});
