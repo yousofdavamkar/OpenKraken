@@ -195,7 +195,7 @@ jobs:
           cache: pnpm
       - if: runner.os == 'Linux'
         name: Native terminal build and picker automation
-        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool git-lfs rpm libarchive-tools fuse3 fish zsh
+        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool git-lfs rpm gnupg2 libarchive-tools fuse3 fish zsh
       - if: runner.os == 'Linux'
         name: Verify native shell prerequisites
         run: |
@@ -351,6 +351,22 @@ jobs:
             --volume "$PWD/scripts/check-rpm-lifecycle.sh:/check.sh:ro" \
             quay.io/fedora/fedora@sha256:086bb30fc7dd0f84b266b9c93d14298f06e30d04421dcd6813629ea00542fa8a \
             timeout 12m bash /check.sh "/artifacts/$artifact" "/upgrade/$upgrade_artifact" "/beta/$beta_artifact"
+      - if: runner.os == 'Linux'
+        name: Verify native RPM signatures and Fedora package trust
+        timeout-minutes: 20
+        env:
+          OPENKRAKEN_XDOTOOL: xdotool
+        run: |
+          keys="$RUNNER_TEMP/openkraken-rpm-test-keys"
+          xvfb-run -a node scripts/check-rpm-signing.mjs "$keys"
+          signed="$PWD/$(dirname "$INSTALLER_ROOT")/test-signed/rpm"
+          artifact=$(node -p 'require(process.argv[1]).artifact.file' "$signed/manifest.json")
+          docker run --rm \
+            --env OPENKRAKEN_DISPOSABLE_INSTALL_TEST=1 --env OPENKRAKEN_TEST_SIGNED_RPM=1 \
+            --volume "$keys:/keys:ro" --volume "$signed:/artifacts:ro" \
+            --volume "$PWD/scripts/check-rpm-lifecycle.sh:/check.sh:ro" \
+            quay.io/fedora/fedora@sha256:086bb30fc7dd0f84b266b9c93d14298f06e30d04421dcd6813629ea00542fa8a \
+            timeout 12m bash /check.sh "/artifacts/$artifact"
       - name: Save signed-feed installers through Electron
         shell: bash
         run: |
@@ -364,6 +380,8 @@ jobs:
           for target in "${targets[@]}"; do
             if [[ "$target" == *-beta ]]; then
               OPENKRAKEN_UPDATE_TEST_MANIFEST=$(node -p 'require("./release/installer-upgrade-" + process.argv[1] + ".json").manifestPath' "$target")
+            elif [[ "$target" == rpm ]]; then
+              OPENKRAKEN_UPDATE_TEST_MANIFEST="release/installers/$platform/test-signed/rpm/manifest.json"
             else
               OPENKRAKEN_UPDATE_TEST_MANIFEST="release/installers/$platform/test/$target/manifest.json"
             fi

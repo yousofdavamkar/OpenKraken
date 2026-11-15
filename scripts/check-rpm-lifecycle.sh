@@ -27,9 +27,20 @@ if [[ $# -ge 2 ]]; then
   upgrades+=("$upgrade")
 fi
 expected_artifact=$artifact
-# The application artifact is an unsigned local test build. Repository package
-# signatures and TLS stay enabled; only this explicitly supplied local RPM is unsigned.
 dnf_options=(-y --setopt=install_weak_deps=False --setopt=timeout=30 --setopt=minrate=50000 --setopt=retries=1 --setopt=keepcache=True)
+if [[ ${OPENKRAKEN_TEST_SIGNED_RPM:-} == 1 ]]; then
+  export LC_ALL=C
+  dnf_options+=(--setopt=localpkg_gpgcheck=True)
+  rpmkeys --import /keys/unrelated.asc
+  if dnf "${dnf_options[@]}" install "$artifact" desktop-file-utils > /tmp/untrusted-rpm.log 2>&1; then
+    echo 'DNF installed the RPM without its signing key' >&2
+    exit 1
+  fi
+  cat /tmp/untrusted-rpm.log
+  grep -Ei 'OpenPGP check for package "openkraken-.*has failed:.*(public key|signing key|OpenPGP keys)' /tmp/untrusted-rpm.log
+  if rpm -q openkraken; then exit 1; fi
+  rpmkeys --import /keys/trusted.asc
+fi
 dnf "${dnf_options[@]}" install "$artifact" desktop-file-utils
 
 check_installed() {
