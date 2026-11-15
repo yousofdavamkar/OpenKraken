@@ -2,8 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { ProviderRepositoryPicker } from './provider-repositories.js';
 import { GitProgress } from './git-progress.js';
 import { useRepository } from './store.js';
-export function CloneDialog({ close }: { close: () => void }) {
+export function CloneDialog({ close: unmount }: { close: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const close = () => {
+    dialog.current?.close();
+    unmount();
+  };
   const { run, cancel, error } = useRepository();
   const [url, setUrl] = useState('');
   const [browsing, setBrowsing] = useState(false);

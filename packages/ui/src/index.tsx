@@ -80,7 +80,23 @@ function App() {
   const [terminal, setTerminal] = useState<TerminalSession>();
   const [terminalHidden, setTerminalHidden] = useState(false);
   const terminalHandle = useRef<TerminalHandle>(null);
-  const open = () => void run({ id: crypto.randomUUID(), method: 'open' });
+  async function chooseFolder(method: 'open' | 'init', launcher: Element | null) {
+    const cursor = snapshot?.cursor;
+    const id = crypto.randomUUID();
+    await run(method === 'open' ? { id, method } : { id, method, branch });
+    if (!(launcher instanceof HTMLElement)) return;
+    // The picker can temporarily disable its launcher or remove the branch form.
+    // Wait for React to enable the controls again, and respect any new focus.
+    requestAnimationFrame(() => {
+      if (
+        useRepository.getState().snapshot?.cursor === cursor &&
+        launcher.isConnected &&
+        document.activeElement === document.body
+      )
+        launcher.focus();
+    });
+  }
+  const open = () => void chooseFolder('open', document.activeElement);
   const head = snapshot?.repository.head;
   return (
     <div className="app">
@@ -172,7 +188,7 @@ function App() {
           onSubmit={(event) => {
             event.preventDefault();
             setInit(false);
-            void run({ id: crypto.randomUUID(), method: 'init', branch });
+            void chooseFolder('init', initLauncher.current);
           }}
         >
           <label>
