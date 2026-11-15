@@ -68,6 +68,11 @@ async function exists(path: string) {
     return false;
   }
 }
+type SnapshotObserver = {
+  status: (chunk: Buffer) => void;
+  refs?: (refs: Snapshot['refs']) => void;
+};
+
 export class RepositoryService {
   private repositories = new Map<string, Repository>();
   private queues = new Map<string, RepositoryQueue>();
@@ -281,11 +286,16 @@ export class RepositoryService {
     return this.readSnapshot(id, signal, refresh, requestedView);
   }
 
-  async observeInitialSnapshot(id: string, signal?: AbortSignal) {
+  async observeInitialSnapshot(
+    id: string,
+    signal?: AbortSignal,
+    observeRefs?: (refs: Snapshot['refs']) => void,
+  ) {
     const status = createHash('sha256');
-    const snapshot = await this.readSnapshot(id, signal, false, undefined, (chunk) =>
-      status.update(chunk),
-    );
+    const snapshot = await this.readSnapshot(id, signal, false, undefined, {
+      status: (chunk) => status.update(chunk),
+      refs: observeRefs,
+    });
     return { snapshot, statusHash: status.digest('hex') };
   }
 
@@ -294,12 +304,12 @@ export class RepositoryService {
     signal: AbortSignal | undefined,
     refresh: boolean,
     requestedView?: GraphView,
-    observeStatus?: (chunk: Buffer) => void,
+    observe?: SnapshotObserver,
   ): Promise<Snapshot> {
     const start = performance.now();
     return this.snapshotQueue.run(
       false,
-      () => this.prepareSnapshot(id, signal, refresh, requestedView, start, observeStatus),
+      () => this.prepareSnapshot(id, signal, refresh, requestedView, start, observe),
       signal,
     );
   }
@@ -309,7 +319,7 @@ export class RepositoryService {
     refresh: boolean,
     requestedView: GraphView | undefined,
     start: number,
-    observeStatus?: (chunk: Buffer) => void,
+    observe?: SnapshotObserver,
   ): Promise<Snapshot> {
     const known = this.repositories.get(id);
     if (!known) throw new GitError('UNKNOWN_REPOSITORY', 'Open this repository first');
@@ -324,7 +334,7 @@ export class RepositoryService {
         const worktreeRead = exists(join(repository.commonDir, 'worktrees')).then((present) =>
           present ? this.worktreeManager(id).manager.list(readSignal) : undefined,
         );
-        const statusRead = this.readSnapshotStatus(repository, readSignal, observeStatus);
+        const statusRead = this.readSnapshotStatus(repository, readSignal, observe?.status);
         const cacheReads = this.cacheFingerprintReads(repository, readSignal);
         const probeStop = new AbortController();
         const prefetch = refresh
@@ -338,6 +348,7 @@ export class RepositoryService {
           async ([refs, worktrees, cacheInputs]) => {
             // The normal snapshot can start now. Only reuse a walk already in progress.
             probeStop.abort();
+            if (!readSignal.aborted) observe?.refs?.(refs);
             return this.prepareHistory(
               repository,
               view,

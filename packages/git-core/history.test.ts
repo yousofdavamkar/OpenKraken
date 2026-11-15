@@ -121,6 +121,29 @@ test('cancelled cursor closes, end-of-history is repeatable, and invalid pages r
     await empty.close();
   }
 });
+test('observing refs does not replace the displayed cursor until the initial snapshot succeeds', async () => {
+  const path = createFixture(join(root, 'observed-refs'), 'linear', 2050);
+  const repo = await service.open(path);
+  const displayed = await service.snapshot(repo.id);
+  await expect(
+    service.observeInitialSnapshot(repo.id, undefined, () => {
+      throw new Error('Ref transfer interrupted');
+    }),
+  ).rejects.toThrow('Ref transfer interrupted');
+  const stop = new AbortController();
+  await expect(
+    service.observeInitialSnapshot(repo.id, stop.signal, () => stop.abort()),
+  ).rejects.toMatchObject({ code: 'CANCELLED' });
+  expect((await service.page(repo.id, displayed.cursor, 2000, 50)).commits).toHaveLength(50);
+  const observe = vi.fn();
+  const { snapshot } = await service.observeInitialSnapshot(repo.id, undefined, observe);
+  expect(observe).toHaveBeenCalledTimes(1);
+  expect(observe.mock.calls[0]?.[0]).toBe(snapshot.refs);
+  expect(snapshot.refs.map((ref) => ref.name)).toEqual(
+    fixtureGit(path, ['for-each-ref', '--format=%(refname)']).split('\n'),
+  );
+});
+
 test('Git search finds unloaded messages, author/email and object prefixes without advancing cursor', async () => {
   const path = createFixture(join(root, 'search'), 'linear', 2200);
   const snapshot = await service.snapshot((await service.open(path)).id);
