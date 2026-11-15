@@ -89,15 +89,26 @@ export function projectCommits(
 }
 export function refsByTarget(refs: readonly Ref[], view: GraphView = { hiddenRefs: [] }) {
   const isVisible = graphRefVisibility(view);
-  const targets = new Map<string, Ref[]>();
+  const targets = new Map<string, Ref | Ref[]>();
   for (const ref of refs) {
     if (!isVisible(ref.name)) continue;
     const oid = ref.peeled ?? ref.target;
     const bucket = targets.get(oid);
-    if (bucket) bucket.push(ref);
-    else targets.set(oid, [ref]);
+    if (!bucket) targets.set(oid, ref);
+    else if (Array.isArray(bucket)) bucket.push(ref);
+    else targets.set(oid, [bucket, ref]);
   }
-  return targets;
+  return {
+    size: targets.size,
+    get(oid: string) {
+      const bucket = targets.get(oid);
+      if (!bucket || Array.isArray(bucket)) return bucket;
+      // Allocate a stable badge list only when this single target is displayed.
+      const list = [bucket];
+      targets.set(oid, list);
+      return list;
+    },
+  };
 }
 
 interface RefBadge {

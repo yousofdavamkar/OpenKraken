@@ -63,7 +63,16 @@ test('local and remote badges sharing a name and target combine; tags stay separ
     { name: 'refs/remotes/fork/main', shortName: 'fork/main', kind: 'remote', target: 'a' },
     { name: 'refs/heads/other-main', shortName: 'main', kind: 'local', target: 'b' },
   ] as Ref[];
-  expect(groupRefBadges(refsByTarget(refs).get('a')!).badges).toEqual([
+  const index = refsByTarget(refs);
+  const aliases = index.get('a')!;
+  const single = index.get('b')!;
+  expect(aliases).toEqual(refs.slice(0, 5));
+  expect(single).toEqual([refs[5]]);
+  expect(index.get('b')).toBe(single);
+  expect(index.get('a')).toBe(aliases);
+  expect(index.get('tag')).toBeUndefined();
+  expect(index.size).toBe(2);
+  expect(groupRefBadges(aliases).badges).toEqual([
     {
       label: 'main',
       nameCount: 3,
@@ -73,7 +82,7 @@ test('local and remote badges sharing a name and target combine; tags stay separ
     { label: 'main', nameCount: 1, names: ['refs/tags/main'], kind: 'tag' },
     { label: 'feature', nameCount: 1, names: ['refs/heads/feature'], kind: 'branch' },
   ]);
-  expect(groupRefBadges(refsByTarget(refs).get('b')!).badges).toEqual([
+  expect(groupRefBadges(single).badges).toEqual([
     { label: 'main', nameCount: 1, names: ['refs/heads/other-main'], kind: 'branch' },
   ]);
 });
