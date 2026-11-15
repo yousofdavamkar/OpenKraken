@@ -64,10 +64,15 @@ function prepareWatcher(repo: Repository) {
 }
 
 function getService() {
-  return (service ??= locateGit(process.env.OPENKRAKEN_GIT).then((git) => {
-    gitPath = git.path;
-    return new RepositoryService(git.path, { dataDir: process.argv[2], editorHelper });
-  }));
+  return (service ??= locateGit(process.env.OPENKRAKEN_GIT)
+    .then((git) => {
+      gitPath = git.path;
+      return new RepositoryService(git.path, { dataDir: process.argv[2], editorHelper });
+    })
+    .catch((error: unknown) => {
+      service = undefined;
+      throw error;
+    }));
 }
 async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
   if (request.method === 'answerEditor') {

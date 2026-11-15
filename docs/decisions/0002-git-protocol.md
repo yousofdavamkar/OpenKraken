@@ -2,7 +2,7 @@
 
 Accepted 2026-11-01. Source: blueprint §2; public Git porcelain-v2, for-each-ref and rev-list manuals.
 
-Use Git ≥2.38. Try an optional OPENKRAKEN_GIT path, then system Git. An unsupported or missing installation is an actionable error. Never run automatic maintenance, set safe.directory globally, or weaken TLS. Repository-related environment overrides are stripped so the shell cannot redirect a chosen folder elsewhere.
+Use Git ≥2.38. Try an optional OPENKRAKEN_GIT path, then system Git. An unsupported or missing installation is an actionable error. Never run automatic maintenance, set safe.directory globally, or weaken TLS. Repository-related environment overrides are stripped so the shell cannot redirect a chosen folder elsewhere. Concurrent requests share the in-flight lookup. A successful lookup lasts for the utility process lifetime. After a lookup failure, the next request probes again so the user can repair Git and retry in the same session.
 
 for-each-ref has no portable `-z` switch at the minimum version. Use nine fixed NUL-terminated fields and consume its trailing newline separately. Include peeled object type to exclude tags pointing at non-commit objects from history. History uses the documented rev-list commit header and twelve fixed fields; empty parent/body fields must not be treated as record separators. Include ISO dates to preserve timezone offsets. Git names/messages decode as UTF-8 for display; status paths retain base64 original bytes, including invalid UTF-8, for future filesystem operations.
 

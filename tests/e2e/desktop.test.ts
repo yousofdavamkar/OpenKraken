@@ -1,7 +1,7 @@
 import { _electron as electron, test, expect } from '@playwright/test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import type { DesktopApi } from '../../packages/ipc-contract/src/index.js';
 declare global {
   interface Window {
@@ -9,6 +9,36 @@ declare global {
   }
 }
 import { createFixture } from '../../packages/test-fixtures/src/index.js';
+
+test('Open recovers when a usable Git becomes available in the same session', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-git-retry-'));
+  const repository = createFixture(join(root, 'repository'));
+  const shadow = join(root, process.platform === 'win32' ? 'git.exe' : 'git');
+  // A broken executable shadows the host Git for this app process only.
+  writeFileSync(shadow, '', { mode: 0o755 });
+  const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
+  const env: Record<string, string> = { ...process.env, OPENKRAKEN_GIT: '' };
+  env[pathKey] = [root, process.env[pathKey]].filter(Boolean).join(delimiter);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+    env,
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, repository);
+    const open = page.getByRole('button', { name: 'Open a repository', exact: true });
+    await open.click();
+    await expect(page.getByText(/Install Git 2.38 or later/)).toBeVisible();
+    rmSync(shadow);
+    await open.click();
+    await expect(page.getByTestId('commit-count')).toHaveText('8 commits');
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('sandbox, native folder open, real utility service and 2000-commit first paint', async ({
   browserName: _browserName,
