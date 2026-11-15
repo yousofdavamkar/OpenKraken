@@ -94,6 +94,77 @@ test('old consent is reset and opting out removes the local session marker', asy
   await upgraded.idle();
 });
 
+test('opting out persists across restart when session cleanup cannot remove a changed marker', async () => {
+  const directory = await fixture();
+  const send = vi.fn<typeof fetch>(async () => new Response(null));
+  const reports = new CrashReports(directory, dsn, runtime, send);
+  await reports.start();
+  const enabled = await reports.save(true, (await reports.read()).revision);
+  const marker = join(directory, 'reporting-session.json');
+  const changed = JSON.stringify({
+    ...JSON.parse(await readFile(marker, 'utf8')),
+    session: crypto.randomUUID(),
+  });
+  await writeFile(marker, changed);
+  expect(await reports.save(false, enabled.revision)).toMatchObject({
+    enabled: false,
+    warning: 'cleanup',
+  });
+  expect(await readFile(marker, 'utf8')).toBe(changed);
+  // Simulate a process exit immediately after the preference was acknowledged.
+  const next = new CrashReports(directory, dsn, runtime, send);
+  await next.start();
+  expect(await next.read()).toMatchObject({ enabled: false });
+  await next.capture('renderer', 'crashed');
+  expect(send).not.toHaveBeenCalled();
+  expect(await readFile(marker, 'utf8')).toBe(changed);
+});
+
+test('session startup failure still allows the user to revoke a valid saved consent', async () => {
+  const directory = await fixture();
+  const enabled = new CrashReports(directory, dsn, runtime);
+  await enabled.save(true, null);
+  const marker = join(directory, 'reporting-session.json');
+  await writeFile(marker, 'unreadable session');
+  const next = new CrashReports(directory, dsn, runtime);
+  await next.start();
+  const disabled = await next.read();
+  expect(disabled).toMatchObject({ enabled: false, warning: 'session' });
+  await next.save(false, disabled.revision);
+  expect(JSON.parse(await readFile(join(directory, 'crash-reporting.json'), 'utf8')).enabled).toBe(
+    false,
+  );
+  expect(await readFile(marker, 'utf8')).toBe('unreadable session');
+});
+
+test('shutdown drains an admitted opt-out before closing reporting storage', async () => {
+  const directory = await fixture();
+  const reports = new CrashReports(directory, dsn, runtime);
+  await reports.start();
+  const enabled = await reports.save(true, null);
+  const revoking = reports.save(false, enabled.revision);
+  reports.close();
+  expect((await revoking).enabled).toBe(false);
+  await reports.idle();
+  const next = new CrashReports(directory, dsn, runtime);
+  expect((await next.read()).enabled).toBe(false);
+  await expect(reports.save(false, null)).rejects.toThrow(/closed/);
+});
+
+test('a failed first opt-in leaves consent disabled on the next launch', async () => {
+  const directory = await fixture();
+  const marker = join(directory, 'reporting-session.json');
+  await writeFile(marker, 'unreadable session');
+  const reports = new CrashReports(directory, dsn, runtime);
+  await reports.start();
+  await expect(reports.save(true, null)).rejects.toThrow();
+  expect((await reports.read()).enabled).toBe(false);
+  await rm(marker);
+  const next = new CrashReports(directory, dsn, runtime);
+  await next.start();
+  expect((await next.read()).enabled).toBe(false);
+});
+
 test('consent survives restart, is bound to the exact destination, and revocation persists', async () => {
   const directory = await fixture();
   const reports = new CrashReports(directory, dsn, runtime);

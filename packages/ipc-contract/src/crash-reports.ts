@@ -7,7 +7,7 @@ export const crashReportingStateSchema = z
       .regex(/^[a-f0-9]{64}$/)
       .nullable(),
     destination: z.string().url().max(2048).nullable(),
-    warning: z.enum(['unreadable', 'changed']).nullable(),
+    warning: z.enum(['unreadable', 'changed', 'session', 'cleanup']).nullable(),
     delivery: z.enum(['idle', 'sending', 'sent', 'failed']),
   })
   .strict();

@@ -105,10 +105,16 @@ export class CrashReports {
         if (!this.state.enabled || this.closed) return null;
         try {
           if ((await this.readSource()) !== this.source) throw new Error('Consent changed');
-          return await this.session.begin(this.state.revision!, this.runtime);
         } catch {
           this.stop();
           this.state.warning = 'unreadable';
+          return null;
+        }
+        try {
+          return await this.session.begin(this.state.revision!, this.runtime);
+        } catch {
+          this.stop();
+          this.state.warning = 'session';
           return null;
         }
       });
@@ -133,19 +139,17 @@ export class CrashReports {
   save(enabled: boolean, revision: string | null) {
     // Revocation takes effect before disk work or waiting on another preference
     // write. A failed persistence attempt never leaves transmission enabled.
+    if (this.closed) return Promise.reject(new Error('Crash reporting is closed'));
     if (!enabled) this.stop();
     const next = this.writes
       .catch(() => {})
       .then(async () => {
         await this.ready;
-        if (this.closed) throw new Error('Crash reporting is closed');
-        if (!enabled) {
-          this.stop();
-          await this.session.end();
-        }
+        if (enabled && this.closed) throw new Error('Crash reporting is closed');
+        if (!enabled) this.stop();
         if (
           revision !== this.state.revision ||
-          this.state.warning ||
+          (this.state.warning && (enabled || this.state.warning !== 'session')) ||
           (await this.readSource()) !== this.source
         )
           throw new Error(
@@ -171,8 +175,19 @@ export class CrashReports {
           } finally {
             await file.close();
           }
+          // Only publish renewed consent once its session marker can be created.
+          if (enabled && this.started) {
+            try {
+              await this.session.begin(digest(raw), this.runtime);
+            } catch (error) {
+              this.stop();
+              this.state.warning = 'session';
+              throw error;
+            }
+          }
           if ((await this.readSource()) !== this.source)
             throw new Error('Crash reporting settings changed externally');
+          if (enabled && this.closed) throw new Error('Crash reporting is closed');
           await rename(temporary, this.file);
         } finally {
           await rm(temporary, { force: true });
@@ -183,13 +198,14 @@ export class CrashReports {
         this.active?.abort();
         this.state.delivery = 'idle';
         this.state.enabled = enabled && !this.closed;
-        if (this.state.enabled && this.started) {
+        if (!enabled) {
+          // Persist the off setting before attempting to remove the previous session marker.
+          const unverifiedMarker = this.state.warning === 'session';
           try {
-            await this.session.begin(this.state.revision, this.runtime);
-          } catch (error) {
-            this.stop();
-            this.state.warning = 'unreadable';
-            throw error;
+            await this.session.end();
+            this.state.warning = unverifiedMarker ? 'cleanup' : null;
+          } catch {
+            this.state.warning = 'cleanup';
           }
         }
         return structuredClone(this.state);
