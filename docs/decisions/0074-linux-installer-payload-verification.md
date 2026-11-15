@@ -25,3 +25,11 @@ The disposable Debian lifecycle check installs dependencies through APT, checks 
 Linux CI builds both test artifacts and runs extraction/UI checks plus the Debian lifecycle fixture. Existing unsigned platform-bundle CI remains on macOS/Windows. DMG/MSI, signing/notarization, authenticated updates, real release metadata and distribution acceptance remain separate work. The inspected builder AppImage launcher can add `--no-sandbox`; do not adopt that fallback. [ADR 0076](0076-appimage-launch-and-verification.md) adds a separate AppImage producer with an independently written launcher that preserves the sandbox.
 
 Public implementation references: [electron-builder v26 CLI/prepackaged](https://www.electron.build/v26/docs/cli/), [Linux options](https://www.electron.build/v26/docs/linux/) and [RPM format documentation](https://rpm.org/docs/6.0.x/manual/format_v6.html). No proprietary artifacts were consulted.
+
+## Building and identifying the application payload
+
+The packaging command typechecks the workspace and runs the desktop build in a freshly cleared release staging directory. The renderer, main process, utility processes, helpers, shell integration and native dependencies are built or copied there from their current sources. Development declarations, incremental compiler state and files left by interrupted Electron tests stay out of the release. The ordinary desktop build still writes to `apps/desktop/dist`.
+
+The installer builder checks the version, application name, desktop entry and main entry point in the copied bundle's `app.asar/package.json`. The verifier repeats the check on the extracted app before launching it. DMG and MSI verification also checks the platform's installer or bundle metadata. The separate staging directory can be removed after packaging.
+
+The app records the source checkout's HEAD and dirty flag at the start of packaging. Installer manifests inherit that record from the bundled app. The release version and build-time configuration remain separate inputs. A source export with no available Git information records `null`. Older bundles can still be installed and checked; a new manifest for one of those bundles records unknown source. A verifier can compare source claims when the app contains the embedded record.

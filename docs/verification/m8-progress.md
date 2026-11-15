@@ -2,6 +2,16 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Release payload and installer version checks
+
+The old Linux package contained TypeScript declarations and incremental compiler state. A fixture also placed stale files in the development output, including the native helper directory, and found them in the packaged archive. The release build now emits its runtime directly into clean staging. The rebuilt Linux x64 archive excluded those files and passed the packaged native Git, terminal, renderer isolation and repository-link smoke checks.
+
+A second fixture produced a DEB whose native version was `0.1.0` while its extracted app reported `0.2.0`. The builder now rejects that mismatch before producing an installer. It can build a correctly labeled installer after the separate staging directory has been removed. The verifier checks the embedded app descriptor again after extracting the installer. Changed archive digests, helper hashes and release versions were rejected for the DEB, RPM and AppImage. [Release payload checks](../decisions/0074-linux-installer-payload-verification.md#building-and-identifying-the-application-payload)
+
+All three final Linux x64 test installers recorded clean build commit `2068102`, including installers assembled after the workspace changed. An independently built `0.2.0` RPM retained its source revision when assembled in a fixture with no commits. Changing only the dirty flag in its manifest stopped verification before launch. Restoring the matching manifest passed. Native Debian and Fedora container tests installed, reinstalled and upgraded the app, preserved fixture user data and removed the package.
+
+The native/unit suite passed 878 tests with 14 skipped. The development build, packaging build, typecheck, lint and actionlint passed. All nine selected Electron tests passed, including signed HTTPS export of the actual DEB. The same export check passed separately with the actual RPM. The packaged beta AppImage downloaded and restarted through a loopback HTTPS feed using a temporary signing key. These results cover Linux x64 test artifacts. Native macOS, Windows and Linux arm64 runs, production signing and public beta acceptance remain open.
+
 ## Keyboard navigation in large histories and repository-open recovery
 
 The graph reveals the selected commit when the user scrolls away and presses End again. The Electron regression reproduced the missing active row at 12,000 commits and now verifies that it returns to the viewport. On full Linux history with 32,000 commits loaded, median synchronous End handling fell from 20.2–22.6 to 2.9–3.0 ms in three paired runs. The reference sidebar also releases an offscreen branch after focus returns to the list. A focused rename dialog still survives scrolling. [Keyboard and sidebar measurements](m8-reference-performance.md#graph-selection-and-reference-sidebar-measurements)
