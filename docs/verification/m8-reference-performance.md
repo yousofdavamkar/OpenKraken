@@ -2,6 +2,17 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Reading tentative roots with rev-parse
+
+Three paired fresh-profile openings per fixture compared the optional `git rev-parse --all` read with `git for-each-ref --format=%(objectname)`. Only the Git utility bundle changed. Each opening used the full Linux history on Linux x64 with populated OS caches and appended three pages of 5,000 commits.
+
+| 50,000 refs      | Median snapshot before | Median snapshot after | Median first paint before | Median first paint after |
+| ---------------- | ---------------------: | --------------------: | ------------------------: | -----------------------: |
+| Distinct targets |               319.4 ms |              311.3 ms |                  802.5 ms |                 796.6 ms |
+| Shared target    |               250.7 ms |              239.2 ms |                  759.0 ms |                 737.2 ms |
+
+All twelve first paints exceeded 500 ms. Distinct-target snapshot time improved in all three pairs and first paint improved in one. Shared-target first paint improved in all three pairs. All 36 appends met 300 ms, with graph and reference scrolling at 16.7–16.8 ms p95. Git 2.38.0 and 2.53.0 passed the eleven native prefetch cases, including a loose branch and a detached HEAD reachable only through its direct object ID. [All paired measurements](m8-native-root-samples.csv) · [Root reconciliation](../decisions/0122-overlap-reference-and-history-reads.md)
+
 ## Preparing the display snapshot during worker layout
 
 A renderer experiment sent the projected commits to the graph worker before expanding the compact refs and freezing the initial snapshot. It published the refs, graph and selection together. Three pairs of fresh Electron profiles per fixture alternated the baseline and experimental renderer with the same Git utility. The OS caches stayed populated.
