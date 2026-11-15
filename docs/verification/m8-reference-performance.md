@@ -2,6 +2,24 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Validating refs before the first page is ready
+
+Three alternating pairs per fixture compared the previous one-message Git utility (`d00f8a7`) with the staged transfer in `38213be`. Each opened 2,000 commits from the same full Linux history in a fresh Electron profile and appended three pages of 5,000. The benchmark used Linux x64, Git 2.53.0 and an Intel Core i7-9750H, with populated OS caches and no concurrent build or test suite. Both used the same renderer. The benchmark's app directory pointed to the main and utility bundles under test.
+
+| 50,000 refs      | Median response before | Median response after | Median first paint before | Median first paint after |
+| ---------------- | ---------------------: | --------------------: | ------------------------: | -----------------------: |
+| Distinct targets |               572.7 ms |              523.4 ms |                  789.7 ms |                 751.1 ms |
+| 500 targets      |               514.2 ms |              466.8 ms |                  721.9 ms |                 686.7 ms |
+| One target       |               449.8 ms |              429.7 ms |                  682.3 ms |                 667.4 ms |
+
+Eight of nine comparisons improved first paint. The third shared-target pair measured 682.3 ms before and 686.5 ms after. Every opening exceeded the 500 ms target. All 54 appends met 300 ms, and both graph and sidebar scrolling stayed at 16.7–16.8 ms p95. [All eighteen openings](m8-staged-snapshot-samples.csv) · [Transfer and cancellation semantics](../decisions/0116-validated-snapshot-references.md#validate-references-while-opening-a-repository)
+
+Before the change, six instrumented openings isolated these median intervals on the distinct/shared fixtures, respectively. Reading the refs took 272.5/224.9 ms. Once refs were ready, finishing the native graph took 36.2/17.1 ms. Computing the watcher baseline took 31.2/44.1 ms. Posting the utility reply through its receipt in main took 49.2/36.6 ms, followed by 68.2/51.9 ms to validate it. Instrumentation ran in a temporary copy of the app. The paired measurements above used the normal bundles.
+
+In separate fresh profiles, single-ref Linux history painted in 344.8 ms and the two-million-commit, 100,000-file checkout in 352.6 ms. Reopening full Linux history with 17,000 cached commits and 50,000 refs sharing one target took 720.8 ms. Opening it with 50,000 distinct targets and 10,000 hidden refs took 876.7 ms. All twelve appends met 300 ms.
+
+Six additional Electron openings sampled the renderer at 200 µs using CDP and hidden source maps. The mapped main JavaScript bundle matched the production bundle byte for byte. Between store publication and first paint, the sampled interval averaged 132 ms for distinct targets and 153 ms for the shared target. Self time in TanStack Virtual Core averaged 52.9 and 54.6 ms respectively. The history model accounted for 19.6 and 26.4 ms, and React DOM for 18.1 and 17.2 ms. Source-mapped stacks included sidebar measurement and per-commit ref grouping. These instrumented runs identify work remaining in the renderer. The timing table above uses separate uninstrumented runs.
+
 ## Transferring consecutive references
 
 Three alternating pairs per fixture opened 2,000 commits of full Linux history in fresh Electron profiles on Linux x64. The OS caches stayed populated. Baseline used `31d5960`. The new build omitted repeated object IDs on the Git utility and renderer boundaries. Each opening appended three 5,000-commit pages. The grouped fixture borrowed the same Linux object store and distributed 50,000 refs across the first 500 commits from HEAD, with 100 refs per target. Git verified the target and ref counts before testing.

@@ -2,6 +2,16 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Staged reference validation and stash search
+
+On Linux x64, `38213be` painted the 50,000-ref fixtures in a median of 751.1 ms with distinct targets, 686.7 ms with 500 targets and 667.4 ms with one target. Eight of nine paired openings improved. All 54 appends met 300 ms. Single-ref Linux history and the two-million-commit checkout met 500 ms in separate openings. [First paint, page and scroll measurements](m8-reference-performance.md#validating-refs-before-the-first-page-is-ready)
+
+Electron held the Git walk after refs were available and cancelled it, then retried using the same request ID. Two more runs held the completed native reply and either cancelled late or stopped the utility. The late cancellation delivered the committed snapshot. Utility exit returned an error. All three retries returned the correct 10,000-tag repository. A failed switch to a repository with a missing commit parent left the original watcher and cursor usable. [Internal transfer protocol](../decisions/0116-validated-snapshot-references.md#validate-references-while-opening-a-repository)
+
+All-history search now resolves stash IDs using the same unambiguous prefix rule as other objects. Electron reproduced the previous extra result when a message contained the middle of a stash hash. The fix retained the message match and opened the stash for its uppercase prefix. The native suite also verified the actual parents when a normal branch reaches the stash. [Search semantics](../decisions/0004-m1-history-and-interaction.md)
+
+The build and lint passed. The final Linux x64 runs passed 920 native/unit tests with 14 skips and 219 Electron tests with two opt-in benchmarks skipped in the full suite. The graph benchmark ran separately. The clean Linux x64 package passed fuse checks, repository links, the folder picker, native Bash keyboard input, renderer isolation and helper smoke checks. It opened the 50,000-ref grouped fixture, found the expected ref on each of two adjacent commits, and appended 5,000 rows.
+
 ## Large reference snapshots in the Linux x64 desktop
 
 Three paired openings per fixture measured the new snapshot encoding against `31d5960`. With 50,000 refs sharing one target, median first paint fell from 741.3 to 698.6 ms. With 100 refs per target it fell from 759.0 to 720.6 ms. For distinct targets it moved from 811.1 to 807.8 ms. All eighteen openings exceeded 500 ms, and one of the 54 page appends exceeded 300 ms. The Linux x64 package built from `d00f8a7` opened the grouped fixture through a repository link, reported 100 refs on each of two adjacent commits and found the expected last ref in each dialog, and appended 5,000 rows. Native folder selection, terminal keyboard input, renderer isolation, helpers and fuse checks also passed. [Paired measurements and payload sizes](m8-reference-performance.md#transferring-consecutive-references)
