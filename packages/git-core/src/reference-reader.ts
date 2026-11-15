@@ -12,6 +12,18 @@ const KEY_FORMAT = '%(refname)%00%(objectname)%00%(upstream)%00%(HEAD)%00';
 const MAX_BYTES = 32 * 1024 * 1024;
 const PARALLEL_THRESHOLD = 10000;
 
+function repeatedTargets(sample: Buffer, length: number) {
+  const targets = new Set<string>();
+  let rows = 0;
+  for (const match of sample
+    .toString('latin1', 0, length)
+    .matchAll(/^([0-9a-f]{40}|[0-9a-f]{64}) refs\//gm)) {
+    targets.add(match[1]!);
+    rows++;
+  }
+  return rows >= 32 && targets.size * 4 <= rows;
+}
+
 // This bounded sample selects a Git query. Only Git supplies the actual refs and types.
 export async function hasRepeatedPackedTargets(commonDir: string) {
   if (process.env.GIT_REPLACE_REF_BASE) return false;
@@ -21,14 +33,13 @@ export async function hasRepeatedPackedTargets(commonDir: string) {
   try {
     const info = await file.stat();
     if (!info.isFile() || info.size < 512 * 1024) return false;
-    const sample = Buffer.alloc(8192);
-    const { bytesRead } = await file.read(sample, 0, sample.length, 0);
-    const targets = [
-      ...sample.toString('latin1', 0, bytesRead).matchAll(/^([0-9a-f]{40}|[0-9a-f]{64}) refs\//gm),
-    ];
-    return (
-      targets.length >= 32 && new Set(targets.map((target) => target[1])).size <= targets.length / 4
-    );
+    // Contiguous aliases usually fit in one small read. A larger prefix
+    // also detects targets that recur hundreds of names apart in Git order.
+    const sample = Buffer.allocUnsafe(256 * 1024);
+    const { bytesRead } = await file.read(sample, 0, 8192, 0);
+    if (repeatedTargets(sample, bytesRead)) return true;
+    const more = await file.read(sample, bytesRead, sample.length - bytesRead, bytesRead);
+    return repeatedTargets(sample, bytesRead + more.bytesRead);
   } catch {
     return false;
   } finally {

@@ -548,6 +548,30 @@ test.skipIf(process.platform === 'win32').each([
   }
 });
 
+test('detects interleaved packed targets and reads every ref in Git order', async () => {
+  const cwd = createFixture(join(root, 'interleaved'), 'linear', 500);
+  const targets = fixtureGit(cwd, ['rev-list', 'HEAD']).split('\n');
+  fixtureGit(
+    cwd,
+    ['update-ref', '--stdin'],
+    Array.from(
+      { length: 9000 },
+      (_, i) =>
+        `create refs/tags/rotate-${String(i).padStart(5, '0')} ${targets[i % targets.length]}`,
+    ).join('\n') + '\n',
+  );
+  fixtureGit(cwd, ['pack-refs', '--all']);
+  const grouped = await hasRepeatedPackedTargets(join(cwd, '.git'));
+  expect(grouped).toBe(true);
+  let typeQueries = 0;
+  const reader = new ReferenceReader((args, options) => {
+    if (args.includes('cat-file')) typeQueries++;
+    return runGit(git.path, args, options);
+  });
+  expect(await reader.read(cwd, undefined, grouped)).toEqual(await nativeRefs(cwd));
+  expect(typeQueries).toBe(1);
+});
+
 describe('repeated targets in a packed SHA-256 repository', () => {
   const cwd = join(root, 'grouped');
   const commonDir = join(cwd, '.git');
