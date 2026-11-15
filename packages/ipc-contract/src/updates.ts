@@ -60,6 +60,7 @@ export const updatesStateSchema = z.strictObject({
       'cancelled',
       'timeout',
       'installation',
+      'unchanged-image',
       'save',
     ])
     .nullable(),

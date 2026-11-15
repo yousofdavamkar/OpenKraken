@@ -138,6 +138,12 @@ async function exists(path: string) {
   }
 }
 
+export class UnchangedAppImageError extends Error {
+  constructor() {
+    super('This AppImage is already installed.');
+  }
+}
+
 /** A main-owned file transaction; staging never changes the running image. */
 export async function stageAppImageUpdate(
   input: {
@@ -156,6 +162,7 @@ export async function stageAppImageUpdate(
   const original = await lstat(target);
   const next = digestSchema.parse(input.artifact);
   if (!matches(await imageDigest(source, arch, signal), next)) fail();
+  if (matches(previous, next)) throw new UnchangedAppImageError();
   const transaction = transactionSchema.parse({
     schemaVersion: 1,
     product: 'org.openkraken.desktop',
@@ -348,8 +355,10 @@ export async function recoverAppImageUpdate(
   const linked =
     backupInfo !== null && backupInfo.dev === targetInfo.dev && backupInfo.ino === targetInfo.ino;
   const current = await imageDigest(target, transaction.arch, signal, linked ? 2 : 1);
-  const installed = matches(current, transaction.next);
-  if (installed ? version !== transaction.version : !matches(current, transaction.previous)) fail();
+  // Older builds could stage identical images. If the predecessor is still present,
+  // discard the journal after validating all retained files, including hard links.
+  const installed = !matches(current, transaction.previous);
+  if (installed && (!matches(current, transaction.next) || version !== transaction.version)) fail();
   // Validate every existing file before removing any part of the recovery transaction.
   if (
     hasBackup &&

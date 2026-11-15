@@ -10,6 +10,8 @@ const failures: Record<NonNullable<UpdateState['error']>, string> = {
   integrity: 'The download did not match the signed release. The incomplete file was discarded.',
   cancelled: 'Update transfer cancelled.',
   timeout: 'The update transfer timed out. Try checking again.',
+  'unchanged-image':
+    'This release contains the installed AppImage. Check again after the publisher corrects the release.',
   installation:
     'The update could not be prepared or confirmed. Existing recovery files were retained.',
 };

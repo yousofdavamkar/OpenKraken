@@ -15,7 +15,11 @@ import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'nod
 import { gt, valid } from 'semver';
 import { z } from 'zod';
 import type { UpdateState } from '@openkraken/ipc-contract';
-import { stageAppImageUpdate, recoverAppImageUpdate } from './appimage-install.js';
+import {
+  stageAppImageUpdate,
+  recoverAppImageUpdate,
+  UnchangedAppImageError,
+} from './appimage-install.js';
 import type { InstalledUpdate } from './update-restart.js';
 import {
   updateConfiguration,
@@ -812,6 +816,7 @@ export class Updates {
         this.installation = null;
         this.installController = null;
         if (signal.aborted) throw error;
+        if (error instanceof UnchangedAppImageError) throw new UpdateFailure('unchanged-image');
         throw new UpdateFailure('installation');
       } finally {
         signal.removeEventListener('abort', abort);

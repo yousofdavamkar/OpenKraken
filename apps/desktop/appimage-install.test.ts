@@ -131,6 +131,67 @@ const artifact = {
 };
 
 test.skipIf(process.platform !== 'linux')(
+  'a newer release containing the installed image cannot stage a restart',
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-appimage-duplicate-'));
+    const target = join(root, 'OpenKraken.AppImage');
+    const source = join(root, 'artifact.ready');
+    try {
+      await writeFile(target, newImage, { mode: 0o700 });
+      await writeFile(source, newImage, { mode: 0o600 });
+      await expect(
+        stageAppImageUpdate(
+          { target, source, artifact, version: '0.2.0', arch: 'x64' },
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow(/already installed/);
+      expect(await readFile(target)).toEqual(newImage);
+      await expect(stat(target + '.openkraken-update')).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(process.platform !== 'linux').each(['staged', 'armed', 'renamed'])(
+  'startup discards a legacy %s journal for an identical replacement',
+  async (phase) => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-appimage-old-journal-'));
+    const target = join(root, 'OpenKraken.AppImage');
+    const folder = target + '.openkraken-update';
+    const leftover = join(folder, phase === 'renamed' ? 'previous.AppImage' : 'next.AppImage');
+    try {
+      await writeFile(target, newImage, { mode: 0o700 });
+      await mkdir(folder, { mode: 0o700 });
+      await writeFile(
+        join(folder, 'transaction.json'),
+        JSON.stringify({
+          schemaVersion: 1,
+          product: 'org.openkraken.desktop',
+          target: 'OpenKraken.AppImage',
+          version: '0.2.0',
+          arch: 'x64',
+          next: artifact,
+          previous: artifact,
+        }),
+        { mode: 0o600 },
+      );
+      if (phase === 'armed') await link(target, join(folder, 'previous.AppImage'));
+      await writeFile(leftover, oldImage, { mode: 0o700 });
+      await expect(recoverAppImageUpdate(target, '0.1.0')).rejects.toThrow();
+      expect(await readFile(leftover)).toEqual(oldImage);
+      await writeFile(leftover, newImage);
+      expect(await recoverAppImageUpdate(target, '0.1.0')).toBe('discarded');
+      expect(await readFile(target)).toEqual(newImage);
+      expect((await stat(target)).nlink).toBe(1);
+      expect(await recoverAppImageUpdate(target, '0.1.0')).toBe('none');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(process.platform !== 'linux')(
   'AppImage replacement preserves the filename and retains recovery until the new app confirms startup',
   async () => {
     const root = await mkdtemp(join(tmpdir(), 'openkraken-appimage-install-'));
