@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
+import { releaseVersionSchema } from '../apps/desktop/src/update-protocol.ts';
 import { msiVersion } from './msi.mjs';
 
 // Build a disposable future version through the real bundle and installer CLIs.
@@ -18,12 +19,17 @@ const root = resolve('.');
 await mkdir(join(root, 'release'), { recursive: true });
 const fixture = await mkdtemp(join(root, 'release/installer-upgrade-'));
 const source = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
-const parts = source.version.split('.').map(Number);
+const beta = process.argv[3] === '--beta';
 assert.ok(
-  parts.length === 3 && parts.every(Number.isSafeInteger),
-  'Use a stable numeric release version',
+  process.argv.length <= 4 || (process.argv.length === 5 && beta && target !== 'msi'),
+  'Use --beta with Linux package upgrade fixtures',
 );
-const version = `${parts[0]}.${parts[1] + 1}.0`;
+const [base, prerelease] = releaseVersionSchema.parse(source.version).split('-');
+const [major, minor] = base.split('.');
+const stable = prerelease ? base : `${major}.${Number(minor) + 1}.0`;
+const version = beta
+  ? `${stable}-beta.${prerelease ? BigInt(prerelease.slice(5)) + 1n : 1}`
+  : stable;
 if (target === 'msi') msiVersion(version);
 await writeFile(join(fixture, 'package.json'), JSON.stringify({ ...source, version }));
 // Simulate leftovers from interrupted developer builds and Electron tests.
@@ -115,7 +121,10 @@ try {
   const pointer = JSON.stringify({ fixture, target, version, manifestPath }, null, 2) + '\n';
   // Keep the last-built pointer for local callers; CI consumes per-format
   // pointers so building an RPM cannot replace the Debian upgrade fixture.
-  await writeFile(join(root, `release/installer-upgrade-${target}.json`), pointer);
+  await writeFile(
+    join(root, `release/installer-upgrade-${target}${beta ? '-beta' : ''}.json`),
+    pointer,
+  );
   await writeFile(join(root, 'release/installer-upgrade.json'), pointer);
   console.log(`Verified upgrade fixture version ${version}: ${manifestPath}`);
 } catch (error) {

@@ -14,10 +14,17 @@ source /etc/os-release
 [[ $(id -u) == 0 ]]
 artifact=$(realpath "$1")
 [[ $artifact == /artifacts/*.rpm && -f $artifact ]]
-upgrade=${2:-}
-if [[ -n $upgrade ]]; then
-  upgrade=$(realpath "$upgrade")
+[[ $# -le 3 ]] || { echo 'Provide current RPM, optional stable upgrade and intermediate beta' >&2; exit 1; }
+upgrades=()
+if [[ $# == 3 ]]; then
+  beta=$(realpath "$3")
+  [[ $beta == /beta/*.rpm && -f $beta ]]
+  upgrades+=("$beta")
+fi
+if [[ $# -ge 2 ]]; then
+  upgrade=$(realpath "$2")
   [[ $upgrade == /upgrade/*.rpm && -f $upgrade ]]
+  upgrades+=("$upgrade")
 fi
 expected_artifact=$artifact
 # The application artifact is an unsigned local test build. Repository package
@@ -52,7 +59,7 @@ dnf "${dnf_options[@]}" reinstall "$artifact"
 check_installed
 [[ $(cat /home/fixture/.config/OpenKraken/draft.txt) == keep-this-draft ]]
 
-if [[ -n $upgrade ]]; then
+for upgrade in "${upgrades[@]}"; do
   old_version=$(rpm -q --qf '%{VERSION}-%{RELEASE}' openkraken)
   old_asar=$(sha256sum /opt/OpenKraken/resources/app.asar)
   dnf "${dnf_options[@]}" upgrade "$upgrade"
@@ -61,8 +68,8 @@ if [[ -n $upgrade ]]; then
   [[ $(rpm -q --qf '%{VERSION}-%{RELEASE}' openkraken) != "$old_version" ]]
   [[ $(sha256sum /opt/OpenKraken/resources/app.asar) != "$old_asar" ]]
   [[ $(cat /home/fixture/.config/OpenKraken/draft.txt) == keep-this-draft ]]
-  echo 'Version upgrade replaced the application payload and preserved launcher and user data'
-fi
+  echo "RPM upgrade to $(rpm -q --qf '%{VERSION}-%{RELEASE}' openkraken) preserved launcher and user data"
+done
 
 dnf "${dnf_options[@]}" remove openkraken
 ! rpm -q openkraken

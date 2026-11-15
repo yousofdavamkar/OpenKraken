@@ -267,7 +267,9 @@ jobs:
           node scripts/check-appimage-launcher.mjs
           pnpm installer --test-metadata --target deb
           pnpm installer --test-metadata --target rpm
+          node scripts/check-installer-upgrade.mjs deb --beta
           node scripts/check-installer-upgrade.mjs deb
+          node scripts/check-installer-upgrade.mjs rpm --beta
           node scripts/check-installer-upgrade.mjs rpm
           pnpm installer --test-metadata --target AppImage
           for target in deb rpm AppImage; do
@@ -315,14 +317,17 @@ jobs:
           artifact=$(node -p 'require("./" + process.env.INSTALLER_ROOT + "/deb/manifest.json").artifact.file')
           upgrade_dir=$(node -p 'require("node:path").dirname(require("./release/installer-upgrade-deb.json").manifestPath)')
           upgrade_artifact=$(node -p 'require(require("./release/installer-upgrade-deb.json").manifestPath).artifact.file')
+          beta_dir=$(node -p 'require("node:path").dirname(require("./release/installer-upgrade-deb-beta.json").manifestPath)')
+          beta_artifact=$(node -p 'require(require("./release/installer-upgrade-deb-beta.json").manifestPath).artifact.file')
           mkdir -p test-results
           docker run --rm \
             --env OPENKRAKEN_DISPOSABLE_INSTALL_TEST=1 \
             --volume "$PWD/$INSTALLER_ROOT/deb:/artifacts:ro" \
+            --volume "$beta_dir:/beta:ro" \
             --volume "$upgrade_dir:/upgrade:ro" \
             --volume "$PWD/scripts/check-deb-lifecycle.sh:/check.sh:ro" \
             docker.io/library/debian@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4 \
-            timeout 12m bash /check.sh "/artifacts/$artifact" "/upgrade/$upgrade_artifact" 2>&1 | tee test-results/deb-lifecycle.log
+            timeout 12m bash /check.sh "/artifacts/$artifact" "/upgrade/$upgrade_artifact" "/beta/$beta_artifact" 2>&1 | tee test-results/deb-lifecycle.log
       - if: runner.os == 'Linux'
         name: Fedora RPM install, upgrade and removal in a disposable container
         timeout-minutes: 15
@@ -330,13 +335,16 @@ jobs:
           artifact=$(node -p 'require("./" + process.env.INSTALLER_ROOT + "/rpm/manifest.json").artifact.file')
           upgrade_dir=$(node -p 'require("node:path").dirname(require("./release/installer-upgrade-rpm.json").manifestPath)')
           upgrade_artifact=$(node -p 'require(require("./release/installer-upgrade-rpm.json").manifestPath).artifact.file')
+          beta_dir=$(node -p 'require("node:path").dirname(require("./release/installer-upgrade-rpm-beta.json").manifestPath)')
+          beta_artifact=$(node -p 'require(require("./release/installer-upgrade-rpm-beta.json").manifestPath).artifact.file')
           docker run --rm \
             --env OPENKRAKEN_DISPOSABLE_INSTALL_TEST=1 \
             --volume "$PWD/$INSTALLER_ROOT/rpm:/artifacts:ro" \
+            --volume "$beta_dir:/beta:ro" \
             --volume "$upgrade_dir:/upgrade:ro" \
             --volume "$PWD/scripts/check-rpm-lifecycle.sh:/check.sh:ro" \
             quay.io/fedora/fedora@sha256:086bb30fc7dd0f84b266b9c93d14298f06e30d04421dcd6813629ea00542fa8a \
-            timeout 12m bash /check.sh "/artifacts/$artifact" "/upgrade/$upgrade_artifact"
+            timeout 12m bash /check.sh "/artifacts/$artifact" "/upgrade/$upgrade_artifact" "/beta/$beta_artifact"
       - name: Save signed-feed installers through Electron
         shell: bash
         run: |

@@ -11,16 +11,28 @@ if [[ ${OPENKRAKEN_DISPOSABLE_INSTALL_TEST:-} != 1 ]] ||
 fi
 source /etc/os-release
 [[ $ID == debian && $VERSION_ID == 13 && $(id -u) == 0 ]]
-[[ $# == 2 ]] || { echo 'Provide current and newer DEB artifacts' >&2; exit 1; }
+[[ $# == 2 || $# == 3 ]] || { echo 'Provide current DEB, stable upgrade and optional intermediate beta' >&2; exit 1; }
 artifact=$(realpath "$1")
 upgrade=$(realpath "$2")
 [[ $artifact == /artifacts/*.deb && -f $artifact ]]
 [[ $upgrade == /upgrade/*.deb && -f $upgrade ]]
-for package in "$artifact" "$upgrade"; do
+upgrades=()
+if [[ $# == 3 ]]; then
+  beta=$(realpath "$3")
+  [[ $beta == /beta/*.deb && -f $beta ]]
+  upgrades+=("$beta")
+fi
+upgrades+=("$upgrade")
+previous_version=''
+for package in "$artifact" "${upgrades[@]}"; do
   [[ $(dpkg-deb --field "$package" Package) == openkraken ]]
   [[ $(dpkg-deb --field "$package" Architecture) == "$(dpkg --print-architecture)" ]]
+  version=$(dpkg-deb --field "$package" Version)
+  if [[ -n $previous_version ]]; then
+    dpkg --compare-versions "$version" gt "$previous_version"
+  fi
+  previous_version=$version
 done
-dpkg --compare-versions "$(dpkg-deb --field "$upgrade" Version)" gt "$(dpkg-deb --field "$artifact" Version)"
 if dpkg-query -W openkraken >/dev/null 2>&1; then
   echo 'Refusing existing OpenKraken package state' >&2
   exit 1
@@ -32,11 +44,8 @@ done
 asar_digest() {
   dpkg-deb --fsys-tarfile "$1" | tar -xOf - ./opt/OpenKraken/resources/app.asar | sha256sum | cut -d ' ' -f 1
 }
-old_asar=$(asar_digest "$artifact")
-new_asar=$(asar_digest "$upgrade")
-[[ $old_asar != "$new_asar" ]]
 expected_artifact=$artifact
-expected_asar=$old_asar
+expected_asar=$(asar_digest "$artifact")
 mkdir -p /home/fixture/.config/OpenKraken
 printf '%s\n' keep-this-draft > /home/fixture/.config/OpenKraken/draft.txt
 export DEBIAN_FRONTEND=noninteractive
@@ -89,11 +98,15 @@ check_installed
 apt-get "${apt_options[@]}" install -y --no-install-recommends --reinstall "$artifact"
 check_installed
 
-apt-get "${apt_options[@]}" install -y --no-install-recommends "$upgrade"
-expected_artifact=$upgrade
-expected_asar=$new_asar
-check_installed
-echo 'Debian version upgrade replaced the ASAR and preserved launcher and user data'
+for package in "${upgrades[@]}"; do
+  next_asar=$(asar_digest "$package")
+  [[ $next_asar != "$expected_asar" ]]
+  apt-get "${apt_options[@]}" install -y --no-install-recommends "$package"
+  expected_artifact=$package
+  expected_asar=$next_asar
+  check_installed
+  echo "Debian upgrade to $(dpkg-query -W -f='${Version}' openkraken) preserved launcher and user data"
+done
 
 # Uninstall must remove system integration and leave user data alone.
 apt-get remove -y openkraken
