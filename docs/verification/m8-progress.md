@@ -2,6 +2,14 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Graph paging, search and repository switching
+
+Loading a page used to clear completed repository-wide search results or cancel a pending search. The two store regressions reproduced both failures. A separate pair reproduced the loss of an in-flight page when a repository picker was cancelled or opening the next repository failed. The Electron regression held a real page between its Git read and graph layout, opened the picker, released the append and cancelled the picker. It then loaded the final page from the same native cursor and selected the last commit with End. [Graph refresh behavior](../decisions/0005-graph-views-and-refresh.md#refresh)
+
+On Linux x64, 911 native/unit tests passed, with 14 skipped. All 58 selected Electron tests passed, including six graph goldens and the related repository, watcher, command and activity flows. The production build and lint passed. The package from clean commit `2bf39b6` passed fuse verification and smoke checks for renderer isolation, helpers, repository links, the native folder picker and Bash terminal input.
+
+The final build opened each fixture in a fresh profile with populated OS caches. The single-ref full Linux history painted in 331.8 ms. The two-million-commit checkout painted in 303.6 ms, and its ten warm status reads took 202.3–223.1 ms. The full Linux history with 50,000 distinct targets painted in 753.3 ms and the shared target in 705.0 ms. Both missed 500 ms. All twelve 5,000-commit appends took 128.3–261.7 ms and graph scrolling measured 16.7–16.8 ms p95. [Paired native root-read measurements](m8-reference-performance.md#reading-tentative-roots-with-rev-parse) · [Renderer scheduling experiment](m8-reference-performance.md#preparing-the-display-snapshot-during-worker-layout)
+
 ## Linux desktop regression and scale checks after the first-run changes
 
 With Git LFS, Gitea, Bash, fish and zsh available, the Linux x64 desktop suite passed 213 tests. Two opt-in performance tests were skipped in that run and exercised separately below. The native/unit suite passed 903 tests with 14 skips. A subsequent keyboard-focus fix passed 38 desktop regressions covering the welcome screen, pickers, graph, commands, clone and activity. The Linux x64 package from clean commit `6d0d40b` passed its packaged sandbox, native terminal, repository-link and helper smoke checks. [M7 changes](m7-progress.md#first-run-guide-localized-welcome-screen-and-operation-notifications)
