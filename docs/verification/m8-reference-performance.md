@@ -2,6 +2,21 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Time to receive and decode the snapshot
+
+The Electron benchmark now times receipt of the snapshot string, JSON parsing and expansion of compact references separately. Six fresh-profile openings used the same 1,505,199-commit Linux history on Linux x64, Git 2.53.0 and Xvfb. The operating system caches were left populated. Each opening appended three 5,000-commit pages.
+
+|   Refs | First paint (ms) | Snapshot ready in Git utility (duration, ms) | Response received since open (ms) | JSON parse (ms) | Ref expansion (ms) |
+| -----: | ---------------: | -------------------------------------------: | --------------------------------: | --------------: | -----------------: |
+|      1 |            320.4 |                                         89.3 |                             211.2 |            12.8 |                0.1 |
+|      1 |            375.5 |                                         85.9 |                             247.7 |            17.3 |                0.2 |
+|      1 |            340.0 |                                         92.0 |                             226.2 |            12.3 |                0.0 |
+| 50,000 |            868.0 |                                        400.1 |                             651.3 |            16.6 |               14.0 |
+| 50,000 |            896.6 |                                        429.3 |                             680.9 |            16.9 |               14.7 |
+| 50,000 |            907.4 |                                        414.0 |                             663.5 |            19.1 |               16.7 |
+
+With 50,000 distinct ref targets, the renderer received the serialized response 151.3–180.9 ms beyond the 500 ms first-paint deadline. Parsing and expanding it took a further 30.6–35.8 ms. The interval before receipt includes repository opening, Git snapshot preparation, watcher setup, validation and transfer. These measurements do not isolate those costs. All 18 appends passed 300 ms (178.8–276.4 ms) and graph scrolling p95 was 16.7–16.8 ms. The one-ref fixture passed all three first paints, and the large-ref fixture missed all three.
+
 ## Reading ancestry from Git's traversal header
 
 The Git utility reads full object and parent IDs from the header emitted by the existing date-ordered `rev-list --parents` traversal. Search and stash queries use the same twelve-field parser with explicit IDs. Linux-history replay compared all fields of 17,000 ordered commits, including every body and parent, against the previous production parser. The streams occupied 22,615,101 and 21,207,090 bytes. Native octopus, shallow and replacement fixtures also compared every returned commit against the earlier Git format. [Protocol decision](../decisions/0002-git-protocol.md#decoding-the-graph-traversal-header)

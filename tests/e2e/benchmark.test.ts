@@ -93,6 +93,9 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       return {
         serviceMs: response.startTime - mark('repository-open-start').startTime,
         snapshotMs: response.detail.snapshotMs as number,
+        responseMs: response.detail.receivedAt - mark('repository-open-start').startTime,
+        jsonParseMs: response.detail.parseMs as number,
+        refExpansionMs: response.detail.expandMs as number,
         workerMs: mark('repository-layout-response').startTime - response.startTime,
         publishMs:
           mark('repository-state-published').startTime -

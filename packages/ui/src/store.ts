@@ -207,14 +207,20 @@ export const useRepository = create<State>()(
           client?.failed
         )
           candidate = new GraphClient();
-        const result = expandGitServiceResult(
-          JSON.parse(await window.openkraken.request(request, 'snapshot-json')),
-          { freezeCompactRefs: true },
-        );
+        const serialized = await window.openkraken.request(request, 'snapshot-json');
+        const receivedAt = performance.now();
+        const decoded = JSON.parse(serialized);
+        const parsedAt = performance.now();
+        const result = expandGitServiceResult(decoded, { freezeCompactRefs: true });
         if (get().busy !== request.id) return;
         if (result.kind === 'snapshot') {
           performance.mark('repository-snapshot-response', {
-            detail: { snapshotMs: result.snapshot.elapsedMs },
+            detail: {
+              snapshotMs: result.snapshot.elapsedMs,
+              receivedAt,
+              parseMs: parsedAt - receivedAt,
+              expandMs: performance.now() - parsedAt,
+            },
           });
           const rows = projectCommits(result.snapshot.commits, result.snapshot, true);
           const previous = get(),

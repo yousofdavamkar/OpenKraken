@@ -2,6 +2,8 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+With 50,000 distinct targets the renderer received its snapshot at 651.3–680.9 ms, already past the 500 ms first-paint deadline. Parsing and expanding it added 30.6–35.8 ms. All three one-ref first paints and all 18 page appends met budget. [Per-opening measurements](m8-reference-performance.md#time-to-receive-and-decode-the-snapshot)
+
 ## Opt-out across restart
 
 Linux desktop tests confirmed that turning off crash reporting survives an abrupt exit even when the session marker has changed. A failed first opt-in also stays off after restart. The tests delivered one redacted JavaScript report to a loopback HTTPS receiver while consent was on and observed no further delivery after revocation. Shutdown also finishes accepted opt-outs for both crash reporting and automatic update checks. Four reporting controller regressions and one updater regression reproduced the failures on the previous code. [Consent and recovery decision](../decisions/0078-interrupted-session-and-javascript-reports.md#saving-consent-during-marker-failures-and-shutdown)
