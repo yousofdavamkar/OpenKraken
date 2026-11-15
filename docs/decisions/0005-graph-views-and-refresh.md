@@ -6,7 +6,7 @@ Status: accepted. Complements 0004.
 
 Hide removes a ref from the Git start points; it does not exclude its ancestors if another visible ref reaches them. Solo selects exactly one ref, taking precedence over hidden preferences. Hiding the checked-out branch also removes its implicit HEAD start point; detached HEAD remains an independent root unless solo is active. Stash visibility controls the overlay and its base starts. Missing solo refs produce an empty view until cleared, rather than silently showing all history. Working-tree status remains available independently.
 
-All-history search uses the cursor's immutable start points. Hash lookup checks reachability from those points as well. Pins resolve only visible commit refs (including peeled tags), and reserve column zero for their first-parent ancestry. A pending pin reserves space without drawing an edge above the tip. Pinning a different visible ref starts a new layout.
+All-history search uses the cursor's immutable start points. Appending a page or updating the working-tree row reruns the loaded-row search while preserving repository-wide results and pending requests for the same query and cursor. Hash lookup checks reachability from those points as well. Pins resolve only visible commit refs (including peeled tags), and reserve column zero for their first-parent ancestry. A pending pin reserves space without drawing an edge above the tip. Pinning a different visible ref starts a new layout.
 
 ## Refresh
 

@@ -2,6 +2,17 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Preparing the display snapshot during worker layout
+
+A renderer experiment sent the projected commits to the graph worker before expanding the compact refs and freezing the initial snapshot. It published the refs, graph and selection together. Three pairs of fresh Electron profiles per fixture alternated the baseline and experimental renderer with the same Git utility. The OS caches stayed populated.
+
+| Linux history with 50,000 refs | Median first paint, baseline | Median first paint, experiment | Median state publication, baseline | Median state publication, experiment |
+| ------------------------------ | ---------------------------: | -----------------------------: | ---------------------------------: | -----------------------------------: |
+| Distinct targets               |                     817.3 ms |                       867.7 ms |                            34.5 ms |                              18.4 ms |
+| One shared target              |                     749.6 ms |                       739.2 ms |                            32.6 ms |                              19.3 ms |
+
+Moving the freeze earlier shortened the measured publication step in every pair. Distinct-target first paint regressed in two of three pairs. All twelve openings exceeded 500 ms. One baseline page took 305.1 ms and the other 35 appends met 300 ms. The production renderer retains its previous scheduling. [All opening, paging and scroll measurements](m8-renderer-preparation-samples.csv)
+
 ## Overlapping reference enumeration and history
 
 Three paired Linux x64 openings per fixture switched only the Git utility bundle between baseline `8d2c620` and the overlapping walk. Each opening used a fresh app profile and populated OS caches, with a single Electron worker. The order was baseline first in pairs one and three and candidate first in pair two. Both fixtures borrow the same full Linux history. Each has 50,000 refs. [All twelve openings and 36 page appends](m8-history-prefetch-samples.csv)
