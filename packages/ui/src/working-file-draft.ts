@@ -20,10 +20,11 @@ export class WorkingFileDraftSession {
   private pending?: () => Promise<void>;
   private writes: Promise<void> = Promise.resolve();
   private closed = false;
-  open(repoId: string, pathBytes: string) {
+  open(repoId: string, pathBytes: string, preview?: true) {
     return request({
       id: crypto.randomUUID(),
       method: 'workingDraftOpen',
+      preview,
       session: this.session,
       repoId,
       pathBytes,
@@ -46,7 +47,8 @@ export class WorkingFileDraftSession {
       }
     };
     this.pending = save;
-    this.timer = setTimeout(() => this.flush(), 250);
+    if (draft === null) this.flush();
+    else this.timer = setTimeout(() => this.flush(), 250);
   }
   private flush() {
     if (this.pending) this.writes = this.writes.then(this.pending);

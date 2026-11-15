@@ -15,6 +15,11 @@ import { DiscardDialog } from './discard-dialog.js';
 import { WorkingDiffDialog } from './working-diff.js';
 import { useRepository, waitForBackground } from './store.js';
 import { useCommitDraft } from './commit-draft.js';
+const WorkingFileDraftList = lazy(() =>
+  import('./working-file-draft-list.js').then((module) => ({
+    default: module.WorkingFileDraftList,
+  })),
+);
 const WorkingFileEditor = lazy(() =>
   import('./working-file-editor.js').then((module) => ({ default: module.WorkingFileEditor })),
 );
@@ -25,6 +30,7 @@ export function WorkingTreePanel() {
   const { snapshot, busy: active, syncing, workingState: state } = useRepository();
   const busy = syncing ? undefined : active;
   const [comparison, setComparison] = useState<WorkingComparisonOptions>();
+  const [draftCheckout, setDraftCheckout] = useState<string>();
   const [editorPath, setEditorPath] = useState<string>();
   const [discard, setDiscard] = useState<{ preview: DiscardPreview; paths: string[] }>();
   const [conflict, setConflict] = useState<ConflictPreview>();
@@ -197,6 +203,15 @@ export function WorkingTreePanel() {
           }}
         />
       )}
+      {draftCheckout === repoId && (
+        <Suspense fallback={<p role="status">Loading file drafts…</p>}>
+          <WorkingFileDraftList
+            key={repoId}
+            repoId={repoId}
+            onClose={() => setDraftCheckout(undefined)}
+          />
+        </Suspense>
+      )}
       {editorPath && (
         <Suspense fallback={<p role="status">Opening editor…</p>}>
           <WorkingFileEditor
@@ -264,6 +279,9 @@ export function WorkingTreePanel() {
       ) : (
         <>
           <div className="working-actions">
+            <button disabled={!!busy} onClick={() => setDraftCheckout(repoId)}>
+              Saved file drafts
+            </button>
             <CommandButton
               command="worktree.undo"
               disabled={!!busy || !state?.undo}

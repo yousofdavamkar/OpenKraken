@@ -1296,7 +1296,15 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('workingDraftList'),
+      repoId: z.string().min(1).max(128),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('workingDraftOpen'),
+      preview: z.literal(true).optional(),
       repoId: z.string().min(1).max(128),
       pathBytes: pathBytesSchema,
       session: requestId,
@@ -1909,6 +1917,13 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('diagnostics'), state: diagnosticsStateSchema }).strict(),
   z.object({ kind: z.literal('updates'), state: updatesStateSchema }).strict(),
   z.object({ kind: z.literal('repositoryLink'), link: repositoryLinkSchema.nullable() }).strict(),
+  z
+    .object({
+      kind: z.literal('workingDraftList'),
+      entries: z.array(z.object({ pathBytes: pathBytesSchema, path: z.string() }).strict()),
+      unreadable: z.boolean(),
+    })
+    .strict(),
   z.object({ kind: z.literal('workingDraft'), draft: workingFileDraftSchema.nullable() }).strict(),
   z.object({ kind: z.literal('commitDraft'), state: commitDraftStateSchema }).strict(),
   z.object({ kind: z.literal('activity'), state: activityStateSchema }).strict(),

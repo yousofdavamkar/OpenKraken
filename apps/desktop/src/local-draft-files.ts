@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 const digest = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -16,11 +16,17 @@ export class LocalDraftFiles<T> {
     this.directory = join(profile, folder);
     this.schema = z.object({ version: z.literal(1), draft }).strict();
   }
-  private async file(identity: readonly string[]) {
+  static name(identity: readonly string[]) {
+    return `${digest(JSON.stringify(identity))}.json`;
+  }
+  private async prepareDirectory() {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     if (!(await lstat(this.directory)).isDirectory())
       throw new Error('Unsupported draft directory');
-    return join(this.directory, `${digest(JSON.stringify(identity))}.json`);
+  }
+  private async file(identity: readonly string[]) {
+    await this.prepareDirectory();
+    return join(this.directory, LocalDraftFiles.name(identity));
   }
   private async source(file: string): Promise<string | null> {
     try {
@@ -42,6 +48,19 @@ export class LocalDraftFiles<T> {
   async read(identity: readonly string[]) {
     await this.idle();
     return this.state(await this.source(await this.file(identity)));
+  }
+  async *entries() {
+    await this.idle();
+    await this.prepareDirectory();
+    for (const name of await readdir(this.directory)) {
+      if (!/^[a-f0-9]{64}\.json$/.test(name)) continue;
+      try {
+        const { draft } = this.state(await this.source(join(this.directory, name)));
+        if (draft !== null) yield { name, draft };
+      } catch {
+        yield { name, draft: null };
+      }
+    }
   }
   save(identity: readonly string[], revision: string | null, draft: T | null) {
     const next = this.writes

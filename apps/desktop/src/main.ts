@@ -598,13 +598,14 @@ else {
         return await terminals.request(request, terminalRepository);
       try {
         if (
+          request.method === 'workingDraftList' ||
           request.method === 'workingDraftOpen' ||
           request.method === 'workingDraftWrite' ||
           request.method === 'workingDraftClose'
         ) {
           const drafts = (workingFileDrafts ??= new WorkingFileDrafts(app.getPath('userData')));
           try {
-            if (request.method === 'workingDraftOpen') {
+            if (request.method === 'workingDraftList' || request.method === 'workingDraftOpen') {
               const repo = draftRepositories.get(request.repoId);
               if (!repo)
                 return {
@@ -612,9 +613,11 @@ else {
                   code: 'UNKNOWN_REPOSITORY',
                   message: 'Open the repository before accessing its draft.',
                 };
+              if (request.method === 'workingDraftList')
+                return { kind: 'workingDraftList', ...(await drafts.list(repo)) };
               return {
                 kind: 'workingDraft',
-                draft: await drafts.open(repo, request.pathBytes, request.session),
+                draft: await drafts.open(repo, request.pathBytes, request.session, request.preview),
               };
             }
             if (request.method === 'workingDraftWrite')

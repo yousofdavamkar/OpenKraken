@@ -64,7 +64,10 @@ function CodeEditor({
   }, [initial, path, onChange]);
   useEffect(() => {
     view.current?.dispatch({
-      effects: editable.current.reconfigure(EditorView.editable.of(!disabled)),
+      effects: editable.current.reconfigure([
+        EditorView.editable.of(!disabled),
+        EditorState.readOnly.of(disabled),
+      ]),
     });
   }, [disabled]);
   return <div ref={host} className="working-code-editor" />;
@@ -201,6 +204,7 @@ function Draft({
           className="primary"
           disabled={locked || stale || !dirty || !newline || closing}
           onClick={() => {
+            setFinishing(true);
             const output =
               newline === 'crlf'
                 ? text.replace(/\n/g, '\r\n')
@@ -210,6 +214,7 @@ function Draft({
             void onSave({ pathBytes: file.pathBytes, token: file.token, text: output }).then(
               (saved) => {
                 if (saved) void finish(true);
+                else setFinishing(false);
               },
             );
           }}

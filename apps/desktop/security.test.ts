@@ -1637,7 +1637,13 @@ test('working-file recovery messages stay in main and validate the file identity
   const draft = { token: 'f'.repeat(64), text: 'draft', newline: 'crlf' };
   const write = { id, method: 'workingDraftWrite', session: id, draft };
   const close = { id, method: 'workingDraftClose', session: id, discard: true };
-  for (const request of [open, write, { ...write, draft: null }, close]) {
+  for (const request of [
+    { id, method: 'workingDraftList', repoId: 'opened' },
+    open,
+    write,
+    { ...write, draft: null },
+    close,
+  ]) {
     expect(requestSchema.safeParse(request).success).toBe(true);
     expect(serviceRequestSchema.safeParse(request).success).toBe(false);
     expect(requestSchema.safeParse({ ...request, path: '/tmp/file' }).success).toBe(false);

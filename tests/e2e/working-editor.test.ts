@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test } from '@playwright/test';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createFixture, fixtureGit } from '../../packages/test-fixtures/src/index.js';
@@ -109,12 +109,14 @@ test('closing the application reviews an unsaved working-file draft', async () =
     expect(readFileSync(join(path, 'draft.txt'), 'utf8')).toBe('unsaved draft\n');
     await page.getByRole('button', { name: 'Edit draft.txt', exact: true }).click();
     await editor.getByRole('textbox', { name: 'Working file text' }).fill('discard this draft\n');
+    await expect(editor.getByRole('status')).toHaveText('Draft saved locally');
     const closed = app.waitForEvent('close');
     await app.evaluate(({ app, dialog }) => {
       dialog.showMessageBoxSync = () => 1;
       setTimeout(() => app.quit(), 20);
     });
     await closed;
+    expect(readdirSync(join(root, 'profile', 'working-file-drafts'))).toEqual([]);
     expect(readFileSync(join(path, 'draft.txt'), 'utf8')).toBe('unsaved draft\n');
   } finally {
     await app.close().catch(() => {});
