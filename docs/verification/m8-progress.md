@@ -2,6 +2,16 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Keyboard navigation in large histories and repository-open recovery
+
+The graph reveals the selected commit when the user scrolls away and presses End again. The Electron regression reproduced the missing active row at 12,000 commits and now verifies that it returns to the viewport. On full Linux history with 32,000 commits loaded, median synchronous End handling fell from 20.2–22.6 to 2.9–3.0 ms in three paired runs. The reference sidebar also releases an offscreen branch after focus returns to the list. A focused rename dialog still survives scrolling. [Keyboard and sidebar measurements](m8-reference-performance.md#graph-selection-and-reference-sidebar-measurements)
+
+An unusable Git installation no longer forces the user to restart OpenKraken. The desktop regression opened the native picker, saw the Git version error, repaired the test process's search path by removing its broken executable and successfully opened the same eight-commit checkout. The previous build still showed the Git error on its second attempt. [Discovery behavior](../decisions/0002-git-protocol.md)
+
+All 208 tests in the full Linux x64 Electron run passed, including local Gitea HTTPS/SSH operations, Git LFS, Bash, fish and zsh. The single-ref Linux history painted in 365.3 ms. Ten watcher-warm status responses on the two-million-commit, 100,000-file fixture took 197.4–224.6 ms. After the Git retry change, all nine repository-opening, watcher-startup and service-shutdown desktop tests passed. All 43 minimum-version desktop checks passed on Git 2.38.0, including the six graph goldens. The native/unit suite passed 870 tests with 14 skipped. TypeScript, the production build and lint passed.
+
+The 50,000-ref first-paint gate remains open. A simpler sidebar row model and a compact validation change both produced mixed or slower end-to-end results and were dropped. Native macOS, Windows and Linux arm64 acceptance and the signed production release and public beta remain outstanding. [Reference validation results](m8-reference-performance.md#compact-reference-validation-experiment)
+
 ## Duplicate AppImages and interrupted rollback
 
 The packaged Linux x64 app rejected a signed release that advertised a newer version but contained the exact installed bytes. It kept running without creating a transaction directory, retained sequence 2 and installed the corrected sequence 3 from the same HTTPS feed. The stable and beta packages both passed. Native tests also recovered legacy identical-image transactions before and after rename and preserved changed recovery files. [File transaction behavior](../decisions/0083-appimage-update-file-transactions.md#a-newer-release-containing-the-installed-image)

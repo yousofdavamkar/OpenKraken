@@ -30,6 +30,8 @@ When an object ID resolves to a visible commit, put that commit first and fill t
 
 Down on the last loaded row selects the first appended row when more history exists. A jump can wait for the page already loading under the pointer or request another page if its target lies farther back. A newer navigation request, a changed selection, or a different snapshot cursor supersedes the pending jump. A failed or cancelled page that adds no rows ends the jump.
 
+When keyboard navigation targets the already focused commit, bring its row back into view even if the user has scrolled away. Ordinary scrolling can leave the selection offscreen until the next navigation command. The grid publishes its active descendant only while that row is mounted.
+
 ## Starting the graph worker on repository open
 
 Start the candidate worker while the repository request is pending. A same-repository refresh uses the existing worker and its lane checkpoints. During a switch, keep the displayed worker until the candidate has returned its first layout. Close the candidate if opening, layout or cancellation ends the request before publication. A worker load failure is retained so the first layout request can report the error immediately.

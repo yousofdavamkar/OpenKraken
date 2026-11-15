@@ -1,0 +1,13 @@
+fixture,pair,renderer,first_paint_ms,after_publish_ms,page_1_ms,page_2_ms,page_3_ms,graph_p95_ms,sidebar_p95_ms,mounted_refs
+distinct,1,production,847.2,102.9,257.8,202.1,213.7,16.8,16.8,6
+distinct,1,direct-rows,857.4,110.8,238.8,248.3,209.3,16.7,16.8,6
+shared,1,production,743.7,128,240.1,199.9,188,16.8,16.7,6
+shared,1,direct-rows,802.7,133.9,265.9,212.8,199.2,16.7,16.7,6
+distinct,2,direct-rows,915.6,127.9,197.3,209.9,179,16.8,16.7,6
+distinct,2,production,904,123.7,203.2,217.3,196.9,16.7,16.7,6
+shared,2,direct-rows,817.2,144.6,364.3,223.8,188.9,16.8,16.7,6
+shared,2,production,763.6,129.3,261.6,188.6,194.8,16.7,16.7,6
+distinct,3,production,910.9,129.1,193.5,220.9,204.7,16.8,16.8,6
+distinct,3,direct-rows,917.4,117.1,207.8,201.7,179.2,16.7,16.7,6
+shared,3,production,787,130.6,306.6,215.3,196.5,16.8,16.8,6
+shared,3,direct-rows,750.6,127.6,268.2,193.9,210.6,16.7,16.8,6

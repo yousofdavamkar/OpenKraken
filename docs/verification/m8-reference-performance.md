@@ -2,6 +2,27 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Graph selection and reference sidebar measurements
+
+Three alternating pairs opened full Linux history in fresh Electron profiles on Linux x64. Each loaded 32,000 commits and dispatched End and Home eleven times each to the focused grid. The viewport was held still to prevent automatic paging. The following medians cover the ten cycles after the first. They measure synchronous dispatch through the renderer's keyboard handler. A separate 12,000-row desktop regression uses the real scroll behavior and checks the visible selection after End.
+
+| Key  | Previous handler, medians by pair | Current handler, medians by pair |
+| ---- | --------------------------------: | -------------------------------: |
+| End  |             20.2 / 20.6 / 22.6 ms |               3.0 / 3.0 / 2.9 ms |
+| Home |                2.9 / 3.1 / 3.0 ms |               1.7 / 1.7 / 1.6 ms |
+
+Selecting a commit now reads the loaded rows from the current store snapshot and writes the resulting selection in an Immer update. The previous implementation created draft proxies as it searched the rows. Range selection across an appended page and cancellation of superseded keyboard jumps have store-level coverage.
+
+A separate startup experiment removed per-reference row wrappers from the virtual sidebar. Three paired openings per fixture used the same Git utility, fresh profiles and populated OS caches. With 50,000 distinct targets, median first paint went from 904.0 to 915.6 ms. With 50,000 refs at one target it went from 763.6 to 802.7 ms. The production sidebar retains the existing row model. All twelve openings missed 500 ms. Two of the 36 appends missed 300 ms, at 306.6 and 364.3 ms. Each opening mounted six sidebar rows and both lists scrolled at 16.7–16.8 ms p95. [Paired startup measurements](m8-sidebar-row-samples.csv)
+
+A diagnostic build timed the native and IPC work separately on the same fixtures. In three distinct-target openings, reference enumeration and its concurrent prerequisites took 200–249 ms. Preparing and reading the first native history page then took another 193–231 ms. Main took 56–85 ms to validate the utility reply. On the shared target those three intervals were 170–190, 92–97 and 46–53 ms. The diagnostic marks were confined to a temporary copy of the app. The production measurements above used the normal build.
+
+## Compact reference validation experiment
+
+A validator that checked the object ID and namespace directly in the wire string took 13.2 ms median to check 50,000 refs in a Node replay, compared with 18.9 ms for the existing validator. The replay used fresh JSON-decoded strings and collected garbage before each timed pass. Two initial rounds were discarded.
+
+Three paired Electron openings per fixture switched only the main bundle. Median first paint went from 785.9 to 750.4 ms on shared targets and from 871.1 to 891.7 ms on distinct targets. All twelve first paints exceeded 500 ms. One of the 36 page appends took 314.1 ms. In a separate instrumented set of three pairs per fixture, median main-process validation went from 58.5 to 57.6 ms on distinct targets and from 53.3 to 54.0 ms on the shared target. The original validator remains in production. Contract tests cover malformed SHA-1 and SHA-256 lengths, invalid hexadecimal characters and namespace prefix lookalikes. [Production and diagnostic samples](m8-compact-validation-samples.csv)
+
 ## Reading six fields for unpeeled references
 
 The initial ref query omits two empty peeling fields. The parser also uses the known namespace length to extract each short name. On the full Linux history fixture with 50,000 distinct targets, native output shrank from 4,109,992 to 4,009,992 bytes. Replay in 64 KiB chunks returned the same 50,000 records in order. Across 32 alternating pairs with garbage collection before each run, median parsing took 38.5 ms before and 34.2 ms after. [Git format and coverage](../decisions/0119-reference-parser-and-scale-gates.md)
