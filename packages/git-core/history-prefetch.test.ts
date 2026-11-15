@@ -37,12 +37,23 @@ async function clone(name: string) {
   return path;
 }
 
-test.each(['unchanged', 'moved', 'reordered', 'replace', 'annotated', 'failed walk'] as const)(
+test.each([
+  'unchanged',
+  'loose',
+  'detached',
+  'moved',
+  'reordered',
+  'replace',
+  'annotated',
+  'failed walk',
+] as const)(
   'the first and appended pages match a normal native walk with %s roots',
   async (kind) => {
     const path = await clone(kind);
     const tree = fixtureGit(path, ['rev-parse', 'HEAD^{tree}']);
     const orphan = fixtureGit(path, ['commit-tree', tree, '-m', 'Independent root']);
+    if (kind === 'loose') fixtureGit(path, ['update-ref', 'refs/heads/loose', orphan]);
+    if (kind === 'detached') fixtureGit(path, ['update-ref', '--no-deref', 'HEAD', orphan]);
     if (kind === 'replace') fixtureGit(path, ['replace', 'HEAD~2050', orphan]);
     if (kind === 'annotated') fixtureGit(path, ['tag', '-a', 'annotation', '-m', 'Annotation']);
     if (kind === 'reordered') {
@@ -76,7 +87,9 @@ test.each(['unchanged', 'moved', 'reordered', 'replace', 'annotated', 'failed wa
       }
       full.resolve();
       const first = await snapshot;
-      expect(ordinary).toHaveBeenCalledTimes(kind === 'unchanged' ? 0 : 1);
+      expect(ordinary).toHaveBeenCalledTimes(
+        ['unchanged', 'loose', 'detached'].includes(kind) ? 0 : 1,
+      );
       const tail = await service.page(repo.id, first.cursor, 2000, 5000);
       expect(first.commits).toHaveLength(2000);
       expect(tail.offset).toBe(2000);
@@ -104,7 +117,7 @@ test('a slow optional ref read yields to the normal snapshot, and a warm prefix 
   const probe = gate();
   const completed = vi.fn();
   const run = vi.spyOn(runner, 'runGit').mockImplementation(async (git, args, options) => {
-    if (args.includes('--format=%(objectname)')) {
+    if (args[0] === 'rev-parse' && args[1] === '--all') {
       probe.resolve();
       const signal = options!.signal!;
       if (!signal.aborted)
@@ -127,7 +140,7 @@ test('a slow optional ref read yields to the normal snapshot, and a warm prefix 
     const reopened = await warm.open(path);
     expect((await warm.snapshot(reopened.id, undefined, false)).commits).toEqual(first.commits);
     expect(
-      run.mock.calls.filter(([, args]) => args.includes('--format=%(objectname)')),
+      run.mock.calls.filter(([, args]) => args[0] === 'rev-parse' && args[1] === '--all'),
     ).toHaveLength(1);
   } finally {
     run.mockRestore();
@@ -179,7 +192,9 @@ test('a solo view opens directly on its selected commit', async () => {
       fixtureGit(path, ['rev-list', 'refs/heads/short']).split('\n'),
     );
     expect(first.hasMore).toBe(false);
-    expect(run.mock.calls.some(([, args]) => args.includes('--format=%(objectname)'))).toBe(false);
+    expect(run.mock.calls.some(([, args]) => args[0] === 'rev-parse' && args[1] === '--all')).toBe(
+      false,
+    );
   } finally {
     run.mockRestore();
     await service.dispose();

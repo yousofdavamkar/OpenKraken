@@ -455,7 +455,7 @@ export class RepositoryService {
       (this.dataDir && (await HistoryCache.hasPrefix(this.dataDir, repository.id)))
     )
       return;
-    const { stdout } = await this.run(['for-each-ref', '--format=%(objectname)'], {
+    const { stdout } = await this.run(['rev-parse', '--all'], {
       cwd: repository.path,
       signal,
       maxBytes: 8 * 1024 * 1024,
