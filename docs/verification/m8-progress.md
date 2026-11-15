@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Saving verified installers
+
+The Updates dialog offers **Save installer…** for verified manual packages. The Linux Electron regression used a signed local HTTPS feed, intercepted the native picker, cancelled once and then saved the exact expected bytes. Controller tests cover DEB, RPM, AppImage, DMG, ZIP and MSI, plus changed cache contents, invalidated trust, stale picker responses, expiry, cancellation during publication and a destination modified during the copy. Windows and macOS formats used simulated platform selection on Linux. [Installer export decision](../decisions/0121-save-verified-installers.md)
+
+Separate tests streamed the existing unsigned Linux x64 DEB (115,269,544 bytes) and RPM (98,957,929 bytes) through the updater using temporary signed release metadata. Both exported files matched their installer manifest digests. Debian’s package reader reported `openkraken 0.1.0 amd64` and Fedora 43 reported `openkraken-0.1.0-1.x86_64`. The Linux native/unit suite passed 854 tests with 14 skipped. All 15 graph and update Electron tests passed. Logs are under `/tmp/ok-m8-export`.
+
 ## AppImage shutdown, slow storage and interrupted confirmation
 
 The packaged Linux x64 regression delayed the final rename by 22 seconds and requested quit again while it was pending. The previous build reopened 0.1.0 after accepting 0.2.0. The fixed FUSE build started 0.2.0 and confirmed its digest and sequence. A beta extract-and-run build also completed the delayed upgrade. With the rename stalled indefinitely, the disposable build accelerated the ten-minute finalization deadline to four seconds. Its verified predecessor reopened and cleared staging. Separate tests killed the parent immediately before and after the rename. Both reopened the expected version.
