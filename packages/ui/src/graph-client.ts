@@ -30,23 +30,21 @@ export class GraphClient {
           event.data.kind === 'packed-layout' ? unpackLayout(event.data) : event.data,
         );
     };
-    this.worker.onerror = (event) => {
-      this.failure = new Error(event.message || 'Graph worker failed');
-      for (const p of this.pending.values()) {
-        clearTimeout(p.timer);
-        p.reject(this.failure);
-      }
-      this.pending.clear();
-    };
+    this.worker.onerror = (event) => this.stop(new Error(event.message || 'Graph worker failed'));
   }
   get failed() {
     return this.failure !== undefined;
   }
   close() {
+    this.stop(new Error('Graph generation replaced'));
+  }
+  private stop(error: Error) {
+    if (this.failure) return;
+    this.failure = error;
     this.worker.terminate();
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
-      pending.reject(new Error('Graph generation replaced'));
+      pending.reject(error);
     }
     this.pending.clear();
   }
@@ -55,8 +53,11 @@ export class GraphClient {
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
+        const error = new Error('Graph worker timed out');
+        // A lost layout reply can leave the worker ahead of the displayed generation.
+        if (input.method !== 'search') return this.stop(error);
         this.pending.delete(id);
-        reject(new Error('Graph worker timed out'));
+        reject(error);
       }, 30000);
       this.pending.set(id, { resolve, reject, timer });
       this.worker.postMessage({ ...input, id });

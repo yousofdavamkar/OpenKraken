@@ -305,6 +305,47 @@ test('Refresh recovers a terminated graph worker and resumes search and paging',
     await close();
   }
 });
+test('Refresh recovers after a completed worker refresh loses its reply', async () => {
+  const { page, close } = await launch('linear', 2200);
+  try {
+    const count = page.getByTestId('commit-count');
+    const refresh = page.getByRole('button', { name: 'Refresh', exact: true });
+    const query = page.getByRole('textbox', { name: 'Search commits' });
+    await page.getByLabel('Refresh on focus', { exact: true }).uncheck();
+    await expect(page.getByText('Watching for changes', { exact: true })).toBeVisible();
+    await query.fill('Commit 2199');
+    await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
+    await page.clock.install();
+    await page.evaluate(() => {
+      const send = Worker.prototype.postMessage;
+      Worker.prototype.postMessage = new Proxy(send, {
+        apply(target, worker: Worker, args) {
+          if (args[0].method === 'refresh') {
+            Worker.prototype.postMessage = send;
+            const receive = worker.onmessage;
+            worker.onmessage = (event) => {
+              if (event.data.id !== args[0].id) return receive?.call(worker, event);
+              worker.onmessage = receive;
+              document.documentElement.dataset.droppedGraphReply = 'true';
+            };
+          }
+          return Reflect.apply(target, worker, args);
+        },
+      });
+    });
+    await refresh.click();
+    await expect(page.locator('html')).toHaveAttribute('data-dropped-graph-reply', 'true');
+    await page.clock.fastForward(30001);
+    await expect(page.getByText('Graph worker timed out', { exact: false })).toBeVisible();
+    await refresh.click();
+    await expect(refresh).toBeEnabled();
+    await page.getByRole('button', { name: 'Load more commits' }).click();
+    await expect(count).toHaveText('2,200 commits');
+    await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
+  } finally {
+    await close();
+  }
+});
 test('one Down key moves past the last initially loaded commit', async () => {
   const { page, close } = await launch('linear', 2003);
   try {
