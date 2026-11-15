@@ -106,6 +106,39 @@ test('Canvas search dims without moving rows; keyboard, ancestry, multi-select a
     await close();
   }
 });
+test('choosing the same search result reveals its virtualized row again', async () => {
+  const { page, repository, close } = await launch('linear', 501);
+  try {
+    const oid = fixtureGit(repository, ['rev-parse', 'HEAD']);
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    const search = page.getByRole('textbox', { name: 'Search commits' });
+    await search.fill(oid);
+    await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
+    const selected = grid.getByRole('row', { selected: true });
+    await search.press('Enter');
+    await expect(selected).toHaveAttribute('data-oid', oid);
+    const scrollAway = async () => {
+      await grid.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      await expect(grid).not.toHaveAttribute('aria-activedescendant', /.+/);
+    };
+    await scrollAway();
+    await search.press('Enter');
+    await expect(selected).toBeInViewport();
+    await expect(grid).toHaveAttribute('aria-activedescendant', 'commit-row-0');
+    await page.getByRole('button', { name: 'Search all history' }).click();
+    const result = page.locator('.search-results').getByRole('button').first();
+    await expect(result).toContainText(oid.slice(0, 8));
+    await scrollAway();
+    await result.click();
+    await expect(selected).toBeInViewport();
+    await expect(grid).toHaveAttribute('aria-activedescendant', 'commit-row-0');
+  } finally {
+    await close();
+  }
+});
+
 test('searching a hexadecimal branch name opens the commit with the matching object ID', async () => {
   const { page, repository, close } = await launch('linear', 12, (path) => {
     const prefix = fixtureGit(path, ['rev-parse', 'HEAD~6']).slice(0, 10);

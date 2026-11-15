@@ -147,6 +147,12 @@ export function History() {
   useEffect(() => {
     if (focused >= 0) virtual.scrollToIndex(focused, { align: 'auto' });
   }, [focused, selection.focus, snapshot?.cursor]);
+  function selectSearchResult(index: number) {
+    if (index < 0) return;
+    // A repeated selection keeps the same focus ID, so the focus effect will not scroll.
+    if (index === focused) virtual.scrollToIndex(index, { align: 'auto' });
+    state.select(rows[index]!.oid);
+  }
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (!snapshot) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
@@ -217,8 +223,7 @@ export function History() {
               viewport.current?.focus();
             }
             if (event.key === 'Enter' && matches?.length) {
-              const first = rows.find((r) => matching?.has(r.oid));
-              if (first) state.select(first.oid);
+              selectSearchResult(rows.findIndex((row) => matching?.has(row.oid)));
               viewport.current?.focus();
             }
           }}
@@ -244,7 +249,7 @@ export function History() {
               key={commit.oid}
               onClick={() => {
                 state.setDetail(commit);
-                if (rows.some((r) => r.oid === commit.oid)) state.select(commit.oid);
+                selectSearchResult(rows.findIndex((row) => row.oid === commit.oid));
               }}
             >
               <code>{commit.oid.slice(0, 8)}</code> {commit.summary}
