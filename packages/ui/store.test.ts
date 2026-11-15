@@ -249,6 +249,44 @@ test('late page after refresh cannot append to the new generation', async () => 
   expect(useRepository.getState().snapshot?.cursor).toBe(fresh.cursor);
   expect(useRepository.getState().rows).toHaveLength(1);
 });
+test.each(['complete', 'pending'])(
+  'paging preserves a %s all-history search while updating loaded matches',
+  async (timing) => {
+    const snapshot = fixture();
+    await open(snapshot);
+    const match = { ...snapshot.commits[0]!, oid: 'b'.repeat(40), summary: 'Second' };
+    await useRepository.getState().search('Second');
+    const pending = deferred();
+    request.mockReturnValueOnce(pending.promise);
+    const searching = useRepository.getState().searchAll();
+    const result = {
+      kind: 'search' as const,
+      commits: [match],
+      cursor: snapshot.cursor,
+      truncated: true,
+    };
+    if (timing === 'complete') {
+      pending.resolve(result);
+      await searching;
+    }
+    request.mockResolvedValueOnce({
+      kind: 'page',
+      commits: [match],
+      cursor: snapshot.cursor,
+      offset: 1,
+      hasMore: false,
+    });
+    await useRepository.getState().loadMore();
+    pending.resolve(result);
+    await searching;
+    const state = useRepository.getState();
+    expect(state.matches).toEqual([match.oid]);
+    expect(state.searchResults).toEqual([match]);
+    expect(state.searchTruncated).toBe(true);
+    expect(window.openkraken.cancel).not.toHaveBeenCalled();
+  },
+);
+
 test('late all-history search is discarded after query changes', async () => {
   const snapshot = fixture();
   await open(snapshot);

@@ -141,7 +141,6 @@ export const useRepository = create<State>()(
           layout.passages,
         );
         freeze(passages, true);
-        querySequence++;
         set((s) => {
           s.snapshot = next;
           s.workingState = result.state;
@@ -158,7 +157,7 @@ export const useRepository = create<State>()(
           if (s.selection.anchor && !available.has(s.selection.anchor))
             s.selection.anchor = s.selection.focus;
         });
-        if (get().query) await get().search(get().query);
+        if (get().query) await updateLoadedMatches();
       } catch (error) {
         set((s) => {
           s.error = error instanceof Error ? error.message : String(error);
@@ -384,7 +383,7 @@ export const useRepository = create<State>()(
           s.passages = nextPassages;
           s.maxColumns = layout.maxColumns;
         });
-        if (get().query) await get().search(get().query);
+        if (get().query) await updateLoadedMatches();
         performance.mark('history-page-loaded');
         performance.measure('history-page', 'history-page-start', 'history-page-loaded');
       } catch (error) {
@@ -399,8 +398,7 @@ export const useRepository = create<State>()(
       }
     },
     search: async (query) => {
-      const sequence = ++querySequence,
-        cursor = get().snapshot?.cursor;
+      querySequence++;
       const previous = get().searching;
       set((s) => {
         s.query = query;
@@ -409,20 +407,7 @@ export const useRepository = create<State>()(
         s.searching = undefined;
       });
       if (previous) void window.openkraken.cancel(previous);
-      if (!cursor || !query.trim()) return;
-      try {
-        const result = await graph().request({ method: 'search', generation: cursor, query });
-        if (sequence !== querySequence || get().snapshot?.cursor !== cursor) return;
-        if (result.kind === 'matches')
-          set((s) => {
-            s.matches = result.oids;
-          });
-      } catch (error) {
-        if (sequence === querySequence)
-          set((s) => {
-            s.error = String(error);
-          });
-      }
+      await updateLoadedMatches();
     },
     searchAll: async () => {
       if (get().syncing) await waitForBackground();
@@ -510,6 +495,27 @@ export const useRepository = create<State>()(
     },
   })),
 );
+
+async function updateLoadedMatches() {
+  const { snapshot, query, rows } = useRepository.getState();
+  if (!snapshot || !query.trim()) return;
+  const sequence = querySequence;
+  const stillCurrent = () => {
+    const state = useRepository.getState();
+    return (
+      state.snapshot?.cursor === snapshot.cursor &&
+      state.rows === rows &&
+      sequence === querySequence
+    );
+  };
+  try {
+    const result = await graph().request({ method: 'search', generation: snapshot.cursor, query });
+    if (result.kind === 'matches' && stillCurrent())
+      useRepository.setState({ matches: result.oids });
+  } catch (error) {
+    if (stillCurrent()) useRepository.setState({ error: String(error) });
+  }
+}
 
 /** A user click can arrive before React paints the background busy state. Preserve that intent. */
 export async function waitForBackground() {

@@ -300,11 +300,15 @@ test('5000-commit pages append without changing previous lanes; unloaded search 
       'Commit 4200 — linear',
     );
     await page.getByRole('button', { name: 'Close details' }).click();
-    await page.getByRole('textbox', { name: 'Search commits' }).fill('');
     await grid.evaluate((element) => {
       element.scrollTop = element.scrollHeight;
     });
     await expect(page.getByTestId('commit-count')).toHaveText('12,000 commits');
+    await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
+    await expect(
+      page.locator('.search-results').getByRole('button', { name: /Commit 4200 — linear/ }),
+    ).toBeVisible();
+    await page.getByRole('textbox', { name: 'Search commits' }).fill('');
     await grid.focus();
     await grid.press('End');
     await expect(grid.getByRole('row', { selected: true })).toContainText('Commit 1 — linear');
