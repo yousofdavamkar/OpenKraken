@@ -59,6 +59,7 @@ import type {
   Repository,
 } from '@openkraken/ipc-contract';
 import { AvatarCache } from './avatars.js';
+import { SnapshotTransfer } from './snapshot-transfer.js';
 import { fetchAvatar } from './avatar-provider.js';
 import { isTrustedDocument, windowPreferences } from './security.js';
 import { ProviderService } from './providers.js';
@@ -140,8 +141,19 @@ let providers: ProviderService | undefined;
 const providerRequests = new Map<string, AbortController>();
 const pending = new Map<
   string,
-  { resolve: (result: ServiceResult) => void; timer: ReturnType<typeof setTimeout> }
+  {
+    resolve: (result: ServiceResult) => void;
+    timer: ReturnType<typeof setTimeout>;
+    transfer?: SnapshotTransfer;
+  }
 >();
+function finishServiceRequest(id: string, result: ServiceResult) {
+  const request = pending.get(id);
+  if (!request) return;
+  clearTimeout(request.timer);
+  pending.delete(id);
+  request.resolve(result);
+}
 const inFlight = new Set<string>();
 const cancelled = new Set<string>();
 function getProviders() {
@@ -167,6 +179,12 @@ function startService() {
   });
   service = child;
   child.on('message', (message) => {
+    if (service !== child) return;
+    if (message?.snapshotPart !== undefined) {
+      const result = pending.get(message.id)?.transfer?.receive(message);
+      if (result) finishServiceRequest(message.id, result);
+      return;
+    }
     const event = desktopEventSchema.safeParse(message);
     if (event.success) {
       // Main-owned lifecycle and UI events must never originate in the Git utility.
@@ -181,20 +199,18 @@ function startService() {
       )
         return;
       if (event.data.type !== 'repositoryChanged' && !pending.has(event.data.id)) return;
-      if (service === child && window && !window.isDestroyed())
-        window.webContents.send(EVENT_CHANNEL, event.data);
+      if (window && !window.isDestroyed()) window.webContents.send(EVENT_CHANNEL, event.data);
       return;
     }
+    const request = pending.get(message?.id);
+    if (!request || message.transferId !== request.transfer?.transferId) return;
     const parsed = serviceResponseSchema.safeParse(message);
     if (!parsed.success) return;
-    const request = pending.get(parsed.data.id);
-    if (!request) return;
-    clearTimeout(request.timer);
-    pending.delete(parsed.data.id);
-    request.resolve(parsed.data.result);
+    finishServiceRequest(parsed.data.id, parsed.data.result);
   });
   child.on('exit', () => {
-    if (service === child) service = undefined;
+    if (service !== child) return;
+    service = undefined;
     interruptGitRequests([...pending.keys()]);
     for (const [id, request] of pending) {
       clearTimeout(request.timer);
@@ -251,8 +267,10 @@ function callService(request: ServiceRequest, signal?: AbortSignal): Promise<Ser
               ? 180000
               : 60000,
     );
-    pending.set(request.id, { resolve, timer });
-    child.postMessage(request);
+    const transfer =
+      request.method === 'open' ? new SnapshotTransfer(request.id, crypto.randomUUID()) : undefined;
+    pending.set(request.id, { resolve, timer, transfer });
+    child.postMessage(transfer ? { ...request, transferId: transfer.transferId } : request);
   }).finally(() => signal?.removeEventListener('abort', cancel));
 }
 function validateSender(event: IpcMainInvokeEvent) {

@@ -46,6 +46,15 @@ for (const failure of ['missing-ref-object', 'missing-parent'] as const)
     const originalHead = fixtureGit(invalid, ['rev-parse', 'HEAD']);
     if (failure === 'missing-ref-object') writeFileSync(broken, `${'1'.repeat(40)}\n`);
     else {
+      fixtureGit(
+        invalid,
+        ['update-ref', '--stdin'],
+        Array.from(
+          { length: 10000 },
+          (_, i) => `create refs/tags/original-${i} ${originalHead}\n`,
+        ).join(''),
+      );
+      fixtureGit(invalid, ['pack-refs', '--all']);
       fixtureGit(invalid, ['config', '--remove-section', 'branch.main']);
       const tree = fixtureGit(invalid, ['rev-parse', 'HEAD^{tree}']);
       const invalidHead = fixtureGit(

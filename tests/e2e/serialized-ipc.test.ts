@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test } from '@playwright/test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -211,3 +211,124 @@ test('large Git snapshots round-trip their ordered reference records through all
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+for (const interruption of ['early cancel', 'late cancel', 'stop utility'] as const) {
+  test(`a staged opening waits for the native outcome and can reuse the request ID (${interruption})`, async () => {
+    test.skip(
+      interruption === 'early cancel' && process.platform === 'win32',
+      'This fixture holds a native Git walk using a POSIX shell',
+    );
+    const root = mkdtempSync(join(tmpdir(), 'openkraken-interrupted-refs-'));
+    const repository = createFixture(join(root, 'repo'), 'linear', 5);
+    const head = fixtureGit(repository, ['rev-parse', 'HEAD']);
+    fixtureGit(
+      repository,
+      ['update-ref', '--stdin'],
+      Array.from({ length: 10000 }, (_, i) => `create refs/tags/open-${i} ${head}\n`).join(''),
+    );
+    fixtureGit(repository, ['pack-refs', '--all']);
+    const git = join(root, 'hold-history');
+    if (interruption === 'early cancel') {
+      writeFileSync(
+        git,
+        '#!/bin/sh\ncase " $* " in *" rev-list "*" --parents "*) while [ -f "$0.gate" ]; do sleep 1; done;; esac\nexec git "$@"\n',
+        { mode: 0o755 },
+      );
+      writeFileSync(git + '.gate', '');
+    }
+    const app = await electron.launch({
+      env: interruption === 'early cancel' ? { ...process.env, OPENKRAKEN_GIT: git } : undefined,
+      args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+    });
+    try {
+      const page = await app.firstWindow();
+      await app.evaluate(
+        ({ dialog, utilityProcess }, { path, holdComplete }) => {
+          dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+          const fork = utilityProcess.fork.bind(utilityProcess);
+          utilityProcess.fork = (...args) => {
+            const child = fork(...args);
+            if (!args[0].endsWith('git-service.cjs')) return child;
+            utilityProcess.fork = fork;
+            const emit = child.emit.bind(child);
+            child.emit = (event, ...values) => {
+              const message = values[0];
+              if (event === 'message' && message?.snapshotPart === 'refs') {
+                Reflect.set(globalThis, 'observedRefCount', message.refs.length);
+              } else if (
+                holdComplete &&
+                event === 'message' &&
+                message?.snapshotPart === 'complete'
+              ) {
+                child.emit = emit;
+                Reflect.set(globalThis, 'releaseSnapshot', (stop: boolean) =>
+                  stop ? child.kill() : emit(event, ...values),
+                );
+                return true;
+              }
+              return emit(event, ...values);
+            };
+            return child;
+          };
+        },
+        { path: repository, holdComplete: interruption !== 'early cancel' },
+      );
+      // The app prestarts its first Git utility before creating the window. Observe its replacement.
+      await app.evaluate(async ({ app }) => {
+        const service = app.getAppMetrics().find((metric) => metric.name === 'OpenKraken Git');
+        if (!service) throw Error('Missing prestarted Git utility');
+        const gone = new Promise<void>((resolve) =>
+          app.once('child-process-gone', () => resolve()),
+        );
+        process.kill(service.pid, 'SIGKILL');
+        await gone;
+      });
+      const id = await page.evaluate(() => crypto.randomUUID());
+      let settled = false;
+      const opening = page
+        .evaluate((id) => window.openkraken.request({ id, method: 'open' }), id)
+        .then((result) => {
+          settled = true;
+          return result;
+        });
+      if (interruption !== 'early cancel') {
+        await expect
+          .poll(() => app.evaluate(() => typeof Reflect.get(globalThis, 'releaseSnapshot')))
+          .toBe('function');
+      }
+      await expect
+        .poll(() => app.evaluate(() => Reflect.get(globalThis, 'observedRefCount') ?? 0))
+        .toBeGreaterThanOrEqual(10000);
+      expect(settled).toBe(false);
+      if (interruption !== 'stop utility')
+        await page.evaluate((id) => window.openkraken.cancel(id), id);
+      if (interruption === 'early cancel') {
+        expect(await opening).toMatchObject({ kind: 'cancelled' });
+        rmSync(git + '.gate');
+      } else {
+        await app.evaluate(
+          (_, stop) => Reflect.get(globalThis, 'releaseSnapshot')(stop),
+          interruption === 'stop utility',
+        );
+        expect(await opening).toMatchObject(
+          interruption === 'late cancel'
+            ? { kind: 'snapshot' }
+            : { kind: 'error', code: 'SERVICE_EXIT' },
+        );
+      }
+      const retry = await page.evaluate(async (id) => {
+        const result = await window.openkraken.request({ id, method: 'open' });
+        if (result.kind !== 'snapshot') throw Error('Retry did not return a complete snapshot');
+        return {
+          count: result.snapshot.refs.length,
+          last: result.snapshot.refs.find((ref) => ref.shortName === 'open-9999')?.target,
+        };
+      }, id);
+      expect(retry.count).toBeGreaterThanOrEqual(10000);
+      expect(retry.last).toBe(head);
+    } finally {
+      await app.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}

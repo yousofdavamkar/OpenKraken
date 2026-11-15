@@ -2,11 +2,12 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   encodeGitServiceResult,
+  encodeSnapshotRefs,
   serviceRequestSchema,
   shutdownSchema,
   cancelSchema,
 } from '@openkraken/ipc-contract';
-import type { Result, ServiceRequest, Repository } from '@openkraken/ipc-contract';
+import type { Result, ServiceRequest, Repository, Ref } from '@openkraken/ipc-contract';
 import {
   GitError,
   locateGit,
@@ -74,7 +75,11 @@ function getService() {
       throw error;
     }));
 }
-async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Result> {
+async function execute(
+  request: ServiceRequest,
+  signal: AbortSignal,
+  observeRefs?: (refs: Ref[]) => void,
+): Promise<Result> {
   if (request.method === 'answerEditor') {
     const prompt = editorPrompts.get(request.promptId);
     const accepted = !!prompt && prompt.requestId === request.requestId;
@@ -134,7 +139,7 @@ async function execute(request: ServiceRequest, signal: AbortSignal): Promise<Re
       )
     : undefined;
   try {
-    return await executeGit(request, signal, scope?.environment);
+    return await executeGit(request, signal, scope?.environment, observeRefs);
   } finally {
     scope?.close();
   }
@@ -143,6 +148,7 @@ async function executeGit(
   request: Exclude<ServiceRequest, { method: 'answerPrompt' | 'answerEditor' }>,
   signal: AbortSignal,
   auth?: NodeJS.ProcessEnv,
+  observeRefs?: (refs: Ref[]) => void,
 ): Promise<Result> {
   const git = await getService();
   let lastProgress = 0;
@@ -593,7 +599,9 @@ async function executeGit(
   const initialWatcher = 'path' in repo ? prepareWatcher(repo) : undefined;
   try {
     const snapshot = await (initialWatcher
-      ? initialWatcher.primeObservedSnapshot(() => git.observeInitialSnapshot(repo.id, signal))
+      ? initialWatcher.primeObservedSnapshot(() =>
+          git.observeInitialSnapshot(repo.id, signal, observeRefs),
+        )
       : git.snapshot(
           repo.id,
           signal,
@@ -667,9 +675,36 @@ parent.on('message', (event) => {
   ].includes(request.method);
   const observed = watcher;
   if (writing) observed?.pause();
-  execute(request, controller.signal)
+  const transferId = request.method === 'open' ? request.transferId : undefined;
+  let sentRefs: Ref[] | undefined;
+  let ordinaryRefs: Ref[] | undefined;
+  const sendRefs = (source: Ref[]) => {
+    const refs = encodeSnapshotRefs(source);
+    if (!refs) {
+      ordinaryRefs = source;
+      return;
+    }
+    parent.postMessage({ id: request.id, transferId, snapshotPart: 'refs', refs });
+    sentRefs = source;
+  };
+  execute(request, controller.signal, transferId ? sendRefs : undefined)
     .then((result) => {
-      parent.postMessage({ id: request.id, result: encodeGitServiceResult(result) });
+      if (result.kind === 'snapshot' && sentRefs === result.snapshot.refs) {
+        const { refs, ...snapshot } = result.snapshot;
+        parent.postMessage({
+          id: request.id,
+          transferId,
+          snapshotPart: 'complete',
+          snapshot,
+          refCount: refs.length,
+        });
+      } else {
+        const encoded =
+          result.kind === 'snapshot' && result.snapshot.refs === ordinaryRefs
+            ? result
+            : encodeGitServiceResult(result);
+        parent.postMessage({ id: request.id, transferId, result: encoded });
+      }
       if (result.kind === 'snapshot' && request.method !== 'refresh') {
         const current = watcher;
         clearTimeout(watchStart);
@@ -707,7 +742,7 @@ parent.on('message', (event) => {
                     )
                   : redactGitMessage(error instanceof Error ? error.message : String(error)),
             };
-      parent.postMessage({ id: request.id, result });
+      parent.postMessage({ id: request.id, transferId, result });
     })
     .finally(() => {
       if (writing) observed?.resume();
