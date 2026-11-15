@@ -211,5 +211,52 @@
         "totalDependencies": 134
       }
     }
+  },
+  "followup": {
+    "date": "2026-11-15",
+    "lockfileSha256": "1f359dc9752ec916925e85c99eaaab21afbee6980aa20b51c334dd2b8517af89",
+    "registry": "https://registry.npmjs.org/",
+    "commands": {
+      "full": {
+        "command": "pnpm audit --json",
+        "exitCode": 0,
+        "response": {
+          "advisories": {},
+          "metadata": {
+            "vulnerabilities": {
+              "info": 0,
+              "low": 0,
+              "moderate": 0,
+              "high": 0,
+              "critical": 0
+            },
+            "dependencies": 122,
+            "devDependencies": 521,
+            "optionalDependencies": 104,
+            "totalDependencies": 655
+          }
+        }
+      },
+      "production": {
+        "command": "pnpm audit --prod --json",
+        "exitCode": 0,
+        "response": {
+          "advisories": {},
+          "metadata": {
+            "vulnerabilities": {
+              "info": 0,
+              "low": 0,
+              "moderate": 0,
+              "high": 0,
+              "critical": 0
+            },
+            "dependencies": 120,
+            "devDependencies": 0,
+            "optionalDependencies": 14,
+            "totalDependencies": 134
+          }
+        }
+      }
+    }
   }
 }

@@ -20,7 +20,7 @@ Repository opening does not sandbox native Git, configured hooks, external tools
 
 The initial full pnpm audit reported two moderate development advisories: [minimatch pattern amplification](https://github.com/advisories/GHSA-g3hv-75wg-m249) and [glob cancellation bypass](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4). Modern dependency branches now resolve minimatch 11.0.1 and glob 14.0.2. [ADR 0107](../decisions/0107-build-time-glob-security-updates.md) records scope, compatibility and the remaining legacy branches. Unrelated Babel and virtualization updates introduced during resolution were removed; a subsequent frozen-lockfile install passed.
 
-The final production audit reports zero advisories. The full development audit still exits 1 with the minimatch advisory on 3.1.5 and 5.1.9. Both inspected sources lack the optimization routine described by that advisory, but the broad affected range remains unsuppressed. No clean full-audit claim is made. Original before/after/production responses are retained in [the audit artifact](m8-dependency-audit.json); an advisory scan is time-specific and does not prove absence of vulnerabilities.
+On November 3, the production audit reported zero advisories. The full audit still reported minimatch 3.1.5 and 5.1.9. On November 4 the reviewed advisory narrowed the affected range to `>=7.0.0 <11.0.1`, excluding both legacy versions. The lockfile resolves its modern branch to 11.0.1. On November 15 the full and production pnpm audits both exited zero with empty advisory lists for the same lockfile. The evidence file includes both responses and the lockfile SHA-256. [Reviewed advisory](https://github.com/advisories/GHSA-g3hv-75wg-m249) · [Audit results](m8-dependency-audit.json)
 
 ## Verification record
 
