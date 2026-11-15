@@ -2,6 +2,23 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Linux desktop regression and scale checks after the first-run changes
+
+With Git LFS, Gitea, Bash, fish and zsh available, the Linux x64 desktop suite passed 213 tests. Two opt-in performance tests were skipped in that run and exercised separately below. The native/unit suite passed 903 tests with 14 skips. A subsequent keyboard-focus fix passed 38 desktop regressions covering the welcome screen, pickers, graph, commands, clone and activity. The Linux x64 package from clean commit `6d0d40b` passed its packaged sandbox, native terminal, repository-link and helper smoke checks. [M7 changes](m7-progress.md#first-run-guide-localized-welcome-screen-and-operation-notifications)
+
+The final development build opened each fixture in a fresh Electron profile. Runs were sequential on Linux x64 with Git 2.53.0 and an Intel Core i7-9750H. The OS caches were retained. First paint and the three 5,000-commit appends are in milliseconds.
+
+| Fixture                                  | First paint |          Page appends | Graph frame p95 |
+| ---------------------------------------- | ----------: | --------------------: | --------------: |
+| Full Linux history, one ref              |       346.8 | 284.1 / 215.5 / 195.7 |            16.8 |
+| Linux history, 50,000 distinct targets   |       798.2 | 274.9 / 214.8 / 205.9 |            16.8 |
+| Linux history, 50,000 refs at one target |       779.5 | 248.6 / 224.0 / 190.4 |            16.7 |
+| Two million commits, first open          |      1149.5 | 143.0 / 131.8 / 138.6 |            16.7 |
+| Two million commits, repeat 1            |       302.8 | 201.2 / 141.8 / 133.4 |            16.8 |
+| Two million commits, repeat 2            |       288.3 | 190.1 / 151.5 / 129.3 |            16.8 |
+
+Both 50,000-ref first paints exceeded 500 ms. The first two-million-commit opening also missed, with 960.4 ms inside the snapshot read. Both later openings of that checkout passed. Every measured append was below 300 ms. On the 100,000-file checkout, five clean and five dirty watcher-warm status reads took 199.6–254.1 ms. An external edit became visible in 858.2 ms. Native Windows, macOS and Linux arm64 execution and the distribution and beta gates remain open.
+
 ## Linux beta packages and native release identity
 
 A local DEB with native version `0.2.0` and bundled version `0.1.0` passed the previous installer verifier and launched. The new verifier rejected it before extraction when the manifest claimed `0.1.0`. Changing the manifest to match the native `0.2.0` header reached the independent ASAR check, which also rejected it before launch. The builder and verifier now read the actual DEB/RPM package name, architecture and version. New manifests record the complete native package version. [Version checks and fixture commands](../decisions/0074-linux-installer-payload-verification.md#native-package-versions)
