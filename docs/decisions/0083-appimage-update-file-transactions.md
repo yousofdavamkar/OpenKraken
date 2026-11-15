@@ -15,3 +15,11 @@ This does not defend against an attacker controlling the user's account, nor doe
 The native acceptance script builds two minimal, independently authored AppImages using the existing pinned tool/runtime. In both FUSE and extract-and-run modes it replaces an image while its old process is alive, verifies that process still reads its old files, launches the replacement, restores and launches the predecessor, then retries and confirms. These are real AppImage runtime/file operations, not Electron application restart acceptance. CI runs this check after constructing the AppImage installer; remote CI execution remains unverified.
 
 References: [AppImage runtime environment](https://docs.appimage.org/packaging-guide/environment-variables.html) identifies the original image path; [Electron app lifecycle](https://www.electronjs.org/docs/latest/api/app) describes relaunch and accepted quit behavior. Desktop handoff implementation and its acceptance bounds are recorded separately in ADR 0084.
+
+## A newer release containing the installed image
+
+Before creating the transaction directory, the adapter checks the size and SHA-256 of the running image and the verified candidate. If they match, the Updates dialog reports the duplicate and keeps the application open. The accepted release sequence remains on disk. A publisher can issue a corrected package at a higher sequence, and the user can check again in the same session.
+
+Older builds could leave a journal whose predecessor and replacement digests were identical. When the installed image matches the recorded predecessor, startup validates every remaining file and its link count and discards the obsolete transaction. Tests cover an interrupted stage, a linked backup before rename, and a backup after rename. In each case, changing the retained file prevents cleanup until its expected bytes are restored.
+
+Run `xvfb-run -a node scripts/verify-update-restart.mjs --unchanged-image` after building on Linux. The fixture signs the initial version at sequence 1, advertises the same image as a newer version at sequence 2, then publishes the corrected bytes at sequence 3. It checks the dialog, installed digest, boot history, journal and release watermark through restart.

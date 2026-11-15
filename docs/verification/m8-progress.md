@@ -2,6 +2,14 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Duplicate AppImages and interrupted rollback
+
+The packaged Linux x64 app rejected a signed release that advertised a newer version but contained the exact installed bytes. It kept running without creating a transaction directory, retained sequence 2 and installed the corrected sequence 3 from the same HTTPS feed. The stable and beta packages both passed. Native tests also recovered legacy identical-image transactions before and after rename and preserved changed recovery files. [File transaction behavior](../decisions/0083-appimage-update-file-transactions.md#a-newer-release-containing-the-installed-image)
+
+The previous restart helper restored the predecessor after a failed launch but exited when it could not sync the installation directory. A native regression reproduced the missing relaunch using ordinary Linux directory permissions. The fixed helper rechecked the restored bytes and inode and launched the predecessor. With the directory still unreadable, the restored application retained its journal. Once access was restored, a further launch cleared it, retained the signed sequence and showed the rollback notice. [Recovery behavior](../decisions/0120-appimage-shutdown-and-confirmation.md#directory-sync-after-restoring-the-predecessor)
+
+The rollback scenario passed in FUSE and extract-and-run modes on Linux x64. The full native/unit suite passed 869 tests with 14 skipped, and all 20 selected Electron tests passed. The build, TypeScript, lint, Go vet and actionlint passed. These package checks used temporary signing keys and a loopback HTTPS feed. Hosted CI, production signing and feed acceptance, and native Windows, macOS and Linux arm64 results remain outstanding.
+
 ## Full Linux history and direct reference reads
 
 The production parser reads six fields on the initial ref query. It preserved every ordered ref in a 50,000-record replay. The median first paint across three paired openings fell from 925.0 to 867.7 ms for distinct targets and from 781.9 to 753.2 ms for a shared target. All 36 page appends in those comparisons passed the 300 ms budget. All twelve first paints missed 500 ms. [Per-opening results](m8-reference-performance.md#reading-six-fields-for-unpeeled-references)
