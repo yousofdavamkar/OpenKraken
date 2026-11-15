@@ -20,6 +20,22 @@ An eight-row prototype shortened the publication-to-paint phase in nine of nine 
 
 Separate fresh-profile openings painted single-ref Linux history in 370.9 ms and the two-million-commit, 100,000-file checkout in 307.2 ms. The shared-target Linux repository reopened with 17,000 cached commits in 666.8 ms. Opening the distinct fixture with 10,000 saved hidden refs took 887.4 ms. All twelve appends met 300 ms.
 
+## Reading object types for unique reference targets
+
+A diagnostic compared three native reads of the same 50,000 refs on full Linux history. The direct read used the six-field production format. The other reads enumerated the identities and upstream fields, then used one buffered Git batch request for the type of each unique object. The serial reader waited for all identities. The pipelined reader wrote new IDs to the batch as they arrived. Six trials per reader and fixture rotated execution order with populated OS caches. Every reconstruction matched the SHA-256 digest of the complete ordered direct records.
+
+A separate Electron experiment used fresh profiles and the production renderer. A disposable Git utility used the pipelined reader only for the three known fixtures. It checked all 50,000 results for commit type and the expected unique-target count. Each run verified the app path, renderer asset, 2,000 loaded commits and 50,000 displayed refs. Four pairs per fixture alternated the order of the two utilities.
+
+| Fixture          | Native direct | Native serial | Native pipelined | Desktop direct paint | Desktop pipelined paint |
+| ---------------- | ------------: | ------------: | ---------------: | -------------------: | ----------------------: |
+| Distinct targets |      190.0 ms |      221.9 ms |         156.1 ms |             771.0 ms |                787.8 ms |
+| 500 targets      |      195.5 ms |       98.5 ms |          95.5 ms |             675.2 ms |                589.9 ms |
+| One target       |      155.5 ms |       95.5 ms |          87.9 ms |             637.5 ms |                583.8 ms |
+
+Values are medians. All eight repeated-target pairs painted sooner, and all 24 openings exceeded the 500 ms budget. On the distinct fixture the native read improved while median end-to-end time increased. The shipping reader still uses the direct Git format. The next candidate is a read of unique object types for repositories with many repeated targets. [Individual trials](m8-ref-type-probe.csv)
+
+A separate direct-metadata comparison used Git 2.38.0 and 2.53.0 on SHA-1 and SHA-256 repositories. It reproduced the six native fields byte for byte for loose refs, packed refs and a cross-type replacement, including a tracked branch, symbolic remote HEAD, Unicode name and annotated tags pointing to commits, a tree, a blob and another tag. These static comparisons cover direct metadata. A production implementation still needs to preserve peeled tag details and handle concurrent changes, cancellation, missing objects and output limits.
+
 ## Validating refs before the first page is ready
 
 Three alternating pairs per fixture compared the previous one-message Git utility (`d00f8a7`) with the staged transfer in `38213be`. Each opened 2,000 commits from the same full Linux history in a fresh Electron profile and appended three pages of 5,000. The benchmark used Linux x64, Git 2.53.0 and an Intel Core i7-9750H, with populated OS caches and no concurrent build or test suite. Both used the same renderer. The benchmark's app directory pointed to the main and utility bundles under test.

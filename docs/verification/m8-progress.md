@@ -10,6 +10,10 @@ The first Linux x64 desktop run at `d648174` passed 218 tests, skipped two opt-i
 
 The Linux x64 package from clean commit `d648174` passed the native helper, folder picker, Bash keyboard, repository link, fuse and renderer isolation checks. With 50,000 refs it showed 100 refs on each of two adjacent commits and appended 5,000 rows. The test-only DEB, RPM and AppImage built from that package passed payload verification and launched. Debian 13 and Fedora 43 containers installed and reinstalled the 0.1.0 base, exercised the existing 0.2.0-beta.1 and 0.2.0 upgrade fixtures from `7bc8efd`, and retained user data through removal. Real DEB and RPM downloads passed the opt-in update UI test using a loopback HTTPS feed and temporary signing keys.
 
+With the shared event subscription, the full Linux x64 desktop run passed 219 tests and skipped the two opt-in benchmarks. It painted the first blame screen in 79.1 ms. The unit/native run passed 922 tests across 111 files with 14 skips. Build, lint and workflow validation passed. The package from clean commit `b95a591` passed the native folder picker, Bash keyboard, helper, fuse, URI, isolation and 50,000-ref graph checks.
+
+Three independent openings using the new grouped fixture generator painted at 640.4, 657.6 and 674.6 ms. One of nine appends missed 300 ms at 362.9 ms. The remaining appends took 197.0–264.0 ms. Graph and sidebar scrolling measured 16.7–16.8 ms p95. An experimental Git reader improved median end-to-end first paint for repeated targets and regressed the distinct-target median. [Reference type experiment](m8-reference-performance.md#reading-object-types-for-unique-reference-targets)
+
 ## Staged reference validation and stash search
 
 On Linux x64, `38213be` painted the 50,000-ref fixtures in a median of 751.1 ms with distinct targets, 686.7 ms with 500 targets and 667.4 ms with one target. Eight of nine paired openings improved. All 54 appends met 300 ms. Single-ref Linux history and the two-million-commit checkout met 500 ms in separate openings. [First paint, page and scroll measurements](m8-reference-performance.md#validating-refs-before-the-first-page-is-ready)
