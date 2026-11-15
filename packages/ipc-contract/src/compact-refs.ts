@@ -51,8 +51,16 @@ function expandRef(value: string): Ref {
 }
 
 /** Expand a main-validated snapshot at the boundary that needs ordinary refs. */
-export function expandGitServiceResult(result: ServiceResult): Result {
+export function expandGitServiceResult(
+  result: ServiceResult,
+  options: { freezeCompactRefs?: boolean } = {},
+): Result {
   if (result.kind !== 'compactSnapshot') return result;
-  const refs = result.snapshot.refs.map((row) => (typeof row === 'string' ? expandRef(row) : row));
+  const refs = result.snapshot.refs.map((row) => {
+    if (typeof row !== 'string') return row;
+    const ref = expandRef(row);
+    // Compact records contain only primitives. Immer can skip their fields during publication.
+    return options.freezeCompactRefs ? Object.freeze(ref) : ref;
+  });
   return { kind: 'snapshot', snapshot: { ...result.snapshot, refs } };
 }

@@ -209,6 +209,7 @@ export const useRepository = create<State>()(
           candidate = new GraphClient();
         const result = expandGitServiceResult(
           JSON.parse(await window.openkraken.request(request, 'snapshot-json')),
+          { freezeCompactRefs: true },
         );
         if (get().busy !== request.id) return;
         if (result.kind === 'snapshot') {

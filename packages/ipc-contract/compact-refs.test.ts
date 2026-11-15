@@ -84,6 +84,14 @@ test('a large Git reply round-trips ordered refs and retains exceptional metadat
   if (checked.kind !== 'compactSnapshot') throw new Error('Expected compact validated reply');
   expect(checked.snapshot.refs[1]).not.toHaveProperty('extra');
   expect(typeof checked.snapshot.refs[0]).toBe('string');
+  const ordinary = expandGitServiceResult(checked);
+  const store = expandGitServiceResult(checked, { freezeCompactRefs: true });
+  if (ordinary.kind !== 'snapshot' || store.kind !== 'snapshot')
+    throw new Error('Expected snapshots');
+  expect(Object.isFrozen(ordinary.snapshot.refs[0])).toBe(false);
+  expect(Object.isFrozen(store.snapshot.refs[0])).toBe(true);
+  expect(Object.isFrozen(store.snapshot.refs[1])).toBe(false);
+  expect(store.snapshot.refs).toStrictEqual(refs);
   expect(expandGitServiceResult(JSON.parse(JSON.stringify(checked)))).toStrictEqual(original);
   expect(resultSchema.safeParse(encoded).success).toBe(false);
 });
