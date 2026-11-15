@@ -1,3 +1,4 @@
+import { Welcome } from './welcome.js';
 import { Activity } from './activity.js';
 import { DiagnosticsControl } from './diagnostics.js';
 import { UpdatesControl } from './updates.js';
@@ -242,24 +243,7 @@ function App() {
           </footer>
         </>
       ) : (
-        <main className="welcome">
-          <div>
-            <span className="welcome-icon" aria-hidden="true">
-              ◈
-            </span>
-            <p className="eyebrow">YOUR REPOSITORY, IN VIEW</p>
-            <h1>A clear view of your history.</h1>
-            <p>
-              Explore branches, inspect your working tree,
-              <br />
-              and follow the commits that brought you here.
-            </p>
-            <button className="primary" onClick={open} disabled={!!busy}>
-              Open a repository
-            </button>
-            <small>Uses Git installed on your computer · No account required</small>
-          </div>
-        </main>
+        <Welcome open={open} busy={!!busy} />
       )}
       {busy && (
         <div className="activity" role="status">
