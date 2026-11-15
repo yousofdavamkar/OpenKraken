@@ -332,6 +332,40 @@ test('cancellation stops a pending transfer, bounds concurrent operations and al
   }
 });
 
+test('a signed release from the other channel cannot advance the saved sequence', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'openkraken-update-channel-'));
+  const path = join(directory, 'trusted-release.json');
+  let manifest = signed(release());
+  const fetchRelease = async () => new Response(manifest);
+  let updater = new Updates(directory, configuration, runtime, fetchRelease);
+  try {
+    expect((await updater.check()).phase).toBe('available');
+    const watermark = await readFile(path, 'utf8');
+    expect(JSON.parse(watermark).configuration).toBe(
+      createHash('sha256').update(JSON.stringify(configuration)).digest('hex'),
+    );
+    await updater.close();
+    updater = new Updates(
+      directory,
+      { ...configuration, channel: 'stable' },
+      runtime,
+      fetchRelease,
+    );
+    manifest = signed({ ...release(99, '0.3.0-beta.1'), channel: 'beta' });
+    expect(await updater.check()).toMatchObject({
+      phase: 'error',
+      error: 'invalid-release',
+      channel: 'stable',
+    });
+    expect(await readFile(path, 'utf8')).toBe(watermark);
+    manifest = signed(release(8, '0.2.1'));
+    expect(await updater.check()).toMatchObject({ phase: 'available', version: '0.2.1' });
+  } finally {
+    await updater.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('modified trust state blocks network access and unsupported or older releases cannot download', async () => {
   const root = await mkdtemp(join(tmpdir(), 'openkraken-update-storage-'));
   let manifest = signed(release());

@@ -80,6 +80,7 @@ export class Updates {
   }
   private empty(phase: UpdateState['phase']): UpdateState {
     return {
+      ...(this.config && { channel: this.config.channel ?? 'stable' }),
       phase,
       version: null,
       artifacts: [],

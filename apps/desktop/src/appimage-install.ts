@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
 import { link, lstat, mkdir, open, readdir, rename, rmdir, unlink } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, normalize } from 'node:path';
-import { valid } from 'semver';
+import { releaseVersionSchema } from './update-protocol.js';
 import { z } from 'zod';
 
 const maximum = 2 * 1024 ** 3;
@@ -14,7 +14,7 @@ const transactionSchema = z.strictObject({
   schemaVersion: z.literal(1),
   product: z.literal('org.openkraken.desktop'),
   target: z.string().min(1).max(255),
-  version: z.string().refine((value) => valid(value) === value && /^\d+\.\d+\.\d+$/.test(value)),
+  version: releaseVersionSchema,
   arch: z.enum(['x64', 'arm64']),
   next: digestSchema,
   previous: digestSchema,

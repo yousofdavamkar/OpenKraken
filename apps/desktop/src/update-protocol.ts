@@ -6,7 +6,9 @@ export const updateEnvelopeLimit = 48 * 1024;
 const payloadLimit = 32 * 1024;
 export const updateSignatureContext = 'OPENKRAKEN-UPDATE-V1\n';
 
+const channelSchema = z.enum(['stable', 'beta']);
 const configurationSchema = z.strictObject({
+  channel: channelSchema.optional(),
   feed: z.string().min(1).max(2048),
   publicKey: z.string().min(1).max(128),
 });
@@ -42,6 +44,8 @@ export function updateConfiguration(raw: unknown) {
     !key.export({ type: 'spki', format: 'der' }).equals(der)
   )
     throw new Error('Updates require an Ed25519 public key');
+  // Existing stable profiles bind their watermark to the original two-field configuration.
+  if (config.channel === 'stable') delete config.channel;
   return config;
 }
 
@@ -72,24 +76,27 @@ const artifactSchema = z
     );
   });
 
+export const releaseVersionSchema = z
+  .string()
+  .max(100)
+  .refine((value) => {
+    const parsed = parseVersion(value);
+    return parsed?.version === value && /^\d+\.\d+\.\d+(?:-beta\.\d+)?$/.test(value);
+  });
+
 const releaseSchema = z
   .strictObject({
     schemaVersion: z.literal(1),
     product: z.literal('org.openkraken.desktop'),
-    channel: z.literal('stable'),
+    channel: channelSchema,
     sequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-    version: z
-      .string()
-      .max(100)
-      .refine((value) => {
-        const parsed = parseVersion(value);
-        return parsed !== null && parsed.raw === parsed.version && parsed.prerelease.length === 0;
-      }),
+    version: releaseVersionSchema,
     issuedAt: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
     expiresAt: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
     artifacts: z.array(artifactSchema).min(1).max(16),
   })
   .refine((release) => {
+    if ((release.channel === 'beta') !== release.version.includes('-beta.')) return false;
     const identities = release.artifacts.map((a) => `${a.platform}/${a.arch}/${a.format}`);
     const names = release.artifacts.map((a) => a.name.toLowerCase());
     return new Set(identities).size === identities.length && new Set(names).size === names.length;
@@ -133,5 +140,6 @@ export function verifyUpdateRelease(raw: string, configuration: UpdateConfigurat
   )
     throw new Error('Update signature is invalid');
   const release = validateUpdateRelease(JSON.parse(payload.toString('utf8')), now);
+  if (release.channel !== (config.channel ?? 'stable')) throw new Error('Update channel differs');
   return { release, digest: createHash('sha256').update(payload).digest('hex') };
 }

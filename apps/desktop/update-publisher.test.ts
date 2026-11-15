@@ -67,6 +67,14 @@ test('the release publisher signs actual artifact bytes and refuses invalid or o
     await writeFile(join(directory, 'release-input.json'), JSON.stringify(descriptor));
     await expect(invoke('invalid.json')).rejects.toThrow();
     await expect(readFile(join(directory, 'invalid.json'))).rejects.toThrow();
+    descriptor.channel = 'beta';
+    await writeFile(join(directory, 'release-input.json'), JSON.stringify(descriptor));
+    await invoke('beta.json');
+    const signedBeta = await readFile(join(directory, 'beta.json'), 'utf8');
+    expect(
+      verifyUpdateRelease(signedBeta, { ...config, channel: 'beta' }, now).release.version,
+    ).toBe(descriptor.version);
+    expect(() => verifyUpdateRelease(signedBeta, config, now)).toThrow();
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

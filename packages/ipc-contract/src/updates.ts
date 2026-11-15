@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const updateFormatSchema = z.enum(['AppImage', 'deb', 'rpm', 'dmg', 'zip', 'msi']);
 export const updatesStateSchema = z.strictObject({
+  channel: z.enum(['stable', 'beta']).optional(),
   phase: z.enum([
     'disabled',
     'idle',

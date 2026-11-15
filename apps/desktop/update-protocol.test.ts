@@ -114,3 +114,21 @@ test('bounded canonical envelopes reject alternate encodings and malformed signa
     expect(() => verifyUpdateRelease(raw, config(), now)).toThrow();
   expect(() => verifyUpdateRelease(envelope(release), config(), NaN)).toThrow();
 });
+
+test('build channel and signed channel must match even when the signing key is shared', () => {
+  const stable = config();
+  const beta = updateConfiguration({ ...stable, channel: 'beta' })!;
+  const candidate = { ...release, channel: 'beta', version: '0.2.0-beta.2' };
+  expect(verifyUpdateRelease(envelope(candidate), beta, now).release).toEqual(candidate);
+  expect(() => verifyUpdateRelease(envelope(candidate), stable, now)).toThrow();
+  expect(() => verifyUpdateRelease(envelope(release), beta, now)).toThrow();
+  for (const version of [
+    '0.2.0',
+    '0.2.0-beta',
+    '0.2.0-beta.01',
+    '0.2.0-beta.2+local',
+    '0.2.0-rc.1',
+  ])
+    expect(() => verifyUpdateRelease(envelope({ ...candidate, version }), beta, now)).toThrow();
+  expect(updateConfiguration({ ...stable, channel: 'stable' })).toEqual(stable);
+});
