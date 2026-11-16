@@ -161,3 +161,44 @@ for (const scenario of ['editing', 'changed commits', 'pending POST']) {
     }
   });
 }
+
+test('cancelling while the protected submission record is being written prevents the POST', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ok-review-cancel-'));
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const { page, details } = await browse(app, true, false);
+    await details.getByRole('button', { name: 'Write review' }).click();
+    const review = page.getByRole('dialog', { name: 'Write pull-request review' });
+    await review.getByLabel('Review text').fill(body);
+    await expect(review.getByText('Draft saved locally', { exact: true })).toBeVisible();
+    await app.evaluate(({ safeStorage }) => {
+      const encrypt = safeStorage.encryptStringAsync.bind(safeStorage);
+      safeStorage.encryptStringAsync = async (text) => {
+        if (JSON.parse(text).draft?.uncertain)
+          await new Promise<void>((resolve) =>
+            Object.assign(globalThis, { releaseReviewRecord: resolve }),
+          );
+        return encrypt(text);
+      };
+    });
+    await review.getByRole('button', { name: 'Preview review' }).click();
+    await review.getByRole('button', { name: 'Submit review', exact: true }).click();
+    await expect.poll(() => app.evaluate(() => 'releaseReviewRecord' in globalThis)).toBe(true);
+    await review.getByRole('button', { name: 'Cancel submission' }).click();
+    await app.evaluate(() =>
+      (globalThis as typeof globalThis & { releaseReviewRecord: () => void }).releaseReviewRecord(),
+    );
+    await expect(review.getByRole('alert')).toContainText('Cancelled before submission');
+    await review.getByRole('button', { name: 'Close review' }).click();
+    await review.getByRole('button', { name: 'Keep draft and close' }).click();
+    await details.getByRole('button', { name: 'Write review' }).click();
+    await expect(review.getByLabel('Review text')).toHaveValue(body);
+    await expect(review.getByRole('button', { name: 'Preview review' })).toBeEnabled();
+    expect(await posts(app)).toBe(0);
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
