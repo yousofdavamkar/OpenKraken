@@ -1,3 +1,4 @@
+import { IssueDraftEncryptionUnavailable, useIssueDraft } from './review-draft.js';
 import { useEffect, useRef, useState } from 'react';
 import {
   providerWriteIssueSchema,
@@ -5,6 +6,8 @@ import {
   type ProviderGitLabIssueActionPreview,
   type ProviderWriteGitLabIssue,
   type ProviderAccount,
+  type IssueDraft,
+  type IssueDraftScope,
   type ProviderWriteIssue,
   type ProviderIssueActionPreview,
   type ProviderIssueWriteResult,
@@ -19,15 +22,19 @@ export type IssueTarget = {
   origin: string;
   repository: ProviderIssueOptions['repository'];
 };
-type Intent =
-  | { action: 'create' }
-  | { action: 'comment'; number: number }
-  | { action: 'state'; number: number; state: 'open' | 'closed' };
+type Intent = IssueDraftScope['intent'];
+export function issueActionLabel(intent: Intent) {
+  return intent.action === 'create'
+    ? 'Create issue'
+    : intent.action === 'comment'
+      ? `Comment on issue #${intent.number}`
+      : `${intent.state === 'closed' ? 'Close' : 'Reopen'} issue #${intent.number}`;
+}
 type Inspection =
   | { kind: 'issues'; page: ProviderIssuePage }
   | { kind: 'comments'; page: ProviderIssueCommentsPage }
   | { kind: 'state'; issue: ProviderIssueDetails };
-function IssueActionDialog({
+export function IssueActionDialog({
   target,
   intent,
   close,
@@ -38,12 +45,17 @@ function IssueActionDialog({
 }) {
   const dialog = useRef<HTMLDialogElement>(null),
     request = useRef<string | undefined>(undefined);
-  const [title, setTitle] = useState(''),
-    [body, setBody] = useState('');
+  const cancelled = useRef(false);
+  const protectedSubmission = useRef(false);
+  const [fields, setFields] = useState<Omit<IssueDraft, 'uncertain'>>({
+    title: '',
+    body: '',
+    confidential: false,
+    internal: false,
+    reason: 'completed',
+  });
+  const { title, body, confidential, internal, reason } = fields;
   const gitlab = target.provider === 'gitlab';
-  const [confidential, setConfidential] = useState(false);
-  const [internal, setInternal] = useState(false);
-  const [reason, setReason] = useState<'completed' | 'not_planned'>('completed');
   const [dirty, setDirty] = useState(false),
     [discard, setDiscard] = useState(false);
   const [busy, setBusy] = useState(false),
@@ -57,18 +69,32 @@ function IssueActionDialog({
     [changed, setChanged] = useState(false);
   const [inspection, setInspection] = useState<Inspection>(),
     [inspectionPage, setInspectionPage] = useState(1);
+  const [unprotected, setUnprotected] = useState(false);
+  const [closeFailed, setCloseFailed] = useState(false);
+  const storage = useIssueDraft(
+    { accountId: target.accountId, repository: target.repository, intent },
+    ({ uncertain, ...saved }) => {
+      protectedSubmission.current = uncertain;
+      setFields(saved);
+      setDirty(true);
+      setUncertain(uncertain);
+      setChanged(uncertain);
+    },
+  );
+  const edit = (patch: Partial<typeof fields>) => {
+    const next = { ...fields, ...patch };
+    setFields(next);
+    setDirty(true);
+    storage.change({ ...next, uncertain: false });
+  };
   useEffect(() => {
     dialog.current?.showModal();
     return () => {
+      cancelled.current = true;
       if (request.current) void window.openkraken.cancel(request.current);
     };
   }, []);
-  const actionLabel =
-    intent.action === 'create'
-      ? 'Create issue'
-      : intent.action === 'comment'
-        ? `Comment on issue #${intent.number}`
-        : `${intent.state === 'closed' ? 'Close' : 'Reopen'} issue #${intent.number}`;
+  const actionLabel = issueActionLabel(intent);
   const draft = (revision: string) =>
     gitlab
       ? intent.action === 'create'
@@ -110,7 +136,8 @@ function IssueActionDialog({
   ).success;
   const preparedIntent = prepared && ('intent' in prepared ? prepared.intent : prepared);
   const review = async () => {
-    if (request.current || !valid) return;
+    if (request.current || !valid || !storage.ready) return;
+    setUnprotected(false);
     setError('');
     setPrepared(undefined);
     setPreview(undefined);
@@ -118,7 +145,7 @@ function IssueActionDialog({
       const parsed = providerWriteIssueSchema.safeParse(draft(''));
       if (parsed.success) {
         setPrepared(parsed.data);
-        if (parsed.data.action === 'create') setTitle(parsed.data.title);
+        if (parsed.data.action === 'create') setFields({ ...fields, title: parsed.data.title });
       }
       return;
     }
@@ -137,7 +164,7 @@ function IssueActionDialog({
         if (response.kind === 'providerGitLabIssueActionPreview') {
           setPreview(response.preview);
           setPrepared({ intent: parsed, revision: response.preview.revision });
-          if (parsed.action === 'create') setTitle(parsed.title);
+          if (parsed.action === 'create') setFields({ ...fields, title: parsed.title });
         } else if (response.kind === 'error') setError(response.message);
         else if (response.kind === 'cancelled') setError('Issue review cancelled.');
         return;
@@ -176,9 +203,40 @@ function IssueActionDialog({
     if (!prepared || request.current) return;
     const id = crypto.randomUUID();
     request.current = id;
+    cancelled.current = false;
     setBusy(true);
     setError('');
     try {
+      protectedSubmission.current = false;
+      try {
+        await storage.write({ ...fields, uncertain: true });
+        protectedSubmission.current = true;
+      } catch (error) {
+        if (!cancelled.current && !(error instanceof IssueDraftEncryptionUnavailable)) {
+          setUnprotected(false);
+          setPrepared(undefined);
+          setDirty(true);
+          setError(
+            'The saved draft could not be verified. Copy your changes and reopen the action to review the current draft.',
+          );
+          return;
+        }
+        if (!unprotected && !cancelled.current) {
+          setUnprotected(true);
+          setError(
+            'The submission could not be recorded locally. Copy your draft before submitting without crash recovery.',
+          );
+          return;
+        }
+      }
+      setUnprotected(false);
+      if (cancelled.current) {
+        if (protectedSubmission.current)
+          await storage.write(dirty ? { ...fields, uncertain: false } : null).catch(() => {});
+        setPrepared(undefined);
+        setError('Issue action cancelled before submission.');
+        return;
+      }
       const response = await window.openkraken.request(
         'intent' in prepared
           ? {
@@ -197,17 +255,28 @@ function IssueActionDialog({
       if (response.kind === 'providerIssueWritten') {
         setResult(response.result);
         setChanged(true);
+        await storage
+          .write(null)
+          .catch(() =>
+            setError(
+              'The provider confirmed the action. The local recovery copy could not be cleared.',
+            ),
+          );
       } else if (response.kind === 'error') {
         setError(response.message);
         setPrepared(undefined);
         if (response.code === 'PROVIDER_WRITE_UNCERTAIN') {
           setUncertain(true);
           setChanged(true);
-        }
+        } else if (protectedSubmission.current)
+          await storage.write(dirty ? { ...fields, uncertain: false } : null).catch(() => {});
       } else if (response.kind === 'cancelled') {
+        if (protectedSubmission.current)
+          await storage.write(dirty ? { ...fields, uncertain: false } : null).catch(() => {});
+
         setError('Issue action cancelled before submission.');
         setPrepared(undefined);
-      }
+      } else throw new Error('Unknown submission result');
     } catch {
       setError('The action result is unknown. Check existing results before trying again.');
       setPrepared(undefined);
@@ -268,6 +337,35 @@ function IssueActionDialog({
     inspection?.kind === 'state' &&
     intent.action === 'state' &&
     inspection.issue.state === intent.state;
+  const reviewAgain = async () => {
+    setBusy(true);
+    try {
+      if (protectedSubmission.current) await storage.write({ ...fields, uncertain: false });
+      protectedSubmission.current = false;
+      setDirty(true);
+      setUncertain(false);
+      setInspection(undefined);
+      setPrepared(undefined);
+      setPreview(undefined);
+      setError('');
+    } catch {
+      setError('The recovery record could not be updated. Reopen the saved draft before retrying.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const closeDraft = async (remove: boolean) => {
+    setBusy(true);
+    try {
+      await storage.write(remove ? null : { ...fields, uncertain });
+      close(changed);
+    } catch {
+      setCloseFailed(true);
+      setError('The local draft could not be updated. Copy any changes you want to keep.');
+    } finally {
+      setBusy(false);
+    }
+  };
   const leave = () => {
     if (busy) return;
     if (dirty && !result) setDiscard(true);
@@ -288,7 +386,7 @@ function IssueActionDialog({
       <p>
         {target.origin}/{target.repository.owner}/{target.repository.name}
       </p>
-      <fieldset disabled={busy || !!prepared || !!result || uncertain}>
+      <fieldset disabled={!storage.ready || busy || !!prepared || !!result || uncertain}>
         <legend>{intent.action === 'state' ? 'State change' : 'Draft'}</legend>
         {intent.action === 'create' && (
           <label>
@@ -297,8 +395,7 @@ function IssueActionDialog({
               maxLength={gitlab ? 255 : 256}
               value={title}
               onChange={(event) => {
-                setTitle(event.target.value);
-                setDirty(true);
+                edit({ title: event.target.value });
               }}
             />
           </label>
@@ -311,8 +408,7 @@ function IssueActionDialog({
               maxLength={65536}
               value={body}
               onChange={(event) => {
-                setBody(event.target.value);
-                setDirty(true);
+                edit({ body: event.target.value });
               }}
             />
           </label>
@@ -323,8 +419,7 @@ function IssueActionDialog({
               type="checkbox"
               checked={confidential}
               onChange={(event) => {
-                setConfidential(event.target.checked);
-                setDirty(true);
+                edit({ confidential: event.target.checked });
               }}
             />{' '}
             Confidential issue
@@ -336,8 +431,7 @@ function IssueActionDialog({
               type="checkbox"
               checked={internal}
               onChange={(event) => {
-                setInternal(event.target.checked);
-                setDirty(true);
+                edit({ internal: event.target.checked });
               }}
             />{' '}
             Internal note
@@ -353,7 +447,7 @@ function IssueActionDialog({
                 value={reason}
                 onChange={(event) => {
                   if (event.target.value === 'completed' || event.target.value === 'not_planned')
-                    setReason(event.target.value);
+                    edit({ reason: event.target.value });
                 }}
               >
                 <option value="completed">Completed</option>
@@ -417,7 +511,8 @@ function IssueActionDialog({
           </p>
         </section>
       )}
-      {busy && <p role="status">Waiting for provider…</p>}
+      {storage.status && <p aria-live="polite">{storage.status}</p>}
+      {busy && !result && <p role="status">Working…</p>}
       {error && <p role="alert">{error}</p>}
       {result && (
         <p role="status">
@@ -499,16 +594,7 @@ function IssueActionDialog({
                 </>
               )}
               {!reached && (
-                <button
-                  disabled={busy}
-                  onClick={() => {
-                    setUncertain(false);
-                    setInspection(undefined);
-                    setPrepared(undefined);
-                    setPreview(undefined);
-                    setError('');
-                  }}
-                >
+                <button disabled={busy} onClick={() => void reviewAgain()}>
                   I checked; review again
                 </button>
               )}
@@ -518,9 +604,25 @@ function IssueActionDialog({
       )}
       {discard ? (
         <section aria-label="Discard issue draft">
-          <p>Discard this unsent draft?</p>
-          <button onClick={() => setDiscard(false)}>Keep draft</button>
-          <button onClick={() => close(changed)}>Discard draft</button>
+          <p>
+            {uncertain
+              ? 'The provider may have received this action. Keep or discard the local copy?'
+              : 'Keep or discard this draft?'}
+          </p>
+          <button disabled={busy} onClick={() => setDiscard(false)}>
+            Keep draft
+          </button>
+          <button disabled={busy} onClick={() => void closeDraft(false)}>
+            Save and close
+          </button>
+          <button disabled={busy} onClick={() => void closeDraft(true)}>
+            Discard draft
+          </button>
+          {closeFailed && (
+            <button disabled={busy} onClick={() => close(changed)}>
+              Close without saving changes
+            </button>
+          )}
         </section>
       ) : (
         <div className="dialog-actions">
@@ -530,6 +632,7 @@ function IssueActionDialog({
           {busy && (
             <button
               onClick={() => {
+                cancelled.current = true;
                 if (request.current) void window.openkraken.cancel(request.current);
               }}
             >
@@ -550,11 +653,11 @@ function IssueActionDialog({
                   Edit action
                 </button>
                 <button disabled={busy} onClick={() => void submit()}>
-                  Confirm issue action
+                  {unprotected ? 'Submit without crash recovery' : 'Confirm issue action'}
                 </button>
               </>
             ) : (
-              <button disabled={busy || !valid} onClick={() => void review()}>
+              <button disabled={!storage.ready || busy || !valid} onClick={() => void review()}>
                 Review issue action
               </button>
             ))}
@@ -586,6 +689,7 @@ export function IssueAction({
       <button onClick={() => setOpened(true)}>{label}</button>
       {opened && (
         <IssueActionDialog
+          key={JSON.stringify([target.accountId, target.repository, intent])}
           target={target}
           intent={intent}
           close={(changed) => {

@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { LocalDraftFiles } from './local-draft-files.js';
 import type { SecretProtection } from './provider-vault.js';
 
+export class DraftEncryptionUnavailable extends Error {}
+
 export class ProtectedDraftFiles<T extends { scope: { accountId: string } }> {
   private files: LocalDraftFiles<string>;
   constructor(
@@ -49,10 +51,16 @@ export class ProtectedDraftFiles<T extends { scope: { accountId: string } }> {
     }
   }
   async save(id: string[], revision: string | null, record: T | null) {
-    const value =
-      record === null
-        ? null
-        : (await this.protection.encrypt(JSON.stringify(record))).toString('base64');
+    let value: string | null = null;
+    if (record !== null) {
+      try {
+        value = (await this.protection.encrypt(JSON.stringify(record))).toString('base64');
+      } catch {
+        // Bypassing protection must never bypass a revision conflict.
+        if ((await this.files.read(id)).revision !== revision) throw new Error('Draft changed');
+        throw new DraftEncryptionUnavailable('Could not protect the draft on this device.');
+      }
+    }
     return (await this.files.save(id, revision, value)).revision;
   }
 }

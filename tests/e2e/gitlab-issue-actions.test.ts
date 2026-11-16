@@ -142,6 +142,13 @@ test('GitLab issue actions review native visibility, preserve stale drafts and i
       .getByRole('textbox', { name: 'Description', exact: true })
       .fill('Literal <script>description</script>');
     await dialog.getByRole('checkbox', { name: 'Confidential issue', exact: true }).check();
+    await dialog.getByRole('button', { name: 'Close action', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Save and close', exact: true }).click();
+    await browser.getByRole('button', { name: 'New issue', exact: true }).click();
+    await expect(
+      dialog.getByRole('checkbox', { name: 'Confidential issue', exact: true }),
+    ).toBeChecked();
+
     await dialog.getByRole('button', { name: 'Review issue action', exact: true }).click();
     await expect(dialog.getByRole('region', { name: 'Confirm issue action' })).toContainText(
       'Confidential issue',
@@ -159,6 +166,13 @@ test('GitLab issue actions review native visibility, preserve stale drafts and i
       .getByRole('textbox', { name: 'Comment', exact: true })
       .fill('Exact <script>comment</script>');
     await dialog.getByRole('checkbox', { name: 'Internal note', exact: true }).check();
+    await dialog.getByRole('button', { name: 'Close action', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Save and close', exact: true }).click();
+    await detail.getByRole('button', { name: 'Write issue comment', exact: true }).click();
+    await expect(
+      dialog.getByRole('checkbox', { name: 'Internal note', exact: true }),
+    ).toBeChecked();
+
     await dialog.getByRole('button', { name: 'Review issue action', exact: true }).click();
     await expect(dialog.getByRole('region', { name: 'Confirm issue action' })).toContainText(
       'Internal note',

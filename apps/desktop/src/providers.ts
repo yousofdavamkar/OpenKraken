@@ -1,3 +1,4 @@
+import { DraftEncryptionUnavailable } from './protected-draft-files.js';
 import type { IssueDraftRequest, IssueDrafts } from './issue-drafts.js';
 import type { ReviewDraftRequest, ReviewDrafts } from './review-drafts.js';
 import {
@@ -353,7 +354,9 @@ export class ProviderService {
         throw new ProviderError('PROVIDER_ACCOUNT', 'This issue account is no longer connected.');
       try {
         return await store.request(request);
-      } catch {
+      } catch (error) {
+        if (error instanceof DraftEncryptionUnavailable)
+          throw new ProviderError('DRAFT_ENCRYPTION_UNAVAILABLE', error.message);
         throw new ProviderError(
           'DRAFT_UNAVAILABLE',
           'The issue draft could not be accessed or changed. Check the keychain and reopen the saved copy.',

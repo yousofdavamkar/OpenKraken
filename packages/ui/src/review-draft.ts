@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import type {
+  IssueDraft,
+  IssueDraftScope,
+  Result,
   ProviderCommentTarget,
   ReviewDraft,
   ReviewDraftScope,
@@ -10,15 +13,65 @@ export function useReviewDraft(
   target: ProviderCommentTarget | null,
   restore: (draft: ReviewDraft) => void,
 ) {
+  return useProviderDraft<ReviewDraft>(
+    restore,
+    () =>
+      window.openkraken
+        .request({ id: crypto.randomUUID(), method: 'reviewDraftRead', scope, target })
+        .then(reviewResult),
+    (draft, revision) =>
+      window.openkraken
+        .request({
+          id: crypto.randomUUID(),
+          method: 'reviewDraftSave',
+          scope,
+          target,
+          draft,
+          revision,
+        })
+        .then(reviewResult),
+  );
+}
+function reviewResult(res: Result) {
+  if (res.kind !== 'reviewDraft')
+    throw new Error(res.kind === 'error' ? res.message : 'Draft access was not confirmed.');
+  return res;
+}
+export class IssueDraftEncryptionUnavailable extends Error {}
+function issueResult(res: Result) {
+  if (res.kind === 'error' && res.code === 'DRAFT_ENCRYPTION_UNAVAILABLE')
+    throw new IssueDraftEncryptionUnavailable(res.message);
+  if (res.kind !== 'issueDraft')
+    throw new Error(res.kind === 'error' ? res.message : 'Draft access was not confirmed.');
+  return res;
+}
+export function useIssueDraft(scope: IssueDraftScope, restore: (draft: IssueDraft) => void) {
+  return useProviderDraft<IssueDraft>(
+    restore,
+    () =>
+      window.openkraken
+        .request({ id: crypto.randomUUID(), method: 'issueDraftRead', scope })
+        .then(issueResult),
+    (draft, revision) =>
+      window.openkraken
+        .request({ id: crypto.randomUUID(), method: 'issueDraftSave', scope, draft, revision })
+        .then(issueResult),
+  );
+}
+function useProviderDraft<T>(
+  restore: (draft: T) => void,
+  read: () => Promise<{ draft: T | null; revision: string | null }>,
+  save: (draft: T | null, revision: string | null) => Promise<{ revision: string | null }>,
+) {
   const [session] = useState(() => ({
-    scope,
-    target,
+    read,
+    save,
     restore,
     revision: null as string | null,
     initialized: false,
     live: false,
     timer: undefined as ReturnType<typeof setTimeout> | undefined,
-    pending: undefined as ReviewDraft | null | undefined,
+    pending: undefined as T | null | undefined,
     writes: Promise.resolve(),
     version: 0,
   }));
@@ -35,18 +88,7 @@ export function useReviewDraft(
       .then(async () => {
         if (!session.initialized)
           throw new Error('The original draft could not be read. Reopen the composer to retry.');
-        const res = await window.openkraken.request({
-          id: crypto.randomUUID(),
-          method: 'reviewDraftSave',
-          scope: session.scope,
-          target: session.target,
-          revision: session.revision,
-          draft,
-        });
-        if (res.kind !== 'reviewDraft')
-          throw new Error(
-            res.kind === 'error' ? res.message : 'Saving the draft was not confirmed.',
-          );
+        const res = await session.save(draft, session.revision);
         session.revision = res.revision;
         if (session.live && edit === session.version) setStatus(draft ? 'Draft saved locally' : '');
       });
@@ -60,17 +102,10 @@ export function useReviewDraft(
   useEffect(() => {
     session.live = true;
     let active = true;
-    void window.openkraken
-      .request({
-        id: crypto.randomUUID(),
-        method: 'reviewDraftRead',
-        scope: session.scope,
-        target: session.target,
-      })
+    void session
+      .read()
       .then((res) => {
         if (!active) return;
-        if (res.kind !== 'reviewDraft')
-          throw new Error(res.kind === 'error' ? res.message : 'The draft could not be read.');
         session.revision = res.revision;
         session.initialized = true;
         if (res.draft) {
@@ -96,7 +131,7 @@ export function useReviewDraft(
       unload();
     };
   }, [session]);
-  const queue = (draft: ReviewDraft | null) => {
+  const queue = (draft: T | null) => {
     clearTimeout(session.timer);
     session.version++;
     session.pending = draft;
@@ -105,13 +140,13 @@ export function useReviewDraft(
   return {
     ready,
     status,
-    change(draft: ReviewDraft | null) {
+    change(draft: T | null) {
       queue(draft);
       session.timer = setTimeout(() => {
         void flush().catch(() => {});
       }, 250);
     },
-    write(draft: ReviewDraft | null) {
+    write(draft: T | null) {
       queue(draft);
       return flush();
     },
