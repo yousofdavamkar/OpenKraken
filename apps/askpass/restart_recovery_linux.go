@@ -64,22 +64,25 @@ func restartCommand(target, profile string, detached bool) *exec.Cmd {
 	return command
 }
 
-func restartConfirmed(target string) bool {
-	_, err := os.Lstat(target + ".openkraken-update")
-	return os.IsNotExist(err)
-}
+type restartGroupState int
+
+const (
+	restartGroupUnknown restartGroupState = iota
+	restartGroupRunning
+	restartGroupEmpty
+)
 
 // The helper remains its group leader, preventing reuse of this group identity.
 // Ordinary replacement descendants must be gone before a recovery rename.
-func restartGroupIdle() bool {
+func inspectRestartGroup() restartGroupState {
 	folder, err := os.Open("/proc")
 	if err != nil {
-		return false
+		return restartGroupUnknown
 	}
 	names, err := folder.Readdirnames(131073)
 	folder.Close()
 	if (err != nil && err != io.EOF) || len(names) > 131072 {
-		return false
+		return restartGroupUnknown
 	}
 	for _, name := range names {
 		pid, err := strconv.Atoi(name)
@@ -91,7 +94,7 @@ func restartGroupIdle() bool {
 			continue
 		}
 		if err != nil {
-			return false
+			return restartGroupUnknown
 		}
 		if group != os.Getpid() {
 			continue
@@ -101,23 +104,26 @@ func restartGroupIdle() bool {
 			continue
 		}
 		if err != nil {
-			return false
+			return restartGroupUnknown
 		}
 		data, err := io.ReadAll(io.LimitReader(file, 4097))
 		file.Close()
 		if err != nil || len(data) > 4096 {
-			return false
+			return restartGroupUnknown
 		}
 		end := strings.LastIndex(string(data), ")")
 		if end < 0 {
-			return false
+			return restartGroupUnknown
 		}
 		fields := strings.Fields(string(data[end+1:]))
-		if len(fields) < 3 || (fields[0] != "Z" && fields[0] != "X" && fields[0] != "x") {
-			return false
+		if len(fields) < 3 {
+			return restartGroupUnknown
+		}
+		if fields[0] != "Z" && fields[0] != "X" && fields[0] != "x" {
+			return restartGroupRunning
 		}
 	}
-	return true
+	return restartGroupEmpty
 }
 
 func restartDirectory(path string, private bool) bool {
@@ -144,14 +150,14 @@ func restartSync(path string) bool {
 
 // After the rename, restore from the backup. Before the rename, the installed
 // predecessor must still be the backup's other hard link. Launch it in place.
-func reopenPredecessor(target, profile, nextHash string, nextSize int64, previousHash string, previousSize int64, journalHash string, beforeRename bool) int {
+func reopenPredecessor(target, profile, nextHash string, nextSize int64, previousHash string, previousSize int64, journalHash string, beforeRename bool, originalFolder os.FileInfo) int {
 	folder := target + ".openkraken-update"
-	if !restartDirectory(filepath.Dir(target), false) || !restartDirectory(folder, true) || !restartGroupIdle() {
+	if !restartDirectory(filepath.Dir(target), false) || !restartDirectory(folder, true) || inspectRestartGroup() != restartGroupEmpty {
 		return 125
 	}
 	folderBefore, folderErr := os.Lstat(folder)
 	parentBefore, parentErr := os.Lstat(filepath.Dir(target))
-	if folderErr != nil || parentErr != nil {
+	if folderErr != nil || parentErr != nil || originalFolder == nil || !os.SameFile(originalFolder, folderBefore) {
 		return 125
 	}
 	directory, err := os.Open(folder)
@@ -190,7 +196,7 @@ func reopenPredecessor(target, profile, nextHash string, nextSize int64, previou
 	if !ok {
 		return 125
 	}
-	if !restartGroupIdle() {
+	if inspectRestartGroup() != restartGroupEmpty {
 		return 125
 	}
 	verified := map[string]os.FileInfo{replacement: current, backup: previous, journal: journalBefore, folder: folderBefore, filepath.Dir(target): parentBefore}

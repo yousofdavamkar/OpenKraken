@@ -36,6 +36,18 @@ func runRelaunch(args []string) int {
 			return 125
 		}
 	}
+	// Keep the directory inode reserved until supervision ends. A later installation
+	// of the same versions can have a journal with exactly the same bytes.
+	folderPath := args[1] + ".openkraken-update"
+	folder, folderErr := os.OpenFile(folderPath, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+	var originalFolder os.FileInfo
+	if folderErr == nil {
+		defer folder.Close()
+		originalFolder, folderErr = folder.Stat()
+	}
+	if folderErr != nil && !os.IsNotExist(folderErr) {
+		return 125
+	}
 	signal.Ignore(syscall.SIGHUP)
 	if _, err := fmt.Fprintln(os.Stdout, "ready"); err != nil {
 		return 125
@@ -61,12 +73,23 @@ func runRelaunch(args []string) int {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	current, err := os.Lstat(folderPath)
+	if err == nil {
+		if originalFolder == nil || !os.SameFile(originalFolder, current) {
+			return 125
+		}
+	} else if !os.IsNotExist(err) || originalFolder != nil {
+		return 125
+	}
+	restore := func(beforeRename bool) int {
+		return reopenPredecessor(args[1], args[2], args[3], size, args[5], previousSize, args[7], beforeRename, originalFolder)
+	}
 	if _, ok := restartVerifiedFile(args[1], args[3], size, 1, false); !ok {
-		return reopenPredecessor(args[1], args[2], args[3], size, args[5], previousSize, args[7], true)
+		return restore(true)
 	}
 	commandToRun := restartCommand(args[1], args[2], false)
 	if commandToRun.Start() != nil {
-		return reopenPredecessor(args[1], args[2], args[3], size, args[5], previousSize, args[7], false)
+		return restore(false)
 	}
 	finished := make(chan struct{})
 	var exited <-chan struct{} = finished
@@ -76,24 +99,35 @@ func runRelaunch(args []string) int {
 	defer ticker.Stop()
 	timeout := time.NewTimer(60 * time.Second)
 	defer timeout.Stop()
+	slow := false
 	for {
 		select {
 		case <-ticker.C:
 		case <-timeout.C:
-			// A running, unconfirmed application is not safe to replace.
-			return 125
+			// A slow start may still confirm, or the user may close the stalled app.
+			// Retain the group identity and check less frequently until either happens.
+			slow = true
+			ticker.Reset(2 * time.Second)
 		case <-exited:
 			launcherExited = true
 			exited = nil
 		}
-		if restartConfirmed(args[1]) {
+		current, err := os.Lstat(folderPath)
+		if os.IsNotExist(err) {
 			return 0
 		}
-		// A launcher can exit before its ordinary descendants. Keep the group
-		// identity reserved for the existing supervision window; restore only
-		// after the group is idle, without terminating a running application.
-		if launcherExited && restartGroupIdle() {
-			return reopenPredecessor(args[1], args[2], args[3], size, args[5], previousSize, args[7], false)
+		if err != nil || originalFolder == nil || !os.SameFile(originalFolder, current) {
+			return 125
+		}
+		if launcherExited {
+			switch inspectRestartGroup() {
+			case restartGroupEmpty:
+				return restore(false)
+			case restartGroupUnknown:
+				if slow {
+					return 125
+				}
+			}
 		}
 	}
 }

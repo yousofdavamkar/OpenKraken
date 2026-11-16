@@ -119,6 +119,9 @@ test
     'live-descendant',
     'delayed-descendant',
     'unconfirmed-running',
+    'confirmed-after-deadline',
+    'replaced-transaction',
+    'changed-after-arming',
   ])('native restart recovery: %s', { timeout: 90000 }, async (scenario, context) => {
   const syncError = scenario === 'rollback-sync-error';
   if (syncError && process.getuid?.() === 0) context.skip('Root can open a mode-0300 directory');
@@ -132,18 +135,29 @@ test
   const target = join(imageDirectory, 'OpenKraken.AppImage');
   const recovery = target + '.openkraken-update';
   await mkdir(join(root, 'updates'), { mode: 0o700 });
+  const lateExit = ['unconfirmed-running', 'live-descendant', 'confirmed-after-deadline'].includes(
+    scenario,
+  );
+  const waitForRelease = 'while [ ! -e "$0.release" ]; do sleep 0.1; done';
+  const markLauncher = 'printf "%s" "$$" > "$0.child"';
+  const confirm =
+    'rm "$0.openkraken-update/previous.AppImage" "$0.openkraken-update/transaction.json"\nrmdir "$0.openkraken-update"';
+  const descendant = (command: string) => `( ${command} ) &\nprintf "%s" "$!" > "$0.child"\nexit 9`;
+  const scripts: Record<string, string> = {
+    'changed-after-arming': 'printf launched > "$0.started"\nexit 9',
+    'changed-target': 'printf changed > "$0"\nexit 9',
+    'replaced-transaction':
+      'mv "$0.openkraken-update" "$0.old"\nmkdir -m 700 "$0.openkraken-update"\ncp -p "$0.old/"* "$0.openkraken-update/"\nexit 9',
+    'confirmed-after-deadline': [markLauncher, waitForRelease, confirm].join('\n'),
+    confirmed: confirm,
+    'live-descendant': descendant(waitForRelease),
+    'delayed-descendant': descendant('sleep 3'),
+    'unconfirmed-running': [markLauncher, waitForRelease, 'exit 9'].join('\n'),
+  };
   const replacement =
     scenario === 'not-executable'
       ? 'invalid executable bytes'
-      : scenario === 'changed-target'
-        ? '#!/bin/sh\nprintf changed > "$0"\nexit 9\n'
-        : scenario === 'confirmed'
-          ? '#!/bin/sh\nrm "$0.openkraken-update/previous.AppImage" "$0.openkraken-update/transaction.json"\nrmdir "$0.openkraken-update"\nexit 0\n'
-          : ['live-descendant', 'delayed-descendant'].includes(scenario)
-            ? `#!/bin/sh\nsleep ${scenario === 'live-descendant' ? 62 : 3} &\nprintf "%s" "$!" > "$0.child"\nexit 9\n`
-            : scenario === 'unconfirmed-running'
-              ? '#!/bin/sh\nprintf "%s" "$$" > "$0.child"\nexec sleep 62\n'
-              : '#!/bin/sh\nexit 9\n';
+      : `#!/bin/sh\n${scripts[scenario] ?? 'exit 9'}\n`;
   const predecessor = '#!/bin/sh\nprintf "%s" "$1" > "$0.restored"\n';
   const journal = JSON.stringify({ fixture: 'retained predecessor' });
   await mkdir(recovery, { mode: 0o700 });
@@ -183,7 +197,6 @@ test
     // The rename is allowed, but opening the parent directory for fsync fails.
     await expect(open(imageDirectory, 'r')).rejects.toMatchObject({ code: 'EACCES' });
   }
-  const supervisionStarted = performance.now();
   const parent = spawn(
     process.execPath,
     [
@@ -195,7 +208,15 @@ test
     child.stdout.on('data', (data) => {
       output += data;
       if (output === 'ready\\n') { output = ''; child.stdin.end('launch\\n'); }
-      else if (output === 'armed\\n') process.stdout.write(String(child.pid), () => process.exit(0));
+      else if (output === 'armed\\n') {
+        if (${scenario === 'changed-after-arming'}) {
+          const fs = require('node:fs');
+          const folder = ${JSON.stringify(recovery)};
+          fs.renameSync(folder, folder + '.original');
+          fs.cpSync(folder + '.original', folder, {recursive: true, preserveTimestamps: true});
+        }
+        process.stdout.write(String(child.pid), () => process.exit(0));
+      }
     });
     child.once('exit', () => process.exit(2));
     child.once('error', () => process.exit(3));
@@ -212,13 +233,18 @@ test
     expect(await exited).toBe(0);
     const helperPid = Number(output);
     expect(helperPid).toBeGreaterThan(1);
-    await expect
-      .poll(() => stopped(helperPid), {
-        timeout: ['unconfirmed-running', 'live-descendant'].includes(scenario) ? 65000 : 5000,
-      })
-      .toBe(true);
-    if (['unconfirmed-running', 'live-descendant'].includes(scenario))
-      expect(performance.now() - supervisionStarted).toBeGreaterThanOrEqual(59000);
+    if (lateExit) {
+      await expect.poll(() => readFile(target + '.child', 'utf8')).toMatch(/^\d+$/);
+      const childPid = Number(await readFile(target + '.child', 'utf8'));
+      await new Promise((resolve) => setTimeout(resolve, 61000));
+      expect(await stopped(childPid)).toBe(false);
+      expect(await readFile(target, 'utf8')).toBe(replacement);
+      expect(await readFile(backup, 'utf8')).toBe(predecessor);
+      await expect(readFile(target + '.restored')).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await stopped(helperPid)).toBe(false);
+      await writeFile(target + '.release', '');
+    }
+    await expect.poll(() => stopped(helperPid), { timeout: 10000 }).toBe(true);
     if (beforeRename) {
       if (scenario === 'before-rename') {
         await expect
@@ -236,7 +262,14 @@ test
         code: 'ENOENT',
       });
     } else if (
-      ['exited', 'not-executable', 'delayed-descendant', 'rollback-sync-error'].includes(scenario)
+      [
+        'exited',
+        'not-executable',
+        'delayed-descendant',
+        'live-descendant',
+        'unconfirmed-running',
+        'rollback-sync-error',
+      ].includes(scenario)
     ) {
       expect(await readFile(target, 'utf8')).toBe(predecessor);
       await expect
@@ -253,13 +286,18 @@ test
       );
       if (scenario.endsWith('unknown-file'))
         expect(await readFile(recovery + '/unexpected', 'utf8')).toBe('preserve');
-      if (['unconfirmed-running', 'live-descendant'].includes(scenario))
-        expect(await stopped(Number(await readFile(target + '.child', 'utf8')))).toBe(false);
+      if (scenario === 'changed-after-arming')
+        await expect(readFile(target + '.started')).rejects.toMatchObject({ code: 'ENOENT' });
+      if (['replaced-transaction', 'changed-after-arming'].includes(scenario))
+        expect(await readFile(backup, 'utf8')).toBe(predecessor);
+      if (scenario === 'confirmed-after-deadline')
+        await expect(readFile(backup)).rejects.toMatchObject({ code: 'ENOENT' });
     }
   } finally {
     parent.kill('SIGKILL');
     await exited;
-    if (['live-descendant', 'delayed-descendant', 'unconfirmed-running'].includes(scenario)) {
+    if (lateExit) await writeFile(target + '.release', '');
+    if (lateExit || scenario === 'delayed-descendant') {
       const childPid = Number(await readFile(target + '.child', 'utf8'));
       await expect.poll(() => stopped(childPid), { timeout: 70000 }).toBe(true);
     }
