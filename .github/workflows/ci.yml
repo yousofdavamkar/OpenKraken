@@ -292,6 +292,7 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --stalled-commit
           xvfb-run -a node scripts/verify-update-restart.mjs --failed-startup
           xvfb-run -a node scripts/verify-update-restart.mjs --rollback-sync-error
+          xvfb-run -a node scripts/verify-update-restart.mjs --pending-notice
           xvfb-run -a node scripts/verify-update-restart.mjs --delayed-descendant
           xvfb-run -a node scripts/verify-update-restart.mjs --interrupt-before-rename
           xvfb-run -a node scripts/verify-update-restart.mjs --interrupt-after-rename

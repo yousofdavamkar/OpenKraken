@@ -12,6 +12,7 @@ import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
+import { locateGo } from './build-askpass.mjs';
 import { buildAppImage } from './appimage.mjs';
 import { packageFuses, pinnedElectronRuntime, sha256, verifyFuses } from './package-security.mjs';
 
@@ -24,8 +25,12 @@ let launchOutput = '';
 const marker = join(root, 'started.json');
 const delayedDescendant = process.argv.includes('--delayed-descendant');
 const rollbackSyncError = process.argv.includes('--rollback-sync-error');
+const pendingNotice = process.argv.includes('--pending-notice');
 const failStartup =
-  process.argv.includes('--failed-startup') || delayedDescendant || rollbackSyncError;
+  process.argv.includes('--failed-startup') ||
+  delayedDescendant ||
+  rollbackSyncError ||
+  pendingNotice;
 const installFolder = rollbackSyncError ? join(root, 'install') : root;
 const helperUnavailable = process.argv.includes('--helper-unavailable');
 const unchangedImage = process.argv.includes('--unchanged-image');
@@ -150,6 +155,34 @@ try {
   }
   const runtime = join(root, 'runtime');
   execFileSync(process.execPath, [resolve('scripts/build.mjs'), runtime], { stdio: 'inherit' });
+  if (pendingNotice) {
+    // Interrupt the disposable helper after the restored image and private notice have been synced.
+    const source = resolve('apps/askpass/restart_recovery_linux.go');
+    const code = await readFile(source, 'utf8');
+    const publish = 'if os.Rename(temporary, target) == nil {';
+    assert.equal(code.split(publish).length, 2, 'Expected exactly one native notice publication');
+    const modified = join(root, 'notice-interruption.go');
+    await writeFile(modified, code.replace(publish, 'os.Exit(23)\n\t' + publish));
+    const overlay = join(root, 'helper-overlay.json');
+    await writeFile(overlay, JSON.stringify({ Replace: { [source]: modified } }));
+    execFileSync(
+      await locateGo(),
+      [
+        'build',
+        '-overlay',
+        overlay,
+        '-trimpath',
+        '-ldflags=-s -w',
+        '-o',
+        join(runtime, 'helpers/openkraken-askpass'),
+        '.',
+      ],
+      {
+        cwd: resolve('apps/askpass'),
+        env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local' },
+      },
+    );
+  }
   for (const version of [initialVersion, replacementVersion]) {
     const staging = join(root, version, 'staging');
     await mkdir(staging, { recursive: true });
@@ -532,6 +565,30 @@ try {
       window.removeEventListener('beforeunload', Reflect.get(window, 'fixtureUnload')),
     );
     await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
+    if (pendingNotice) {
+      const scratch = join(profile, 'updates/rollback-notice.tmp');
+      await expect
+        .poll(
+          async () =>
+            await readFile(scratch, 'utf8').catch((error) => {
+              if (error.code !== 'ENOENT') throw error;
+              return null;
+            }),
+          { timeout: 30000 },
+        )
+        .toBe('{"schemaVersion":1,"outcome":"restored"}');
+      assert.equal(await sha256(target), originalDigest);
+      await assert.rejects(stat(join(profile, 'updates/rollback-notice.json')), { code: 'ENOENT' });
+      assert.deepEqual(JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')), [
+        initialVersion,
+        replacementVersion,
+      ]);
+      child = spawn(target, [`--user-data-dir=${profile}`], {
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, TMPDIR: root, XDG_CONFIG_HOME: configHome },
+      });
+    }
     let started = JSON.parse(await waitForFile(marker, slowCommit ? 60000 : 30000));
     if (rollbackSyncError) {
       assert.equal(started.version, initialVersion);
@@ -661,26 +718,41 @@ try {
           'An update failed to start and the previous version was restored.',
         );
         await reopenedPage.screenshot({ path: 'test-results/appimage-recovery-notice.png' });
+        if (pendingNotice) {
+          assert.deepEqual(
+            JSON.parse(await readFile(join(profile, 'updates/rollback-notice.tmp'), 'utf8')),
+            { schemaVersion: 1, outcome: 'restored' },
+          );
+          await assert.rejects(stat(join(profile, 'updates/rollback-notice.json')), {
+            code: 'ENOENT',
+          });
+        }
         await reopenedDialog.getByRole('button', { name: 'Dismiss recovery notice' }).click();
         await expect(reopenedDialog.getByRole('alert')).toHaveCount(0);
         await assert.rejects(stat(join(profile, 'updates/rollback-notice.json')), {
           code: 'ENOENT',
         });
+        if (pendingNotice)
+          await assert.rejects(stat(join(profile, 'updates/rollback-notice.tmp')), {
+            code: 'ENOENT',
+          });
       }
     }
     await delay(500);
     console.log(
-      stalledCommit
-        ? 'Packaged AppImage: finalization deadline stopped a stalled commit; the verified predecessor reopened and cleaned staging.'
-        : slowCommit
-          ? 'Packaged AppImage: the 22-second commit survived repeated quit, launched the signed replacement and confirmed startup.'
-          : interruptedCommit
-            ? `Packaged AppImage: killed the parent ${afterRename ? 'after' : 'before'} rename, launched ${started.version}, cleaned staging and retained the release watermark.`
-            : delayedDescendant
-              ? 'Packaged AppImage: waited for the delayed descendant, restored the exact predecessor, and retained the release watermark.'
-              : failStartup
-                ? 'Packaged AppImage: failed replacement startup restored and launched the exact predecessor; startup cleanup and release watermark retention passed.'
-                : 'Packaged AppImage: signed HTTPS download, cancelled unsaved-work restart, accepted install, new-version launch and recovery acknowledgement passed.',
+      pendingNotice
+        ? 'Packaged AppImage: manual relaunch after interrupted notice publication recovered the previous image, displayed its rollback notice and preserved the signed release watermark.'
+        : stalledCommit
+          ? 'Packaged AppImage: finalization deadline stopped a stalled commit; the verified predecessor reopened and cleaned staging.'
+          : slowCommit
+            ? 'Packaged AppImage: the 22-second commit survived repeated quit, launched the signed replacement and confirmed startup.'
+            : interruptedCommit
+              ? `Packaged AppImage: killed the parent ${afterRename ? 'after' : 'before'} rename, launched ${started.version}, cleaned staging and retained the release watermark.`
+              : delayedDescendant
+                ? 'Packaged AppImage: waited for the delayed descendant, restored the exact predecessor, and retained the release watermark.'
+                : failStartup
+                  ? 'Packaged AppImage: failed replacement startup restored and launched the exact predecessor; startup cleanup and release watermark retention passed.'
+                  : 'Packaged AppImage: signed HTTPS download, cancelled unsaved-work restart, accepted install, new-version launch and recovery acknowledgement passed.',
     );
   }
   completed = true;
