@@ -105,3 +105,48 @@ for (const failure of ['missing-ref-object', 'missing-parent'] as const)
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+test('a watcher notification received before initial layout updates the displayed repository', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-delayed-layout-'));
+  const repository = createFixture(join(root, 'repository'), 'linear', 32);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, repository);
+    await page.evaluate(() => {
+      window.openkraken.subscribe((event) => {
+        if (event.type !== 'repositoryChanged') return;
+        performance.mark('test-watcher-' + event.mode);
+        for (const domain of event.domains) performance.mark('test-change-' + domain);
+      });
+      const send = Worker.prototype.postMessage;
+      Worker.prototype.postMessage = new Proxy(send, {
+        apply(target, worker, args) {
+          if (args[0].method !== 'reset') return Reflect.apply(target, worker, args);
+          Worker.prototype.postMessage = send;
+          window.addEventListener(
+            'test-release-layout',
+            () => Reflect.apply(target, worker, args),
+            { once: true },
+          );
+          performance.mark('test-held-layout');
+        },
+      });
+    });
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    await page.waitForFunction(() => performance.getEntriesByName('test-held-layout').length);
+    await page.waitForFunction(() => performance.getEntriesByName('test-watcher-native').length);
+    fixtureGit(repository, ['branch', 'while-layout-pending']);
+    await page.waitForFunction(() => performance.getEntriesByName('test-change-refs').length);
+    await page.evaluate(() => window.dispatchEvent(new Event('test-release-layout')));
+    await expect(page.getByText('Watching for changes', { exact: true })).toBeVisible();
+    await expect(page.locator('.refs .ref', { hasText: 'while-layout-pending' })).toBeVisible();
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -581,3 +581,13 @@ test('background snapshots retain undo controls until fresh working state arrive
   expect(useRepository.getState().workingState?.undo?.label).toBe('Delete tag');
   expect(useRepository.getState().syncing).toBeUndefined();
 });
+
+test('reopening the same repository retains its active watcher mode', async () => {
+  const snapshot = fixture();
+  await open(snapshot);
+  useRepository.setState({ watcherMode: 'polling' });
+  await open({ ...snapshot, cursor: crypto.randomUUID() });
+  expect(useRepository.getState().watcherMode).toBe('polling');
+  await open({ ...snapshot, repository: { ...snapshot.repository, id: 'b'.repeat(64) } });
+  expect(useRepository.getState().watcherMode).toBeUndefined();
+});

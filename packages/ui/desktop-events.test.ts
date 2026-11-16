@@ -29,3 +29,42 @@ test('mounted views share one desktop subscription and unsubscribe independently
     vi.unstubAllGlobals();
   }
 });
+
+test('watcher startup coalesces domains for the current repository until its view subscribes', async () => {
+  vi.resetModules();
+  let emit!: (event: DesktopEvent) => void;
+  vi.stubGlobal('window', {
+    openkraken: {
+      subscribe: (listener: typeof emit) => {
+        emit = listener;
+      },
+    },
+  });
+  try {
+    const { subscribeRepositoryChanges } = await import('./src/desktop-events.js');
+    const receive = vi.fn();
+    const old = subscribeRepositoryChanges('old', receive);
+    emit({ type: 'repositoryChanged', repoId: 'new', mode: 'native', domains: ['refs'] });
+    emit({
+      type: 'repositoryChanged',
+      repoId: 'new',
+      mode: 'polling',
+      domains: ['refs', 'status'],
+    });
+    emit({ type: 'activityChanged' });
+    expect(receive).not.toHaveBeenCalled();
+    old();
+    const current = subscribeRepositoryChanges('new', receive);
+    expect(receive.mock.calls).toEqual([
+      [{ type: 'repositoryChanged', repoId: 'new', mode: 'polling', domains: ['refs', 'status'] }],
+    ]);
+    emit({ type: 'repositoryChanged', repoId: 'new', mode: 'native', domains: [] });
+    expect(receive).toHaveBeenCalledTimes(2);
+    current();
+    const again = subscribeRepositoryChanges('new', receive);
+    expect(receive).toHaveBeenCalledTimes(2);
+    again();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

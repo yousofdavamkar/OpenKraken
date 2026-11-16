@@ -1,5 +1,5 @@
-import { subscribeDesktopEvents } from './desktop-events.js';
-import { useEffect, useState } from 'react';
+import { subscribeRepositoryChanges } from './desktop-events.js';
+import { useEffect, useEffectEvent, useState } from 'react';
 import type { RepositoryEvent } from '@openkraken/ipc-contract';
 import { AutomaticFetch } from './automatic-fetch.js';
 import { useRepository } from './store.js';
@@ -15,6 +15,9 @@ export function RepositorySync() {
   const { snapshot, watcherMode } = useRepository();
   const [focusRefresh, setFocusRefresh] = useState(loadFocus);
   const repoId = snapshot?.repository.id;
+  const shouldRefreshOnFocus = useEffectEvent(
+    () => focusRefresh && !document.querySelector('dialog[open]'),
+  );
   useEffect(() => {
     if (!repoId) return;
     let stopped = false,
@@ -50,14 +53,14 @@ export function RepositorySync() {
         if (domains.size) schedule();
       }
     };
-    const unsubscribe = subscribeDesktopEvents((event) => {
-      if (event.type !== 'repositoryChanged' || event.repoId !== repoId) return;
+    const unsubscribe = subscribeRepositoryChanges(repoId, (event) => {
+      if (useRepository.getState().snapshot?.repository.id !== repoId) return;
       useRepository.setState({ watcherMode: event.mode });
       for (const domain of event.domains) domains.add(domain);
       schedule();
     });
     const focus = () => {
-      if (!focusRefresh || document.querySelector('dialog[open]')) return;
+      if (!shouldRefreshOnFocus()) return;
       domains.add('refs');
       schedule();
     };
@@ -68,7 +71,7 @@ export function RepositorySync() {
       unsubscribe();
       window.removeEventListener('focus', focus);
     };
-  }, [repoId, focusRefresh]);
+  }, [repoId]);
   if (!snapshot) return null;
   return (
     <div className="repository-sync">

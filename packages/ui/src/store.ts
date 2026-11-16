@@ -275,7 +275,7 @@ export const useRepository = create<State>()(
               JSON.stringify(s.workingState?.status) !== JSON.stringify(result.snapshot.status)
             )
               s.workingState = undefined;
-            if (!sameRepository) {
+            if (previous.snapshot?.repository.id !== result.snapshot.repository.id) {
               s.watcherMode = undefined;
             }
             s.rows = rows;
