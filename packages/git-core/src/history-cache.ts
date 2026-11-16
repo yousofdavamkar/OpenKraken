@@ -158,29 +158,34 @@ export class HistoryCache {
           }),
         ] as const) {
           // Serialize in bounded batches so an idle cache write cannot block paging.
-          const chunks: string[] = [],
-            hash = createHash('sha256').update(JSON.stringify({ offset, hasMore })).update('[');
+          const header = Buffer.from(
+            `{"key":${JSON.stringify(this.key)},"offset":${offset},"commits":[`,
+          );
+          const chunks = [header];
+          let size = header.byteLength;
+          const hash = createHash('sha256').update(JSON.stringify({ offset, hasMore })).update('[');
           for (let i = 0; i < commits.length; i += 100) {
-            const chunk = commits
-              .slice(i, i + 100)
-              .map((c) => JSON.stringify(c))
-              .join(',');
-            if (i) hash.update(',');
+            const batch = JSON.stringify(commits.slice(i, i + 100)).slice(1, -1);
+            const chunk = Buffer.from((i ? ',' : '') + batch);
+            size += chunk.byteLength;
+            if (size > limit) break;
             hash.update(chunk);
             chunks.push(chunk);
             await yieldTurn();
             if (this.disabled) return;
           }
           const checksum = hash.update(']').digest('hex');
-          const data = `{"key":${JSON.stringify(this.key)},"offset":${offset},"commits":[${chunks.join(',')}],"hasMore":${hasMore},"digest":"${checksum}"}`;
-          if (Buffer.byteLength(data) > limit) {
+          const footer = Buffer.from(`],"hasMore":${hasMore},"digest":"${checksum}"}`);
+          size += footer.byteLength;
+          if (size > limit) {
             await rm(join(this.directory, name), { force: true });
             continue;
           }
+          chunks.push(footer);
           const path = join(this.directory, name),
             temp = `${path}.${randomUUID()}.tmp`;
           try {
-            await writeFile(temp, data, { mode: 0o600, flag: 'wx' });
+            await writeFile(temp, Buffer.concat(chunks, size), { mode: 0o600, flag: 'wx' });
             await rename(temp, path);
           } finally {
             await rm(temp, { force: true });

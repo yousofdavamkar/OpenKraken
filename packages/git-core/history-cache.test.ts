@@ -294,3 +294,35 @@ test('a divergent seeded prefix rejects continuation and invalidates the cache',
     await cursor.close();
   }
 });
+
+test('an oversized UTF-8 history page stops encoding later batches and removes its old prefix', async () => {
+  const path = createFixture(join(root, 'oversized-page'), 'linear', 101);
+  const profile = join(root, 'oversized-profile');
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const { commits } = await service.snapshot(repo.id);
+    expect(commits).toHaveLength(101);
+    const cache = new HistoryCache(profile, repo.id, 'large-page');
+    cache.record(0, commits, false);
+    await cache.flush();
+    const prefix = join(profile, 'history', repo.id, 'prefix.json');
+    expect(JSON.parse(await readFile(prefix, 'utf8')).commits).toHaveLength(101);
+    const readLast = vi.fn(() => commits[100]!.body);
+    const next = commits.slice();
+    next[0] = { ...commits[0]!, body: '🌱'.repeat(2 * 1024 * 1024) };
+    next[100] = {
+      ...commits[100]!,
+      get body() {
+        return readLast();
+      },
+    };
+    const updated = new HistoryCache(profile, repo.id, 'replacement');
+    updated.record(0, next, false);
+    await updated.flush();
+    await expect(readFile(prefix)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(readLast).not.toHaveBeenCalled();
+  } finally {
+    await service.dispose();
+  }
+});
