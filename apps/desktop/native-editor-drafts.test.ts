@@ -99,6 +99,9 @@ test('interrupted editor writes can be kept or discarded while stale and out-of-
   await drafts.dismiss(a.request, a.prompt, false);
   const writing = drafts.write(b.request, b.prompt, 'discard');
   const clearing = drafts.dismiss(b.request, b.prompt, true);
+  drafts.interrupt([b.request]);
+  drafts.closed(b.request, b.prompt, 'aborted');
+  drafts.finished(b.request);
   expect(() => drafts.write(b.request, b.prompt, 'late')).toThrow();
   await Promise.all([writing, clearing]);
   expect((await drafts.list(checkout)).entries).toMatchObject([{ promptId: a.prompt }]);

@@ -116,7 +116,7 @@ export class NativeEditorDrafts {
   }
   closed(requestId: string, promptId: string, reason: 'submitted' | 'cancelled' | 'aborted') {
     const prompt = this.prompts.get(promptId);
-    if (!prompt || prompt.requestId !== requestId || prompt.state === 'interrupted') return;
+    if (!prompt || prompt.requestId !== requestId || prompt.state !== 'editing') return;
     if (reason === 'submitted') prompt.state = 'submitted';
     else {
       this.prompts.delete(promptId);
@@ -133,12 +133,15 @@ export class NativeEditorDrafts {
     for (const prompt of this.prompts.values()) {
       if (!ids.includes(prompt.requestId)) continue;
       if (prompt.state === 'submitted') this.prompts.delete(prompt.promptId);
-      else prompt.state = 'interrupted';
+      else if (prompt.state === 'editing') prompt.state = 'interrupted';
     }
   }
   finished(requestId: string) {
     for (const prompt of this.prompts.values()) {
-      if (prompt.requestId === requestId && prompt.state !== 'interrupted')
+      if (
+        prompt.requestId === requestId &&
+        (prompt.state === 'editing' || prompt.state === 'submitted')
+      )
         this.prompts.delete(prompt.promptId);
     }
   }
