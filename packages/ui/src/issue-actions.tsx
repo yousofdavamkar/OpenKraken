@@ -386,12 +386,13 @@ export function IssueActionDialog({
       <p>
         {target.origin}/{target.repository.owner}/{target.repository.name}
       </p>
-      <fieldset disabled={!storage.ready || busy || !!prepared || !!result || uncertain}>
+      <fieldset disabled={!storage.ready || busy || !!prepared || !!result}>
         <legend>{intent.action === 'state' ? 'State change' : 'Draft'}</legend>
         {intent.action === 'create' && (
           <label>
             Issue title
             <input
+              readOnly={uncertain}
               maxLength={gitlab ? 255 : 256}
               value={title}
               onChange={(event) => {
@@ -405,6 +406,7 @@ export function IssueActionDialog({
             {intent.action === 'create' ? 'Description' : 'Comment'}
             <textarea
               rows={6}
+              readOnly={uncertain}
               maxLength={65536}
               value={body}
               onChange={(event) => {
@@ -416,6 +418,7 @@ export function IssueActionDialog({
         {gitlab && intent.action === 'create' && (
           <label>
             <input
+              disabled={uncertain}
               type="checkbox"
               checked={confidential}
               onChange={(event) => {
@@ -428,6 +431,7 @@ export function IssueActionDialog({
         {gitlab && intent.action === 'comment' && (
           <label>
             <input
+              disabled={uncertain}
               type="checkbox"
               checked={internal}
               onChange={(event) => {
@@ -444,6 +448,7 @@ export function IssueActionDialog({
             <label>
               Closing reason
               <select
+                disabled={uncertain}
                 value={reason}
                 onChange={(event) => {
                   if (event.target.value === 'completed' || event.target.value === 'not_planned')
@@ -629,7 +634,7 @@ export function IssueActionDialog({
           <button disabled={busy} onClick={leave}>
             Close action
           </button>
-          {busy && (
+          {busy && request.current && (
             <button
               onClick={() => {
                 cancelled.current = true;

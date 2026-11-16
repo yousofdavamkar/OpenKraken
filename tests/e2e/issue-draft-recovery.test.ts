@@ -100,7 +100,15 @@ test('issue draft survives two process deaths and opens offline without replayin
         await dialog.getByRole('button', { name: 'Confirm issue action' }).click();
         await expect.poll(async () => (await traffic(app)).posts).toBe(1);
       } else {
-        await expect(dialog.getByLabel('Description')).toBeDisabled();
+        const description = dialog.getByRole('textbox', { name: 'Description' });
+        await expect(description).toHaveJSProperty('readOnly', true);
+        await description.focus();
+        await description.press('ControlOrMeta+a');
+        expect(
+          await description.evaluate((field: HTMLTextAreaElement) =>
+            field.value.slice(field.selectionStart, field.selectionEnd),
+          ),
+        ).toBe('Private description');
         await expect(dialog.getByRole('button', { name: 'Review issue action' })).toHaveCount(0);
         await dialog.getByRole('button', { name: 'Check existing results' }).click();
         await expect(dialog.getByRole('region', { name: 'Existing results' })).toBeVisible();
@@ -199,6 +207,24 @@ test('cancel during protected issue save prevents dispatch, and a changed draft 
       dialog.getByRole('button', { name: 'Submit without crash recovery' }),
     ).toBeVisible();
     expect((await traffic(app)).posts).toBe(0);
+    await app.evaluate(({ session }) => {
+      const connection = session.fromPartition('openkraken-providers');
+      const fetch = connection.fetch.bind(connection);
+      connection.fetch = async (input, init) => {
+        if (init?.method !== 'POST') return fetch(input, init);
+        if (
+          String(input) !== 'https://api.github.com/repos/team/project/issues' ||
+          JSON.parse(String(init.body)).title !== 'Newer copy'
+        )
+          throw Error('Unexpected action');
+        (globalThis as typeof globalThis & { issueRecoveryTraffic: { posts: number } })
+          .issueRecoveryTraffic.posts++;
+        return new Response('{}', { status: 422, headers: { 'content-type': 'application/json' } });
+      };
+    });
+    await dialog.getByRole('button', { name: 'Submit without crash recovery' }).click();
+    await expect(dialog.getByRole('alert')).toContainText('rejected');
+    expect((await traffic(app)).posts).toBe(1);
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });
