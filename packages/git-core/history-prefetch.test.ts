@@ -205,3 +205,34 @@ test('a solo view opens directly on its selected commit', async () => {
     await service.dispose();
   }
 });
+
+test('an empty replacement namespace follows Git across the first page and append', async () => {
+  const path = await clone('custom-replacements');
+  const original = fixtureGit(path, ['rev-parse', 'HEAD~2050']);
+  const tree = fixtureGit(path, ['rev-parse', 'HEAD^{tree}']);
+  const replacement = fixtureGit(path, ['commit-tree', tree, '-m', 'Replacement root']);
+  fixtureGit(path, ['update-ref', 'refs/custom/' + original, replacement]);
+  vi.stubEnv('GIT_REPLACE_REF_BASE', '');
+  const service = new RepositoryService('git');
+  const run = vi.spyOn(runner, 'runGit');
+  try {
+    const repo = await service.open(path);
+    const first = await service.snapshot(repo.id, undefined, false);
+    expect(first.hasMore).toBe(true);
+    const tail = await service.page(repo.id, first.cursor, first.commits.length, 5000);
+    const records = [...first.commits, ...tail.commits].map((c) => [c.oid, ...c.parents].join(' '));
+    expect(records).toEqual(
+      fixtureGit(path, ['rev-list', '--date-order', '--parents', '--all']).split('\n'),
+    );
+    expect(records).toContain(original);
+    expect(tail.hasMore).toBe(false);
+    expect(run.mock.calls.some(([, args]) => args.includes('--no-replace-objects'))).toBe(false);
+    expect(run.mock.calls.some(([, args]) => args[0] === 'rev-parse' && args[1] === '--all')).toBe(
+      false,
+    );
+  } finally {
+    run.mockRestore();
+    vi.unstubAllEnvs();
+    await service.dispose();
+  }
+});

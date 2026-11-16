@@ -1,4 +1,5 @@
 import { afterAll, expect, test, vi } from 'vitest';
+import type { Snapshot } from '@openkraken/ipc-contract';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -160,6 +161,55 @@ test('an external graft file uses live history and preserves the existing cache'
   }
   expect((await open()).commits.map((commit) => commit.oid)).toEqual([head]);
 });
+test.each(['GIT_SHALLOW_FILE', 'GIT_NO_REPLACE_OBJECTS', 'GIT_REPLACE_REF_BASE'] as const)(
+  'an empty %s uses Git’s effective parentage and preserves ordinary cached pages',
+  async (variable) => {
+    const path = createFixture(join(root, variable), 'linear', 32);
+    const head = fixtureGit(path, ['rev-parse', 'HEAD']);
+    if (variable === 'GIT_SHALLOW_FILE') {
+      await writeFile(join(path, '.git', 'shallow'), head + '\n');
+    } else {
+      fixtureGit(path, ['replace', '--graft', 'HEAD']);
+      if (variable === 'GIT_REPLACE_REF_BASE') {
+        const replacement = fixtureGit(path, ['rev-parse', 'refs/replace/' + head]);
+        fixtureGit(path, ['update-ref', 'refs/custom/' + head, replacement]);
+        fixtureGit(path, ['replace', '-d', head]);
+      }
+    }
+    const dataDir = join(root, variable + '-profile');
+    const open = async () => {
+      const service = new RepositoryService('git', { dataDir });
+      try {
+        const repo = await service.open(path);
+        return await service.snapshot(repo.id, undefined, false, {
+          hiddenRefs: [],
+          soloRef: 'refs/heads/main',
+        });
+      } finally {
+        await service.dispose();
+      }
+    };
+    const native = () =>
+      fixtureGit(path, ['rev-list', '--date-order', '--parents', 'HEAD']).split('\n');
+    const displayed = (snapshot: Snapshot) =>
+      snapshot.commits.map((commit) => [commit.oid, ...commit.parents].join(' '));
+    const ordinary = native();
+    const first = await open();
+    expect(displayed(first)).toEqual(ordinary);
+    const file = join(dataDir, 'history', first.repository.id, 'prefix.json');
+    const cached = await readFile(file);
+    vi.stubEnv(variable, '');
+    try {
+      const expected = native();
+      expect(expected).not.toEqual(ordinary);
+      expect(displayed(await open())).toEqual(expected);
+      expect(await readFile(file)).toEqual(cached);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(displayed(await open())).toEqual(ordinary);
+  },
+);
 test('damaged records miss safely; cache quotas and invalidation do not affect repositories', async () => {
   const service = new RepositoryService('git');
   const snapshot = await service.snapshot(

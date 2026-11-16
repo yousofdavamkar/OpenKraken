@@ -435,9 +435,9 @@ export class RepositoryService {
     if (
       !this.dataDir ||
       process.env.GIT_GRAFT_FILE !== undefined ||
-      process.env.GIT_SHALLOW_FILE ||
-      process.env.GIT_REPLACE_REF_BASE ||
-      process.env.GIT_NO_REPLACE_OBJECTS
+      process.env.GIT_SHALLOW_FILE !== undefined ||
+      process.env.GIT_REPLACE_REF_BASE !== undefined ||
+      process.env.GIT_NO_REPLACE_OBJECTS !== undefined
     )
       return [];
     return [
@@ -460,8 +460,8 @@ export class RepositoryService {
       view.soloRef ||
       view.hiddenRefs.length ||
       repository.isShallow ||
-      process.env.GIT_REPLACE_REF_BASE ||
-      process.env.GIT_SHALLOW_FILE ||
+      process.env.GIT_REPLACE_REF_BASE !== undefined ||
+      process.env.GIT_SHALLOW_FILE !== undefined ||
       process.env.GIT_GRAFT_FILE !== undefined
     )
       return;

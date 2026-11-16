@@ -26,7 +26,7 @@ function repeatedTargets(sample: Buffer, length: number) {
 
 // This bounded sample selects a Git query. Only Git supplies the actual refs and types.
 export async function hasRepeatedPackedTargets(commonDir: string) {
-  if (process.env.GIT_REPLACE_REF_BASE) return false;
+  if (process.env.GIT_REPLACE_REF_BASE !== undefined) return false;
   const flags = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW;
   const file = await open(join(commonDir, 'packed-refs'), flags).catch(() => undefined);
   if (!file) return false;
