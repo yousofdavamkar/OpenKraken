@@ -79,6 +79,42 @@ test('cached windows paint without waiting for Git and join the real stream with
     await service.dispose();
   }
 });
+test('reopening a partially cached page records the live suffix for the next restart', async () => {
+  const path = createFixture(join(root, 'mixed-page'), 'linear', 7024);
+  const expected = fixtureGit(path, ['rev-list', '--date-order', '--all']).split('\n');
+  const dataDir = join(root, 'mixed-page-profile');
+  let id = '';
+  for (const count of [333, 5000]) {
+    const service = new RepositoryService('git', { dataDir });
+    try {
+      id = (await service.open(path)).id;
+      const initial = await service.snapshot(id);
+      const page = await service.page(id, initial.cursor, initial.commits.length, count);
+      expect(page.commits.map((c) => c.oid)).toEqual(expected.slice(2000, 2000 + count));
+      if (count === 5000) {
+        const tail = await service.page(id, initial.cursor, 7000, 5000);
+        expect(tail.commits.map((c) => c.oid)).toEqual(expected.slice(7000));
+        expect(tail.hasMore).toBe(false);
+      }
+    } finally {
+      await service.dispose();
+    }
+  }
+  const directory = join(dataDir, 'history', id);
+  const { key } = JSON.parse(await readFile(join(directory, 'prefix.json'), 'utf8'));
+  const loaded = await new HistoryCache(dataDir, id, key).load();
+  if (!loaded?.continuation) throw new Error('Missing cached history');
+  const cached = loaded.commits.map((c) => c.oid);
+  let hasMore = loaded.hasMore;
+  await loaded.continuation((page) => {
+    cached.push(...page.commits.map((c) => c.oid));
+    hasMore = page.hasMore;
+    return true;
+  });
+  expect(cached.length).toBe(expected.length);
+  expect(cached).toEqual(expected);
+  expect(hasMore).toBe(false);
+});
 test('changed refs, effective configuration and shallow boundaries invalidate cached history', async () => {
   const source = createFixture(join(root, 'source'), 'linear', 30),
     path = join(root, 'shallow.git'),

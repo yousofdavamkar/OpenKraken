@@ -104,10 +104,12 @@ export class HistoryCache {
   }
   record(offset: number, commits: Commit[], hasMore: boolean) {
     this.ready = this.ready.then(() => {
-      if (this.disabled || offset !== this.records.length || offset >= 17000 || !commits.length)
-        return;
+      // A reopened page may begin in the disk prefix and finish in the live walk.
+      const start = this.records.length - offset;
+      const end = Math.min(commits.length, 17000 - offset);
+      if (this.disabled || offset < 0 || start < 0 || start >= end) return;
       if (!this.firstCount) this.firstCount = commits.length;
-      this.records.push(...commits.slice(0, 17000 - offset));
+      this.records.push(...commits.slice(start, end));
       this.hasMore = hasMore || offset + commits.length > 17000;
       this.dirty = true;
       clearTimeout(this.timer);
