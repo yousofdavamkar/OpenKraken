@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## AppImage rollback notice after helper interruption
+
+Previously, opening the restored app discarded a completed rollback notice if the helper had stopped before publishing it. The restored app now recognizes that record across launches. A partial record cannot report a successful restore. In both the stable FUSE and beta extract-and-run Linux x64 fixtures, the native helper exited between syncing the notice and publishing it. Manually reopening the original image showed the notice and allowed dismissal. Both runs preserved the signed release sequence and cleared the completed image transaction. The predecessor in each fixture included the recovery fix. [Recovery behavior and limits](../decisions/0086-appimage-startup-exit-recovery.md#interruption-before-publishing-the-restoration-notice)
+
+The full Linux unit/native suite passed 992 tests with 14 skipped. All 41 updater controller tests, both Electron update tests, typechecking, lint, build and packaged smoke passed. Electron Packager now uses the release archive checksums shipped with the locked Electron npm package in the normal desktop build and the AppImage restart fixture. Two earlier fixture builds stopped while trying to fetch checksum data for a cached Electron archive. The Linux x64 package subsequently verified that archive and the packaged fuses with network fetch disabled in the packaging process.
+
 ## Filtered graph history and recovery
 
 On the 50,000-distinct-target Linux fixture, starting a filtered Git walk during ref enumeration reduced median first paint with 10,000 hidden tags from 819.0 to 749.4 ms over three paired runs. The optimization verifies the complete ordered roots before publishing the first page. The worker now receives only the topology and searchable fields. The final app still exceeded 500 ms on all four large-ref views, including the solo current branch. All 21 measured 5,000-commit appends met 300 ms. [Performance measurements](m8-reference-performance.md#filtered-history-and-graph-worker-input)
