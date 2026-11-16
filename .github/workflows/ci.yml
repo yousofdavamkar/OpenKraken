@@ -294,11 +294,13 @@ jobs:
           xvfb-run -a node scripts/verify-update-restart.mjs --rollback-sync-error
           xvfb-run -a node scripts/verify-update-restart.mjs --pending-notice
           xvfb-run -a node scripts/verify-update-restart.mjs --delayed-descendant
+          xvfb-run -a node scripts/verify-update-restart.mjs --late-startup-exit
           xvfb-run -a node scripts/verify-update-restart.mjs --interrupt-before-rename
           xvfb-run -a node scripts/verify-update-restart.mjs --interrupt-after-rename
           xvfb-run -a node scripts/verify-update-restart.mjs --helper-unavailable
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --beta --failed-startup
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --beta --late-startup-confirmation
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --failed-startup
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --delayed-descendant
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --interrupt-before-rename

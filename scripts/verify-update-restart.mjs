@@ -24,11 +24,15 @@ let completed = false;
 let launchOutput = '';
 const marker = join(root, 'started.json');
 const delayedDescendant = process.argv.includes('--delayed-descendant');
+const lateExit = process.argv.includes('--late-startup-exit');
+const lateConfirmation = process.argv.includes('--late-startup-confirmation');
+const delayedStartup = lateExit || lateConfirmation;
 const rollbackSyncError = process.argv.includes('--rollback-sync-error');
 const pendingNotice = process.argv.includes('--pending-notice');
 const failStartup =
   process.argv.includes('--failed-startup') ||
   delayedDescendant ||
+  lateExit ||
   rollbackSyncError ||
   pendingNotice;
 const installFolder = rollbackSyncError ? join(root, 'install') : root;
@@ -45,6 +49,7 @@ const interruptedCommit = predecessorInstalled || afterRename;
 assert.ok(
   [
     failStartup,
+    lateConfirmation,
     helperUnavailable,
     unchangedImage,
     beforeRename,
@@ -61,6 +66,8 @@ const initialVersion = beta ? '0.2.0-beta.2' : '0.1.0';
 const replacementVersion = beta ? '0.2.0-beta.10' : '0.2.0';
 const predecessorReturns = failStartup || predecessorInstalled;
 const failedMarker = join(root, 'failed-startup');
+const heldStartup = join(root, 'held-startup');
+const resumeStartup = join(root, 'resume-startup');
 const descendantMarker = join(root, 'delayed-descendant.json');
 async function waitForFile(path, timeout = 30000) {
   const deadline = Date.now() + timeout;
@@ -262,6 +269,16 @@ try {
         };
       }
       if ((fixtureReturning && ${failStartup}) || ${migrateFeed && version === replacementVersion}) fixtureElectron.app.commandLine.appendSwitch('remote-debugging-port', '0');
+      if (${delayedStartup && version === replacementVersion}) {
+        const fs = require('node:fs');
+        fs.writeFileSync(${JSON.stringify(heldStartup)}, String(process.pid));
+        const sleeper = new Int32Array(new SharedArrayBuffer(4));
+        const deadline = Date.now() + 100000;
+        while (!fs.existsSync(${JSON.stringify(resumeStartup)})) {
+          if (Date.now() >= deadline) process.exit(24);
+          Atomics.wait(sleeper, 0, 0, 100);
+        }
+      }
       if (${failStartup && version === replacementVersion}) {
         require('node:fs').writeFileSync(${JSON.stringify(failedMarker)}, 'replacement reached main');
         if (${rollbackSyncError}) require('node:fs').chmodSync(${JSON.stringify(installFolder)}, 0o300);
@@ -332,6 +349,7 @@ try {
     );
     const [bundle] = await packager({
       dir: staging,
+      tmpdir: root,
       out: join(root, version, 'bundle'),
       name: 'OpenKraken',
       executableName: 'openkraken',
@@ -565,6 +583,22 @@ try {
       window.removeEventListener('beforeunload', Reflect.get(window, 'fixtureUnload')),
     );
     await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
+    if (delayedStartup) {
+      const replacementPid = Number(await waitForFile(heldStartup));
+      await delay(61000);
+      const state = await readFile(`/proc/${replacementPid}/stat`, 'utf8');
+      assert.doesNotMatch(state.slice(state.lastIndexOf(')') + 1), /^ [ZXx] /);
+      assert.equal(await sha256(target), receipts[1].artifacts[0].sha256);
+      assert.equal(await sha256(target + '.openkraken-update/previous.AppImage'), originalDigest);
+      assert.deepEqual(JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')), [
+        initialVersion,
+        replacementVersion,
+      ]);
+      console.log(
+        'After 61 seconds the replacement was still running and both AppImage digests matched.',
+      );
+      await writeFile(resumeStartup, 'resume');
+    }
     if (pendingNotice) {
       const scratch = join(profile, 'updates/rollback-notice.tmp');
       await expect
