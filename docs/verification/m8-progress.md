@@ -2,6 +2,14 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Graph reply recovery and incremental history-cache writes
+
+The renderer rejects an append that loses a complete row, even when its remaining node and edge records decode. The Electron regression kept the displayed 2,000 commits, recovered paging through Refresh and found an appended commit by ID. All 19 graph Electron tests passed, including six Canvas image comparisons. [Graph worker behavior](../decisions/0006-compact-graph-passages.md#failed-worker-dispatch-and-unreadable-replies)
+
+Extending a persisted cache from 12,000 to 17,000 commits now writes one file. In six paired measurements per case, median flush time fell from 198.3 to 54.0 ms in one session and from 192.5 to 52.7 ms after reopening. Missing or modified pages are rebuilt on the next dirty flush. Packaged Linux x64 verification compared cache digests and ordered IDs and parents with native Git across repository switches and restarts. The 50,000-ref first paint measured 728.9 ms and remains over budget. [Measurements and packaged verification](m8-reference-performance.md#extending-a-persisted-window-from-12000-to-17000-commits)
+
+The Linux unit/native suite passed 1,006 tests with 14 skipped. A subsequent cache regression covers declining a tail before reading a live page of equal size. All 21 cache and snapshot-recovery tests including that case passed on Git 2.38.0. Typechecking, lint, production build, packaged smoke and fuse verification passed.
+
 ## Repository switches with pending history-cache writes
 
 When a user switches repositories, the Git utility now starts writing the current cache while reading the destination snapshot. It still saves commits paged from the old graph during the switch. Encoding each 100-commit batch once reduced median time to write 17,000 real commits from 292.6 to 198.6 ms in eight paired replays. All four files matched the previous writer byte for byte. An oversized page stops encoding once a batch crosses its byte limit. [Cache behavior](../decisions/0008-bounded-history-cache.md#writing-history-during-a-repository-switch)

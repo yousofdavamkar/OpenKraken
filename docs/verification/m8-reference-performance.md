@@ -2,6 +2,19 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Extending a persisted window from 12,000 to 17,000 commits
+
+A Linux x64 replay used the first 17,000 commits of the full Linux fixture. Their order and parents matched native Git. Each run flushed the first 12,000 records, appended the final 5,000 and timed that second flush. The reopen variant created a new cache instance and accepted the persisted pages before the timed append. Each variant ran six measured pairs in alternating build order after one warm-up pair. Every final cache file matched the previous writer byte for byte. [Individual timings and bytes replaced](m8-history-cache-append-samples.csv)
+
+| Starting state             | Previous median | New median | Files replaced |         Bytes replaced |
+| -------------------------- | --------------: | ---------: | -------------: | ---------------------: |
+| Same cache instance        |        198.3 ms |    54.0 ms |          4 → 1 | 24,501,310 → 6,492,122 |
+| Reopened persisted history |        192.5 ms |    52.7 ms |          4 → 1 | 24,501,310 → 6,492,122 |
+
+In a separate packaged Linux x64 run, the app opened 12,000 commits, switched repositories and restarted. Paging the source to 17,000 commits and switching again preserved the inode and modification time of its three filled files. The fourth file grew to contain the last 5,000 commits. Both repositories’ stored histories matched Git, and another restart replayed all 17,000 source records.
+
+On fresh Electron opens at `30851f3`, the single-ref fixture painted in 348.4 ms and the 50,000-distinct-target fixture in 728.9 ms. The six 5,000-commit appends took 180.6–271.7 ms. The large-ref opening still exceeds the 500 ms target. The cached-append replay above measures storage work separately from these desktop timings.
+
 ## Switching with 17,000 commits loaded
 
 Each paired Linux x64 run opened the single-ref Linux fixture in a fresh profile, loaded 17,000 commits and switched to the same 1,505,199-commit history with 50,000 refs. Before switching, the final source cache page had yet to reach disk. After switching, every one of the 17,000 saved IDs and parent lists matched Git, and the destination appended 5,000 commits. Three pairs per fixture alternated build order. The host used Git 2.53.0, a prepared commit-graph and uncleared OS caches. [Individual switch samples](m8-opening-experiments.csv)
