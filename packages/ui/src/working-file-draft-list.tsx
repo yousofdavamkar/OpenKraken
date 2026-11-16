@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import type { WorkingFileDraft } from '@openkraken/ipc-contract';
+import type { FileEditorDraft } from '@openkraken/ipc-contract';
 import { WorkingFileDraftSession } from './working-file-draft.js';
 
-type Entry = { path: string; pathBytes: string };
+type Entry = { path: string; pathBytes: string; editor?: 'conflict' };
 export function WorkingFileDraftList({ repoId, onClose }: { repoId: string; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const active = useRef<WorkingFileDraftSession | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
-  const [selected, setSelected] = useState<{ entry: Entry; draft: WorkingFileDraft }>();
+  const [selected, setSelected] = useState<{ entry: Entry; draft: FileEditorDraft }>();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(true);
   const [confirm, setConfirm] = useState(false);
@@ -40,7 +40,10 @@ export function WorkingFileDraftList({ repoId, onClose }: { repoId: string; onCl
     const session = new WorkingFileDraftSession();
     active.current = session;
     try {
-      const draft = await session.open(repoId, entry.pathBytes, true);
+      const draft =
+        entry.editor === 'conflict'
+          ? await session.openConflict(repoId, entry.pathBytes, true)
+          : await session.open(repoId, entry.pathBytes, true);
       if (!draft) throw new Error('This draft has already been cleared.');
       setSelected({ entry, draft });
     } catch (error) {
@@ -54,7 +57,12 @@ export function WorkingFileDraftList({ repoId, onClose }: { repoId: string; onCl
     setBusy(true);
     try {
       await active.current?.close(true);
-      setEntries((rows) => rows.filter((row) => row.pathBytes !== selected.entry.pathBytes));
+      setEntries((rows) =>
+        rows.filter(
+          (row) =>
+            row.pathBytes !== selected.entry.pathBytes || row.editor !== selected.entry.editor,
+        ),
+      );
       active.current = null;
       setSelected(undefined);
       setConfirm(false);
@@ -111,9 +119,10 @@ export function WorkingFileDraftList({ repoId, onClose }: { repoId: string; onCl
           {!busy && !entries.length && !error && <p>No saved file drafts for this checkout.</p>}
           <ul>
             {entries.map((entry) => (
-              <li key={entry.pathBytes}>
+              <li key={`${entry.editor ?? 'file'}:${entry.pathBytes}`}>
                 <button disabled={busy} onClick={() => void open(entry)}>
                   {entry.path}
+                  {entry.editor === 'conflict' && ' (conflict resolution)'}
                 </button>
               </li>
             ))}

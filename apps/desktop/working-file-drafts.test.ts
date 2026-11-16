@@ -57,3 +57,43 @@ test('an external draft edit prevents stale removal and corrupt drafts survive l
   await expect(drafts.write('edit', draft)).rejects.toThrow();
   expect(await readFile(file, 'utf8')).toBe('incomplete');
 });
+
+test('working text and conflict choices have separate identities for the same checkout path', async () => {
+  profile = await mkdtemp(join(tmpdir(), 'ok-conflict-draft-scope-'));
+  const drafts = new WorkingFileDrafts(profile);
+  await drafts.open(left, pathBytes, 'file');
+  await drafts.write('file', draft);
+  const conflict = {
+    editor: 'conflict',
+    token: draft.token,
+    text: 'merged',
+    choices: [{ index: 1, ours: '01', theirs: '0' }],
+  } as const;
+  const saved = { ...conflict, choices: [...conflict.choices] };
+  await expect(drafts.write('file', saved)).rejects.toThrow();
+  expect(await drafts.open(left, pathBytes, 'merge', false, 'conflict')).toBeNull();
+  await expect(drafts.write('merge', draft)).rejects.toThrow();
+  await drafts.write('merge', saved);
+  await drafts.close('merge', false);
+  expect((await drafts.list(left)).entries).toEqual(
+    expect.arrayContaining([
+      { path: 'docs/私.txt', pathBytes },
+      { path: 'docs/私.txt', pathBytes, editor: 'conflict' },
+    ]),
+  );
+  expect((await drafts.list(right)).entries).toEqual([]);
+  expect(await drafts.open(left, pathBytes, 'preview', true, 'conflict')).toEqual(saved);
+  await drafts.close('preview', true);
+  expect(await drafts.open(left, pathBytes, 'file')).toEqual(draft);
+  expect((await drafts.list(left)).entries).toHaveLength(1);
+});
+
+test('partially merged output can exceed the size of a single stage', async () => {
+  profile = await mkdtemp(join(tmpdir(), 'ok-conflict-draft-size-'));
+  const drafts = new WorkingFileDrafts(profile);
+  await drafts.open(left, pathBytes, 'edit', false, 'conflict');
+  const text = 'line\n'.repeat(250000) + 'x'.repeat(1024 * 1024);
+  await drafts.write('edit', { editor: 'conflict', text, token: draft.token, choices: [] });
+  const reopened = await drafts.open(left, pathBytes, 'reopened', false, 'conflict');
+  expect(reopened?.text === text).toBe(true);
+});

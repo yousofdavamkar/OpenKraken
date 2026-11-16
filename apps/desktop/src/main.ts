@@ -617,7 +617,13 @@ else {
                 return { kind: 'workingDraftList', ...(await drafts.list(repo)) };
               return {
                 kind: 'workingDraft',
-                draft: await drafts.open(repo, request.pathBytes, request.session, request.preview),
+                draft: await drafts.open(
+                  repo,
+                  request.pathBytes,
+                  request.session,
+                  request.preview,
+                  request.editor,
+                ),
               };
             }
             if (request.method === 'workingDraftWrite')

@@ -619,6 +619,44 @@ export const workingFileDraftSchema = z
     newline: z.enum(['', 'lf', 'crlf', 'cr']),
   })
   .strict();
+const conflictChunkChoicesSchema = z
+  .array(
+    z
+      .object({
+        index: z.number().int().min(0).max(1999),
+        ours: z
+          .string()
+          .max(10000)
+          .regex(/^[01]*$/),
+        theirs: z
+          .string()
+          .max(10000)
+          .regex(/^[01]*$/),
+      })
+      .strict(),
+  )
+  .max(2000)
+  .refine(
+    (choices) =>
+      new Set(choices.map((choice) => choice.index)).size === choices.length &&
+      choices.reduce((total, choice) => total + choice.ours.length + choice.theirs.length, 0) <=
+        20000,
+  );
+export const conflictDraftSchema = z
+  .object({
+    editor: z.literal('conflict'),
+    token: workingFileSchema.shape.token,
+    // Unresolved chunks can contain all three 2 MiB stages and up to 2,000 marker blocks.
+    text: z
+      .string()
+      .max(3 * 2 * 1024 * 1024 + 2000 * 64)
+      .refine((text) => !text.includes('\0')),
+    choices: conflictChunkChoicesSchema.nullable(),
+  })
+  .strict();
+export type ConflictDraft = z.infer<typeof conflictDraftSchema>;
+export const fileEditorDraftSchema = z.union([workingFileDraftSchema, conflictDraftSchema]);
+export type FileEditorDraft = z.infer<typeof fileEditorDraftSchema>;
 export type WorkingFileDraft = z.infer<typeof workingFileDraftSchema>;
 export type WorkingFileOptions = z.infer<typeof workingFileOptionsSchema>;
 export type WorkingFile = z.infer<typeof workingFileSchema>;
@@ -1304,6 +1342,7 @@ export const requestSchema = z.discriminatedUnion('method', [
     .object({
       id: requestId,
       method: z.literal('workingDraftOpen'),
+      editor: z.literal('conflict').optional(),
       preview: z.literal(true).optional(),
       repoId: z.string().min(1).max(128),
       pathBytes: pathBytesSchema,
@@ -1315,7 +1354,7 @@ export const requestSchema = z.discriminatedUnion('method', [
       id: requestId,
       method: z.literal('workingDraftWrite'),
       session: requestId,
-      draft: workingFileDraftSchema.nullable(),
+      draft: fileEditorDraftSchema.nullable(),
     })
     .strict(),
   z
@@ -1920,11 +1959,19 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('workingDraftList'),
-      entries: z.array(z.object({ pathBytes: pathBytesSchema, path: z.string() }).strict()),
+      entries: z.array(
+        z
+          .object({
+            pathBytes: pathBytesSchema,
+            path: z.string(),
+            editor: z.literal('conflict').optional(),
+          })
+          .strict(),
+      ),
       unreadable: z.boolean(),
     })
     .strict(),
-  z.object({ kind: z.literal('workingDraft'), draft: workingFileDraftSchema.nullable() }).strict(),
+  z.object({ kind: z.literal('workingDraft'), draft: fileEditorDraftSchema.nullable() }).strict(),
   z.object({ kind: z.literal('commitDraft'), state: commitDraftStateSchema }).strict(),
   z.object({ kind: z.literal('activity'), state: activityStateSchema }).strict(),
   z

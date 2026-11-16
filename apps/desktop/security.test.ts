@@ -1659,3 +1659,26 @@ test('working-file recovery messages stay in main and validate the file identity
     );
   }
 });
+
+test('conflict recovery limits line choices to the worker bounds and keeps recovered text out of the Git service', () => {
+  const id = '00000000-0000-4000-8000-000000000000';
+  const draft = {
+    editor: 'conflict',
+    token: 'e'.repeat(64),
+    text: 'reviewed',
+    choices: [{ index: 1, ours: '01', theirs: '' }],
+  };
+  const request = { id, method: 'workingDraftWrite', session: id, draft };
+  expect(requestSchema.safeParse(request).success).toBe(true);
+  expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+  for (const choices of [
+    [{ index: 2000, ours: '', theirs: '' }],
+    [draft.choices[0], draft.choices[0]],
+    [{ index: 0, ours: 'x', theirs: '' }],
+    [{ index: 0, ours: '1'.repeat(10001), theirs: '' }],
+  ]) {
+    expect(requestSchema.safeParse({ ...request, draft: { ...draft, choices } }).success).toBe(
+      false,
+    );
+  }
+});

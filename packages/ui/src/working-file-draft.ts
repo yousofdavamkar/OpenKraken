@@ -1,4 +1,4 @@
-import type { Request, WorkingFileDraft } from '@openkraken/ipc-contract';
+import type { Request, FileEditorDraft } from '@openkraken/ipc-contract';
 
 async function request(
   input: Extract<
@@ -20,17 +20,29 @@ export class WorkingFileDraftSession {
   private pending?: () => Promise<void>;
   private writes: Promise<void> = Promise.resolve();
   private closed = false;
-  open(repoId: string, pathBytes: string, preview?: true) {
+  private writeError?: Error;
+  async open(repoId: string, pathBytes: string, preview?: true) {
+    const draft = await this.openDraft(repoId, pathBytes, preview);
+    if (draft && 'editor' in draft) throw new Error('Unexpected conflict draft.');
+    return draft;
+  }
+  async openConflict(repoId: string, pathBytes: string, preview?: true) {
+    const draft = await this.openDraft(repoId, pathBytes, preview, 'conflict');
+    if (draft && !('editor' in draft)) throw new Error('Unexpected working-file draft.');
+    return draft;
+  }
+  private openDraft(repoId: string, pathBytes: string, preview?: true, editor?: 'conflict') {
     return request({
       id: crypto.randomUUID(),
       method: 'workingDraftOpen',
+      editor,
       preview,
       session: this.session,
       repoId,
       pathBytes,
     });
   }
-  change(draft: WorkingFileDraft | null, notify: (message: string) => void) {
+  change(draft: FileEditorDraft | null, notify: (message: string) => void) {
     if (this.closed) return;
     clearTimeout(this.timer);
     const save = async () => {
@@ -41,9 +53,12 @@ export class WorkingFileDraftSession {
           session: this.session,
           draft,
         });
+        this.writeError = undefined;
         notify(draft ? 'Draft saved locally' : '');
       } catch (error) {
-        notify(error instanceof Error ? error.message : 'The local draft could not be saved.');
+        this.writeError =
+          error instanceof Error ? error : new Error('The local draft could not be saved.');
+        notify(this.writeError.message);
       }
     };
     this.pending = save;
@@ -54,7 +69,7 @@ export class WorkingFileDraftSession {
     if (this.pending) this.writes = this.writes.then(this.pending);
     this.pending = undefined;
   }
-  async close(discard: boolean) {
+  async close(discard: boolean, requireSaved = false) {
     if (this.closed) return;
     this.closed = true;
     clearTimeout(this.timer);
@@ -62,6 +77,10 @@ export class WorkingFileDraftSession {
     else {
       this.flush();
       await this.writes;
+      if (requireSaved && this.writeError) {
+        this.closed = false;
+        throw this.writeError;
+      }
     }
     // Main serializes already-admitted writes and rejects later writes for a closed session.
     // Admit a confirmed discard before a window close can tear down this renderer.
