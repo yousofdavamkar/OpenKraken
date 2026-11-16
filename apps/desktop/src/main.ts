@@ -1,3 +1,4 @@
+import { ReviewDrafts } from './review-drafts.js';
 import { ActivityLog } from './activity-log.js';
 import { Diagnostics } from './diagnostics.js';
 import { installTimeoutMs, Updates } from './updates.js';
@@ -916,6 +917,9 @@ else {
           request.method === 'providerBitbucketWorkspaces' ||
           request.method === 'providerBitbucketRepositories' ||
           request.method === 'providerRepositories' ||
+          request.method === 'reviewDraftRead' ||
+          request.method === 'reviewDraftSave' ||
+          request.method === 'reviewDraftList' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerPollingPolicy' ||
           request.method === 'providerConnect' ||
@@ -933,6 +937,16 @@ else {
           providers = getProviders();
           const controller = new AbortController();
           providerRequests.set(request.id, controller);
+
+          if (
+            request.method === 'reviewDraftRead' ||
+            request.method === 'reviewDraftSave' ||
+            request.method === 'reviewDraftList'
+          )
+            return await providers.reviewDraft(
+              new ReviewDrafts(app.getPath('userData'), electronSecretProtection(safeStorage)),
+              request,
+            );
 
           if (request.method === 'providerPollingPolicy')
             return resultSchema.parse({
@@ -1501,6 +1515,9 @@ else {
           request.method === 'providerBitbucketWorkspaces' ||
           request.method === 'providerBitbucketRepositories' ||
           request.method === 'providerRepositories' ||
+          request.method === 'reviewDraftRead' ||
+          request.method === 'reviewDraftSave' ||
+          request.method === 'reviewDraftList' ||
           request.method === 'providerAccounts' ||
           request.method === 'providerPollingPolicy' ||
           request.method === 'providerConnect' ||
@@ -1551,6 +1568,7 @@ else {
           'updatesRead',
           'updatesCancel',
           'commitDraftSave',
+          'reviewDraftSave',
           'nativeDraftWrite',
           'nativeDraftDismiss',
           'workingDraftWrite',

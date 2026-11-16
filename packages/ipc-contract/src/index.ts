@@ -12,6 +12,8 @@ export * from './crash-reports.js';
 import { activityRequests, activityStateSchema, activityEventSchema } from './activity.js';
 import { commitDraftRequests, commitDraftStateSchema } from './commit-drafts.js';
 export * from './commit-drafts.js';
+import { reviewDraftRequests, reviewDraftResults } from './review-drafts.js';
+export * from './review-drafts.js';
 export * from './activity.js';
 import {
   lfsRequests,
@@ -1348,6 +1350,7 @@ export const requestSchema = z.discriminatedUnion('method', [
     })
     .strict(),
   ...commitDraftRequests,
+  ...reviewDraftRequests,
   z
     .object({
       id: requestId,
@@ -2056,6 +2059,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
     })
     .strict(),
   z.object({ kind: z.literal('workingDraft'), draft: fileEditorDraftSchema.nullable() }).strict(),
+  ...reviewDraftResults,
   z.object({ kind: z.literal('commitDraft'), state: commitDraftStateSchema }).strict(),
   z.object({ kind: z.literal('activity'), state: activityStateSchema }).strict(),
   z

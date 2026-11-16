@@ -1,3 +1,4 @@
+import type { ReviewDraftRequest, ReviewDrafts } from './review-drafts.js';
 import {
   providerBitbucketCommentsOptionsSchema,
   type ProviderBitbucketCommentsOptions,
@@ -337,6 +338,24 @@ export class ProviderService {
     return this.run(async () => {
       const { accounts } = await this.authorize(id, signal);
       return { keychainAvailable: true, accounts };
+    });
+  }
+  reviewDraft(store: ReviewDrafts, request: ReviewDraftRequest) {
+    return this.run(async () => {
+      if (
+        !(await this.load()).some(
+          (account) => account.provider === 'github' && account.id === request.scope.accountId,
+        )
+      )
+        throw new ProviderError('PROVIDER_ACCOUNT', 'This GitHub account is no longer connected.');
+      try {
+        return await store.request(request);
+      } catch {
+        throw new ProviderError(
+          'DRAFT_UNAVAILABLE',
+          'The review draft could not be accessed or changed. Check the keychain and reopen the saved copy.',
+        );
+      }
     });
   }
   pollingPolicy(id: string) {
