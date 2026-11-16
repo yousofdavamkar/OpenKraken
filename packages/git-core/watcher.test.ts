@@ -97,6 +97,11 @@ test('large Unicode reference baselines distinguish tag-only updates from branch
     const snapshot = await watch.primeObservedSnapshot(() =>
       service.observeInitialSnapshot(repo.id),
     );
+    // Changing the caller's nested tracking record must not change the opening baseline.
+    const upstream = snapshot.refs.find((ref) => ref.name === 'refs/heads/main')?.upstream;
+    if (!upstream) throw new Error('Expected fixture tracking branch');
+    upstream.ref = 'refs/remotes/other/main';
+    upstream.ahead = 9;
     const changed = snapshot.refs.find((ref) => ref.name === names[1])!;
     const parent = fixtureGit(path, ['rev-parse', 'HEAD~1']);
     changed.target = parent;
