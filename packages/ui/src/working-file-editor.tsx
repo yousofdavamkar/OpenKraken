@@ -106,6 +106,7 @@ function Draft({
     setText(next);
   }, []);
   const dialog = useRef<HTMLDialogElement>(null);
+  const closeApproved = useRef(false);
   const stale = !!recovered && recovered.token !== file.token;
   const dirty = stale || text !== original || newline !== originalNewline;
   const locked = busy || finishing || !!cleanupError;
@@ -124,11 +125,13 @@ function Draft({
     };
   }, [dirty, edited, file.token, newline, recovered, session, storageError, text]);
   const finish = async (discard: boolean) => {
+    closeApproved.current = true;
     setFinishing(true);
     try {
       await session.close(discard);
       onClose();
     } catch (error) {
+      closeApproved.current = false;
       setCleanupError(
         error instanceof Error ? error.message : 'The saved draft could not be cleared.',
       );
@@ -138,6 +141,7 @@ function Draft({
   useLayoutEffect(() => {
     if (!dirty) return;
     const prevent = (event: BeforeUnloadEvent) => {
+      if (closeApproved.current) return;
       event.preventDefault();
       event.returnValue = '';
     };

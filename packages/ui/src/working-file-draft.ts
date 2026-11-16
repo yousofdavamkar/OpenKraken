@@ -59,8 +59,12 @@ export class WorkingFileDraftSession {
     this.closed = true;
     clearTimeout(this.timer);
     if (discard) this.pending = undefined;
-    else this.flush();
-    await this.writes;
+    else {
+      this.flush();
+      await this.writes;
+    }
+    // Main serializes already-admitted writes and rejects later writes for a closed session.
+    // Admit a confirmed discard before a window close can tear down this renderer.
     try {
       await request({
         id: crypto.randomUUID(),

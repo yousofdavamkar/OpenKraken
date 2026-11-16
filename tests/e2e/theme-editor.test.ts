@@ -40,7 +40,14 @@ test('system theme changes recolor an open editor without losing its draft or un
     expect(readFileSync(join(repository, 'draft.py'), 'utf8')).toBe('before = 1\n');
     await page.screenshot({ path: 'test-results/appearance-light-editor.png' });
     await editor.getByRole('button', { name: 'Close editor', exact: true }).click();
-    await editor.getByRole('button', { name: 'Discard draft', exact: true }).click();
+    const prevented = await editor
+      .getByRole('button', { name: 'Discard draft', exact: true })
+      .evaluate((button: HTMLButtonElement) => {
+        button.click();
+        // The native window may start closing before the profile write acknowledges.
+        return !window.dispatchEvent(new Event('beforeunload', { cancelable: true }));
+      });
+    expect(prevented).toBe(false);
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });
