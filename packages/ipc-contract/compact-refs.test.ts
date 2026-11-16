@@ -210,17 +210,15 @@ test('main rejects malformed packed rows and validates the enclosing snapshot an
 
 test('initial commit bodies stay ordered for both snapshot formats and incomplete transfers fail', () => {
   const author = { name: 'Å', email: 'a@example.test', time: 1, tzOffsetMin: -60 };
-  const commits = ['', 'independent summary\n🌱\u0000\r\n', '\"\\'.repeat(10000)].map(
-    (body, i) => ({
-      oid: String(i).repeat(40),
-      parents: [],
-      summary: 'Subject',
-      author,
-      committer: author,
-      body,
-      isStash: false,
-    }),
-  );
+  const commits = ['', 'independent summary\n🌱\u0000\r\n', '"\\'.repeat(10000)].map((body, i) => ({
+    oid: String(i).repeat(40),
+    parents: [],
+    summary: 'Subject',
+    author,
+    committer: author,
+    body,
+    isStash: false,
+  }));
   const plain = { kind: 'snapshot' as const, snapshot: { ...snapshot([tag]), commits } };
   const compact = {
     kind: 'compactSnapshot' as const,
