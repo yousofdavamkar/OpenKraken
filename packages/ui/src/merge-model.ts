@@ -14,3 +14,25 @@ export function renderMerge(parts: MergePart[], resolutions: Record<number, stri
     )
     .join('');
 }
+
+// Chunk indices refer to the three-stage merge that produced the recovered output.
+export function resolveChunkChoices(
+  parts: MergePart[],
+  choices: { index: number; ours: string; theirs: string }[],
+) {
+  const resolutions: Record<number, string> = {};
+  for (const { index, ours, theirs } of choices) {
+    const part = parts[index];
+    if (
+      part?.kind !== 'conflict' ||
+      ours.length !== part.ours.length ||
+      theirs.length !== part.theirs.length
+    )
+      return;
+    resolutions[index] = [
+      ...part.ours.filter((_, i) => ours[i] === '1'),
+      ...part.theirs.filter((_, i) => theirs[i] === '1'),
+    ].join('');
+  }
+  return resolutions;
+}

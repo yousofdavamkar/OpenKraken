@@ -165,21 +165,15 @@ export function WorkingTreePanel() {
       <OperationPanel key={repoId} />
       {conflict && (
         <ConflictEditor
-          key={conflict.token}
+          key={`${repoId}:${conflict.token}`}
+          repoId={repoId}
           document={conflict}
           busy={!!busy}
           error={error}
           close={() => setConflict(undefined)}
-          resolve={(options) => {
-            void mutate({
-              id: crypto.randomUUID(),
-              method: 'resolveConflict',
-              repoId,
-              options,
-            }).then((ok) => {
-              if (ok) setConflict(undefined);
-            });
-          }}
+          resolve={(options) =>
+            mutate({ id: crypto.randomUUID(), method: 'resolveConflict', repoId, options })
+          }
         />
       )}
 
