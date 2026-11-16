@@ -68,6 +68,16 @@ async function exists(path: string) {
     return false;
   }
 }
+function addVisibleHead(
+  starts: Set<string>,
+  head: Repository['head'],
+  view: GraphView,
+  isVisible: (name: string) => boolean,
+) {
+  if (head.oid && !view.soloRef && (head.kind === 'detached' || isVisible(head.ref)))
+    starts.add(head.oid);
+}
+
 type SnapshotObserver = {
   status: (chunk: Buffer) => void;
   refs?: (refs: Snapshot['refs']) => void;
@@ -348,6 +358,7 @@ export class RepositoryService {
           : this.prefetchHistory(
               repository,
               view,
+              grouped,
               AbortSignal.any([readSignal, probeStop.signal]),
             ).catch(() => undefined);
         const graphRead = Promise.all([refRead, worktreeRead, Promise.all(cacheReads)]).then(
@@ -455,10 +466,14 @@ export class RepositoryService {
       ),
     ];
   }
-  private async prefetchHistory(repository: Repository, view: GraphView, signal: AbortSignal) {
+  private async prefetchHistory(
+    repository: Repository,
+    view: GraphView,
+    grouped: boolean,
+    signal: AbortSignal,
+  ) {
     if (
-      view.soloRef ||
-      view.hiddenRefs.length ||
+      (grouped && !view.soloRef && view.hiddenRefs.length > 0) ||
       repository.isShallow ||
       process.env.GIT_REPLACE_REF_BASE !== undefined ||
       process.env.GIT_SHALLOW_FILE !== undefined ||
@@ -473,15 +488,43 @@ export class RepositoryService {
       (this.dataDir && (await HistoryCache.hasPrefix(this.dataDir, repository.id)))
     )
       return;
-    const { stdout } = await this.run(['rev-parse', '--all'], {
+    if (signal.aborted) return;
+    const head = repository.head;
+    if (head.kind === 'branch' && head.oid && view.soloRef === head.ref)
+      return new HistoryCursor(
+        this.git,
+        repository.path,
+        [head.oid],
+        [],
+        undefined,
+        FIRST_PAGE_SIZE,
+      );
+    const filtered = !!view.soloRef || view.hiddenRefs.length > 0;
+    const args = filtered
+      ? [
+          'for-each-ref',
+          '--format=%(objectname) %(refname)',
+          ...(view.soloRef ? ['--', view.soloRef] : []),
+        ]
+      : ['rev-parse', '--all'];
+    const { stdout } = await this.run(args, {
       cwd: repository.path,
       signal,
       maxBytes: 8 * 1024 * 1024,
     });
     if (signal.aborted) return;
-    const starts = new Set(stdout.toString('utf8').trimEnd().split('\n'));
+    const isVisible = graphRefVisibility(view);
+    const starts = new Set<string>();
+    const lines = stdout.toString('utf8').split('\n');
+    if (lines.pop() !== '') return;
+    for (const line of lines) {
+      const separator = filtered ? line.indexOf(' ') : -1;
+      if (filtered && separator === -1) return;
+      if (filtered && !isVisible(line.slice(separator + 1))) continue;
+      starts.add(filtered ? line.slice(0, separator) : line);
+    }
     for (const oid of starts) if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid)) return;
-    if (repository.head.oid) starts.add(repository.head.oid);
+    addVisibleHead(starts, head, view, isVisible);
     return new HistoryCursor(
       this.git,
       repository.path,
@@ -517,9 +560,7 @@ export class RepositoryService {
       starts.add(oid);
       if (ref.name === view.pinnedRef) pinnedOid = oid;
     }
-    const head = repository.head;
-    if (head.oid && !view.soloRef && (head.kind === 'detached' || isVisible(head.ref)))
-      starts.add(head.oid);
+    addVisibleHead(starts, repository.head, view, isVisible);
     for (const worktree of worktrees?.entries ?? []) {
       if (worktree.current || !worktree.head) continue;
       const visible = worktree.branch ? isVisible(worktree.branch) : !view.soloRef;

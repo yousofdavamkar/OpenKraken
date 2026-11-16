@@ -206,6 +206,104 @@ test('a solo view opens directly on its selected commit', async () => {
   }
 });
 
+test.each(['hidden', 'hidden HEAD', 'solo', 'moved solo', 'Unicode solo', 'detached'] as const)(
+  'a saved %s view starts a filtered walk before full metadata and preserves exact paging',
+  async (kind) => {
+    const path = await clone('view-' + kind);
+    const short = 'refs/heads/short';
+    fixtureGit(path, ['update-ref', short, 'HEAD~2068']);
+    const tree = fixtureGit(path, ['rev-parse', 'HEAD^{tree}']);
+    const independent = fixtureGit(path, ['commit-tree', tree, '-m', 'Independent root']);
+    const branch = 'refs/heads/main';
+    const unicode = 'refs/tags/末尾\u00a0';
+    if (kind === 'Unicode solo') fixtureGit(path, ['update-ref', unicode, 'HEAD']);
+    if (kind === 'detached') fixtureGit(path, ['update-ref', '--no-deref', 'HEAD', independent]);
+    if (kind === 'hidden HEAD') fixtureGit(path, ['update-ref', branch, independent]);
+    const solo = kind.includes('solo');
+    const view = solo
+      ? { hiddenRefs: [], soloRef: kind === 'Unicode solo' ? unicode : branch }
+      : { hiddenRefs: [kind === 'hidden HEAD' ? branch : short] };
+    // Hidden views with mostly distinct packed targets benefit from the named root read.
+    if (!solo) {
+      const commits = fixtureGit(path, ['rev-list', '--max-count=2070', 'refs/tags/v0.1.0']).split(
+        '\n',
+      );
+      fixtureGit(
+        path,
+        ['update-ref', '--stdin'],
+        commits
+          .map((oid, i) => `create refs/heads/start-${'x'.repeat(120)}-${i} ${oid}`)
+          .join('\n') + '\n',
+      );
+      fixtureGit(path, ['pack-refs', '--all']);
+    }
+    const service = new RepositoryService('git');
+    const repo = await service.open(path);
+    const native = runner.runGit;
+    const full = gate();
+    const early = vi.fn();
+    const ordinary = vi.fn();
+    const run = vi.spyOn(runner, 'runGit').mockImplementation(async (git, args, options) => {
+      if (readsSnapshotRefs(args)) await full.promise;
+      if (args[0] === 'rev-list') {
+        if (options?.env?.GIT_NO_REPLACE_OBJECTS) early(options.stdin);
+        else ordinary();
+      }
+      return native(git, args, options);
+    });
+    const opening = service.snapshot(repo.id, undefined, false, view);
+    try {
+      await vi.waitFor(() => expect(early).toHaveBeenCalledOnce(), { timeout: 2000 });
+      if (kind === 'moved solo') fixtureGit(path, ['update-ref', view.soloRef!, 'HEAD~20']);
+      if (solo)
+        expect(early.mock.calls[0]![0]).toBe(
+          fixtureGit(path, ['rev-parse', 'refs/tags/v0.1.0']) + '\n',
+        );
+      full.resolve();
+      const first = await opening;
+      expect(ordinary).toHaveBeenCalledTimes(kind === 'moved solo' ? 1 : 0);
+      const tail = await service.page(repo.id, first.cursor, first.commits.length, 5000);
+      const expected = await service.snapshot(repo.id, undefined, true, view);
+      expect(first.commits).toEqual(expected.commits);
+      expect(tail.commits).toEqual(
+        (await service.page(repo.id, expected.cursor, expected.commits.length, 5000)).commits,
+      );
+      expect(first.hasMore).toBe(true);
+      expect(tail.hasMore).toBe(false);
+      if (kind === 'detached' || kind === 'hidden HEAD')
+        expect(first.commits.some((c) => c.oid === independent)).toBe(kind === 'detached');
+    } finally {
+      full.resolve();
+      await opening.catch(() => {});
+      run.mockRestore();
+      await service.dispose();
+    }
+  },
+);
+
+test('a hidden view with repeated packed targets needs one native root enumeration', async () => {
+  const path = await clone('grouped-hidden');
+  const service = new RepositoryService('git');
+  const repo = await service.open(path);
+  const run = vi.spyOn(runner, 'runGit');
+  try {
+    const view = { hiddenRefs: ['refs/heads/main'] };
+    const first = await service.snapshot(repo.id, undefined, false, view);
+    expect(first.commits).toHaveLength(2000);
+    expect(
+      run.mock.calls.some(([, args]) => args.includes('--format=%(objectname) %(refname)')),
+    ).toBe(false);
+    expect(
+      run.mock.calls.some(
+        ([, args, options]) => args[0] === 'rev-list' && options?.env?.GIT_NO_REPLACE_OBJECTS,
+      ),
+    ).toBe(false);
+  } finally {
+    run.mockRestore();
+    await service.dispose();
+  }
+});
+
 test('an empty replacement namespace follows Git across the first page and append', async () => {
   const path = await clone('custom-replacements');
   const original = fixtureGit(path, ['rev-parse', 'HEAD~2050']);
