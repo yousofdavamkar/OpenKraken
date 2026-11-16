@@ -97,6 +97,8 @@ OPENKRAKEN_BENCH_REPO=/path/to/linux.git xvfb-run -a pnpm benchmark:graph
 
 To measure a cached reopen after a complete app restart, set `OPENKRAKEN_BENCH_WARM=1` as well. The harness primes 17,000 commits before the measured launch and labels that condition in its JSON. The default always uses a fresh profile; it records whether the repository already has a Git commit-graph. It never creates one.
 
+Set `OPENKRAKEN_BENCH_SOLO_REF` to a full ref name, such as `refs/heads/main`, to measure opening a saved solo view. Choose a ref with enough history for three full pages. The measurement records the ref and the harness checks the active view after timing.
+
 Results and a screenshot are attached under `test-results/benchmark/`. This benchmark skips during the normal suite unless the environment variable is set. It does not clone, fetch or change Git refs, objects, the index or working files. The watcher self-test briefly creates and removes a private probe in the Git directory.
 
 ## Packages

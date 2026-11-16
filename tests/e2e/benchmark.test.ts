@@ -36,6 +36,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
   const args = [resolve('apps/desktop'), `--user-data-dir=${profile}`];
   let app: ElectronApplication | undefined;
   try {
+    const soloRef = process.env.OPENKRAKEN_BENCH_SOLO_REF;
     let hiddenTags: string[] = [];
     if (process.env.OPENKRAKEN_BENCH_HIDDEN_TAGS === '1') {
       hiddenTags = execFileSync(
@@ -50,8 +51,10 @@ test('real-repository first paint, paging and scrolling budgets', async ({
         .trimEnd()
         .split('\n');
       expect(hiddenTags).toHaveLength(10000);
+    }
+    if (hiddenTags.length || soloRef) {
       const id = createHash('sha256').update(realpathSync(path)).digest('hex');
-      await new RepositoryPreferences(profile).save(id, { hiddenRefs: hiddenTags });
+      await new RepositoryPreferences(profile).save(id, { hiddenRefs: hiddenTags, soloRef });
     }
     app = await electron.launch({ args });
     if (warm) {
@@ -161,6 +164,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       platform: `${process.platform} ${process.arch} ${release()}`,
       cpu: cpus()[0]?.model,
       hiddenRefCount: hiddenTags.length,
+      soloRef,
       firstPaintMs,
       firstPaintPhases,
       page5000Ms: pages,
@@ -207,6 +211,10 @@ test('real-repository first paint, paging and scrolling budgets', async ({
         'true',
       );
     }
+    if (soloRef)
+      await expect(page.getByLabel('Active graph view', { exact: true })).toContainText(
+        `Solo: ${soloRef}`,
+      );
     expect(mountedRows).toBeLessThan(100);
     expect.soft(mountedReferences).toBeLessThan(100);
     expect.soft(firstPaintMs).toBeLessThan(500);
