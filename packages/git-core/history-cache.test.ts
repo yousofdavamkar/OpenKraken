@@ -115,6 +115,37 @@ test('changed refs, effective configuration and shallow boundaries invalidate ca
     await service.dispose();
   }
 });
+test('an external graft file uses live history and preserves the existing cache', async () => {
+  const path = createFixture(join(root, 'grafted'), 'linear', 32);
+  // Exercise a single traversal root. The fixture normally also tracks HEAD's parent.
+  for (const ref of fixtureGit(path, ['for-each-ref', '--format=%(refname)']).split('\n'))
+    if (ref !== 'refs/heads/main') fixtureGit(path, ['update-ref', '-d', ref]);
+  const profile = { dataDir: join(root, 'grafted-profile') };
+  const open = async () => {
+    const service = new RepositoryService('git', profile);
+    try {
+      return await service.snapshot((await service.open(path)).id);
+    } finally {
+      await service.dispose();
+    }
+  };
+  const before = await open();
+  const prefix = join(profile.dataDir, 'history', before.repository.id, 'prefix.json');
+  const saved = await readFile(prefix);
+  const head = fixtureGit(path, ['rev-parse', 'HEAD']);
+  const file = join(root, 'external-grafts');
+  await writeFile(file, head + '\n');
+  vi.stubEnv('GIT_GRAFT_FILE', file);
+  try {
+    const expected = fixtureGit(path, ['rev-list', '--date-order', '--all']).split('\n');
+    expect(expected).not.toEqual(before.commits.map((commit) => commit.oid));
+    expect((await open()).commits.map((commit) => commit.oid)).toEqual(expected);
+    expect(await readFile(prefix)).toEqual(saved);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+  expect((await open()).commits).toEqual(before.commits);
+});
 test('damaged records miss safely; cache quotas and invalidation do not affect repositories', async () => {
   const service = new RepositoryService('git');
   const snapshot = await service.snapshot(
