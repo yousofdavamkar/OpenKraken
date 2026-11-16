@@ -13,7 +13,7 @@ import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
 import { buildAppImage } from './appimage.mjs';
-import { packageFuses, sha256, verifyFuses } from './package-security.mjs';
+import { packageFuses, pinnedElectronRuntime, sha256, verifyFuses } from './package-security.mjs';
 
 if (process.platform !== 'linux') throw new Error('Linux AppImage acceptance requires Linux');
 await mkdir('release', { recursive: true });
@@ -302,7 +302,7 @@ try {
       out: join(root, version, 'bundle'),
       name: 'OpenKraken',
       executableName: 'openkraken',
-      electronVersion: '45.2.1',
+      ...pinnedElectronRuntime(),
       asar: {
         unpack: '**/*.node',
         unpackDir: 'dist/{helpers,node_modules/node-pty,shell-integration}',

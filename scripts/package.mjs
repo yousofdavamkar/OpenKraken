@@ -1,6 +1,11 @@
 import { packager } from '@electron/packager';
 import { flipFuses, FuseVersion } from '@electron/fuses';
-import { packageFuses, payloadManifest, verifyFuses } from './package-security.mjs';
+import {
+  packageFuses,
+  pinnedElectronRuntime,
+  payloadManifest,
+  verifyFuses,
+} from './package-security.mjs';
 import { buildLinuxNative } from './linux-native.mjs';
 import { mkdir, readFile, writeFile, rm, lstat, readdir, chmod } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -50,7 +55,7 @@ const outputs = await packager({
   name: 'OpenKraken',
   appBundleId: 'org.openkraken.desktop',
   executableName: 'openkraken',
-  electronVersion: '45.2.1',
+  ...pinnedElectronRuntime(),
   protocols: [{ name: 'OpenKraken repository links', schemes: ['openkraken'] }],
   asar: {
     unpack: '**/*.node',

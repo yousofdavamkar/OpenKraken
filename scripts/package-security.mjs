@@ -9,6 +9,14 @@ import { readWindowsPayloadAccess } from './windows-payload.mjs';
 const require = createRequire(import.meta.url);
 const { extractFile } = createRequire(require.resolve('@electron/packager'))('@electron/asar');
 
+// The locked Electron npm package publishes the checksums for its release archives.
+export function pinnedElectronRuntime() {
+  return {
+    electronVersion: require('electron/package.json').version,
+    download: { checksums: require('electron/checksums.json') },
+  };
+}
+
 export function verifyPackagedApplication(directory, version, claimedSource) {
   const resources = process.platform === 'darwin' ? 'Contents/Resources' : 'resources';
   const archive = join(directory, resources, 'app.asar');
