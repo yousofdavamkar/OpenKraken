@@ -1,6 +1,6 @@
 import { afterAll, expect, test, vi } from 'vitest';
 import type { Snapshot } from '@openkraken/ipc-contract';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
@@ -325,4 +325,76 @@ test('an oversized UTF-8 history page stops encoding later batches and removes i
   } finally {
     await service.dispose();
   }
+});
+
+test('appending rewrites only changed cache pages and repairs lost or edited prefixes', async () => {
+  const path = createFixture(join(root, 'incremental'), 'linear', 10);
+  const service = new RepositoryService('git');
+  const repo = await service.open(path);
+  const { commits } = await service.snapshot(repo.id);
+  await service.dispose();
+  const profile = join(root, 'incremental-profile');
+  const directory = join(profile, 'history', repo.id);
+  const prefix = join(directory, 'prefix.json');
+  const tail = join(directory, 'tail-0.json');
+  let cache = new HistoryCache(profile, repo.id, 'incremental');
+  cache.record(0, commits.slice(0, 2), true);
+  await cache.flush();
+  const original = await stat(prefix, { bigint: true });
+  const bytes = await readFile(prefix);
+  cache.record(2, commits.slice(2, 4), true);
+  await cache.flush();
+  expect(await stat(prefix, { bigint: true })).toMatchObject({
+    ino: original.ino,
+    mtimeNs: original.mtimeNs,
+  });
+  expect(JSON.parse(await readFile(tail, 'utf8')).commits).toEqual(commits.slice(2, 4));
+
+  cache = new HistoryCache(profile, repo.id, 'incremental');
+  const seed = await cache.load();
+  await seed!.continuation!(() => true);
+  cache.record(4, commits.slice(4, 6), true);
+  await cache.flush();
+  expect(await stat(prefix, { bigint: true })).toMatchObject({
+    ino: original.ino,
+    mtimeNs: original.mtimeNs,
+  });
+  expect(JSON.parse(await readFile(tail, 'utf8')).commits).toEqual(commits.slice(2, 6));
+
+  await writeFile(prefix, Buffer.alloc(bytes.length, 32));
+  cache.record(6, commits.slice(6, 8), true);
+  await cache.flush();
+  expect(await readFile(prefix)).toEqual(bytes);
+  await rm(prefix);
+  cache.record(8, commits.slice(8), false);
+  await cache.flush();
+  expect(await readFile(prefix)).toEqual(bytes);
+  expect(JSON.parse(await readFile(tail, 'utf8'))).toMatchObject({
+    offset: 2,
+    commits: commits.slice(2),
+    hasMore: false,
+  });
+});
+
+test('a tail declined by the cursor cannot stand in for a live page of the same size', async () => {
+  const path = createFixture(join(root, 'declined'), 'linear', 6);
+  const service = new RepositoryService('git');
+  const repo = await service.open(path);
+  const { commits } = await service.snapshot(repo.id);
+  await service.dispose();
+  const profile = join(root, 'declined-profile');
+  const cache = new HistoryCache(profile, repo.id, 'declined');
+  cache.record(0, commits.slice(0, 2), true);
+  cache.record(2, commits.slice(2, 4), true);
+  await cache.flush();
+
+  const reopened = new HistoryCache(profile, repo.id, 'declined');
+  const seed = await reopened.load();
+  await seed!.continuation!(() => false);
+  reopened.record(2, commits.slice(4), true);
+  await reopened.flush();
+  const next = await new HistoryCache(profile, repo.id, 'declined').load();
+  const append = vi.fn(() => true);
+  await next!.continuation!(append);
+  expect(append).toHaveBeenCalledExactlyOnceWith({ commits: commits.slice(4), hasMore: true });
 });

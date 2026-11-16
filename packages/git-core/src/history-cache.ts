@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import type { BigIntStats } from 'node:fs';
+import { mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setImmediate as yieldTurn } from 'node:timers/promises';
 import { z } from 'zod';
@@ -15,9 +16,16 @@ const pageSchema = z.object({
   hasMore: z.boolean(),
   digest: z.string(),
 });
+function fileStamp(file: BigIntStats) {
+  return [file.dev, file.ino, file.size, file.mtimeNs, file.ctimeNs].join('/');
+}
 /** One bounded immutable-history window per repository, entirely under the app profile. */
 export class HistoryCache {
   private records: Commit[] = [];
+  private persisted = new Map<
+    string,
+    { offset: number; count: number; hasMore: boolean; stamp: string }
+  >();
   private firstCount = 0;
   private hasMore = true;
   private ready = Promise.resolve();
@@ -43,8 +51,17 @@ export class HistoryCache {
   private async read(name: string, maxBytes: number) {
     try {
       const path = join(this.directory, name);
-      if ((await stat(path)).size > maxBytes) return;
-      const result = pageSchema.safeParse(JSON.parse(await readFile(path, 'utf8')));
+      const file = await open(path, 'r');
+      let stamp: string, content: string;
+      try {
+        const metadata = await file.stat({ bigint: true });
+        if (metadata.size > maxBytes) return;
+        stamp = fileStamp(metadata);
+        content = await file.readFile('utf8');
+      } finally {
+        await file.close();
+      }
+      const result = pageSchema.safeParse(JSON.parse(content));
       if (!result.success || result.data.key !== this.key) return;
       const page = result.data,
         commits: Commit[] = [];
@@ -61,7 +78,7 @@ export class HistoryCache {
         commits.push(...batch.data);
         await yieldTurn();
       }
-      if (hash.update(']').digest('hex') === page.digest) return { ...page, commits };
+      if (hash.update(']').digest('hex') === page.digest) return { ...page, commits, stamp };
     } catch {
       /* A cache miss always falls back to the real Git stream. */
     }
@@ -70,6 +87,12 @@ export class HistoryCache {
     const prefix = await this.read(prefixName, 8 * 1024 * 1024);
     if (!prefix || prefix.offset !== 0 || !prefix.commits.length || prefix.commits.length > 2000)
       return;
+    this.persisted.set(prefixName, {
+      offset: 0,
+      count: prefix.commits.length,
+      hasMore: prefix.hasMore,
+      stamp: prefix.stamp,
+    });
     this.records = [...prefix.commits];
     this.firstCount = prefix.commits.length;
     this.hasMore = prefix.hasMore;
@@ -86,6 +109,12 @@ export class HistoryCache {
           )
             return;
           if (!append({ commits: tail.commits, hasMore: tail.hasMore })) return;
+          this.persisted.set(name, {
+            offset: tail.offset,
+            count: tail.commits.length,
+            hasMore: tail.hasMore,
+            stamp: tail.stamp,
+          });
           this.records.push(...tail.commits);
           this.hasMore = tail.hasMore;
           if (!tail.hasMore) return;
@@ -157,6 +186,19 @@ export class HistoryCache {
             ] as const;
           }),
         ] as const) {
+          const path = join(this.directory, name);
+          // Records only grow at the end. Reuse a matching range while its file still exists intact.
+          const previous = this.persisted.get(name);
+          if (
+            previous &&
+            previous.offset === offset &&
+            previous.count === commits.length &&
+            previous.hasMore === hasMore
+          ) {
+            const stamp = await stat(path, { bigint: true }).then(fileStamp, () => undefined);
+            if (stamp === previous.stamp) continue;
+          }
+          this.persisted.delete(name);
           // Serialize in bounded batches so an idle cache write cannot block paging.
           const header = Buffer.from(
             `{"key":${JSON.stringify(this.key)},"offset":${offset},"commits":[`,
@@ -178,16 +220,19 @@ export class HistoryCache {
           const footer = Buffer.from(`],"hasMore":${hasMore},"digest":"${checksum}"}`);
           size += footer.byteLength;
           if (size > limit) {
-            await rm(join(this.directory, name), { force: true });
+            await rm(path, { force: true });
             continue;
           }
           chunks.push(footer);
-          const path = join(this.directory, name),
-            temp = `${path}.${randomUUID()}.tmp`;
+          const temp = `${path}.${randomUUID()}.tmp`;
+          const file = await open(temp, 'wx', 0o600);
           try {
-            await writeFile(temp, Buffer.concat(chunks, size), { mode: 0o600, flag: 'wx' });
+            await file.writeFile(Buffer.concat(chunks, size));
             await rename(temp, path);
+            const stamp = fileStamp(await file.stat({ bigint: true }));
+            this.persisted.set(name, { offset, count: commits.length, hasMore, stamp });
           } finally {
+            await file.close();
             await rm(temp, { force: true });
           }
         }
