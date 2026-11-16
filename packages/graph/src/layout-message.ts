@@ -50,28 +50,37 @@ export function packLayout({ rows, ...layout }: Layout): PackedLayout {
 }
 
 export function unpackLayout({ nodes, edges, ids, ...layout }: PackedLayout): Layout {
+  if (nodes.length % nodeWidth || edges.length % edgeWidth)
+    throw new Error('Incomplete graph layout');
   const rows: GraphRow[] = [];
   let edgeWord = 0;
   for (let nodeWord = 0; nodeWord < nodes.length; nodeWord += nodeWidth) {
     const rowEdges: GraphEdge[] = [];
     const end = nodes[nodeWord + 3]!;
+    const oid = ids[nodes[nodeWord]!];
+    if (oid === undefined || end < edgeWord || end > edges.length || end % edgeWidth)
+      throw new Error('Incomplete graph layout');
     for (; edgeWord < end; edgeWord += edgeWidth) {
+      const kind = kinds[edges[edgeWord + 2]!];
+      const target = ids[edges[edgeWord + 4]!];
+      if (kind === undefined || target === undefined) throw new Error('Incomplete graph layout');
       rowEdges.push({
         from: edges[edgeWord]!,
         to: edges[edgeWord + 1]!,
-        kind: kinds[edges[edgeWord + 2]!]!,
+        kind,
         colorIndex: edges[edgeWord + 3]!,
-        target: ids[edges[edgeWord + 4]!]!,
+        target,
         dashed: !!edges[edgeWord + 5],
       });
     }
     rows.push({
-      oid: ids[nodes[nodeWord]!]!,
+      oid,
       rowIndex: layout.offset + rows.length,
       column: nodes[nodeWord + 1]!,
       colorIndex: nodes[nodeWord + 2]!,
       edges: rowEdges,
     });
   }
+  if (edgeWord !== edges.length) throw new Error('Incomplete graph layout');
   return { ...layout, kind: 'layout', rows };
 }

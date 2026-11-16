@@ -380,6 +380,46 @@ test('a refresh that fails during dispatch cannot later close the recovered work
     await close();
   }
 });
+test('an incomplete append layout keeps the displayed page and refresh recovers search and paging', async () => {
+  const { page, repository, close } = await launch('linear', 2200);
+  try {
+    const count = page.getByTestId('commit-count');
+    const more = page.getByRole('button', { name: 'Load more commits' });
+    const query = page.getByRole('textbox', { name: 'Search commits' });
+    await page.getByLabel('Refresh on focus', { exact: true }).uncheck();
+    await expect(page.getByText('Watching for changes', { exact: true })).toBeVisible();
+    await page.evaluate(() => {
+      const send = Worker.prototype.postMessage;
+      Worker.prototype.postMessage = new Proxy(send, {
+        apply(target, worker: Worker, args) {
+          if (args[0].method === 'append') {
+            Worker.prototype.postMessage = send;
+            const receive = worker.onmessage;
+            worker.onmessage = (event) => {
+              if (event.data.id === args[0].id && event.data.kind === 'packed-layout') {
+                worker.onmessage = receive;
+                event.data.nodes = event.data.nodes.subarray(0, -1);
+              }
+              return receive?.call(worker, event);
+            };
+          }
+          return Reflect.apply(target, worker, args);
+        },
+      });
+    });
+    await more.click();
+    await expect(page.getByText(/Incomplete graph layout/)).toBeVisible();
+    await expect(count).toHaveText('2,000 commits · more available');
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await more.click();
+    await expect(count).toHaveText('2,200 commits');
+    await query.fill(fixtureGit(repository, ['rev-parse', 'HEAD~2100']).slice(0, 12));
+    await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
+  } finally {
+    await close();
+  }
+});
+
 test('one Down key moves past the last initially loaded commit', async () => {
   const { page, close } = await launch('linear', 2003);
   try {

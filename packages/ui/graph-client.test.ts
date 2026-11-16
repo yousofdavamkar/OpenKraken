@@ -132,3 +132,40 @@ test('an unreadable worker message rejects pending requests immediately', async 
     vi.useRealTimers();
   }
 });
+
+test('an incomplete layout reply retires the worker and settles the layout and concurrent search', async () => {
+  vi.useFakeTimers();
+  vi.clearAllMocks();
+  const client = new GraphClient();
+  try {
+    const layout = client.request({ method: 'append', generation: 'a', offset: 1, commits: [] });
+    const query = client.request({ method: 'search', generation: 'a', query: 'needle' });
+    const settled = Promise.allSettled([layout, query]);
+    worker.onmessage!({
+      data: {
+        kind: 'packed-layout',
+        id: 1,
+        generation: 'a',
+        offset: 1,
+        ids: ['tip'],
+        nodes: new Uint32Array([0, 0, 0]),
+        edges: new Uint32Array(),
+        passages: [],
+        maxColumns: 1,
+        reusedTail: 0,
+        checkpointRows: [],
+      },
+    });
+    expect(client.failed).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    for (const result of await settled)
+      expect(result).toMatchObject({
+        status: 'rejected',
+        reason: new Error('Incomplete graph layout'),
+      });
+    expect(worker.terminate).toHaveBeenCalledTimes(1);
+  } finally {
+    client.close();
+    vi.useRealTimers();
+  }
+});

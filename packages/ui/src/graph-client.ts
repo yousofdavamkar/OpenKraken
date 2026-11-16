@@ -22,13 +22,19 @@ export class GraphClient {
     this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       const pending = this.pending.get(event.data.id);
       if (!pending) return;
+      try {
+        if (event.data.kind === 'error') pending.reject(new Error(event.data.message));
+        else
+          pending.resolve(
+            event.data.kind === 'packed-layout' ? unpackLayout(event.data) : event.data,
+          );
+      } catch {
+        // The worker may already have advanced its offset. Refresh must start a fresh layout.
+        this.stop(new Error('Incomplete graph layout'));
+        return;
+      }
       this.pending.delete(event.data.id);
       clearTimeout(pending.timer);
-      if (event.data.kind === 'error') pending.reject(new Error(event.data.message));
-      else
-        pending.resolve(
-          event.data.kind === 'packed-layout' ? unpackLayout(event.data) : event.data,
-        );
     };
     this.worker.onmessageerror = () => this.stop(new Error('Graph worker reply could not be read'));
     this.worker.onerror = (event) => this.stop(new Error(event.message || 'Graph worker failed'));
