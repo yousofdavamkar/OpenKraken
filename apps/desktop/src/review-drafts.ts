@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { join } from 'node:path';
+import { ProtectedDraftFiles } from './protected-draft-files.js';
 import { LocalDraftFiles } from './local-draft-files.js';
 import type { SecretProtection } from './provider-vault.js';
 import {
@@ -46,59 +46,37 @@ export class ReviewDrafts {
     private protection: SecretProtection,
   ) {}
   async request(request: ReviewDraftRequest): Promise<Result> {
-    const files = new LocalDraftFiles(
+    const files = new ProtectedDraftFiles(
       this.profile,
-      join('provider-review-drafts', request.scope.accountId),
-      z.string().base64(),
-      1024 * 1024,
+      'provider-review-drafts',
+      request.scope.accountId,
+      this.protection,
+      record,
+      (entry) => identity(entry.scope, entry.target),
     );
-    const decode = async (encoded: string, filename: string) => {
-      const { result } = await this.protection.decrypt(Buffer.from(encoded, 'base64'));
-      const value = record.parse(JSON.parse(result));
-      if (
-        value.scope.accountId !== request.scope.accountId ||
-        LocalDraftFiles.name(identity(value.scope, value.target)) !== filename
-      )
-        throw new Error('Draft identity changed');
-      return value;
-    };
     if (request.method === 'reviewDraftList') {
       const entries = [];
       const key = 'repository' in request.scope ? scopeKey(request.scope) : undefined;
       let unreadable = false;
       for await (const entry of files.entries()) {
-        try {
-          if (entry.draft === null) throw new Error('Unreadable draft');
-          const { scope, target } = await decode(entry.draft, entry.name);
-          if (key === undefined || key === scopeKey(scope)) entries.push({ scope, target });
-        } catch {
-          unreadable = true;
-        }
+        if (!entry) unreadable = true;
+        else if (key === undefined || key === scopeKey(entry.scope))
+          entries.push({ scope: entry.scope, target: entry.target });
       }
       return { kind: 'reviewDraftList', entries, unreadable };
     }
     const id = identity(request.scope, request.target);
     if (request.method === 'reviewDraftRead') {
-      const { draft, revision } = await files.read(id);
-      return {
-        kind: 'reviewDraft',
-        revision,
-        draft: draft === null ? null : (await decode(draft, LocalDraftFiles.name(id))).draft,
-      };
+      const { record, revision } = await files.read(id);
+      return { kind: 'reviewDraft', revision, draft: record?.draft ?? null };
     }
-    const value =
+    const revision = await files.save(
+      id,
+      request.revision,
       request.draft === null
         ? null
-        : (
-            await this.protection.encrypt(
-              JSON.stringify({
-                scope: request.scope,
-                target: request.target,
-                draft: request.draft,
-              }),
-            )
-          ).toString('base64');
-    const { revision } = await files.save(id, request.revision, value);
+        : { scope: request.scope, target: request.target, draft: request.draft },
+    );
     return { kind: 'reviewDraft', revision, draft: request.draft };
   }
 }
