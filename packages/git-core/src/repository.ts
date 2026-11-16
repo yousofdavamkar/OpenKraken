@@ -434,7 +434,7 @@ export class RepositoryService {
   private cacheFingerprintReads(repository: Repository, signal: AbortSignal) {
     if (
       !this.dataDir ||
-      process.env.GIT_GRAFT_FILE ||
+      process.env.GIT_GRAFT_FILE !== undefined ||
       process.env.GIT_SHALLOW_FILE ||
       process.env.GIT_REPLACE_REF_BASE ||
       process.env.GIT_NO_REPLACE_OBJECTS
@@ -462,7 +462,7 @@ export class RepositoryService {
       repository.isShallow ||
       process.env.GIT_REPLACE_REF_BASE ||
       process.env.GIT_SHALLOW_FILE ||
-      process.env.GIT_GRAFT_FILE
+      process.env.GIT_GRAFT_FILE !== undefined
     )
       return;
     // File size is only a scheduling hint. Git supplies every tentative root.

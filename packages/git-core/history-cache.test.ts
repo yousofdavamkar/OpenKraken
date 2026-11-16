@@ -145,6 +145,20 @@ test('an external graft file uses live history and preserves the existing cache'
     vi.unstubAllEnvs();
   }
   expect((await open()).commits).toEqual(before.commits);
+
+  await writeFile(join(path, '.git', 'info', 'grafts'), head + '\n');
+  expect((await open()).commits.map((commit) => commit.oid)).toEqual([head]);
+  const graftedCache = await readFile(prefix);
+  vi.stubEnv('GIT_GRAFT_FILE', '');
+  try {
+    const expected = fixtureGit(path, ['rev-list', '--date-order', '--all']).split('\n');
+    expect(expected).toHaveLength(32);
+    expect((await open()).commits.map((commit) => commit.oid)).toEqual(expected);
+    expect(await readFile(prefix)).toEqual(graftedCache);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+  expect((await open()).commits.map((commit) => commit.oid)).toEqual([head]);
 });
 test('damaged records miss safely; cache quotas and invalidation do not affect repositories', async () => {
   const service = new RepositoryService('git');
