@@ -68,7 +68,18 @@ export class GraphClient {
       }, 30000);
       this.pending.set(id, { resolve, reject, timer });
       try {
-        this.worker.postMessage({ ...input, id });
+        if (input.method === 'search') this.worker.postMessage({ ...input, id });
+        else {
+          const commits = input.commits.map(({ oid, parents, isStash, summary, body, author }) => ({
+            oid,
+            parents,
+            isStash,
+            summary,
+            body,
+            author: { name: author.name, email: author.email },
+          }));
+          this.worker.postMessage({ ...input, id, commits });
+        }
       } catch (error) {
         // A synchronous clone failure never reaches the worker or advances its generation.
         clearTimeout(timer);

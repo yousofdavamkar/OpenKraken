@@ -169,3 +169,41 @@ test('an incomplete layout reply retires the worker and settles the layout and c
     vi.useRealTimers();
   }
 });
+
+test('layout requests send the fields used by graph allocation and search', async () => {
+  const client = new GraphClient();
+  const author = { name: 'Jess', email: 'jess@example.test' };
+  const document = {
+    oid: 'stash',
+    parents: ['head', 'index'],
+    isStash: true,
+    summary: 'saved changes',
+    body: 'unfinished work',
+    author,
+  };
+  const displayCommit = {
+    ...document,
+    kind: 'commit' as const,
+    author: { ...author, timestamp: 42 },
+    committer: { ...author, timestamp: 50 },
+  };
+  const response = client.request({
+    method: 'reset',
+    generation: 'g',
+    offset: 0,
+    commits: [displayCommit],
+  });
+  const settled = Promise.allSettled([response]);
+  try {
+    expect(worker.postMessage).toHaveBeenLastCalledWith({
+      id: 1,
+      method: 'reset',
+      generation: 'g',
+      offset: 0,
+      commits: [document],
+    });
+  } finally {
+    client.close();
+    await settled;
+  }
+});
