@@ -352,6 +352,7 @@ export class RepositoryService {
         );
         const statusRead = this.readSnapshotStatus(repository, readSignal, observe?.status);
         const cacheReads = this.cacheFingerprintReads(repository, readSignal);
+        const cacheFlush = this.cache?.flush();
         const probeStop = new AbortController();
         const prefetch = refresh
           ? Promise.resolve(undefined)
@@ -372,6 +373,7 @@ export class RepositoryService {
               refs,
               worktrees,
               cacheInputs,
+              cacheFlush,
               readSignal,
               await prefetch,
             );
@@ -380,7 +382,7 @@ export class RepositoryService {
         let graph: Awaited<typeof graphRead>;
         let status: Snapshot['status'];
         try {
-          [graph, status] = await Promise.all([graphRead, statusRead]);
+          [graph, status] = await Promise.all([graphRead, statusRead, cacheFlush]);
           if (requestedView) await this.preferences.save(id, requestedView);
           if (signal?.aborted) throw new GitError('CANCELLED', 'Snapshot loading cancelled');
         } catch (error) {
@@ -391,6 +393,7 @@ export class RepositoryService {
             refRead,
             worktreeRead,
             ...cacheReads,
+            cacheFlush,
           ]);
           if (candidate.status === 'fulfilled') await candidate.value.history.close();
           else await (await prefetch)?.close();
@@ -540,6 +543,7 @@ export class RepositoryService {
     refs: Snapshot['refs'],
     worktrees: Snapshot['worktrees'],
     cacheInputs: string[],
+    cacheFlush: Promise<void> | undefined,
     signal: AbortSignal,
     candidate?: HistoryCursor,
   ) {
@@ -580,7 +584,8 @@ export class RepositoryService {
         .map((c) => ({ ...c, parents: c.parents.slice(0, 1), isStash: true }));
       for (const stash of stashCommits) if (stash.parents[0]) starts.add(stash.parents[0]);
     }
-    await this.cache?.flush();
+    // The previous cache may be writing this prefix or trimming other repositories.
+    await cacheFlush;
     let cache: HistoryCache | undefined;
     if (this.dataDir && cacheInputs.length) {
       const [version, config, ...metadata] = cacheInputs;

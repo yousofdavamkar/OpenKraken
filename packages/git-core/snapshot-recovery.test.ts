@@ -264,3 +264,53 @@ test('the cache config read can fail while refs are pending and the published cu
     await service.dispose();
   }
 });
+
+test('switching repositories persists the displayed history while Git reads the next references', async () => {
+  const active = createFixture(join(root, 'switch-flush-active'), 'linear', 2100);
+  const next = createFixture(join(root, 'switch-flush-next'), 'linear', 20);
+  const dataDir = join(root, 'switch-flush-profile');
+  const service = new RepositoryService('git', { dataDir });
+  const repo = await service.open(active);
+  const first = await service.snapshot(repo.id);
+  const destination = await service.open(next);
+  const native = runner.runGit;
+  let onRefs!: () => void, resume!: () => void;
+  const refsStarted = new Promise<void>((resolve) => {
+    onRefs = resolve;
+  });
+  const refGate = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  const run = vi.spyOn(runner, 'runGit').mockImplementation(async (git, args, options) => {
+    if (args[0] === 'for-each-ref' && options?.cwd === next) {
+      onRefs();
+      await refGate;
+    }
+    return native(git, args, options);
+  });
+  const switching = service.snapshot(destination.id);
+  try {
+    await refsStarted;
+    const cache = join(dataDir, 'history', repo.id);
+    await vi.waitFor(
+      async () => {
+        expect(JSON.parse(await readFile(join(cache, 'prefix.json'), 'utf8')).commits).toHaveLength(
+          2000,
+        );
+      },
+      { timeout: 2000 },
+    );
+    const tail = await service.page(repo.id, first.cursor, 2000, 100);
+    expect(tail.commits).toHaveLength(100);
+    resume();
+    expect((await switching).repository.id).toBe(destination.id);
+    expect(JSON.parse(await readFile(join(cache, 'tail-0.json'), 'utf8')).commits).toEqual(
+      tail.commits,
+    );
+  } finally {
+    resume();
+    await switching.catch(() => {});
+    run.mockRestore();
+    await service.dispose();
+  }
+});
