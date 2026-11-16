@@ -30,6 +30,8 @@ When posting a graph request throws synchronously, the renderer removes that req
 
 The renderer checks the lengths of packed node and edge records, the node and edge target IDs, and each node’s edge boundary before publishing a layout. A truncated reply can arrive after the worker has advanced the generation. The renderer retires that worker and settles every waiting request. The Electron regression refreshes the graph after a truncated append, then loads and searches another page.
 
+The renderer also checks each reply against its pending request. Reset and append must return the requested offset and every submitted commit ID in order. A refresh may reuse a prefix and tail, but those ranges plus its returned rows must cover the requested history exactly. The whole-row regression drops the final complete node and its edges, leaving a decodable message. The displayed 2,000 commits survive the error, and Refresh recovers paging and search.
+
 ## Sending commits to the worker
 
 Reset, append and refresh send each commit’s ID, ordered parents, stash marker, summary, body, author name and author email. The renderer keeps the display metadata, including the committer and timestamps. On a replay of the same real history through the Electron renderer and graph worker, median round-trip time fell from 20.4 to 17.9 ms for 2,000 commits and from 50.0 to 45.2 ms for a 5,000-commit append. Both paths produced identical graph rows, edges and passages. [Desktop measurements](../verification/m8-reference-performance.md#filtered-history-and-graph-worker-input)

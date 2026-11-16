@@ -6,6 +6,28 @@ type Input = GraphRequest extends infer R
     ? Omit<R, 'id'>
     : never
   : never;
+function readReply(input: Input, reply: Exclude<WorkerResponse, { kind: 'error' }>): GraphResponse {
+  if (reply.generation !== input.generation) throw new Error('Incomplete graph layout');
+  if (reply.kind === 'matches' && input.method === 'search') return reply;
+  if (reply.kind !== 'packed-layout' || input.method === 'search')
+    throw new Error('Incomplete graph layout');
+
+  const layout = unpackLayout(reply);
+  const { offset, rows, reusedTail } = layout;
+  const start = offset - input.offset;
+  if (
+    !Number.isSafeInteger(start) ||
+    start < 0 ||
+    !Number.isSafeInteger(reusedTail) ||
+    reusedTail < 0 ||
+    (input.method !== 'refresh' && (start !== 0 || reusedTail !== 0)) ||
+    start + rows.length + reusedTail !== input.commits.length ||
+    rows.some((row, index) => row.oid !== input.commits[start + index]!.oid)
+  )
+    throw new Error('Incomplete graph layout');
+  return layout;
+}
+
 export class GraphClient {
   private worker = new GraphWorker();
   private sequence = 0;
@@ -13,6 +35,7 @@ export class GraphClient {
   private pending = new Map<
     number,
     {
+      input: Input;
       resolve: (response: GraphResponse) => void;
       reject: (error: Error) => void;
       timer: ReturnType<typeof setTimeout>;
@@ -24,10 +47,7 @@ export class GraphClient {
       if (!pending) return;
       try {
         if (event.data.kind === 'error') pending.reject(new Error(event.data.message));
-        else
-          pending.resolve(
-            event.data.kind === 'packed-layout' ? unpackLayout(event.data) : event.data,
-          );
+        else pending.resolve(readReply(pending.input, event.data));
       } catch {
         // The worker may already have advanced its offset. Refresh must start a fresh layout.
         this.stop(new Error('Incomplete graph layout'));
@@ -66,7 +86,7 @@ export class GraphClient {
         this.pending.delete(id);
         reject(error);
       }, 30000);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { input, resolve, reject, timer });
       try {
         if (input.method === 'search') this.worker.postMessage({ ...input, id });
         else {

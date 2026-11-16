@@ -398,7 +398,9 @@ test('an incomplete append layout keeps the displayed page and refresh recovers 
             worker.onmessage = (event) => {
               if (event.data.id === args[0].id && event.data.kind === 'packed-layout') {
                 worker.onmessage = receive;
-                event.data.nodes = event.data.nodes.subarray(0, -1);
+                // Drop the last complete row and its edges. The remaining records still decode.
+                event.data.nodes = event.data.nodes.subarray(0, -4);
+                event.data.edges = event.data.edges.subarray(0, event.data.nodes.at(-1) ?? 0);
               }
               return receive?.call(worker, event);
             };

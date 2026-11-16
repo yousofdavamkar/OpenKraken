@@ -170,6 +170,79 @@ test('an incomplete layout reply retires the worker and settles the layout and c
   }
 });
 
+const documents = ['first', 'second', 'third'].map((oid) => ({
+  oid,
+  parents: [],
+  summary: oid,
+  body: '',
+  author: { name: '', email: '' },
+}));
+
+function pageReply(offset: number, ids: string[], reusedTail = 0) {
+  return {
+    kind: 'packed-layout' as const,
+    id: 1,
+    generation: 'g',
+    offset,
+    ids,
+    nodes: Uint32Array.from(ids.flatMap((_, index) => [index, 0, 0, 0])),
+    edges: new Uint32Array(),
+    passages: [],
+    maxColumns: 1,
+    reusedTail,
+    checkpointRows: [],
+  };
+}
+
+test.each([
+  ['a missing whole row', pageReply(6, ['first', 'second'])],
+  ['a shifted page', pageReply(5, ['first', 'second', 'third'])],
+  ['reordered commits', pageReply(6, ['first', 'third', 'second'])],
+  ['a different generation', { ...pageReply(6, ['first', 'second', 'third']), generation: 'old' }],
+  ['claimed append reuse', pageReply(6, ['first', 'second'], 1)],
+] as const)('retires the worker when an append contains %s', async (_problem, reply) => {
+  const client = new GraphClient();
+  try {
+    const result = client.request({
+      method: 'append',
+      generation: 'g',
+      offset: 6,
+      commits: documents,
+    });
+    worker.onmessage!({ data: reply });
+    await expect(result).rejects.toThrow('Incomplete graph layout');
+    expect(client.failed).toBe(true);
+  } finally {
+    client.close();
+  }
+});
+
+test.each([
+  [pageReply(1, ['second'], 1), true],
+  [pageReply(3, []), true],
+  [pageReply(1, ['second']), false],
+  [pageReply(-1, [], 4), false],
+  [pageReply(1.5, [], 1.5), false],
+  [pageReply(1, ['first'], 1), false],
+] as const)('checks the changed and reused ranges on refresh %#', async (reply, valid) => {
+  const client = new GraphClient();
+  try {
+    const result = client.request({
+      method: 'refresh',
+      generation: 'g',
+      baseGeneration: 'old',
+      offset: 0,
+      commits: documents,
+    });
+    worker.onmessage!({ data: reply });
+    if (valid)
+      await expect(result).resolves.toMatchObject({ kind: 'layout', offset: reply.offset });
+    else await expect(result).rejects.toThrow('Incomplete graph layout');
+  } finally {
+    client.close();
+  }
+});
+
 test('layout requests send the fields used by graph allocation and search', async () => {
   const client = new GraphClient();
   const author = { name: 'Jess', email: 'jess@example.test' };
