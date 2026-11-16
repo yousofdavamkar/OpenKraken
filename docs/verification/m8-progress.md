@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Conflict editor drafts
+
+Linux x64 restart tests recovered manual merge output and checked lines in a partially resolved two-chunk conflict after main-process death. All three native index stages and the working file stayed unchanged until explicit staging. A changed working file blocked staging of the recovered draft. After an external merge abort, **Saved file drafts** exposed the text for copying or discard. A concurrent change to the stored draft kept newer edits visible in the editor and preserved the external revision. [Conflict draft behavior](../decisions/0125-conflict-draft-recovery.md)
+
+The packaged Linux x64 build at `9a28300` also recovered a partially resolved merge after a forced main-process exit. The worker restored the selected line and the unresolved chunk. The staged blob and working file matched the reviewed output after explicit staging, and the draft inventory cleared. The full unit and native suite passed 954 tests with 14 skips. All 24 selected Electron tests, package smoke, typechecking and lint passed.
+
 ## Working-file drafts
 
 A forced Linux x64 main-process exit preserved acknowledged CodeMirror text and its selected line endings across a fresh launch. The unchanged-file case saved the restored draft. The changed-file case kept the newer disk contents and disabled Save. After deletion, the checkout's **Saved file drafts** panel recovered the text and cleared it on explicit discard. The commit-form and working-file stores use the same private atomic writer. [Storage and recovery behavior](../decisions/0124-working-file-draft-recovery.md)
@@ -802,7 +808,7 @@ Evidence: `/tmp/openkraken-supervisor-{red,green,native,hook,unit,e2e,types,buil
 ## Remaining work
 
 - Native supervision runtime acceptance on Windows/macOS, further crash/write scenarios beyond the Linux fetch/PTY/prompt fixtures above, native lock handling and durable write recovery. POSIX processes that intentionally detach or daemonize beyond the active command's stream lifetime are not contained.
-- Durable drafts for conflict/native editors and provider composers remain open. Commit-form and working-file recovery are implemented within the bounds above. Crash-report coverage before reporting initialization, live receiver configuration/acceptance, hung-startup and interrupted-update recovery, non-AppImage installation/restart, signed installers/distribution, security review and beta evidence remain open. Signed release checks/downloads, opt-in automatic checks, supported AppImage desktop installation/restart and startup-exit restoration, opt-in process/JavaScript summaries and interrupted-session recovery are implemented within the bounds above.
+- Durable drafts for native Git editor prompts and provider composers remain open. Commit-form, working-file and conflict-editor recovery are implemented within the bounds above. Crash-report coverage before reporting initialization, live receiver configuration/acceptance, hung-startup and interrupted-update recovery, non-AppImage installation/restart, signed installers/distribution, security review and beta evidence remain open. Signed release checks/downloads, opt-in automatic checks, supported AppImage desktop installation/restart and startup-exit restoration, opt-in process/JavaScript summaries and interrupted-session recovery are implemented within the bounds above.
 - Native DMG/MSI acceptance, broader RPM/AppImage distribution acceptance, Linux arm64 and macOS/Windows installer runtime checks, and real release metadata. Linux x64 has local DEB, RPM and AppImage test builds, including an RPM signed with a disposable key. Debian 13 and Fedora 43 x64 version upgrades are verified within the bounds above. Production signing and distribution remain open.
 - Broader real-repository and cross-platform performance/regression gates, plus the unresolved intermittent command exit-143 investigation recorded in M7 progress.
 
