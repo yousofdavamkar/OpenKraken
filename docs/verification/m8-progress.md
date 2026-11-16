@@ -2,6 +2,18 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Opening snapshots and recovering the graph
+
+Opening snapshots now carry the first 2,000 commit bodies outside their JSON metadata. On Linux x64, replaying the same validated snapshot through Electron’s sandbox bridge saved a median of 15.6 ms with 50,000 distinct refs and 21.9 ms with a single ref. The packaged app matched every commit, message and ordered ref against the earlier format on the full Linux distinct-target fixture, and appended 5,000 commits through the UI. [Desktop timings and replay measurements](m8-reference-performance.md#transferring-the-opening-snapshots-commit-bodies)
+
+A refresh that failed during worker dispatch used to leave a 30-second timeout behind. After retry, that timer closed the recovered worker and prevented the graph from loading its next page. The Electron regression now appends and searches after advancing past the deadline. An unreadable worker reply also rejects pending work immediately. [Worker recovery](../decisions/0006-compact-graph-passages.md#failed-worker-dispatch-and-unreadable-replies)
+
+A separate Electron regression held initial layout until the native watcher had observed a new branch. The original renderer missed both the watcher mode and the new branch. It now coalesces notifications for the opening repository and refreshes the mounted graph. Reopening the same repository retains its watcher mode. [Watcher handoff](../decisions/0104-snapshot-reference-watcher-baseline.md#delivering-changes-during-initial-layout)
+
+The history cache now handles empty shallow and replacement overrides. The packaged Linux app matched every native object ID and parent before, during and after each override. Its cached prefix stayed byte-identical during all three overrides. Git 2.38.0 passed 47 cache, prefetch and ref-reader tests with 12 newer-Git cases skipped. [Git override behavior](../decisions/0008-bounded-history-cache.md#empty-shallow-and-replacement-settings)
+
+The full Linux unit/native suite passed 971 tests with 14 skips. All 33 selected Electron tests passed on the final renderer, and five focused Electron tests passed with Git 2.38.0. During an earlier run alongside the native suite and packaging, the desktop fixture took 823 ms to paint and 491.8 ms to append a graph page. The standalone final run measured 224.2 and 200.7 ms respectively. The final Linux x64 package at `e0e8be1` passed native package smoke, the delayed-layout watcher check, the comparison of both snapshot formats and the three cache override restart checks. Typechecking and lint passed. The final full-history runs still missed 500 ms on all six large-ref opens and on one of three single-ref opens. All 27 measured appends met 300 ms.
+
 ## Cached graph history with Git grafts
 
 With an external graft file, Git reported one reachable commit while OpenKraken displayed a cached 32. An explicitly empty override caused the reverse error when the repository had its own graft file. The service now reads live history in both cases. [Cache behavior](../decisions/0008-bounded-history-cache.md#external-graft-files)

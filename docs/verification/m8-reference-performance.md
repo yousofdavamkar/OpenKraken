@@ -2,6 +2,24 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Transferring the opening snapshot’s commit bodies
+
+The renderer now receives the first 2,000 commit messages as an ordered array alongside JSON metadata. A captured first page from full Linux history contained 2,945,781 bytes of unescaped UTF-8 message text. The complete snapshot JSON was 3,860,347 bytes with one ref and 7,370,328 bytes with 50,000 distinct refs. [Snapshot format](../decisions/0115-history-page-response.md#opening-snapshots)
+
+Three pairs per fixture alternated the existing and new formats in fresh Electron profiles on Linux x64 with Git 2.53.0, a prepared commit-graph and populated OS caches. Both variants used the same Git utility and the same 1,505,199-commit history. The first-paint measurement includes repository open, native enumeration, transfer, layout and display. The separate IPC replay used the same validated snapshot in memory for both formats, a sandboxed renderer and the production encoding and decoding functions. Ten alternating pairs per fixture followed a warm-up pair. Each replay checked a digest over every decoded field outside the timed interval.
+
+| Reference targets                  | Median first paint, JSON → split bodies | Median IPC replay through ref expansion, JSON → split bodies |
+| ---------------------------------- | --------------------------------------: | -----------------------------------------------------------: |
+| 50,000 distinct                    |                        734.8 → 735.5 ms |                                               68.7 → 53.1 ms |
+| 500 interleaved across 50,000 refs |                        671.3 → 639.6 ms |                                               66.8 → 51.1 ms |
+| One ref                            |                        410.4 → 339.3 ms |                                               34.1 → 12.2 ms |
+
+The split format completed the IPC replay faster in all 30 pairs. All 12 large-ref openings exceeded 500 ms. The three single-ref openings with the split format took 336.1–350.9 ms. The slowest single-ref baseline spent 587.5 ms in its native snapshot alone. Of 27 measured page appends per build, all 27 baseline appends and 25 with the new opening format met 300 ms. The two misses, 396 and 414 ms, occurred in the same single-ref run, which also recorded a 33.4 ms graph frame interval p95. [Opening and paging samples](m8-opening-experiments.csv) · [IPC replay samples](m8-snapshot-body-replay.csv)
+
+The final application at `e0e8be1` ran the unchanged graph benchmark three times per fixture with fresh profiles. The distinct-target first paints took 750.5, 703.4 and 728.2 ms. Interleaved targets took 637.4, 626.3 and 611.6 ms. The single-ref fixture took 896.8, 340.3 and 372.3 ms. All 27 appends met 300 ms and graph frame intervals stayed at or below 16.8 ms p95. [Final runs](m8-opening-experiments.csv)
+
+A separate renderer experiment froze the decoded snapshot and display rows while the worker computed the initial layout. Median state-publication time dropped from 20.3 to 7.9 ms on distinct targets and from 23.6 to 10.3 ms on interleaved targets. Median first paint increased from 709.0 to 755.4 ms and from 652.3 to 676.2 ms respectively. Production retains its existing freeze scheduling. [Timing samples](m8-opening-experiments.csv)
+
 ## Cache-key timing on the opening path
 
 A trace of a fresh open on the distinct-target fixture put about 330 ms between starting reference enumeration and receiving the full records. Preparing and dispatching the compact ref message took another 31 ms. After that, about 48 ms elapsed before the service adopted the early cursor and its ready first page. The following experiments used a separate uninstrumented app for each variant, the same renderer, fresh profiles and uncleared OS caches. The baseline was `b674110` on Linux x64 with an Intel Core i7-9750H and Git 2.53.0. Each fixture had 1,505,199 commits, 50,000 refs and a prepared Git commit-graph. [Individual measurements](m8-opening-experiments.csv)

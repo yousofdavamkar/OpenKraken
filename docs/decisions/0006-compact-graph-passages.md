@@ -23,3 +23,7 @@ The benchmark clone has 87,206 commits and a shallow boundary at 2026-01-01. Pro
 Git documents that ordered walks may require visiting the entire graph, and that commit-graph acceleration is unavailable with shallow boundaries. See [Git commit-graph design](https://git-scm.com/docs/commit-graph). The measurements are consistent with this limitation; they do not establish performance for a full, indexed Linux repository.
 
 The real-history paging and scrolling gates now pass, while its first-paint gate remains failing. Keep that failure visible. Further startup work needs a separate cache/index design or an agreed performance envelope; this increment does not write commit-graph files into users' repositories or change traversal order to improve a timing result.
+
+## Failed worker dispatch and unreadable replies
+
+When posting a graph request throws synchronously, the renderer removes that request and clears its timeout. The worker can still serve its current generation. A delivered browser `messageerror` cannot identify a usable reply, so the renderer closes that worker and rejects its pending requests immediately. Refresh can then create a new worker. An Electron regression injects a dispatch failure, retries Refresh, advances past the old timeout and checks paging and search on the recovered graph.

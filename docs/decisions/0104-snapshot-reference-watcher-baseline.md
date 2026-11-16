@@ -23,3 +23,7 @@ All snapshot fields, graph roots, watcher domains, IPC validation and timing bud
 ## Hashing a large opening snapshot at the first check
 
 At 10,000 or more refs the watcher copies the snapshot's ordered reference lines and worktree metadata before returning it. The first active check hashes those captured values before reading the current repository. A paused check keeps the opening values for resume, and closing the watcher releases them. Capturing the values at open lets the first check detect a native change even when a caller also mutates its copy of the snapshot. Small repositories still compute the initial hash during open.
+
+## Delivering changes during initial layout
+
+The renderer’s bridge listener is active before the graph mounts. It retains the latest watcher mode and merges changed domains for the utility’s single current repository. Subscribing the matching repository view consumes that pending notification once, then delivers live events normally. Changing the focus-refresh preference keeps the subscription and its scheduled refreshes active. Reopening the already watched repository preserves its mode. An Electron test waits for the native watcher, creates a real branch while the initial layout is held, then checks that the released view displays both the mode and the new branch.

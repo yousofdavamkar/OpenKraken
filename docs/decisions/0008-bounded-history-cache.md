@@ -25,3 +25,7 @@ A 19,000-commit integration test gates the actual Git stream, verifies cached pa
 ## External graft files
 
 Git can use a file selected by `GIT_GRAFT_FILE` to override commit parentage. Changing that file can change every displayed page while HEAD, refs and the repository's own graft metadata stay the same. The service bypasses cache reads and writes whenever the variable is set. An empty value tells Git to ignore the repository’s own graft file and can restore the entire ungrafted history. Removing the override makes the ordinary cache available again. A regression with an existing 32-commit prefix originally displayed all 32 when native Git reported one.
+
+## Empty shallow and replacement settings
+
+An empty `GIT_SHALLOW_FILE` ignores the repository’s shallow boundary. An empty `GIT_NO_REPLACE_OBJECTS` disables replacements. An empty `GIT_REPLACE_REF_BASE` can bring replacement refs outside the usual namespace into the native walk. The service bypasses the disk cache whenever any of these settings is present. It also skips the tentative unreplaced walk for custom replacement namespaces and shallow overrides, and uses direct native ref metadata for custom namespaces. Tests reopen a populated cache and compare ordered object IDs and parent lists with Git before, during and after each override.
