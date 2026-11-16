@@ -1,6 +1,16 @@
 import { expect, test, vi } from 'vitest';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -207,6 +217,79 @@ test('a native restoration notice survives restart until explicitly dismissed', 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test.each(['complete', 'partial', 'invalid outcome', 'already published', 'invalid published'])(
+  'reopens a native rollback notice interrupted before publication (%s)',
+  async (scenario) => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-pending-rollback-'));
+    const temporary = join(root, 'rollback-notice.tmp');
+    const published = join(root, 'rollback-notice.json');
+    const notice = JSON.stringify({ schemaVersion: 1, outcome: 'restored' });
+    await writeFile(
+      temporary,
+      scenario === 'partial' ? notice.slice(0, -1) : scenario === 'invalid outcome' ? '{}' : notice,
+      { mode: 0o600 },
+    );
+    if (scenario === 'already published')
+      await writeFile(published, notice + '\n', { mode: 0o600 });
+    if (scenario === 'invalid published') await writeFile(published, '{}', { mode: 0o600 });
+    let updater = new Updates(root, configuration, runtime);
+    try {
+      const state = await updater.started();
+      if (scenario === 'invalid published') {
+        expect(state).toMatchObject({ error: 'storage', recovery: null });
+        expect(await readFile(published, 'utf8')).toBe('{}');
+        return;
+      }
+      if (scenario !== 'complete')
+        await expect(stat(temporary)).rejects.toMatchObject({ code: 'ENOENT' });
+      if (scenario === 'partial' || scenario === 'invalid outcome') {
+        expect(state).toMatchObject({ error: null, recovery: null });
+        await expect(stat(published)).rejects.toMatchObject({ code: 'ENOENT' });
+        return;
+      }
+      expect(state).toMatchObject({ error: null, recovery: 'restored' });
+      expect(await readFile(scenario === 'complete' ? temporary : published, 'utf8')).toBe(
+        scenario === 'already published' ? notice + '\n' : notice,
+      );
+      await updater.close();
+      updater = new Updates(root, configuration, runtime);
+      expect((await updater.started()).recovery).toBe('restored');
+      expect((await updater.dismissRecovery()).recovery).toBeNull();
+      await expect(stat(temporary)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(stat(published)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await updater.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.each(['restored', 'changed'])(
+  'dismissal after native publication checks the %s notice',
+  async (contents) => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-rollback-dismissal-'));
+    const temporary = join(root, 'rollback-notice.tmp');
+    const published = join(root, 'rollback-notice.json');
+    await writeFile(temporary, '{"schemaVersion":1,"outcome":"restored"}', { mode: 0o600 });
+    const updater = new Updates(root, configuration, runtime);
+    try {
+      expect((await updater.started()).recovery).toBe('restored');
+      await rename(temporary, published);
+      if (contents === 'changed') {
+        await writeFile(published, '{}');
+        await expect(updater.dismissRecovery()).rejects.toThrow('Update recovery notice changed');
+        expect(await readFile(published, 'utf8')).toBe('{}');
+      } else {
+        expect((await updater.dismissRecovery()).recovery).toBeNull();
+        await expect(stat(published)).rejects.toMatchObject({ code: 'ENOENT' });
+      }
+    } finally {
+      await updater.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test('automatic checks require saved consent and stale preference changes cannot overwrite it', async () => {
   const root = await mkdtemp(join(tmpdir(), 'openkraken-update-preferences-'));

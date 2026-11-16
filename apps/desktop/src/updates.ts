@@ -156,7 +156,7 @@ export class Updates {
   private schedulingReady = false;
   private checkingAutomatically = false;
   private choosingDestination = false;
-  private recoveryNotice: string | null = null;
+  private recoveryNotice: { name: string; source: string } | null = null;
   private abandonment: Promise<UpdateState> | null = null;
   constructor(
     private directory: string,
@@ -274,6 +274,22 @@ export class Updates {
     const previous = this.config?.migrateFrom;
     return !!previous && binding === this.binding(previous);
   }
+  private async loadRecoveryNotice() {
+    const temporary = 'rollback-notice.tmp';
+    const published = 'rollback-notice.json';
+    const pending = await this.readSource(temporary);
+    const notice = await this.readSource(published);
+    if (notice !== null) {
+      z.strictObject({ schemaVersion: z.literal(1), outcome: z.literal('restored') }).parse(
+        JSON.parse(notice),
+      );
+    }
+    // The helper writes these exact bytes only after restoring the installed image.
+    if (notice === null && pending === '{"schemaVersion":1,"outcome":"restored"}')
+      return { name: temporary, source: pending };
+    if (pending !== null) await this.removeOwned(temporary, 4096);
+    return notice === null ? null : { name: published, source: notice };
+  }
   private async load() {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     await this.checkDirectory(true);
@@ -289,13 +305,7 @@ export class Updates {
     await this.removeOwned('trusted-release.tmp', 4096);
     await this.removeOwned('artifact.part', 2 * 1024 ** 3);
     await this.removeOwned('artifact.ready', 2 * 1024 ** 3);
-    await this.removeOwned('rollback-notice.tmp', 4096);
-    const recoveryNotice = await this.readSource('rollback-notice.json');
-    if (recoveryNotice !== null)
-      z.strictObject({ schemaVersion: z.literal(1), outcome: z.literal('restored') }).parse(
-        JSON.parse(recoveryNotice),
-      );
-    this.recoveryNotice = recoveryNotice;
+    this.recoveryNotice = await this.loadRecoveryNotice();
     try {
       this.automaticSource = await this.readSource('automatic-checks.json');
       const saved =
@@ -435,9 +445,15 @@ export class Updates {
   dismissRecovery(): Promise<UpdateState> {
     return this.savePreferences(async () => {
       if (!this.config || this.closed || this.recoveryNotice === null) return this.read();
-      if ((await this.readSource('rollback-notice.json')) !== this.recoveryNotice)
-        throw new Error('Update recovery notice changed');
-      await this.removeOwned('rollback-notice.json', 4096);
+      let { name } = this.recoveryNotice;
+      let source = await this.readSource(name);
+      if (name === 'rollback-notice.tmp' && source === null) {
+        // A helper still completing publication can rename the same record after our read.
+        name = 'rollback-notice.json';
+        source = await this.readSource(name);
+      }
+      if (source !== this.recoveryNotice.source) throw new Error('Update recovery notice changed');
+      await this.removeOwned(name, 4096);
       this.recoveryNotice = null;
       return this.read();
     });
