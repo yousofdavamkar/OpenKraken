@@ -29,9 +29,8 @@ test('external grafts replace the displayed topology across restarts and preserv
       );
     let before: string[] | undefined;
     for (const size of [0, 1, 2, 0]) {
-      const env = { ...process.env };
+      const env: Record<string, string> = { ...process.env, GIT_GRAFT_FILE: file };
       if (size) {
-        env.GIT_GRAFT_FILE = file;
         await writeFile(file, ids[size - 1] + '\n');
       } else delete env.GIT_GRAFT_FILE;
       const app = await electron.launch({
