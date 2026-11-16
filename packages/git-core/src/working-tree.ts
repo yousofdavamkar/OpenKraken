@@ -298,7 +298,7 @@ export class WorkingTree {
       if ((e as NodeJS.ErrnoException).code === 'EEXIST')
         throw new GitError(
           'INDEX_LOCKED',
-          'Another Git operation holds index.lock. Wait for it to finish.',
+          'An index.lock file already exists. Check for an active Git operation or a lock left by an interrupted operation before retrying.',
         );
       throw e;
     }

@@ -49,6 +49,7 @@ test('external staging and existing locks prevent undo or writes from overwritin
   await writeFile(join(path, '.git/index.lock'), 'owned by another process');
   await expect(work.files('unstage', [bytes('tracked.txt')])).rejects.toMatchObject({
     code: 'INDEX_LOCKED',
+    message: expect.stringContaining('a lock left by an interrupted operation'),
   });
   expect(await readFile(join(path, '.git/index.lock'), 'utf8')).toBe('owned by another process');
 });
