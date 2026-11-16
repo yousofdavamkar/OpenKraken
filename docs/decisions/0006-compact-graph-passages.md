@@ -27,3 +27,9 @@ The real-history paging and scrolling gates now pass, while its first-paint gate
 ## Failed worker dispatch and unreadable replies
 
 When posting a graph request throws synchronously, the renderer removes that request and clears its timeout. The worker can still serve its current generation. A delivered browser `messageerror` cannot identify a usable reply, so the renderer closes that worker and rejects its pending requests immediately. Refresh can then create a new worker. An Electron regression injects a dispatch failure, retries Refresh, advances past the old timeout and checks paging and search on the recovered graph.
+
+The renderer checks the lengths of packed node and edge records, the node and edge target IDs, and each node’s edge boundary before publishing a layout. A truncated reply can arrive after the worker has advanced the generation. The renderer retires that worker and settles every waiting request. The Electron regression refreshes the graph after a truncated append, then loads and searches another page.
+
+## Sending commits to the worker
+
+Reset, append and refresh send each commit’s ID, ordered parents, stash marker, summary, body, author name and author email. The renderer keeps the display metadata, including the committer and timestamps. On a replay of the same real history through the Electron renderer and graph worker, median round-trip time fell from 20.4 to 17.9 ms for 2,000 commits and from 50.0 to 45.2 ms for a 5,000-commit append. Both paths produced identical graph rows, edges and passages. [Desktop measurements](../verification/m8-reference-performance.md#filtered-history-and-graph-worker-input)

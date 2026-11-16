@@ -2,6 +2,22 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Filtered history and graph worker input
+
+Three alternating pairs per view compared `54a10fe` with a prototype that started a filtered history walk while the sidebar read authoritative refs. Each run opened a fresh profile on the same 1,505,199-commit Linux history with a prepared commit-graph, Git 2.53.0 and uncleared OS caches.
+
+| Fixture and saved view                             | Median first paint, baseline → prototype | Median native snapshot, baseline → prototype |
+| -------------------------------------------------- | ---------------------------------------: | -------------------------------------------: |
+| 50,000 distinct targets, 10,000 hidden tags        |                         819.0 → 749.4 ms |                             444.4 → 395.2 ms |
+| 50,000 refs across 500 targets, 10,000 hidden tags |                         667.4 → 672.8 ms |                             308.0 → 313.1 ms |
+| 50,000 distinct targets, solo current branch       |                         645.4 → 632.7 ms |                             347.2 → 297.8 ms |
+
+All three distinct-target hidden-view pairs improved first paint. Two of three hidden-view pairs with repeated targets took longer. The shipped code keeps the ordinary hidden-view walk on a repeated-target sample. The solo prototype queried Git for the ref name and ID. The shipped current-branch shortcut starts with the already opened HEAD. All 18 experimental opens exceeded 500 ms. All 54 appends met 300 ms. [Individual timings](m8-opening-experiments.csv)
+
+The worker input experiment compared builds based on `683a37a` in three alternating pairs per fixture. Sending only topology and search fields reduced the median 5,000-commit worker phase from 54.3 to 48.0 ms on distinct targets and from 70.1 to 65.7 ms on a single ref. Median end-to-end append fell from 199.9 to 187.8 ms on distinct targets and rose from 193.6 to 207.4 ms on the single ref. Median first paints were 695.5 → 698.7 ms and 336.6 → 326.8 ms respectively. The JSON representation of the fixed replay input shrank from 3,891,476 to 3,577,342 bytes on open and from 7,506,072 to 6,719,951 bytes on append. These byte counts describe the records used in the replay. Chromium uses structured cloning for the actual transfer. [Individual timings](m8-opening-experiments.csv)
+
+The final app at `25dd0cb` ran the repository benchmark without concurrent suites. On 50,000 distinct targets, the ordinary view took 686.1 ms to paint, hiding 10,000 tags took 781.5 ms and soloing the current branch took 673.9 ms. Hiding 10,000 tags on interleaved targets took 694.5 ms. The single-ref control took 852.4, 341.6 and 338.8 ms across three fresh profiles. Its slow first run spent 619.9 ms in the native snapshot. All 21 appends met 300 ms (166.9–264.2 ms), and graph frame intervals reached at most 16.8 ms p95. Set `OPENKRAKEN_BENCH_SOLO_REF=refs/heads/master` to reproduce the solo view on this fixture. [Final run samples](m8-opening-experiments.csv)
+
 ## Transferring the opening snapshot’s commit bodies
 
 The renderer now receives the first 2,000 commit messages as an ordered array alongside JSON metadata. A captured first page from full Linux history contained 2,945,781 bytes of unescaped UTF-8 message text. The complete snapshot JSON was 3,860,347 bytes with one ref and 7,370,328 bytes with 50,000 distinct refs. [Snapshot format](../decisions/0115-history-page-response.md#opening-snapshots)

@@ -6,6 +6,8 @@ For an unfiltered initial snapshot, a packed-refs file of at least 512 KiB allow
 
 The full ref records, peeled tags, graph view, worktree heads and stash overlays determine the published snapshot. The utility adopts the early cursor only when the complete ordered roots match, the history cache supplies no seed, and there are no stash overlays, replacement refs, shallow boundaries or grafts. A failed or mismatched walk is closed before the ordinary walk starts. A failed snapshot also closes any unpublished cursor. The adopted cursor continues at its existing offset for subsequent pages.
 
-Filtered views, refreshes, known shallow repositories, explicit graft/shallow/replacement settings and existing disk prefixes use the ordinary path. A stale disk prefix can therefore suppress this optimization for one open. Loose-only repositories and repositories using an alternative ref backend can use the ordinary path regardless of ref count.
+For a saved hidden-ref view, Git enumerates tentative object IDs and canonical names with `for-each-ref`. The utility applies the same visibility predicate and detached-HEAD rule as the full snapshot. If the packed-ref sample contains repeated targets, a hidden-ref view uses the ordinary path. For a solo view, the utility reads only the chosen name and checks it for exact equality. If that name is the opened branch, its known HEAD can start the walk directly. The same ordered-root and overlay checks still decide whether the cursor can be adopted.
+
+Refreshes, known shallow repositories, explicit graft/shallow/replacement-namespace settings and existing disk prefixes use the ordinary path. A stale disk prefix can therefore suppress this optimization for one open. Loose-only repositories and repositories using an alternative ref backend can use the ordinary path regardless of ref count.
 
 [Desktop scale measurements](../verification/m8-reference-performance.md#overlapping-reference-enumeration-and-history)

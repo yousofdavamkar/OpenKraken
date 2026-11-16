@@ -2,6 +2,16 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Filtered graph history and recovery
+
+On the 50,000-distinct-target Linux fixture, starting a filtered Git walk during ref enumeration reduced median first paint with 10,000 hidden tags from 819.0 to 749.4 ms over three paired runs. The optimization verifies the complete ordered roots before publishing the first page. The worker now receives only the topology and searchable fields. The final app still exceeded 500 ms on all four large-ref views, including the solo current branch. All 21 measured 5,000-commit appends met 300 ms. [Performance measurements](m8-reference-performance.md#filtered-history-and-graph-worker-input)
+
+A page that overlapped an existing disk prefix used to leave the cache stuck at 2,333 of 7,024 delivered commits. It now persists the live suffix and the final continuation flag. In the Linux x64 package at `25dd0cb`, both the saved hidden-tag view and the solo branch matched native Git's first 7,000 ordered IDs and parents. Restarting the hidden-tag view extended its persisted tail from 333 to 5,000 verified records. [Cache behavior](../decisions/0008-bounded-history-cache.md#pages-that-overlap-the-retained-prefix)
+
+The renderer can recover from a truncated packed graph page. Refresh restores paging and search after the incomplete reply. Typechecking, lint, build, packaged smoke and fuse verification passed. The Linux unit/native suite passed 985 tests with 14 skips. The Git 2.38.0 ref-reader, history-cache and prefetch suites passed 55 with 12 skips. All 32 selected Electron regressions passed, including six Canvas image comparisons. [Graph worker recovery](../decisions/0006-compact-graph-passages.md#failed-worker-dispatch-and-unreadable-replies)
+
+The complete Linux Electron run passed 244 tests and skipped five opt-in tests. A second run passed the three loopback Gitea tests and the working-state benchmark. On the two-million-commit, 100,000-file fixture, all ten measured clean and dirty status reads met 300 ms (slowest 232.3 ms). An external edit appeared after 858.5 ms. The fifth opt-in test was the graph benchmark reported above.
+
 ## Recovering issue actions
 
 GitHub, GitHub Enterprise and GitLab issue dialogs now recover descriptions, comments, visibility settings and closing reasons. The connected account’s **Saved issue drafts** inventory works offline. After two forced exits, the Electron fixture recovered the original text, required a fresh review and recognized an outstanding POST. Opening the recovered draft made zero network requests. Checking existing results read the account identity and issue list and sent zero writes. Cancelling while encrypting prevented dispatch. A conflicting save preserved the newer draft. [Issue draft behavior](../decisions/0128-issue-action-drafts.md)

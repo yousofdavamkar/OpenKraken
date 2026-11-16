@@ -29,3 +29,7 @@ Git can use a file selected by `GIT_GRAFT_FILE` to override commit parentage. Ch
 ## Empty shallow and replacement settings
 
 An empty `GIT_SHALLOW_FILE` ignores the repository’s shallow boundary. An empty `GIT_NO_REPLACE_OBJECTS` disables replacements. An empty `GIT_REPLACE_REF_BASE` can bring replacement refs outside the usual namespace into the native walk. The service bypasses the disk cache whenever any of these settings is present. It also skips the tentative unreplaced walk for custom replacement namespaces and shallow overrides, and uses direct native ref metadata for custom namespaces. Tests reopen a populated cache and compare ordered object IDs and parent lists with Git before, during and after each override.
+
+## Pages that overlap the retained prefix
+
+The next page after a restart can contain both previously cached commits and new records from Git. The cache appends the portion that extends its contiguous range, up to the 17,000-record limit, and records the continuation flag from that page. A test reopens 2,333 cached commits, requests a 5,000-commit page at offset 2,000 and then consumes the final 24 commits. All 7,024 records, their order and the end-of-history flag survive another restart.
