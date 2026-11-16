@@ -6,6 +6,8 @@ M8 remains in progress. Full Linux history still shows intermittent misses again
 
 A forced Linux x64 main-process exit preserved acknowledged CodeMirror text and its selected line endings across a fresh launch. The unchanged-file case saved the restored draft. The changed-file case kept the newer disk contents and disabled Save. After deletion, the checkout's **Saved file drafts** panel recovered the text and cleared it on explicit discard. The commit-form and working-file stores use the same private atomic writer. [Storage and recovery behavior](../decisions/0124-working-file-draft-recovery.md)
 
+The packaged Linux x64 build at `a2f09bc` recovered an acknowledged edit after main-process death and file deletion. Closing its read-only preview retained the draft. Confirmed discard removed the recovery copy and left the deleted file absent. An earlier desktop regression hung during app close immediately after confirming discard. With the fix in `8c88442`, the editor theme/Undo/close test passed four consecutive runs. The final unit and native suite passed 951 tests with 14 skips. All 32 selected Electron tests, the packaged smoke suite, typechecking and lint passed.
+
 ## Graph paging and worker timeout recovery
 
 Transferring layout rows and edges reduced the median worker phase on both 50,000-ref fixtures. The distinct-target median full page went from 228.2 to 208.7 ms, and the interleaved median went from 209.6 to 211.8 ms. All 18 candidate appends met the 300 ms limit. All six candidate openings missed the 500 ms limit. [Paired measurements](m8-reference-performance.md#transferring-canvas-rows-from-the-graph-worker)
