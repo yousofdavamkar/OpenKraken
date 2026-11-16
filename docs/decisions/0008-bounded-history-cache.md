@@ -33,3 +33,9 @@ An empty `GIT_SHALLOW_FILE` ignores the repository’s shallow boundary. An empt
 ## Pages that overlap the retained prefix
 
 The next page after a restart can contain both previously cached commits and new records from Git. The cache appends the portion that extends its contiguous range, up to the 17,000-record limit, and records the continuation flag from that page. A test reopens 2,333 cached commits, requests a 5,000-commit page at offset 2,000 and then consumes the final 24 commits. All 7,024 records, their order and the end-of-history flag survive another restart.
+
+## Writing history during a repository switch
+
+Start flushing the displayed history while Git reads refs, working state and cache inputs for the next snapshot. Wait for that flush before loading the next cache because a flush can also evict older entries. On handoff, drain any commits delivered to the previous cursor during the switch. If the new snapshot fails, the previous cursor remains available. A regression holds the destination ref read open, observes the old prefix on disk, appends 100 commits to the displayed cursor and verifies those records survived the switch.
+
+Serialize a page in batches of 100 commits and encode each batch as UTF-8. The digest and the file use the same bytes. Include the header, separators and footer in the page size check. Stop encoding later batches once a batch exceeds the file cap and remove any older copy of that oversized page. The on-disk format is unchanged. [Cache timing and compatibility measurements](../verification/m8-reference-performance.md#switching-with-17000-commits-loaded)

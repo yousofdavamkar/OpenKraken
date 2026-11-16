@@ -2,6 +2,14 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Repository switches with pending history-cache writes
+
+When a user switches repositories, the Git utility now starts writing the current cache while reading the destination snapshot. It still saves commits paged from the old graph during the switch. Encoding each 100-commit batch once reduced median time to write 17,000 real commits from 292.6 to 198.6 ms in eight paired replays. All four files matched the previous writer byte for byte. An oversized page stops encoding once a batch crosses its byte limit. [Cache behavior](../decisions/0008-bounded-history-cache.md#writing-history-during-a-repository-switch)
+
+At `a0fd141`, single-ref Linux history painted in 346.5 ms on a fresh open and 482.3 ms when switching back to a primed cache. The 50,000-distinct-target fixture took 716.6 ms on a fresh open and 805.8 ms on a switch. Switching to interleaved targets took 768.6 ms. All 15 final appends met the 300 ms budget. Earlier paired runs included slower appends on both builds. [Measurements and fixture commands](m8-reference-performance.md#switching-with-17000-commits-loaded)
+
+The Linux x64 package opened 17,000 source commits, switched to a 50,000-ref destination, loaded 7,000 destination commits and switched back. Both caches matched native Git’s ordered IDs and parents and their stored digests. Restarting the package replayed all 17,000 source records. The Linux suite passed 994 tests with 14 skipped. Git 2.38.0 passed all 34 focused cache, snapshot-recovery and watcher tests. All 32 selected Linux Electron tests passed, including the six graph image comparisons. Typechecking, lint, build, package smoke and fuse verification passed.
+
 ## AppImage rollback notice after helper interruption
 
 Previously, opening the restored app discarded a completed rollback notice if the helper had stopped before publishing it. The restored app now recognizes that record across launches. A partial record cannot report a successful restore. In both the stable FUSE and beta extract-and-run Linux x64 fixtures, the native helper exited between syncing the notice and publishing it. Manually reopening the original image showed the notice and allowed dismissal. Both runs preserved the signed release sequence and cleared the completed image transaction. The predecessor in each fixture included the recovery fix. [Recovery behavior and limits](../decisions/0086-appimage-startup-exit-recovery.md#interruption-before-publishing-the-restoration-notice)

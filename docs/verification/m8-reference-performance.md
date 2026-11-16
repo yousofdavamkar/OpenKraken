@@ -2,6 +2,23 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Switching with 17,000 commits loaded
+
+Each paired Linux x64 run opened the single-ref Linux fixture in a fresh profile, loaded 17,000 commits and switched to the same 1,505,199-commit history with 50,000 refs. Before switching, the final source cache page had yet to reach disk. After switching, every one of the 17,000 saved IDs and parent lists matched Git, and the destination appended 5,000 commits. Three pairs per fixture alternated build order. The host used Git 2.53.0, a prepared commit-graph and uncleared OS caches. [Individual switch samples](m8-opening-experiments.csv)
+
+| Change                                                                   | Distinct ref targets, median switch paint | 500 interleaved targets, median switch paint |
+| ------------------------------------------------------------------------ | ----------------------------------------: | -------------------------------------------: |
+| Start the previous cache flush during destination reads                  |                        1,109.1 → 950.6 ms |                           1,047.5 → 931.0 ms |
+| Encode each cache batch once, with the overlapping flush already enabled |                      2,504.1 → 2,197.6 ms |                           1,045.3 → 983.8 ms |
+
+Both changes reduced switch time in each of their six pairs. Absolute timings differed substantially between cohorts. Several destination appends in the second cohort also exceeded 300 ms, on both builds. The cause of the variation was not isolated. In a separate eight-pair replay of the same 17,000 commits, median time to write all four cache files fell from 292.6 to 198.6 ms. Every byte, including all four stored digests, matched the original format. [Cache write samples](m8-history-cache-write-samples.csv)
+
+The repository benchmark at `a0fd141` measured one run per condition. Switching from 17,000 commits to distinct and interleaved targets took 805.8 and 768.6 ms respectively. Switching back to a previously cached single-ref repository took 482.3 ms. Fresh opens took 716.6 ms with 50,000 distinct refs and 346.5 ms with one ref. All 15 appends met 300 ms (134.5–282.3 ms), and graph frame intervals were at most 16.8 ms p95. Use `OPENKRAKEN_BENCH_FROM_REPO` for the source and `OPENKRAKEN_BENCH_REPO` for the destination. Setting `OPENKRAKEN_BENCH_WARM=1` also primes the destination and restarts the app before loading the source. [Final benchmark samples](m8-opening-experiments.csv)
+
+### Capturing the initial watcher baseline
+
+A separate prototype replaced the watcher's captured reference lines with a flat array of immutable fields. Across 12 alternating replay pairs per fixture, median capture time fell from 4.9 to 0.9 ms on distinct targets and from 4.6 to 0.9 ms on interleaved targets. The captured baseline occupied approximately 1.2 MB of V8 heap after GC, down from 6.9 MB. Hashing it at the first check took approximately 23 ms, up from 20 ms. Every watcher domain hash matched. On the desktop, first paint took longer in five of six pairs. Its medians rose from 683.8 to 710.7 ms on distinct targets and from 616.6 to 630.2 ms on interleaved targets. The application retains its existing watcher capture. [Opening samples](m8-opening-experiments.csv)
+
 ## Filtered history and graph worker input
 
 Three alternating pairs per view compared `54a10fe` with a prototype that started a filtered history walk while the sidebar read authoritative refs. Each run opened a fresh profile on the same 1,505,199-commit Linux history with a prepared commit-graph, Git 2.53.0 and uncleared OS caches.
