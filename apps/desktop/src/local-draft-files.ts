@@ -55,8 +55,8 @@ export class LocalDraftFiles<T> {
     for (const name of await readdir(this.directory)) {
       if (!/^[a-f0-9]{64}\.json$/.test(name)) continue;
       try {
-        const { draft } = this.state(await this.source(join(this.directory, name)));
-        if (draft !== null) yield { name, draft };
+        const { draft, revision } = this.state(await this.source(join(this.directory, name)));
+        if (draft !== null && revision !== null) yield { name, draft, revision };
       } catch {
         yield { name, draft: null };
       }

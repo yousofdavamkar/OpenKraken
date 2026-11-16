@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   encodeGitServiceResult,
   encodeSnapshotRefs,
@@ -36,17 +36,35 @@ function reviewDocument(
   id: string,
   document: { path: string; text: string },
   signal: AbortSignal,
-): Promise<string | null> {
+): Promise<{ text: string; written: () => void } | null> {
   if (signal.aborted) return Promise.resolve(null);
   if (editorPrompts.size >= 8) throw new GitError('EDITOR_BUSY', 'Too many Git editor requests');
   return new Promise((resolve) => {
     const promptId = randomUUID();
-    const cancel = () => finish(null);
-    const finish = (text: string | null) => {
+    const cancel = () => finish(null, true);
+    const finish = (text: string | null, aborted = false) => {
       if (!editorPrompts.delete(promptId)) return;
       signal.removeEventListener('abort', cancel);
-      parent!.postMessage({ type: 'editorClosed', id, promptId });
-      resolve(text);
+      parent!.postMessage({
+        type: 'editorClosed',
+        id,
+        promptId,
+        reason: aborted ? 'aborted' : text === null ? 'cancelled' : 'submitted',
+      });
+      resolve(
+        text === null
+          ? null
+          : {
+              text,
+              written: () =>
+                parent!.postMessage({
+                  type: 'editorDocumentWritten',
+                  id,
+                  promptId,
+                  digest: createHash('sha256').update(text).digest('hex'),
+                }),
+            },
+      );
     };
     editorPrompts.set(promptId, { requestId: id, finish });
     signal.addEventListener('abort', cancel, { once: true });

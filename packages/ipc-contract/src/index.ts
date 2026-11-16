@@ -962,10 +962,27 @@ const authenticationAnswer = z
       .nullable(),
   })
   .strict();
-const editorTextSchema = z
+export const editorTextSchema = z
   .string()
   .max(1048576)
   .refine((text) => !text.includes('\0') && new TextEncoder().encode(text).length <= 1048576);
+export const nativeDraftEntrySchema = z
+  .object({
+    editor: z.literal('git'),
+    promptId: requestId,
+    path: z.string().min(1).max(16384),
+    updatedAt: z.number().int().nonnegative(),
+  })
+  .strict();
+export type NativeDraftEntry = z.infer<typeof nativeDraftEntrySchema>;
+export const editorWrittenSchema = z
+  .object({
+    type: z.literal('editorDocumentWritten'),
+    id: requestId,
+    promptId: requestId,
+    digest: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict();
 const editorAnswer = z
   .object({
     id: requestId,
@@ -1331,6 +1348,49 @@ export const requestSchema = z.discriminatedUnion('method', [
     })
     .strict(),
   ...commitDraftRequests,
+  z
+    .object({
+      id: requestId,
+      method: z.literal('nativeDraftWrite'),
+      requestId,
+      promptId: requestId,
+      text: editorTextSchema.nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('nativeDraftDismiss'),
+      requestId,
+      promptId: requestId,
+      discard: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('nativeDraftCandidates'),
+      requestId,
+      promptId: requestId,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('nativeDraftRead'),
+      repoId: repoIdSchema,
+      promptId: requestId,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('nativeDraftRemove'),
+      repoId: repoIdSchema,
+      promptId: requestId,
+      revision: z.string().regex(/^[a-f0-9]{64}$/),
+    })
+    .strict(),
   z
     .object({
       id: requestId,
@@ -1951,6 +2011,27 @@ export const serviceRequestSchema = z.discriminatedUnion('method', [
 ]);
 export const cancelSchema = z.object({ id: requestId }).strict();
 export const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('nativeDraftUpdated') }).strict(),
+  z
+    .object({
+      kind: z.literal('nativeDraftText'),
+      text: editorTextSchema,
+      revision: z.string().regex(/^[a-f0-9]{64}$/),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('nativeDraftCandidates'),
+      repoId: repoIdSchema,
+      entries: z.array(
+        nativeDraftEntrySchema.extend({
+          sameSource: z.boolean(),
+          revision: z.string().regex(/^[a-f0-9]{64}$/),
+        }),
+      ),
+      unreadable: z.boolean(),
+    })
+    .strict(),
   z.object({ kind: z.literal('rendererFailure') }).strict(),
   z.object({ kind: z.literal('crashReporting'), state: crashReportingStateSchema }).strict(),
   z.object({ kind: z.literal('diagnostics'), state: diagnosticsStateSchema }).strict(),
@@ -1960,13 +2041,16 @@ export const resultSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.literal('workingDraftList'),
       entries: z.array(
-        z
-          .object({
-            pathBytes: pathBytesSchema,
-            path: z.string(),
-            editor: z.literal('conflict').optional(),
-          })
-          .strict(),
+        z.union([
+          nativeDraftEntrySchema,
+          z
+            .object({
+              pathBytes: pathBytesSchema,
+              path: z.string(),
+              editor: z.literal('conflict').optional(),
+            })
+            .strict(),
+        ]),
       ),
       unreadable: z.boolean(),
     })
@@ -2473,6 +2557,13 @@ export const desktopEventSchema = z.discriminatedUnion('type', [
       text: editorTextSchema,
     })
     .strict(),
-  z.object({ type: z.literal('editorClosed'), id: requestId, promptId: requestId }).strict(),
+  z
+    .object({
+      type: z.literal('editorClosed'),
+      id: requestId,
+      promptId: requestId,
+      reason: z.enum(['submitted', 'cancelled', 'aborted']),
+    })
+    .strict(),
 ]);
 export type DesktopEvent = z.infer<typeof desktopEventSchema>;

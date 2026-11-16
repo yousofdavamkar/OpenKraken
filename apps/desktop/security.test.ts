@@ -1682,3 +1682,22 @@ test('conflict recovery limits line choices to the worker bounds and keeps recov
     );
   }
 });
+
+test('native editor draft storage accepts bounded text and reviewed identities on main-only routes', () => {
+  const id = '00000000-0000-4000-8000-000000000000',
+    repoId = 'a'.repeat(64);
+  const write = { id, method: 'nativeDraftWrite', requestId: id, promptId: id, text: 'edited' };
+  for (const request of [
+    write,
+    { id, method: 'nativeDraftCandidates', requestId: id, promptId: id },
+    { id, method: 'nativeDraftDismiss', requestId: id, promptId: id, discard: false },
+    { id, method: 'nativeDraftRead', repoId, promptId: id },
+    { id, method: 'nativeDraftRemove', repoId, promptId: id, revision: 'f'.repeat(64) },
+  ]) {
+    expect(requestSchema.safeParse(request).success).toBe(true);
+    expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+    expect(requestSchema.safeParse({ ...request, path: 'arbitrary' }).success).toBe(false);
+  }
+  expect(requestSchema.safeParse({ ...write, text: '\0' }).success).toBe(false);
+  expect(requestSchema.safeParse({ ...write, text: 'ü'.repeat(524289) }).success).toBe(false);
+});

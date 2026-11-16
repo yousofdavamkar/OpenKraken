@@ -11,6 +11,7 @@ import {
 } from './update-restart.js';
 import { updatesStateSchema } from '@openkraken/ipc-contract';
 import { RepositoryLinks } from './repository-links.js';
+import { NativeEditorDrafts } from './native-editor-drafts.js';
 import { WorkingFileDrafts } from './working-file-drafts.js';
 import { CommitDrafts } from './commit-drafts.js';
 import { CommandMenu } from './command-menu.js';
@@ -41,6 +42,7 @@ import {
   expandGitServiceResult,
   serializeLegacySnapshot,
   desktopEventSchema,
+  editorWrittenSchema,
   requestSchema,
   cancelSchema,
   serviceResponseSchema,
@@ -111,6 +113,10 @@ let avatars: AvatarCache | undefined;
 let appSettings: AppSettings | undefined;
 let activity: ActivityLog | undefined;
 let commitDrafts: CommitDrafts | undefined;
+let nativeDrafts: NativeEditorDrafts | undefined;
+function nativeEditorDrafts() {
+  return (nativeDrafts ??= new NativeEditorDrafts(app.getPath('userData')));
+}
 let workingFileDrafts: WorkingFileDrafts | undefined;
 const draftRepositories = new Map<string, Repository>();
 let activeAppearance: AppearancePreferences = {
@@ -147,12 +153,14 @@ const pending = new Map<
     resolve: (result: ServiceResult) => void;
     timer: ReturnType<typeof setTimeout>;
     transfer?: SnapshotTransfer;
+    editorRepository?: Repository;
   }
 >();
 function finishServiceRequest(id: string, result: ServiceResult) {
   const request = pending.get(id);
   if (!request) return;
   clearTimeout(request.timer);
+  nativeDrafts?.finished(id);
   pending.delete(id);
   request.resolve(result);
 }
@@ -187,6 +195,14 @@ function startService() {
       if (result) finishServiceRequest(message.id, result);
       return;
     }
+    if (message?.type === 'editorDocumentWritten') {
+      const parsed = editorWrittenSchema.safeParse(message);
+      if (parsed.success && pending.has(parsed.data.id))
+        void nativeDrafts
+          ?.written(parsed.data.id, parsed.data.promptId, parsed.data.digest)
+          ?.catch(() => {});
+      return;
+    }
     const event = desktopEventSchema.safeParse(message);
     if (event.success) {
       // Main-owned lifecycle and UI events must never originate in the Git utility.
@@ -201,6 +217,21 @@ function startService() {
       )
         return;
       if (event.data.type !== 'repositoryChanged' && !pending.has(event.data.id)) return;
+      if (event.data.type === 'editorPrompt') {
+        const repo = pending.get(event.data.id)?.editorRepository;
+        if (repo)
+          nativeEditorDrafts().register(
+            repo,
+            event.data.id,
+            event.data.promptId,
+            event.data.path,
+            event.data.text,
+          );
+      } else if (event.data.type === 'editorClosed') {
+        void nativeDrafts
+          ?.closed(event.data.id, event.data.promptId, event.data.reason)
+          ?.catch(() => {});
+      }
       if (window && !window.isDestroyed()) window.webContents.send(EVENT_CHANNEL, event.data);
       return;
     }
@@ -228,6 +259,7 @@ function startService() {
   return child;
 }
 function interruptGitRequests(requestIds: string[]) {
+  nativeDrafts?.interrupt(requestIds);
   if (requestIds.length && window && !window.isDestroyed())
     window.webContents.send(EVENT_CHANNEL, { type: 'gitRequestsInterrupted', requestIds });
 }
@@ -271,7 +303,11 @@ function callService(request: ServiceRequest, signal?: AbortSignal): Promise<Ser
     );
     const transfer =
       request.method === 'open' ? new SnapshotTransfer(request.id, crypto.randomUUID()) : undefined;
-    pending.set(request.id, { resolve, timer, transfer });
+    const editorRepository =
+      request.method === 'interactiveRebase' || request.method === 'operationAction'
+        ? draftRepositories.get(request.repoId)
+        : undefined;
+    pending.set(request.id, { resolve, timer, transfer, editorRepository });
     child.postMessage(transfer ? { ...request, transferId: transfer.transferId } : request);
   }).finally(() => signal?.removeEventListener('abort', cancel));
 }
@@ -308,6 +344,7 @@ function createWindow() {
       noLink: true,
     });
     if (choice === 1) {
+      nativeDrafts?.detach(true);
       void workingFileDrafts?.close(undefined, true).catch(() => {});
       event.preventDefault();
     } else if (updateHandoff) {
@@ -328,6 +365,7 @@ function createWindow() {
   };
   window.webContents.on('render-process-gone', cancelProviderSignIn);
   window.webContents.on('render-process-gone', (_event, details) => {
+    nativeDrafts?.detach(false);
     void workingFileDrafts?.close(undefined, false);
     diagnostics?.failure('renderer', details.reason);
     void crashReports?.capture('renderer', details.reason);
@@ -338,6 +376,7 @@ function createWindow() {
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   window.on('closed', () => {
+    nativeDrafts?.detach(false);
     terminalRepository = undefined;
     void terminals.close();
     window = undefined;
@@ -598,6 +637,46 @@ else {
         return await terminals.request(request, terminalRepository);
       try {
         if (
+          request.method === 'nativeDraftCandidates' ||
+          request.method === 'nativeDraftWrite' ||
+          request.method === 'nativeDraftRead' ||
+          request.method === 'nativeDraftRemove' ||
+          request.method === 'nativeDraftDismiss'
+        ) {
+          const drafts = nativeEditorDrafts();
+          try {
+            if (request.method === 'nativeDraftCandidates')
+              return {
+                kind: 'nativeDraftCandidates',
+                ...(await drafts.candidates(request.requestId, request.promptId)),
+              };
+            if (request.method === 'nativeDraftWrite')
+              await drafts.write(request.requestId, request.promptId, request.text);
+            else if (request.method === 'nativeDraftDismiss')
+              await drafts.dismiss(request.requestId, request.promptId, request.discard);
+            else {
+              const repo = draftRepositories.get(request.repoId);
+              if (!repo)
+                return {
+                  kind: 'error',
+                  code: 'UNKNOWN_REPOSITORY',
+                  message: 'Open the checkout to access its drafts.',
+                };
+              if (request.method === 'nativeDraftRead')
+                return { kind: 'nativeDraftText', ...(await drafts.read(repo, request.promptId)) };
+              await drafts.remove(repo, request.promptId, request.revision);
+            }
+            return { kind: 'nativeDraftUpdated' };
+          } catch {
+            return {
+              kind: 'error',
+              code: 'DRAFT_UNAVAILABLE',
+              message:
+                'The Git editor draft is unavailable, changed elsewhere, or still open. Keep a copy of your text.',
+            };
+          }
+        }
+        if (
           request.method === 'workingDraftList' ||
           request.method === 'workingDraftOpen' ||
           request.method === 'workingDraftWrite' ||
@@ -613,8 +692,17 @@ else {
                   code: 'UNKNOWN_REPOSITORY',
                   message: 'Open the repository before accessing its draft.',
                 };
-              if (request.method === 'workingDraftList')
-                return { kind: 'workingDraftList', ...(await drafts.list(repo)) };
+              if (request.method === 'workingDraftList') {
+                const [files, native] = await Promise.all([
+                  drafts.list(repo),
+                  nativeEditorDrafts().list(repo),
+                ]);
+                return {
+                  kind: 'workingDraftList',
+                  entries: [...files.entries, ...native.entries],
+                  unreadable: files.unreadable || native.unreadable,
+                };
+              }
               return {
                 kind: 'workingDraft',
                 draft: await drafts.open(
@@ -1463,6 +1551,8 @@ else {
           'updatesRead',
           'updatesCancel',
           'commitDraftSave',
+          'nativeDraftWrite',
+          'nativeDraftDismiss',
           'workingDraftWrite',
           'workingDraftClose',
           'terminalAck',
@@ -1587,6 +1677,7 @@ else {
       !providers &&
       !appSettings &&
       !commitDrafts &&
+      !nativeDrafts &&
       !workingFileDrafts &&
       !crashReports &&
       !updates
@@ -1606,6 +1697,7 @@ else {
       crashReports?.idle(),
       diagnostics?.idle(),
       commitDrafts?.idle(),
+      nativeDrafts?.idle(),
       workingFileDrafts?.idle(),
       terminals.close(),
     ]).then(() => activity?.idle());

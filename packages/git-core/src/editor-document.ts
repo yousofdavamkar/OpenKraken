@@ -7,7 +7,7 @@ const LIMIT = 1024 * 1024;
 export type GitEditor = (
   document: { path: string; text: string },
   signal: AbortSignal,
-) => Promise<string | null>;
+) => Promise<string | { text: string; written: () => void } | null>;
 async function reviewedFile(repo: Repository, input: string) {
   const root = await realpath(repo.gitDir);
   const path = resolve(repo.path, input);
@@ -67,9 +67,10 @@ export async function editGitDocument(
   const before = await reviewedFile(repo, input);
   await before.file.close();
   signal.throwIfAborted();
-  const text = await edit({ path: before.path, text: before.text }, signal);
+  const answer = await edit({ path: before.path, text: before.text }, signal);
   signal.throwIfAborted();
-  if (text === null) throw new GitError('CANCELLED', 'Git editor cancelled');
+  if (answer === null) throw new GitError('CANCELLED', 'Git editor cancelled');
+  const text = typeof answer === 'string' ? answer : answer.text;
   const bytes = Buffer.from(text, 'utf8');
   if (bytes.length > LIMIT || bytes.includes(0) || bytes.toString('utf8') !== text)
     throw new GitError('EDITOR_LIMIT', 'Enter valid UTF-8 text of at most 1 MiB');
@@ -102,4 +103,5 @@ export async function editGitDocument(
   } finally {
     await current.file.close();
   }
+  if (typeof answer !== 'string') answer.written();
 }
