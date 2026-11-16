@@ -2,6 +2,14 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Cached graph history with Git grafts
+
+With an external graft file, Git reported one reachable commit while OpenKraken displayed a cached 32. An explicitly empty override caused the reverse error when the repository had its own graft file. The service now reads live history in both cases. [Cache behavior](../decisions/0008-bounded-history-cache.md#external-graft-files)
+
+The Linux x64 package built from `8dc9b49` matched Git’s first 7,000 commit IDs before restart. Editing the external graft file changed the graph from one commit to two across launches and preserved both ordinary cache files byte for byte. Removing the override restored all 7,100 commits through paging. With a repository graft, an empty override restored all 7,100 commits and preserved the one-commit cache. Removing the empty override showed the grafted commit again. The five history-cache tests passed on Git 2.38.0 and 2.53.0. The full suite passed 962 tests with 14 skips. All 21 selected Electron tests passed under X11, including graph search, keyboard navigation and six visual comparisons. The initial run that inherited the host Wayland session missed search focus once. Typechecking, lint, production build, Linux packaging and native package smoke passed.
+
+Three startup experiments ran on 50,000-ref fixtures. All 30 opens missed 500 ms and all 90 subsequent appends met 300 ms. None of the experiments entered the production graph path. [Timings and comparison conditions](m8-reference-performance.md#cache-key-timing-on-the-opening-path)
+
 ## GitHub review and comment drafts
 
 The Linux x64 desktop recovered review text and action after main-process death. A crash with one POST outstanding restored the uncertain-submission check. Reopening and inspecting the draft sent zero additional POSTs. Changed commits blocked submission, and the account inventory returned the original text offline with zero provider requests. Cancelling while OS protection was saving the submission record prevented the POST. [Storage and submission behavior](../decisions/0127-provider-review-drafts.md)

@@ -2,6 +2,23 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Cache-key timing on the opening path
+
+A trace of a fresh open on the distinct-target fixture put about 330 ms between starting reference enumeration and receiving the full records. Preparing and dispatching the compact ref message took another 31 ms. After that, about 48 ms elapsed before the service adopted the early cursor and its ready first page. The following experiments used a separate uninstrumented app for each variant, the same renderer, fresh profiles and uncleared OS caches. The baseline was `b674110` on Linux x64 with an Intel Core i7-9750H and Git 2.53.0. Each fixture had 1,505,199 commits, 50,000 refs and a prepared Git commit-graph. [Individual measurements](m8-opening-experiments.csv)
+
+| Experiment                                                 | Reference targets | Median first paint, baseline → candidate | Median native snapshot, baseline → candidate |
+| ---------------------------------------------------------- | ----------------- | ---------------------------------------: | -------------------------------------------: |
+| Reuse verified early roots and their precomputed cache key | 50,000 distinct   |                         706.2 → 765.1 ms |                             356.8 → 357.4 ms |
+| Reuse verified early roots and their precomputed cache key | 500 interleaved   |                         648.9 → 645.9 ms |                             240.4 → 234.3 ms |
+| Compute the key at first cache access                      | 50,000 distinct   |                         735.5 → 733.9 ms |                             366.4 → 352.0 ms |
+| Compute the key at first cache access                      | 500 interleaved   |                         623.5 → 652.2 ms |                             242.7 → 237.3 ms |
+
+Each row summarizes three alternating pairs. Every opening missed 500 ms. All 72 measured appends of 5,000 commits met 300 ms and graph and sidebar frame intervals reached at most 16.8 ms p95. The early-root approach slowed first paint on the distinct-target fixture in all three pairs. Deferring the key shortened the native snapshot in all three distinct-target pairs, but it slowed first paint in all three interleaved pairs. The production cache retains its existing fingerprint computation.
+
+## Parallel object-type lookup
+
+On the 50,000-distinct-target fixture, a prototype read names and upstream metadata with `for-each-ref` and resolved object types in two parallel `cat-file --batch-check` processes. Five native-only pairs produced identical ordered ref records and reduced median lookup from 214.5 to 172.8 ms. With the same prototype on the Electron opening path, median native snapshot time increased from 336.0 to 411.0 ms and median first paint increased from 694.0 to 774.1 ms. The prototype was slower in all three desktop pairs. All 18 appends met 300 ms. Production continues to use the existing ref reader. [Individual desktop runs](m8-opening-experiments.csv)
+
 ## Transferring Canvas rows from the graph worker
 
 The baseline at `18f0ef4` cloned the row and edge objects. The worker in `63a7e8e` transfers two typed buffers and the renderer reconstructs those objects. The benchmark used fresh Electron profiles, a Git commit-graph, uncleared OS caches and the same Linux x64 host. Each fixture had 1,505,199 reachable commits and 50,000 refs. Three pairs alternated build order. Each opening painted 2,000 commits and appended three pages of 5,000. The harness checked the active renderer path and bundle name before opening the repository.
