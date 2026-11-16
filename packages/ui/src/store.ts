@@ -9,7 +9,11 @@ import type {
   Snapshot,
   WorkingState,
 } from '@openkraken/ipc-contract';
-import { decodeHistoryPage, expandGitServiceResult } from '@openkraken/ipc-contract';
+import {
+  decodeHistoryPage,
+  decodeSnapshotBodies,
+  expandGitServiceResult,
+} from '@openkraken/ipc-contract';
 import { patchPassages } from '@openkraken/graph';
 import type { GraphRow, GraphPassage } from '@openkraken/graph';
 import { GraphClient } from './graph-client.js';
@@ -201,9 +205,9 @@ export const useRepository = create<State>()(
           client?.failed
         )
           candidate = new GraphClient();
-        const serialized = await window.openkraken.request(request, 'snapshot-transfer');
+        const serialized = await window.openkraken.request(request, 'snapshot-bodies');
         const receivedAt = performance.now();
-        const decoded = JSON.parse(serialized);
+        const decoded = decodeSnapshotBodies(serialized);
         const parsedAt = performance.now();
         const result = expandGitServiceResult(decoded, { freezeCompactRefs: true });
         if (get().busy !== request.id) return;

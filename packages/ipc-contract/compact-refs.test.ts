@@ -1,6 +1,8 @@
 import { expect, test } from 'vitest';
 import {
   encodeGitServiceResult,
+  encodeSnapshotBodies,
+  decodeSnapshotBodies,
   expandGitServiceResult,
   resultSchema,
   serializeLegacySnapshot,
@@ -204,4 +206,39 @@ test('main rejects malformed packed rows and validates the enclosing snapshot an
       result: { ...result, snapshot: { ...result.snapshot, cursor: 'wrong' } },
     }).success,
   ).toBe(false);
+});
+
+test('initial commit bodies stay ordered for both snapshot formats and incomplete transfers fail', () => {
+  const author = { name: 'Å', email: 'a@example.test', time: 1, tzOffsetMin: -60 };
+  const commits = ['', 'independent summary\n🌱\u0000\r\n', '\"\\'.repeat(10000)].map(
+    (body, i) => ({
+      oid: String(i).repeat(40),
+      parents: [],
+      summary: 'Subject',
+      author,
+      committer: author,
+      body,
+      isStash: false,
+    }),
+  );
+  const plain = { kind: 'snapshot' as const, snapshot: { ...snapshot([tag]), commits } };
+  const compact = {
+    kind: 'compactSnapshot' as const,
+    snapshot: { ...plain.snapshot, refs: [oid + ':' + tag.name, 'refs/tags/v2'] },
+  };
+  for (const input of [plain, compact]) {
+    const reply = structuredClone(encodeSnapshotBodies(input));
+    if (typeof reply === 'string') throw new Error('Expected split snapshot');
+    expect(reply.bodies).toEqual(commits.map((c) => c.body));
+    expect(JSON.parse(reply.metadata).snapshot.commits[1]).not.toHaveProperty('body');
+    expect(decodeSnapshotBodies(reply)).toStrictEqual(input);
+    reply.bodies.pop();
+    expect(() => decodeSnapshotBodies(reply)).toThrow('Incomplete snapshot commit bodies');
+  }
+  for (const result of [
+    { kind: 'cancelled' },
+    { kind: 'error', code: 'GIT_FAILED', message: 'Read failed' },
+  ] as const) {
+    expect(decodeSnapshotBodies(encodeSnapshotBodies(result))).toEqual(result);
+  }
 });

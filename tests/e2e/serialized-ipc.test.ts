@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   decodeHistoryPage,
+  decodeSnapshotBodies,
   expandGitServiceResult,
   type ServiceResult,
   type Result,
@@ -103,6 +104,7 @@ test('serialized responses retain Git text, paging and errors through the sandbo
       ['open', 'history-page'],
       ['commandPreferences', 'snapshot-json'],
       ['commandPreferences', 'snapshot-transfer'],
+      ['commandPreferences', 'snapshot-bodies'],
     ]) {
       await expect(
         page.evaluate(
@@ -115,6 +117,18 @@ test('serialized responses retain Git text, paging and errors through the sandbo
         ),
       ).rejects.toThrow('Invalid response format');
     }
+    const firstPage = await page.evaluate(
+      (repoId) =>
+        window.openkraken.request(
+          { id: crypto.randomUUID(), method: 'refresh', repoId },
+          'snapshot-bodies',
+        ),
+      opened.snapshot.repository.id,
+    );
+    expect(typeof firstPage).toBe('object');
+    const restored = decodeSnapshotBodies(firstPage);
+    if (restored.kind !== 'snapshot') throw new Error('Expected split commit bodies');
+    expect(restored.snapshot.commits).toEqual(opened.snapshot.commits);
     const preferences = await page.evaluate(async () => {
       const request = { id: crypto.randomUUID(), method: 'commandPreferences' as const };
       return {
@@ -171,6 +185,11 @@ test('large Git snapshots round-trip their ordered reference records through all
           { id: crypto.randomUUID(), method: 'refresh', repoId: opened.snapshot.repository.id },
           'snapshot-transfer',
         ),
+        bodies: await window.openkraken.request(
+          { id: crypto.randomUUID(), method: 'refresh', repoId: opened.snapshot.repository.id },
+          'snapshot-bodies',
+        ),
+        commits: opened.snapshot.commits,
         same: JSON.stringify(opened.snapshot.refs) === JSON.stringify(refreshed.snapshot.refs),
         branch: opened.snapshot.refs.find((ref) => ref.shortName === 'Ångström/🌱'),
         annotated: opened.snapshot.refs.find((ref) => ref.name === 'refs/tags/annotated'),
@@ -186,6 +205,11 @@ test('large Git snapshots round-trip their ordered reference records through all
     if (transfer.kind !== 'compactSnapshot') throw new Error('Expected compact renderer transfer');
     expect(transfer.snapshot.refs).toContain('refs/tags/fixture-9999');
     expect(wire.snapshot.refs).toContain(head + ':refs/tags/fixture-9999');
+    const split = decodeSnapshotBodies(result.bodies);
+    if (split.kind !== 'compactSnapshot')
+      throw new Error('Expected compact refs with split bodies');
+    expect(split.snapshot.refs).toEqual(transfer.snapshot.refs);
+    expect(split.snapshot.commits).toEqual(result.commits);
     const displayed = expandGitServiceResult(transfer);
     if (displayed.kind !== 'snapshot') throw new Error('Expected expanded renderer snapshot');
     expect(displayed.snapshot.refs).toEqual(result.refs);

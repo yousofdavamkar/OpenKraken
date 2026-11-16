@@ -12,6 +12,7 @@ import type {
   DesktopApi,
   HistoryPageRequest,
   SnapshotRequest,
+  SnapshotBodies,
   HistoryPageReply,
   Request,
   Result,
@@ -23,14 +24,18 @@ async function request(
 ): Promise<HistoryPageReply>;
 async function request(
   input: SnapshotRequest,
+  format: 'snapshot-bodies',
+): Promise<SnapshotBodies | string>;
+async function request(
+  input: SnapshotRequest,
   format: 'snapshot-json' | 'snapshot-transfer',
 ): Promise<string>;
 async function request(input: Request, format: 'json'): Promise<string>;
 async function request(input: Request): Promise<Result>;
 async function request(
   input: Request,
-  format?: 'json' | 'history-page' | 'snapshot-json' | 'snapshot-transfer',
-): Promise<Result | string | HistoryPageReply> {
+  format?: 'json' | 'snapshot-bodies' | 'history-page' | 'snapshot-json' | 'snapshot-transfer',
+): Promise<Result | string | HistoryPageReply | SnapshotBodies> {
   const request = requestSchema.parse(input);
   validateResponseFormat(format, request.method);
   return ipcRenderer.invoke(CHANNEL, request, format);

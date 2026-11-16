@@ -1,4 +1,4 @@
-import type { HistoryPageReply } from './page-transfer.js';
+import type { HistoryPageReply, SnapshotBodies } from './page-transfer.js';
 import { canCompactRef, objectIdPattern, packedRefKind, validCompactRef } from './compact-refs.js';
 export { expandGitServiceResult, serializeLegacySnapshot } from './compact-refs.js';
 import { crashReportingStateSchema } from './crash-reports.js';
@@ -2435,8 +2435,13 @@ export type Request = z.infer<typeof requestSchema>;
 export type ServiceRequest = z.infer<typeof serviceRequestSchema>;
 export type Result = z.infer<typeof resultSchema>;
 export type ServiceResult = z.infer<typeof serviceResponseSchema>['result'];
-export { encodeHistoryPage, decodeHistoryPage } from './page-transfer.js';
-export type { HistoryPageTransfer, HistoryPageReply } from './page-transfer.js';
+export {
+  encodeHistoryPage,
+  decodeHistoryPage,
+  encodeSnapshotBodies,
+  decodeSnapshotBodies,
+} from './page-transfer.js';
+export type { HistoryPageTransfer, HistoryPageReply, SnapshotBodies } from './page-transfer.js';
 export type SnapshotRequest = Extract<Request, { method: (typeof snapshotMethods)[number] }>;
 const snapshotMethods = [
   'open',
@@ -2452,7 +2457,9 @@ export function validateResponseFormat(format: unknown, method: string): void {
     format !== undefined &&
     format !== 'json' &&
     !(
-      (format === 'snapshot-json' || format === 'snapshot-transfer') &&
+      (format === 'snapshot-json' ||
+        format === 'snapshot-transfer' ||
+        format === 'snapshot-bodies') &&
       snapshotMethods.some((item) => item === method)
     ) &&
     !(format === 'history-page' && method === 'page')
@@ -2463,6 +2470,7 @@ export function validateResponseFormat(format: unknown, method: string): void {
 export type HistoryPageRequest = Extract<Request, { method: 'page' }>;
 export interface DesktopApi {
   request(request: HistoryPageRequest, format: 'history-page'): Promise<HistoryPageReply>;
+  request(request: SnapshotRequest, format: 'snapshot-bodies'): Promise<SnapshotBodies | string>;
   request(request: SnapshotRequest, format: 'snapshot-json' | 'snapshot-transfer'): Promise<string>;
   /** Main-validated result as JSON, avoiding nested object copies across contextBridge. */
   request(request: Request, format: 'json'): Promise<string>;

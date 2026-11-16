@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, expect, test, vi } from 'vitest';
 import { GraphEngine } from '../graph/src/engine.js';
 import type { GraphRequest } from '../graph/src/engine.js';
-import { encodeHistoryPage } from '@openkraken/ipc-contract';
+import { encodeHistoryPage, encodeSnapshotBodies } from '@openkraken/ipc-contract';
 import type { Result, Snapshot } from '@openkraken/ipc-contract';
 const workers = vi.hoisted(() => ({ start: vi.fn(), close: vi.fn(), layout: vi.fn() }));
 vi.mock('./src/graph-client.js', () => ({
@@ -71,9 +71,11 @@ beforeEach(() => {
     openkraken: {
       request: async (
         input: unknown,
-        format?: 'json' | 'history-page' | 'snapshot-json' | 'snapshot-transfer',
+        format?:
+          'json' | 'snapshot-bodies' | 'history-page' | 'snapshot-json' | 'snapshot-transfer',
       ) => {
         const result = await request(input);
+        if (format === 'snapshot-bodies') return encodeSnapshotBodies(result);
         if (format === 'history-page' && result.kind === 'page') return encodeHistoryPage(result);
         return format === 'json' || format === 'snapshot-json' || format === 'snapshot-transfer'
           ? JSON.stringify(result)

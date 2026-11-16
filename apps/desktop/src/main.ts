@@ -40,6 +40,7 @@ import {
   validateResponseFormat,
   EVENT_CHANNEL,
   encodeHistoryPage,
+  encodeSnapshotBodies,
   expandGitServiceResult,
   serializeLegacySnapshot,
   desktopEventSchema,
@@ -57,6 +58,7 @@ import type {
   Result,
   ServiceRequest,
   HistoryPageTransfer,
+  SnapshotBodies,
   ServiceResult,
   AppearancePreferences,
   Request as DesktopRequest,
@@ -1604,7 +1606,11 @@ else {
     };
     ipcMain.handle(
       CHANNEL,
-      async (event, raw, format: unknown): Promise<Result | string | HistoryPageTransfer> => {
+      async (
+        event,
+        raw,
+        format: unknown,
+      ): Promise<Result | string | HistoryPageTransfer | SnapshotBodies> => {
         validateSender(event);
         const request = requestSchema.parse(raw);
         validateResponseFormat(format, request.method);
@@ -1618,6 +1624,7 @@ else {
         }
         // Serialize after validation and before both renderer IPC and isolated-world copying.
         if (format === 'history-page' && result.kind === 'page') return encodeHistoryPage(result);
+        if (format === 'snapshot-bodies') return encodeSnapshotBodies(result);
         if (format === 'snapshot-transfer') return JSON.stringify(result);
         if (format === 'snapshot-json') return serializeLegacySnapshot(result);
         const expanded = expandGitServiceResult(result);
