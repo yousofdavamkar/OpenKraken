@@ -1,5 +1,6 @@
+import { NativeDraftRecovery } from './native-draft-recovery.js';
 import { subscribeDesktopEvents } from './desktop-events.js';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { DesktopEvent } from '@openkraken/ipc-contract';
 type Prompt = Extract<DesktopEvent, { type: 'editorPrompt' }> & { interrupted?: boolean };
 function EditorDialog({ prompt, discard }: { prompt: Prompt; discard: () => void }) {
@@ -7,23 +8,83 @@ function EditorDialog({ prompt, discard }: { prompt: Prompt; discard: () => void
   const [text, setText] = useState(prompt.text);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
+  const [status, setStatus] = useState('');
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const version = useRef(0);
+  const saveError = useRef('');
+  const admitted = useRef<Promise<void>>(Promise.resolve());
+  const dirty = text !== prompt.text;
+  const closing = useRef(false);
+  const persist = (value: string, edit: number) => {
+    const save = async () => {
+      try {
+        const result = await window.openkraken.request({
+          id: crypto.randomUUID(),
+          method: 'nativeDraftWrite',
+          requestId: prompt.id,
+          promptId: prompt.promptId,
+          text: value === prompt.text ? null : value,
+        });
+        if (result.kind !== 'nativeDraftUpdated')
+          throw new Error(
+            result.kind === 'error' ? result.message : 'Draft save was not confirmed.',
+          );
+        saveError.current = '';
+        if (edit === version.current) setStatus(value === prompt.text ? '' : 'Draft saved locally');
+      } catch (error) {
+        saveError.current =
+          error instanceof Error ? error.message : 'Draft save was not confirmed.';
+        if (edit === version.current) setStatus(saveError.current);
+      }
+    };
+    admitted.current = admitted.current.then(save);
+    return admitted.current;
+  };
+  const change = (value: string) => {
+    setText(value);
+    clearTimeout(timer.current);
+    const edit = ++version.current;
+    if (value.includes('\0') || new TextEncoder().encode(value).length > 1048576) {
+      setStatus('Draft exceeds the Git editor limit.');
+      return;
+    }
+    setStatus('Saving draft…');
+    timer.current = setTimeout(() => {
+      timer.current = undefined;
+      void persist(value, edit);
+    }, 250);
+  };
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current);
+      version.current++;
+    },
+    [],
+  );
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
-  useEffect(() => {
-    if (!prompt.interrupted) return;
+  useLayoutEffect(() => {
+    if (!prompt.interrupted && !dirty) return;
     const prevent = (event: BeforeUnloadEvent) => {
+      if (closing.current) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', prevent);
     return () => window.removeEventListener('beforeunload', prevent);
-  }, [prompt.interrupted]);
+  }, [prompt.interrupted, dirty]);
   const respond = async (value: string | null) => {
     if (pending || prompt.interrupted) return;
     setPending(true);
     setError('');
     try {
+      if (timer.current !== undefined) {
+        clearTimeout(timer.current);
+        timer.current = undefined;
+        if (value !== null) await persist(value, version.current);
+      }
+      await admitted.current;
       const result = await window.openkraken.request({
         id: crypto.randomUUID(),
         method: 'answerEditor',
@@ -39,6 +100,36 @@ function EditorDialog({ prompt, discard }: { prompt: Prompt; discard: () => void
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
     } finally {
+      setPending(false);
+    }
+  };
+  const dismiss = async (remove: boolean, skipSave = false) => {
+    setPending(true);
+    clearTimeout(timer.current);
+    try {
+      if (!remove && !skipSave) {
+        if (invalid)
+          throw new Error(
+            'Copy the document text before closing. This draft exceeds the Git editor limit.',
+          );
+        await persist(text, ++version.current);
+        if (saveError.current) throw new Error(saveError.current);
+      } else await admitted.current;
+      const result = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'nativeDraftDismiss',
+        requestId: prompt.id,
+        promptId: prompt.promptId,
+        discard: remove,
+      });
+      if (result.kind !== 'nativeDraftUpdated' && !skipSave)
+        throw new Error(
+          result.kind === 'error' ? result.message : 'Closing the draft was not confirmed.',
+        );
+      closing.current = true;
+      discard();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
       setPending(false);
     }
   };
@@ -71,16 +162,37 @@ function EditorDialog({ prompt, discard }: { prompt: Prompt; discard: () => void
           rows={18}
           maxLength={1048576}
           spellCheck={false}
-          disabled={pending && !prompt.interrupted}
+          disabled={pending}
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => change(event.target.value)}
         />
       </label>
+      {status && <p role="status">{status}</p>}
+      {!prompt.interrupted && (
+        <NativeDraftRecovery
+          requestId={prompt.id}
+          promptId={prompt.promptId}
+          useText={change}
+          disabled={pending}
+        />
+      )}
       {invalid && <p role="alert">Enter text of at most 1 MiB without NUL bytes.</p>}
-      {error && !prompt.interrupted && <p role="alert">{error}</p>}
+      {error && <p role="alert">{error}</p>}
       <div className="dialog-actions">
         {prompt.interrupted ? (
-          <button onClick={discard}>Discard unsaved draft</button>
+          <>
+            <button disabled={pending} onClick={() => void dismiss(false)}>
+              Keep draft and close
+            </button>
+            <button disabled={pending} onClick={() => void dismiss(true)}>
+              Discard unsaved draft
+            </button>
+            {error && (
+              <button disabled={pending} onClick={() => void dismiss(false, true)}>
+                Close without saving these edits
+              </button>
+            )}
+          </>
         ) : (
           <>
             <button disabled={pending} onClick={() => void respond(null)}>
