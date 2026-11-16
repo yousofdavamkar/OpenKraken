@@ -23,6 +23,20 @@ async function scrollP95(element: HTMLElement | SVGElement) {
   return frames[Math.floor(frames.length * 0.95)]!;
 }
 
+async function loadHistory(app: ElectronApplication, path: string) {
+  const page = await app.firstWindow();
+  await app.evaluate(({ dialog }, folder) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
+  }, path);
+  await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+  const count = page.getByTestId('commit-count');
+  await expect(count).toHaveText('2,000 commits · more available', { timeout: 60000 });
+  for (const loaded of [7000, 12000, 17000]) {
+    await page.getByRole('button', { name: 'Load more commits', exact: true }).click();
+    await expect(count).toHaveText(`${loaded.toLocaleString('en-US')} commits · more available`);
+  }
+}
+
 // Opt-in benchmark: no Git writes. The observer creates/removes its private self-test probe.
 const repository = process.env.OPENKRAKEN_BENCH_REPO;
 const warm = process.env.OPENKRAKEN_BENCH_WARM === '1';
@@ -58,29 +72,38 @@ test('real-repository first paint, paging and scrolling budgets', async ({
     }
     app = await electron.launch({ args });
     if (warm) {
-      const prime = await app.firstWindow();
-      await app.evaluate(({ dialog }, folder) => {
-        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
-      }, path);
-      await prime.getByRole('button', { name: 'Open a repository', exact: true }).click();
-      await expect(prime.getByTestId('commit-count')).toHaveText('2,000 commits · more available', {
-        timeout: 60000,
-      });
-      for (const count of [7000, 12000, 17000]) {
-        await prime.getByRole('button', { name: 'Load more commits', exact: true }).click();
-        await expect(prime.getByTestId('commit-count')).toHaveText(
-          `${count.toLocaleString('en-US')} commits · more available`,
-        );
-      }
+      await loadHistory(app, path);
       await app.close();
       app = await electron.launch({ args });
     }
+    const fromRepository = process.env.OPENKRAKEN_BENCH_FROM_REPO;
+    if (fromRepository) {
+      const source = realpathSync(fromRepository);
+      expect(source).not.toBe(realpathSync(path));
+      await loadHistory(app, source);
+    }
     const page = await app.firstWindow();
-    await page.getByRole('button', { name: 'Open a repository', exact: true }).waitFor();
+    const open = page.getByRole('button', {
+      name: fromRepository ? 'Open repository' : 'Open a repository',
+      exact: true,
+    });
+    await open.waitFor();
     await app.evaluate(({ dialog }, folder) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
     }, path);
-    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    if (fromRepository) {
+      await page.evaluate(() => {
+        performance.clearMeasures('repository-first-paint');
+        for (const mark of [
+          'history-page-start',
+          'history-page-response',
+          'history-page-worker',
+          'history-page-loaded',
+        ])
+          performance.clearMarks(mark);
+      });
+    }
+    await open.click();
     await expect
       .poll(
         () => page.evaluate(() => performance.getEntriesByName('repository-first-paint').length),
@@ -164,6 +187,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       platform: `${process.platform} ${process.arch} ${release()}`,
       cpu: cpus()[0]?.model,
       hiddenRefCount: hiddenTags.length,
+      ...(fromRepository && { switchedFrom: realpathSync(fromRepository), previousCommits: 17000 }),
       soloRef,
       firstPaintMs,
       firstPaintPhases,

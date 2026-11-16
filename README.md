@@ -99,6 +99,8 @@ To measure a cached reopen after a complete app restart, set `OPENKRAKEN_BENCH_W
 
 Set `OPENKRAKEN_BENCH_SOLO_REF` to a full ref name, such as `refs/heads/main`, to measure opening a saved solo view. Choose a ref with enough history for three full pages. The measurement records the ref and the harness checks the active view after timing.
 
+Set `OPENKRAKEN_BENCH_FROM_REPO` to a different repository with more than 17,000 reachable commits to measure switching. The harness opens that repository, loads 17,000 commits and then opens the measured destination in the same window. The result records the source path and the number of commits loaded before the switch.
+
 Results and a screenshot are attached under `test-results/benchmark/`. This benchmark skips during the normal suite unless the environment variable is set. It does not clone, fetch or change Git refs, objects, the index or working files. The watcher self-test briefly creates and removes a private probe in the Git directory.
 
 ## Packages
