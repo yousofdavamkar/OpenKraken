@@ -30,6 +30,7 @@ export class GraphClient {
           event.data.kind === 'packed-layout' ? unpackLayout(event.data) : event.data,
         );
     };
+    this.worker.onmessageerror = () => this.stop(new Error('Graph worker reply could not be read'));
     this.worker.onerror = (event) => this.stop(new Error(event.message || 'Graph worker failed'));
   }
   get failed() {
@@ -60,7 +61,14 @@ export class GraphClient {
         reject(error);
       }, 30000);
       this.pending.set(id, { resolve, reject, timer });
-      this.worker.postMessage({ ...input, id });
+      try {
+        this.worker.postMessage({ ...input, id });
+      } catch (error) {
+        // A synchronous clone failure never reaches the worker or advances its generation.
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(error);
+      }
     });
   }
 }

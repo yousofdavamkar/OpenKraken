@@ -346,6 +346,40 @@ test('Refresh recovers after a completed worker refresh loses its reply', async 
     await close();
   }
 });
+test('a refresh that fails during dispatch cannot later close the recovered worker', async () => {
+  const { page, repository, close } = await launch('linear', 2200);
+  try {
+    const refresh = page.getByRole('button', { name: 'Refresh', exact: true });
+    const query = page.getByRole('textbox', { name: 'Search commits' });
+    await page.getByLabel('Refresh on focus', { exact: true }).uncheck();
+    await expect(page.getByText('Watching for changes', { exact: true })).toBeVisible();
+    await query.fill('Commit 2199');
+    await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
+    await page.clock.install();
+    await page.evaluate(() => {
+      const send = Worker.prototype.postMessage;
+      Worker.prototype.postMessage = new Proxy(send, {
+        apply(target, worker, args) {
+          if (args[0].method !== 'refresh') return Reflect.apply(target, worker, args);
+          Worker.prototype.postMessage = send;
+          throw new DOMException('Could not clone the refresh', 'DataCloneError');
+        },
+      });
+    });
+    await refresh.click();
+    await expect(page.getByText('Could not clone the refresh', { exact: false })).toBeVisible();
+    await refresh.click();
+    await expect(refresh).toBeEnabled();
+    await expect(page.getByText('Could not clone the refresh', { exact: false })).toHaveCount(0);
+    await page.clock.fastForward(30001);
+    await page.getByRole('button', { name: 'Load more commits' }).click();
+    await expect(page.getByTestId('commit-count')).toHaveText('2,200 commits');
+    await query.fill(fixtureGit(repository, ['rev-parse', 'HEAD~2100']).slice(0, 12));
+    await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
+  } finally {
+    await close();
+  }
+});
 test('one Down key moves past the last initially loaded commit', async () => {
   const { page, close } = await launch('linear', 2003);
   try {
