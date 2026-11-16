@@ -2,6 +2,10 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Working-file drafts
+
+A forced Linux x64 main-process exit preserved acknowledged CodeMirror text and its selected line endings across a fresh launch. The unchanged-file case saved the restored draft. The changed-file case kept the newer disk contents and disabled Save. After deletion, the checkout's **Saved file drafts** panel recovered the text and cleared it on explicit discard. The commit-form and working-file stores use the same private atomic writer. [Storage and recovery behavior](../decisions/0124-working-file-draft-recovery.md)
+
 ## Graph paging and worker timeout recovery
 
 Transferring layout rows and edges reduced the median worker phase on both 50,000-ref fixtures. The distinct-target median full page went from 228.2 to 208.7 ms, and the interleaved median went from 209.6 to 211.8 ms. All 18 candidate appends met the 300 ms limit. All six candidate openings missed the 500 ms limit. [Paired measurements](m8-reference-performance.md#transferring-canvas-rows-from-the-graph-worker)
@@ -796,7 +800,7 @@ Evidence: `/tmp/openkraken-supervisor-{red,green,native,hook,unit,e2e,types,buil
 ## Remaining work
 
 - Native supervision runtime acceptance on Windows/macOS, further crash/write scenarios beyond the Linux fetch/PTY/prompt fixtures above, native lock handling and durable write recovery. POSIX processes that intentionally detach or daemonize beyond the active command's stream lifetime are not contained.
-- Durable drafts for working-file, conflict/native editors and provider composers; commit-form drafts are implemented within the bounds above. Crash-report coverage before reporting initialization, live receiver configuration/acceptance, hung-startup and interrupted-update recovery, non-AppImage installation/restart, signed installers/distribution, security review and beta evidence remain open. Signed release checks/downloads, opt-in automatic checks, supported AppImage desktop installation/restart and startup-exit restoration, opt-in process/JavaScript summaries and interrupted-session recovery are implemented within the bounds above.
+- Durable drafts for conflict/native editors and provider composers remain open. Commit-form and working-file recovery are implemented within the bounds above. Crash-report coverage before reporting initialization, live receiver configuration/acceptance, hung-startup and interrupted-update recovery, non-AppImage installation/restart, signed installers/distribution, security review and beta evidence remain open. Signed release checks/downloads, opt-in automatic checks, supported AppImage desktop installation/restart and startup-exit restoration, opt-in process/JavaScript summaries and interrupted-session recovery are implemented within the bounds above.
 - Native DMG/MSI acceptance, broader RPM/AppImage distribution acceptance, Linux arm64 and macOS/Windows installer runtime checks, and real release metadata. Linux x64 has local DEB, RPM and AppImage test builds, including an RPM signed with a disposable key. Debian 13 and Fedora 43 x64 version upgrades are verified within the bounds above. Production signing and distribution remain open.
 - Broader real-repository and cross-platform performance/regression gates, plus the unresolved intermittent command exit-143 investigation recorded in M7 progress.
 
