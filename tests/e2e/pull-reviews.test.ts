@@ -206,6 +206,9 @@ test('PR patches and reviews preserve drafts, reject stale commits and submit on
       ).reviewFixture.uncertain = true;
     });
     await details.getByRole('button', { name: 'Write review', exact: true }).click();
+    await expect(review.getByLabel('Review text')).toBeEnabled();
+    await expect(review.getByLabel('Review text')).toHaveValue('');
+    await expect(review.getByLabel('Review action')).toHaveValue('COMMENT');
     await review.getByLabel('Review text').fill('Follow-up <script>untrusted</script>');
     await review.getByRole('button', { name: 'Preview review' }).click();
     await review.getByRole('button', { name: 'Submit review', exact: true }).click();

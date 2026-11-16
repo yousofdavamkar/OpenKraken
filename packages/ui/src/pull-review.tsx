@@ -1,3 +1,4 @@
+import { useReviewDraft } from './review-draft.js';
 import { editorTheme } from './editor-theme.js';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
@@ -495,28 +496,96 @@ function ReviewDialog({
     [uncertain, setUncertain] = useState(false),
     [checking, setChecking] = useState(false),
     [checked, setChecked] = useState(false);
+  const cancelled = useRef(false);
+  const [source] = useState(() => ({
+    head: context.detail.head.sha,
+    base: context.detail.base.sha,
+  }));
+  const [original, setOriginal] = useState(source);
+  const stale =
+    original.head !== context.detail.head.sha || original.base !== context.detail.base.sha;
+  const scope = {
+    accountId: context.accountId,
+    repository: context.repository,
+    number: context.detail.number,
+  };
+  const storage = useReviewDraft(scope, target ?? null, (draft) => {
+    setOriginal(draft.source);
+    setBody(draft.body);
+    setEvent(draft.event);
+    setUncertain(draft.uncertain);
+    if (draft.uncertain)
+      setError(
+        'The provider may have received this submission. Check submitted results before trying again.',
+      );
+  });
+  const draftValue = (text: string, action: ProviderSubmitReview['event'], unknown: boolean) =>
+    text || action !== 'COMMENT' || unknown
+      ? { body: text, event: action, source: original, uncertain: unknown }
+      : null;
+  const edit = (text: string, action: ProviderSubmitReview['event']) => {
+    setBody(text);
+    setEvent(action);
+    storage.change(draftValue(text, action, false));
+  };
+  const [closeFailed, setCloseFailed] = useState(false);
+  const closeDraft = async (remove: boolean) => {
+    if (pending) return;
+    setPending(true);
+    try {
+      if (remove) await storage.write(null);
+      else await storage.flush();
+      close();
+    } catch {
+      setPending(false);
+      setCloseFailed(true);
+      setError('The local draft could not be updated. Copy any text you want to keep.');
+    }
+  };
+  const [unprotected, setUnprotected] = useState(false);
   useEffect(() => {
     dialog.current?.showModal();
     return () => {
+      cancelled.current = true;
       if (request.current) void window.openkraken.cancel(request.current);
     };
   }, []);
   const leave = () => {
     if (pending) return;
-    if (body && !result) setDiscard(true);
+    if ((body || event !== 'COMMENT' || uncertain) && !result) setDiscard(true);
     else close();
   };
   const send = async () => {
+    if (request.current || stale || !storage.ready) return;
     const id = crypto.randomUUID();
+    cancelled.current = false;
     request.current = id;
     setPending(true);
     setError('');
     try {
+      try {
+        await storage.write(draftValue(body, event, true));
+      } catch {
+        if (!unprotected) {
+          setUnprotected(true);
+          setError(
+            'The submission could not be recorded locally. Copy your text before submitting without crash recovery.',
+          );
+          return;
+        }
+      }
+      if (cancelled.current) {
+        await storage.write(draftValue(body, event, false)).catch(() => {});
+        setConfirmed(false);
+        setError('Cancelled before submission.');
+        return;
+      }
+      setUnprotected(false);
       const common = { id, accountId: context.accountId };
       const options = {
         repository: context.repository,
         number: context.detail.number,
-        revision: { head: context.detail.head.sha, base: context.detail.base.sha },
+        revision: original,
         body,
       };
       const response = await window.openkraken.request(
@@ -529,12 +598,18 @@ function ReviewDialog({
         response.kind === 'providerCommentCreated'
       ) {
         setResult(response.kind === 'providerReviewSubmitted' ? response.review : response.comment);
+        await storage
+          .write(null)
+          .catch(() => setError('Submitted. The local recovery copy could not be cleared.'));
         submitted();
       } else if (response.kind === 'error') {
         setError(response.message);
-        setUncertain(response.code === 'PROVIDER_WRITE_UNCERTAIN');
+        const unknown = response.code === 'PROVIDER_WRITE_UNCERTAIN';
+        setUncertain(unknown);
+        if (!unknown) await storage.write(draftValue(body, event, false)).catch(() => {});
         setConfirmed(false);
       } else if (response.kind === 'cancelled') {
+        await storage.write(draftValue(body, event, false)).catch(() => {});
         setError(`${target ? 'Comment' : 'Review'} cancelled before submission.`);
         setConfirmed(false);
       }
@@ -579,11 +654,11 @@ function ReviewDialog({
           <select
             aria-label="Review action"
             value={event}
-            disabled={pending || confirmed || !!result || uncertain}
+            disabled={!storage.ready || stale || pending || confirmed || !!result || uncertain}
             onChange={(e) => {
               const value = e.target.value;
               if (value === 'COMMENT' || value === 'APPROVE' || value === 'REQUEST_CHANGES')
-                setEvent(value);
+                edit(body, value);
             }}
           >
             <option value="COMMENT">Comment</option>
@@ -602,10 +677,18 @@ function ReviewDialog({
           rows={6}
           maxLength={65536}
           value={body}
-          disabled={pending || confirmed || !!result || uncertain}
-          onChange={(e) => setBody(e.target.value)}
+          readOnly={stale}
+          disabled={!storage.ready || pending || confirmed || !!result || uncertain}
+          onChange={(e) => edit(e.target.value, event)}
         />
       </label>
+      {!result && storage.status && <p>{storage.status}</p>}
+      {stale && (
+        <p>
+          These commits have changed. The draft was written for {original.head}. Copy any text you
+          want to reuse.
+        </p>
+      )}
       {confirmed && (
         <section aria-label={`Confirm ${noun} submission`}>
           <p>
@@ -641,6 +724,7 @@ function ReviewDialog({
           {checked && (
             <button
               onClick={() => {
+                storage.change(draftValue(body, event, false));
                 setUncertain(false);
                 setChecking(false);
                 setChecked(false);
@@ -655,8 +739,24 @@ function ReviewDialog({
       {discard ? (
         <section aria-label={`Discard ${noun} draft`}>
           <p>Discard this unsent {noun} text?</p>
-          <button onClick={() => setDiscard(false)}>Keep editing</button>
-          <button className="danger" onClick={close}>
+          <button
+            disabled={pending}
+            onClick={() => {
+              setDiscard(false);
+              setCloseFailed(false);
+            }}
+          >
+            Keep editing
+          </button>
+          {closeFailed && (
+            <button disabled={pending} onClick={close}>
+              Close without saving these edits
+            </button>
+          )}
+          <button disabled={pending} onClick={() => void closeDraft(false)}>
+            Keep draft and close
+          </button>
+          <button className="danger" disabled={pending} onClick={() => void closeDraft(true)}>
             Discard draft
           </button>
         </section>
@@ -668,6 +768,7 @@ function ReviewDialog({
           {pending && (
             <button
               onClick={() => {
+                cancelled.current = true;
                 if (request.current) void window.openkraken.cancel(request.current);
               }}
             >
@@ -675,14 +776,22 @@ function ReviewDialog({
             </button>
           )}
           {!result &&
+            storage.ready &&
+            !stale &&
             !uncertain &&
             (confirmed ? (
               <>
-                <button disabled={pending} onClick={() => setConfirmed(false)}>
+                <button
+                  disabled={pending}
+                  onClick={() => {
+                    setConfirmed(false);
+                    setUnprotected(false);
+                  }}
+                >
                   Edit {noun}
                 </button>
                 <button disabled={pending} onClick={() => void send()}>
-                  Submit {noun}
+                  {unprotected ? 'Submit without crash recovery' : `Submit ${noun}`}
                 </button>
               </>
             ) : (

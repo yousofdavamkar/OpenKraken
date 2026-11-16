@@ -1,3 +1,4 @@
+import { SavedReviewDrafts } from './saved-review-drafts.js';
 import { CommandButton } from './commands.js';
 import { useEffect, useRef, useState } from 'react';
 import type { ProviderAccounts, Request } from '@openkraken/ipc-contract';
@@ -70,6 +71,7 @@ function AccountsDialog({ close }: { close: () => void }) {
                 : 'GitHub'}{' '}
             · {account.origin}
           </p>
+          {account.provider === 'github' && <SavedReviewDrafts scope={{ accountId: account.id }} />}
           <button
             disabled={pending || deviceBusy}
             onClick={() =>

@@ -143,6 +143,10 @@ test('inline review comments map patch lines, group replies and preserve uncerta
     const composer = page.getByRole('dialog', { name: 'Write inline comment' });
     await expect(composer).toContainText('Reply to thread #10');
     await composer.getByLabel('Comment text').fill('Explained in the next commit.');
+    await composer.getByRole('button', { name: 'Close comment' }).click();
+    await composer.getByRole('button', { name: 'Keep draft and close' }).click();
+    await threads.getByRole('button', { name: 'Reply to thread #10', exact: true }).last().click();
+    await expect(composer.getByLabel('Comment text')).toHaveValue('Explained in the next commit.');
     await composer.getByRole('button', { name: 'Preview comment' }).click();
     const posts = () =>
       app.evaluate(

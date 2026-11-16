@@ -1,3 +1,4 @@
+import { SavedReviewDrafts } from './saved-review-drafts.js';
 import { CommandButton } from './commands.js';
 import { BitbucketPullDetails } from './bitbucket-pull-details.js';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
@@ -157,6 +158,9 @@ function PullDetails({
                 if (changed) refreshList();
                 else setAttempt((value) => value + 1);
               }}
+            />
+            <SavedReviewDrafts
+              scope={{ accountId: target.accountId, repository: target.repository, number }}
             />
             <WriteReview
               context={{ ...target, detail }}
