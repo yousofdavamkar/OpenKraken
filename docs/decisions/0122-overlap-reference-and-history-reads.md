@@ -11,3 +11,7 @@ For a saved hidden-ref view, Git enumerates tentative object IDs and canonical n
 Refreshes, known shallow repositories, explicit graft/shallow/replacement-namespace settings and existing disk prefixes use the ordinary path. A stale disk prefix can therefore suppress this optimization for one open. Loose-only repositories and repositories using an alternative ref backend can use the ordinary path regardless of ref count.
 
 [Desktop scale measurements](../verification/m8-reference-performance.md#overlapping-reference-enumeration-and-history)
+
+## Packed refs sharing the opened HEAD
+
+On an unfiltered open, if at least 32 sampled packed refs all point to the object Git reported for HEAD, the optional walk starts from that HEAD immediately. Enumerating all tentative roots would transfer the same object ID repeatedly on repositories with many aliases. The complete native ref enumeration still runs. The app adopts the early cursor only when its ordered roots exactly match those computed from the complete refs and worktrees, and the existing cache, stash, replacement, graft and shallow-history checks pass. A loose ref or a packed ref beyond the sample can introduce a different tip. In that case the service closes the early cursor and starts the ordinary walk before displaying any rows.

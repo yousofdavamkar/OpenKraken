@@ -12,7 +12,8 @@ const KEY_FORMAT = '%(refname)%00%(objectname)%00%(upstream)%00%(HEAD)%00';
 const MAX_BYTES = 32 * 1024 * 1024;
 const PARALLEL_THRESHOLD = 10000;
 
-interface PackedRefSample {
+export interface PackedRefSample {
+  singleTarget?: string;
   repeatedTargets: boolean;
   manyBranches: boolean;
 }
@@ -28,7 +29,11 @@ function sampleTargets(sample: Buffer, length: number): PackedRefSample {
     rows++;
     if (match[2]) branches++;
   }
-  return { repeatedTargets: rows >= 32 && targets.size * 4 <= rows, manyBranches: branches >= 32 };
+  return {
+    singleTarget: rows >= 32 && targets.size === 1 ? targets.values().next().value : undefined,
+    repeatedTargets: rows >= 32 && targets.size * 4 <= rows,
+    manyBranches: branches >= 32,
+  };
 }
 
 // This bounded sample selects a Git query. Only Git supplies the actual refs and types.

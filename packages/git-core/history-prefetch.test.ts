@@ -333,3 +333,55 @@ test('an empty replacement namespace follows Git across the first page and appen
     await service.dispose();
   }
 });
+
+test.each(['none', 'loose', 'packed'] as const)(
+  'a packed sample pointing to HEAD preserves history with an additional root (%s)',
+  async (extraRoot) => {
+    const path = await clone('shared-head-' + extraRoot);
+    fixtureGit(path, ['update-ref', '-d', 'refs/remotes/origin/main']);
+    fixtureGit(path, ['pack-refs', '--all']);
+    if (extraRoot !== 'none') {
+      const tree = fixtureGit(path, ['rev-parse', 'HEAD^{tree}']);
+      const independent = fixtureGit(path, ['commit-tree', tree, '-m', 'Independent root']);
+      // The tag sorts after the bounded packed sample.
+      fixtureGit(path, ['update-ref', 'refs/tags/zzz-independent', independent]);
+      if (extraRoot === 'packed') fixtureGit(path, ['pack-refs', '--all']);
+    }
+    const service = new RepositoryService('git');
+    const repo = await service.open(path);
+    const native = runner.runGit;
+    const started = gate();
+    const calls = vi.spyOn(runner, 'runGit').mockImplementation(async (git, args, options) => {
+      if (readsSnapshotRefs(args)) await started.promise;
+      if (args[0] === 'rev-list' && options?.env?.GIT_NO_REPLACE_OBJECTS) started.resolve();
+      return native(git, args, options);
+    });
+    const snapshot = service.snapshot(repo.id, undefined, false);
+    try {
+      await vi.waitFor(
+        () => expect(calls.mock.calls.some(([, args]) => args[0] === 'rev-list')).toBe(true),
+        { timeout: 5000 },
+      );
+      const first = await snapshot;
+      const next = await service.page(repo.id, first.cursor, first.commits.length, 5000);
+      expect(next.hasMore).toBe(false);
+      const records = [...first.commits, ...next.commits].map((c) =>
+        [c.oid, ...c.parents].join(' '),
+      );
+      expect(records).toEqual(
+        fixtureGit(path, ['rev-list', '--date-order', '--parents', '--all']).split('\n'),
+      );
+      expect(
+        calls.mock.calls.some(([, args]) => args[0] === 'rev-parse' && args[1] === '--all'),
+      ).toBe(false);
+      expect(calls.mock.calls.filter(([, args]) => args[0] === 'rev-list')).toHaveLength(
+        extraRoot === 'none' ? 1 : 2,
+      );
+    } finally {
+      started.resolve();
+      await snapshot.catch(() => {});
+      calls.mockRestore();
+      await service.dispose();
+    }
+  },
+);

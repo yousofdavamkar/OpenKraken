@@ -40,7 +40,7 @@ import type {
 } from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { HistoryParser, StatusParser, HISTORY_FORMAT } from './parsers.js';
-import { samplePackedRefs, ReferenceReader } from './reference-reader.js';
+import { samplePackedRefs, ReferenceReader, type PackedRefSample } from './reference-reader.js';
 import { HistoryCache } from './history-cache.js';
 import { RepositoryPreferences } from './preferences.js';
 import { HistoryCursor } from './history.js';
@@ -365,7 +365,7 @@ export class RepositoryService {
           : this.prefetchHistory(
               repository,
               view,
-              packedRefs.repeatedTargets,
+              packedRefs,
               AbortSignal.any([readSignal, probeStop.signal]),
             ).catch(() => undefined);
         const graphRead = Promise.all([refRead, worktreeRead, Promise.all(cacheReads)]).then(
@@ -478,11 +478,11 @@ export class RepositoryService {
   private async prefetchHistory(
     repository: Repository,
     view: GraphView,
-    grouped: boolean,
+    sample: PackedRefSample,
     signal: AbortSignal,
   ) {
     if (
-      (grouped && !view.soloRef && view.hiddenRefs.length > 0) ||
+      (sample.repeatedTargets && !view.soloRef && view.hiddenRefs.length > 0) ||
       repository.isShallow ||
       process.env.GIT_REPLACE_REF_BASE !== undefined ||
       process.env.GIT_SHALLOW_FILE !== undefined ||
@@ -499,7 +499,13 @@ export class RepositoryService {
       return;
     if (signal.aborted) return;
     const head = repository.head;
-    if (head.kind === 'branch' && head.oid && view.soloRef === head.ref)
+    const unfiltered = !view.soloRef && view.hiddenRefs.length === 0;
+    // Only the native snapshot can confirm that no loose or later packed ref adds a root.
+    if (
+      head.oid &&
+      ((head.kind === 'branch' && view.soloRef === head.ref) ||
+        (unfiltered && sample.singleTarget === head.oid))
+    )
       return new HistoryCursor(
         this.git,
         repository.path,
