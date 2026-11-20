@@ -1,6 +1,6 @@
 import { pressShortcut } from '../electron-shortcut.js';
 import { _electron as electron, expect, test } from '@playwright/test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createFixture, fixtureGit, fixtureKinds } from '../../packages/test-fixtures/src/index.js';
@@ -9,11 +9,13 @@ async function launch(
   kind: FixtureKind = 'merge',
   count?: number,
   prepare?: (path: string) => void,
+  git?: string,
 ) {
   const root = mkdtempSync(join(tmpdir(), 'openkraken-graph-e2e-'));
   const repository = createFixture(join(root, 'repo'), kind, count);
   prepare?.(repository);
   const app = await electron.launch({
+    env: git ? { ...process.env, OPENKRAKEN_GIT: git } : undefined,
     args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
   });
   const page = await app.firstWindow();
@@ -172,6 +174,74 @@ test('choosing the same search result reveals its virtualized row again', async 
     await expect(grid).toHaveAttribute('aria-activedescendant', 'commit-row-0');
   } finally {
     await close();
+  }
+});
+
+test('keyboard cancellation stops both native search scans and leaves paging usable', async () => {
+  test.skip(process.platform === 'win32', 'The controlled Git executable uses a POSIX shell.');
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-search-cancel-'));
+  const git = join(root, 'git-wrapper');
+  const gate = git + '.hold';
+  writeFileSync(gate, '');
+  writeFileSync(
+    git,
+    [
+      '#!/bin/sh',
+      'for arg do',
+      '  case "$arg" in',
+      '    --grep=*) marker=message ;;',
+      '    --author=*) marker=author ;;',
+      '    *) continue ;;',
+      '  esac',
+      '  echo $$ > "$0.$marker"',
+      '  while test -f "$0.hold"; do sleep 0.05; done',
+      '  break',
+      'done',
+      'exec git "$@"',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
+  try {
+    const { page, close } = await launch('linear', 2200, undefined, git);
+    try {
+      const query = page.getByRole('textbox', { name: 'Search commits' });
+      const search = page.getByRole('button', { name: 'Search all history', exact: true });
+      const cancel = page.getByRole('button', { name: 'Cancel search', exact: true });
+      await query.fill('Commit 1 — linear');
+      await search.press('Enter');
+      await expect(cancel).toBeFocused();
+      const markers = ['message', 'author'].map((scan) => git + '.' + scan);
+      await expect.poll(() => markers.every((marker) => existsSync(marker))).toBe(true);
+      const pids = markers.map((marker) => Number(readFileSync(marker, 'utf8')));
+      await page.getByRole('button', { name: 'Load more commits' }).click();
+      await expect(page.getByRole('grid')).toHaveAttribute('aria-rowcount', '2200');
+      await cancel.press('Enter');
+      await expect(search).toBeFocused();
+      await expect
+        .poll(() =>
+          pids.every((pid) => {
+            try {
+              process.kill(pid, 0);
+              return false;
+            } catch (error) {
+              return (error as NodeJS.ErrnoException).code === 'ESRCH';
+            }
+          }),
+        )
+        .toBe(true);
+      await expect(query).toHaveValue('Commit 1 — linear');
+      await expect(page.getByLabel('All history results')).toHaveCount(0);
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      rmSync(gate);
+      await search.press('Enter');
+      await expect(page.getByLabel('All history results').getByRole('button')).toHaveText(
+        /Commit 1 — linear/,
+      );
+    } finally {
+      await close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

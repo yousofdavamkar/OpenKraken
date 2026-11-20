@@ -50,7 +50,6 @@ function App() {
     busy: active,
     syncing,
     paging,
-    searching,
     detail,
     setDetail,
     error,
@@ -174,7 +173,7 @@ function App() {
               Refresh
             </CommandButton>
           )}
-          {(busy || paging || searching) && <button onClick={() => void cancel()}>Cancel</button>}
+          {(busy || paging) && <button onClick={() => void cancel()}>Cancel</button>}
         </div>
       </header>
       {clone && <CloneDialog close={() => setClone(false)} />}

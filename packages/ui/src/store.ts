@@ -40,6 +40,7 @@ function rowPositions(rows: DisplayCommit[]) {
 let client: GraphClient | undefined;
 const graph = () => (client ??= new GraphClient());
 let querySequence = 0;
+let cancellingSearch: string | undefined;
 let navigationSequence = 0;
 interface State {
   snapshot?: Snapshot;
@@ -67,6 +68,7 @@ interface State {
   loadMore: (count?: number) => Promise<void>;
   search: (query: string) => Promise<void>;
   searchAll: () => Promise<void>;
+  cancelSearch: () => Promise<void>;
   select: (oid: string, mode?: 'single' | 'toggle' | 'range', position?: number) => void;
   navigate: (target: string | number) => Promise<void>;
   setDetail: (commit?: Commit | DisplayCommit) => void;
@@ -460,8 +462,7 @@ export const useRepository = create<State>()(
       if (get().syncing) await waitForBackground();
       const { snapshot, query } = get();
       if (!snapshot || !query.trim() || get().searching) return;
-      const id = crypto.randomUUID(),
-        sequence = querySequence;
+      const id = crypto.randomUUID();
       set((s) => {
         s.searching = id;
         s.error = undefined;
@@ -474,7 +475,7 @@ export const useRepository = create<State>()(
           cursor: snapshot.cursor,
           query,
         });
-        if (sequence !== querySequence || get().snapshot?.cursor !== snapshot.cursor) return;
+        if (get().searching !== id || cancellingSearch === id) return;
         if (result.kind === 'error') throw new Error(result.message);
         if (result.kind === 'search')
           set((s) => {
@@ -482,7 +483,7 @@ export const useRepository = create<State>()(
             s.searchTruncated = result.truncated;
           });
       } catch (error) {
-        if (sequence === querySequence)
+        if (get().searching === id && cancellingSearch !== id)
           set((s) => {
             s.error = String(error);
           });
@@ -490,6 +491,19 @@ export const useRepository = create<State>()(
         set((s) => {
           if (s.searching === id) s.searching = undefined;
         });
+      }
+    },
+    cancelSearch: async () => {
+      const id = get().searching;
+      if (!id || cancellingSearch === id) return;
+      cancellingSearch = id;
+      try {
+        await window.openkraken.cancel(id);
+        if (get().searching === id) set({ searching: undefined });
+      } catch (error) {
+        if (get().searching === id) set({ error: String(error) });
+      } finally {
+        if (cancellingSearch === id) cancellingSearch = undefined;
       }
     },
     select: (oid, mode, position) => {
@@ -552,8 +566,7 @@ export const useRepository = create<State>()(
         s.detail = detail;
       }),
     cancel: async () => {
-      for (const id of [get().busy, get().paging, get().searching])
-        if (id) await window.openkraken.cancel(id);
+      for (const id of [get().busy, get().paging]) if (id) await window.openkraken.cancel(id);
     },
   })),
 );

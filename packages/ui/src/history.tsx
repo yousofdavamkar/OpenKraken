@@ -234,8 +234,14 @@ export function History() {
           {query.trim() ? `${matches?.length ?? 0} loaded matches` : ''}
         </span>
         {query.trim() && (
-          <button disabled={!!searching || !!busy} onClick={() => void state.searchAll()}>
-            Search all history
+          <button
+            disabled={!!busy && !searching}
+            onClick={() => void (searching ? state.cancelSearch() : state.searchAll())}
+            onKeyDown={(event) => {
+              if (event.repeat && event.key === 'Enter') event.preventDefault();
+            }}
+          >
+            {searching ? 'Cancel search' : 'Search all history'}
           </button>
         )}
       </div>

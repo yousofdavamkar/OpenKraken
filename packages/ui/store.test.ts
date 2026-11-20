@@ -395,6 +395,75 @@ test.each(['complete', 'pending'])(
   },
 );
 
+test.each(['result', 'error'])(
+  'cancel search preserves an in-flight page and ignores a late %s during a retry',
+  async (reply) => {
+    const snapshot = fixture();
+    await open(snapshot);
+    const state = useRepository.getState;
+    await state().search('First');
+    const search = deferred(),
+      page = deferred(),
+      retry = deferred();
+    request.mockReturnValueOnce(search.promise).mockReturnValueOnce(page.promise);
+    const searching = state().searchAll();
+    const searchId = state().searching;
+    const paging = state().loadMore();
+    const pageId = state().paging;
+    await state().cancelSearch();
+    expect(window.openkraken.cancel).toHaveBeenCalledExactlyOnceWith(searchId);
+    expect(state()).toMatchObject({
+      query: 'First',
+      matches: [snapshot.commits[0]!.oid],
+      paging: pageId,
+    });
+    expect(state().searching).toBeUndefined();
+    request.mockReturnValueOnce(retry.promise);
+    const retrying = state().searchAll();
+    const retryId = state().searching;
+    const found = {
+      kind: 'search' as const,
+      cursor: snapshot.cursor,
+      commits: snapshot.commits,
+      truncated: false,
+    };
+    search.resolve(
+      reply === 'result' ? found : { kind: 'error', code: 'CANCELLED', message: 'Stopped' },
+    );
+    await searching;
+    expect(state().searchResults).toBeUndefined();
+    expect(state().error).toBeUndefined();
+    expect(state().searching).toBe(retryId);
+    await state().cancel();
+    expect(window.openkraken.cancel).toHaveBeenCalledTimes(2);
+    expect(window.openkraken.cancel).toHaveBeenLastCalledWith(pageId);
+    page.resolve({ kind: 'cancelled' });
+    await paging;
+    retry.resolve(found);
+    await retrying;
+    expect(state().searchResults).toEqual(snapshot.commits);
+  },
+);
+
+test('a failed cancellation can be retried while the search is running', async () => {
+  const snapshot = fixture();
+  await open(snapshot);
+  const state = useRepository.getState;
+  await state().search('First');
+  const search = deferred();
+  request.mockReturnValueOnce(search.promise);
+  const searching = state().searchAll();
+  const id = state().searching;
+  vi.mocked(window.openkraken.cancel).mockRejectedValueOnce(new Error('Connection closed'));
+  await state().cancelSearch();
+  expect(state().searching).toBe(id);
+  expect(state().error).toContain('Connection closed');
+  await state().cancelSearch();
+  expect(state().searching).toBeUndefined();
+  search.resolve({ kind: 'cancelled' });
+  await searching;
+});
+
 test.each(['cancelled', 'snapshot'] as const)(
   'a picker returning %s retires search only on repository replacement',
   async (kind) => {
