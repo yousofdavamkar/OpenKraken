@@ -868,3 +868,9 @@ live-walk-and-key-check,distinct-current-tip,4,candidate,1026.6,591.8,,281.4,,,,
 live-walk-and-key-check,distinct-current-tip,4,baseline,968.6,562.0,,327.8,,,,,,,,,,,,,
 live-walk-and-key-check,distinct-current-tip,5,baseline,903.3,530.6,,289,,,,,,,,,,,,,
 live-walk-and-key-check,distinct-current-tip,5,candidate,932.6,554.3,,263,,,,,,,,,,,,,
+restart-change-fresh-gate,distinct,1,3fe9557,942.7,515.2,706.1,242.6,266.7,266.7,16.8,16.8,68.7,77.2,67.2,764.5,24.7,33.7,46.5,7.5,124.2
+restart-change-fresh-gate,distinct,2,3fe9557,992.6,562.9,763,290.2,250.8,262.7,16.8,16.8,83.2,71.9,55.7,803.8,13.8,27,45.3,8.9,134.6
+restart-change-fresh-gate,distinct,3,3fe9557,959.9,533.1,693.7,346.1,291.9,366.5,33.4,16.8,104.9,73.6,109.1,749.4,21.6,34.1,46.4,6.6,157.5
+restart-change-fresh-gate,distinct,1,f718327,1042.8,600.6,784.4,277.1,250.9,220.7,16.8,16.7,75.9,63.3,62.2,836.4,17.6,34.4,55.1,9.4,141.9
+restart-change-fresh-gate,distinct,2,f718327,784,444.7,583.7,262,217.6,203.6,16.8,16.8,79,57.2,49.1,629.5,14.6,31.2,48.6,5.9,100
+restart-change-fresh-gate,distinct,3,f718327,755.9,412.8,549.9,247,238.1,185.7,16.8,16.8,82,66.9,47.3,584.2,12.8,21.4,37.5,20.3,113.9

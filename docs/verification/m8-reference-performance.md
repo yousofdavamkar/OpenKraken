@@ -15,6 +15,8 @@ The baseline was `832475a` and the candidate was `3fe9557`. Medians exclude one 
 
 An independent run opened the original 1,505,199-commit fixture with three fresh profiles in 942.7, 992.6 and 959.9 ms. All missed the 500 ms budget. Seven of nine page appends met 300 ms. The two misses took 346.1 and 366.5 ms in the third profile, where graph scrolling also exceeded the 18.7 ms p95 budget at 33.4 ms. The first two profiles measured 16.8 ms p95 for graph scrolling.
 
+After rebuilding, a second fresh-profile run measured 1,042.8, 784.0 and 755.9 ms to first paint. All nine appends met 300 ms at 185.7–277.1 ms. Graph scrolling measured 16.8 ms p95 in all three profiles. The [saved-window traversal](m8-scale-performance.md#comparing-a-restarted-graph-with-native-git) repeated the full native comparison using the pre-update profile and confirmed all 302 pages.
+
 ## Large commit messages in the saved history window
 
 Two Linux x64 bare histories contained the same 80 consecutive commits with 256 KiB message bodies. On the 4,800-commit tip the large messages appeared within the first 2,000 rows. On the 9,600-commit tip they appeared in the next 5,000 rows. Fresh and restarted service runs matched every displayed commit ID and ordered parent with native Git, including all 80 messages. Four Electron launches opened the first page, appended through the root and selected the root with End. The first repository saved no cache pages. The second retained its 2,000-commit opening page.

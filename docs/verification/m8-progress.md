@@ -6,7 +6,7 @@ M8 remains in progress. On Linux x64, the full Linux history with one ref passed
 
 On Linux x64, the desktop reopened a 17,000-row saved window after its branch moved. All 50,000 refs and all 1,505,200 commit IDs with their ordered parents matched Git across 302 pages. In five paired openings, median first paint improved from 1,116.7 to 1,011.5 ms after the branch moved. When the saved window was already current, median first paint increased from 968.6 to 1,026.6 ms. The reader also recovers from an unexpected named pipe in place of a cache file on Linux.
 
-Three independent fresh openings on the original 50,000-distinct-target fixture missed the 500 ms budget. Seven of nine appends met 300 ms. [Desktop timings and measurements](m8-reference-performance.md#restarting-after-a-branch-update-on-50000-refs)
+Three independent fresh openings on the original 50,000-distinct-target fixture missed the 500 ms budget. Seven of nine appends met 300 ms. On a second run, opening took 755.9–1,042.8 ms and all nine appends met budget. The Linux x64 suite passed 1,209 unit and native tests with ten skips. All 31 graph and history-cache desktop tests passed, and the Linux package passed its Canvas, search, paging and keyboard smoke checks. [Desktop timings and measurements](m8-reference-performance.md#restarting-after-a-branch-update-on-50000-refs)
 
 ## Paging and restarting with large commit messages
 
