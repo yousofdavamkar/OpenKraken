@@ -7,6 +7,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 
+import { checkReleaseKeyboard } from './check-release-keyboard.js';
 import { reportingTest } from './reporting-fixture.js';
 
 test('the default build has no reporting destination and cannot be opted in', async () => {
@@ -417,6 +418,7 @@ reportingTest('crashes and interrupted sessions respect consent', async ({ recei
 
     app = await launch();
     page = await app.firstWindow();
+    await checkReleaseKeyboard(page);
     await page.getByRole('button', { name: 'Crash reporting', exact: true }).click();
     let dialog = page.getByRole('dialog', { name: 'Crash reporting' });
     await expect(dialog).toContainText(`https://127.0.0.1:${address.port}`);

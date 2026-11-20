@@ -29,12 +29,19 @@ function DiagnosticsDialog({ onClose }: { onClose: () => void }) {
     closeButton.current?.focus();
     void load();
   }, []);
+  const dismiss = () => {
+    dialog.current?.close();
+    onClose();
+  };
   return (
     <dialog
       ref={dialog}
       className="reference-dialog diagnostics-dialog"
       aria-label="Local diagnostics"
-      onClose={onClose}
+      onCancel={(event) => {
+        event.preventDefault();
+        dismiss();
+      }}
     >
       <h2>Local diagnostics</h2>
       <p>
@@ -82,7 +89,7 @@ function DiagnosticsDialog({ onClose }: { onClose: () => void }) {
         <button disabled={busy || !state || !!state.warning} onClick={() => void load(true)}>
           Clear logs
         </button>
-        <button ref={closeButton} onClick={() => dialog.current?.close()}>
+        <button ref={closeButton} onClick={dismiss}>
           Close
         </button>
       </div>

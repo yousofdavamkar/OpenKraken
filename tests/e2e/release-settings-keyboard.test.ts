@@ -1,4 +1,5 @@
-import { _electron as electron, expect, test } from '@playwright/test';
+import { _electron as electron, test } from '@playwright/test';
+import { checkReleaseKeyboard } from './check-release-keyboard.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -10,28 +11,7 @@ test('release and diagnostics dialogs return keyboard users to the toolbar', asy
   });
   try {
     const page = await app.firstWindow();
-    await page.getByRole('button', { name: 'Crash reporting', exact: true }).focus();
-    for (const [buttonName, dialogName] of [
-      ['Crash reporting', 'Crash reporting'],
-      ['Activity', 'Activity'],
-      ['Diagnostics', 'Local diagnostics'],
-      ['Updates', 'App updates'],
-    ] as const) {
-      const opener = page.getByRole('button', { name: buttonName, exact: true });
-      const dialog = page.getByRole('dialog', { name: dialogName, exact: true });
-      await expect(opener).toBeFocused();
-      for (const [openKey, closeKey] of [
-        ['Enter', 'Enter'],
-        ['Space', 'Escape'],
-      ] as const) {
-        await page.keyboard.press(openKey);
-        await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeFocused();
-        await page.keyboard.press(closeKey);
-        await expect(dialog).toHaveCount(0);
-        await expect(opener).toBeFocused();
-      }
-      await page.keyboard.press('Tab');
-    }
+    await checkReleaseKeyboard(page);
   } finally {
     await app.close();
     await rm(profile, { recursive: true, force: true });

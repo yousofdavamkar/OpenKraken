@@ -171,12 +171,19 @@ function UpdatesDialog({
   };
   const running = state && ['checking', 'downloading', 'preparing', 'saving'].includes(state.phase);
   const status = updateStatus(state);
+  const dismiss = () => {
+    dialog.current?.close();
+    onClose();
+  };
   return (
     <dialog
       ref={dialog}
       className="reference-dialog updates-dialog"
       aria-label="App updates"
-      onClose={onClose}
+      onCancel={(event) => {
+        event.preventDefault();
+        dismiss();
+      }}
     >
       <h2>App updates</h2>
       {state?.channel === 'beta' && <p>Beta channel · This build receives prerelease updates.</p>}
@@ -272,7 +279,7 @@ function UpdatesDialog({
             Check for updates
           </button>
         )}
-        <button ref={closeButton} autoFocus onClick={() => dialog.current?.close()}>
+        <button ref={closeButton} autoFocus onClick={dismiss}>
           Close
         </button>
       </div>

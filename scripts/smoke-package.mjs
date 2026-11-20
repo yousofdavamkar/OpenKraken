@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { createFixture } from '../packages/test-fixtures/src/index.ts';
+import { checkReleaseKeyboard } from '../tests/e2e/check-release-keyboard.ts';
 import { checkPackagedHistory } from './check-packaged-history.mjs';
 import { assertMsiSmokeProfile } from './msi-lifecycle.mjs';
 
@@ -175,6 +176,8 @@ try {
     !diagnostics.state.entries.some((entry) => entry.type === 'started')
   )
     throw new Error('Packaged local diagnostics failed to initialize');
+  await checkReleaseKeyboard(page);
+  console.log('Packaged release and diagnostics dialogs restored keyboard focus to the toolbar.');
   await page.getByRole('button', { name: 'Review repository link', exact: true }).click();
   const linkDialog = page.getByRole('dialog', { name: 'Open linked repository', exact: true });
   await expect(linkDialog).toContainText(linkedRepository);

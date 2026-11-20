@@ -52,14 +52,18 @@ function ReportingDialog({
       setSaving(false);
     }
   };
+  const dismiss = () => {
+    dialog.current?.close();
+    onClose();
+  };
   return (
     <dialog
       ref={dialog}
       className="reference-dialog crash-reporting-dialog"
       aria-label="Crash reporting"
-      onClose={onClose}
       onCancel={(event) => {
-        if (saving) event.preventDefault();
+        event.preventDefault();
+        if (!saving) dismiss();
       }}
     >
       <h2>Crash reporting</h2>
@@ -130,7 +134,7 @@ function ReportingDialog({
         >
           Apply
         </button>
-        <button onClick={() => dialog.current?.close()} disabled={saving}>
+        <button onClick={dismiss} disabled={saving}>
           Close
         </button>
       </div>
