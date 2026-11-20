@@ -2,6 +2,24 @@
 
 M8 remains in progress. On Linux x64, full Linux history with one ref and with 49,999 aliases on the first row met the 500 ms opening and 300 ms paging budgets in the latest fresh-profile runs. One nested-tag restart exceeded 500 ms. The 50,000-distinct-target fixture still exceeds the opening budget. Native Windows/macOS and ARM64 acceptance, the production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Cancelling a switch while the old repository writes its cache
+
+The Linux regression held the original repository’s cache write open during a switch. Before the fix, cancellation still had not returned after two seconds. A cancelled switch and an unavailable destination now release the request while the write is pending. The original graph loads its remaining commits, and the next successful switch persists both the 2,000-commit prefix and the three-commit tail. [Cache handoff behavior](../decisions/0008-bounded-history-cache.md#leaving-a-pending-cache-read)
+
+A separate desktop run loaded 17,000 commits from the two-million-commit synthetic checkout and switched to a saved 17,000-commit window of full Linux history with 50,000 distinct ref targets. The destination path and all 302 pages matched Git through 1,505,199 commits, including their ordered parents. In four paired desktop comparisons, reading the destination’s prefix during the outgoing write helped two openings and slowed two. The shipping read order had a median switch paint of 845 ms. All 12 measured appends with that build met 300 ms. [Switch measurements](m8-reference-performance.md#switching-back-to-a-cached-repository-with-50000-refs)
+
+All three Linux x64 test formats from clean commit `335213c` reopened a changed repository through a second process. The fixture verified the saved first page on disk, committed a new tip while another checkout was open, selected the new tip in the graph, then paged through 7,004 commits to the root. Debian 13 installed, reinstalled, upgraded from 0.1.0 to 0.2.0, removed and purged the application while retaining user data. Fedora 43 installed, reinstalled and removed the RPM while retaining user data. AppImage acceptance launched the embedded runtime and also ran in extract-and-run mode.
+
+| Linux x64 test installer |       Bytes | SHA-256                                                            |
+| ------------------------ | ----------: | ------------------------------------------------------------------ |
+| DEB                      | 115,149,232 | `9bf7a026ba9c469056ce5a63e2f7fc94138a49b131d30ed84bc40c9377c7c0a0` |
+| RPM                      |  99,011,281 | `448471470c4e262214d617539d328d84395608df2822f84d399f85237a9b4fa8` |
+| AppImage                 | 133,208,568 | `e3b14afb009344a7896fe32a01ee0f866813960cf1b62f4782d05bc6acd2f094` |
+
+The DEB check also reproduced a Chromium singleton socket path exceeding the Linux limit under a long temporary profile. The smoke launcher now puts its Linux runtime sockets in a short private directory and removes it after exit. The DEB and extract-and-run AppImage checks passed with the original long staging path. Linux CI runs the latter check with a long profile path. These are local test artifacts. Production signing, hosted cross-platform acceptance and the large-reference opening budget remain open.
+
+The full Linux suite passed 1,160 unit and native tests with nine skips. All 91 focused Git 2.38.0 checks and 34 focused desktop graph, cache, repository and reference tests passed. The standard 2,000-commit fixture painted in 261.0 ms. A 5,000-commit append took 157.8 ms and scrolling at 12,000 rows measured 16.8 ms p95. Typechecking, lint and local workflow validation passed.
+
 ## Reading saved graph history during a restart
 
 On Linux x64, starting the saved-page read during ref enumeration reduced median restarted first paint from 870.4 to 733.8 ms across five alternating pairs on full Linux history with 50,000 distinct ref targets. The app checks the current Git fingerprint and cache file identity before displaying a commit. An integration test held ref enumeration open after an external commit and verified that the displayed history included the new tip. Other tests replaced and removed the saved file, cancelled an incomplete first open and opened another repository. [Cache acceptance rules](../decisions/0008-bounded-history-cache.md#restarting-with-a-saved-first-page)

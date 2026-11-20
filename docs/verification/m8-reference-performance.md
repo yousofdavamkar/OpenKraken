@@ -6,7 +6,7 @@ The sidebar now mounts a bounded set of reference controls on large repositories
 
 A Linux x64 Electron profile first saved 17,000 commits from the 50,000-distinct-target fixture and restarted. It opened single-ref Linux history, loaded 17,000 commits there, then switched back to the saved fixture. Four measured pairs alternated build order after a warm-up pair. Both builds waited for the outgoing cache write and checked the destination’s current graph fingerprint. The prototype also read the destination’s first cache page during the outgoing write and rechecked the file stamp afterward.
 
-The control painted in median 845.4 ms and the prototype in 849.8 ms. The prototype was faster in two pairs and slower in two. All 24 measured appends of 5,000 commits met 300 ms. Every measured opening exceeded 500 ms. The shipping implementation keeps the early read on initial process startup. [Individual timings](m8-opening-experiments.csv)
+Median first paint was 845 ms for the control and 850 ms for the prototype. The prototype was faster in two pairs and slower in two. All 24 measured appends of 5,000 commits met 300 ms. Every measured opening exceeded 500 ms. The shipping implementation keeps the early read on initial process startup. [Individual timings](m8-opening-experiments.csv)
 
 ## Reading the cached first page during ref enumeration
 
