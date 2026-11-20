@@ -10,6 +10,7 @@ import { chmod, cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from
 import { createServer } from 'node:https';
 import { once } from 'node:events';
 import { basename, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -21,7 +22,7 @@ if (process.platform !== 'linux') throw new Error('Linux AppImage acceptance req
 await mkdir('release', { recursive: true });
 const root = await mkdtemp(resolve('release/update-restart-check-'));
 // Chromium puts its Unix-domain singleton socket under TMPDIR, even in extract-and-run mode.
-const runtimeTemp = await mkdtemp('/tmp/openkraken-image-');
+const runtimeTemp = await mkdtemp(join(tmpdir(), 'ok-img-'));
 let server, child, browser, mainPid;
 let completed = false;
 let launchOutput = '';
@@ -494,6 +495,13 @@ try {
     await mkdir(profile);
     args.push(`--user-data-dir=${profile}`);
   }
+  async function selectUpdate(dialog) {
+    await dialog.getByRole('button', { name: 'Check for updates' }).click();
+    await dialog.getByRole('button', { name: 'Download AppImage' }).click();
+    await expect(
+      dialog.getByRole('button', { name: 'Install and restart', exact: true }),
+    ).toBeVisible({ timeout: 30000 });
+  }
   async function launchAndSelectUpdate() {
     child = spawn(target, args, {
       detached: true,
@@ -538,11 +546,7 @@ try {
       await expect(consent).toBeEnabled();
       await expect(consent).toBeChecked();
     }
-    await dialog.getByRole('button', { name: 'Check for updates' }).click();
-    await dialog.getByRole('button', { name: 'Download AppImage' }).click();
-    await expect(
-      dialog.getByRole('button', { name: 'Install and restart', exact: true }),
-    ).toBeVisible({ timeout: 30000 });
+    await selectUpdate(dialog);
     return { page, dialog };
   }
   let previousInstallId;
@@ -573,9 +577,19 @@ try {
     );
     assert.equal(state.phase, 'verified');
     assert.ok(state.installId && state.installId !== previousInstallId);
+    const beforeRecheck = requests.length;
+    await selectUpdate(dialog);
+    assert.deepEqual(requests.slice(beforeRecheck), ['/release.json']);
+    const afterRecheck = await page.evaluate(
+      (installId) =>
+        window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesInstall', installId }),
+      state.installId,
+    );
+    assert.equal(afterRecheck.state.phase, 'verified');
+    assert.ok(afterRecheck.state.installId && afterRecheck.state.installId !== state.installId);
     await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
     console.log(
-      'Recovered the verified AppImage after process exit with one metadata request and fresh install approval.',
+      'Restart and same-session recheck each fetched only signed metadata and required fresh install approval.',
     );
   }
   if (unchangedImage) {
