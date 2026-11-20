@@ -96,6 +96,7 @@ async function exportInstaller(
       }
       if (size !== artifact.size || hash.digest('hex') !== artifact.sha256)
         throw new UpdateFailure('integrity');
+      if (artifact.format === 'AppImage') await output.chmod(0o700);
       await output.sync();
       staged = await output.stat();
     } finally {

@@ -75,6 +75,10 @@ test.each([
     expect((await updater.save(verified.saveId!, choose)).phase).toBe('saved');
     expect(choose).toHaveBeenCalledWith(name);
     expect(await readFile(path, 'utf8')).toBe('fixture');
+    if (process.platform !== 'win32') {
+      expect((await stat(path)).mode & 0o777).toBe(format === 'AppImage' ? 0o700 : 0o600);
+      expect((await stat(join(root, 'updates/artifact.ready'))).mode & 0o111).toBe(0);
+    }
   } finally {
     await updater.close();
     await rm(root, { recursive: true, force: true });
