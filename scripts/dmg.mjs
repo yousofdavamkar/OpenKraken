@@ -1,6 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { copyFile, stat, lstat, mkdir, mkdtemp, readlink, rm, symlink } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
+import { macBundleVersions } from './mac-bundle-versions.mjs';
 import { signDiskImage, verifyMacSignature, verifyNotaryTicket } from './mac-signing.mjs';
 import { promisify } from 'node:util';
 import {
@@ -18,7 +19,7 @@ function requireMac() {
   if (process.platform !== 'darwin') throw new Error('DMG operations require native macOS');
 }
 
-export async function verifyMacBundle(bundle, version, identity) {
+export async function verifyMacBundle(bundle, release, identity) {
   requireMac();
   if (!(await lstat(bundle)).isDirectory()) throw new Error('Expected a real application bundle');
   const { stdout } = await run(
@@ -27,11 +28,13 @@ export async function verifyMacBundle(bundle, version, identity) {
     commandOptions,
   );
   const info = JSON.parse(stdout);
+  const { appVersion, buildVersion } = macBundleVersions(release);
   const schemes = info.CFBundleURLTypes?.flatMap((entry) => entry.CFBundleURLSchemes ?? []);
   if (
     info.CFBundleIdentifier !== 'org.openkraken.desktop' ||
     info.CFBundleExecutable !== 'openkraken' ||
-    info.CFBundleShortVersionString !== version ||
+    info.CFBundleShortVersionString !== appVersion ||
+    info.CFBundleVersion !== buildVersion ||
     info.CFBundlePackageType !== 'APPL' ||
     !Array.isArray(schemes) ||
     schemes.length !== 1 ||
@@ -43,18 +46,18 @@ export async function verifyMacBundle(bundle, version, identity) {
   if (identity) await verifyMacSignature(bundle, identity, 'org.openkraken.desktop');
 }
 
-export async function buildDmg(bundle, work, filename, version, identity) {
+export async function buildDmg(bundle, work, filename, release, identity) {
   requireMac();
   if (basename(filename) !== filename || !filename.endsWith('.dmg'))
     throw new Error('Expected a DMG artifact basename');
   const original = await payloadManifest(bundle);
-  await verifyMacBundle(bundle, version, identity);
+  await verifyMacBundle(bundle, release, identity);
   const source = join(work, 'dmg-source');
   await mkdir(source);
   const copied = join(source, 'OpenKraken.app');
   await run('/usr/bin/ditto', [bundle, copied], commandOptions);
   comparePayload(original, await payloadManifest(copied));
-  await verifyMacBundle(copied, version, identity);
+  await verifyMacBundle(copied, release, identity);
   await symlink('/Applications', join(source, 'Applications'));
   const artifact = join(work, filename);
   await run(
@@ -113,11 +116,11 @@ export async function verifyDmg(source, manifest, identity) {
         throw new Error('DMG Applications shortcut differs');
       const mounted = join(mountpoint, 'OpenKraken.app');
       comparePayload(manifest.payload, await payloadManifest(mounted));
-      await verifyMacBundle(mounted, manifest.version, identity);
+      await verifyMacBundle(mounted, manifest, identity);
       verifyPackagedApplication(mounted, manifest.version, manifest.source ?? null);
       await run('/usr/bin/ditto', [mounted, copied], commandOptions);
       comparePayload(manifest.payload, await payloadManifest(copied));
-      await verifyMacBundle(copied, manifest.version, identity);
+      await verifyMacBundle(copied, manifest, identity);
     } finally {
       // Do not force-unmount or kill unrelated processes to clean up a failure.
       await run('/usr/bin/hdiutil', ['detach', mountpoint], commandOptions);

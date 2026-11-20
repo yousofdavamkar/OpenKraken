@@ -100,8 +100,9 @@ const source = join(
 const original = await payloadManifest(source);
 const executableName = target === 'msi' ? 'openkraken.exe' : 'openkraken';
 await verifyFuses(target === 'dmg' ? source : join(source, executableName));
-const { version } = JSON.parse(await readFile('package.json', 'utf8'));
-if (target === 'dmg') await verifyMacBundle(source, version);
+const release = JSON.parse(await readFile('package.json', 'utf8'));
+const { version } = release;
+if (target === 'dmg') await verifyMacBundle(source, release);
 const signingMode = notaryProfile
   ? 'notarized'
   : identity || winIdentity || rpmKey
@@ -160,7 +161,7 @@ try {
         prepackaged,
         work,
         `OpenKraken-${version}-darwin-${process.arch}${testMetadata ? '-TEST-ONLY' : identity ? '' : '-unsigned'}.dmg`,
-        version,
+        release,
         identity,
       ),
     ];
@@ -286,6 +287,7 @@ try {
     ...(notarySubmissionId && { notarySubmissionId }),
     source: buildSource,
     nativePackageVersion,
+    ...(target === 'dmg' && { macBuildNumber: release.macBuildNumber }),
     artifact: {
       file: basename(artifact),
       size: (await stat(artifact)).size,

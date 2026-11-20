@@ -1,4 +1,5 @@
 import { packager } from '@electron/packager';
+import { macPackagerOptions } from './mac-bundle-versions.mjs';
 import { flipFuses, FuseVersion } from '@electron/fuses';
 import {
   packageFuses,
@@ -46,7 +47,9 @@ const winIdentity = windowsIdentity(
 const timestampUrl = windowsTimestamp(winIdentity, values['win-timestamp-url']);
 const source = readBuildSource();
 const staging = resolve('release/staging');
-const { version } = JSON.parse(await readFile('package.json', 'utf8'));
+const release = JSON.parse(await readFile('package.json', 'utf8'));
+const { version } = release;
+const macOptions = process.platform === 'darwin' ? macPackagerOptions(release) : {};
 await rm(staging, { recursive: true, force: true });
 await mkdir(staging, { recursive: true });
 execFileSync(process.execPath, [join(import.meta.dirname, 'build.mjs'), join(staging, 'dist')], {
@@ -78,6 +81,7 @@ const outputs = await packager({
   appBundleId: 'org.openkraken.desktop',
   executableName: 'openkraken',
   ...pinnedElectronRuntime(),
+  ...macOptions,
   protocols: [{ name: 'OpenKraken repository links', schemes: ['openkraken'] }],
   asar: {
     unpack: '**/*.node',

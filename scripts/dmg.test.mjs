@@ -17,6 +17,7 @@ import { promisify } from 'node:util';
 import { comparePayload, payloadManifest, sha256 } from './package-security.mjs';
 import { saveSignedInstaller } from './signed-installer.mjs';
 import { verifyMacBundle } from './dmg.mjs';
+import { macBundleVersions, macPackagerOptions } from './mac-bundle-versions.mjs';
 import { isMacCode, macIdentity, verifyDmgReceipt, verifyMacSignature } from './mac-signing.mjs';
 
 const run = promisify(execFile);
@@ -31,6 +32,32 @@ async function fixture() {
   temporary.push(directory);
   return directory;
 }
+
+test('macOS keeps one numeric release version across successive beta and final builds', () => {
+  const releases = ['0.2.0-beta.1', '0.2.0-beta.2', '0.2.0'];
+  expect(
+    releases.map((version, index) => macBundleVersions({ version, macBuildNumber: 2 + index })),
+  ).toEqual([2, 3, 4].map((number) => ({ appVersion: '0.2.0', buildVersion: String(number) })));
+  expect(macBundleVersions({ version: '0.1.0' })).toEqual({
+    appVersion: '0.1.0',
+    buildVersion: '0.1.0',
+  });
+  for (const macBuildNumber of [undefined, null, '3', 0, -1, 3.5, 2 ** 53])
+    expect(() => macBundleVersions({ version: releases[0], macBuildNumber })).toThrow();
+  expect(() => macBundleVersions({ version: '0.2.0-preview.1', macBuildNumber: 2 })).toThrow();
+});
+
+test('beta packaging restores the runtime release before the ASAR is hashed', async () => {
+  const release = { version: '0.2.0-beta.2', macBuildNumber: 3 };
+  const options = macPackagerOptions(release);
+  const buildPath = await fixture();
+  const path = join(buildPath, 'package.json');
+  const app = { name: 'openkraken', version: options.appVersion, main: 'dist/main.cjs' };
+  await writeFile(path, JSON.stringify(app));
+  for (const hook of options.beforeAsar) await hook({ buildPath });
+  expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ ...app, version: release.version });
+  expect(macPackagerOptions({ ...release, version: '0.2.0' }).beforeAsar).toBeUndefined();
+});
 
 test.skipIf(process.platform !== 'linux')(
   'DMG creation refuses a non-macOS host before touching a bundle',
@@ -115,6 +142,7 @@ test.skipIf(process.platform !== 'darwin').each([
   ['CFBundleIdentifier', 'wrong.product'],
   ['CFBundleExecutable', 'wrong-executable'],
   ['CFBundleShortVersionString', '9.9.9'],
+  ['CFBundleVersion', '1'],
   ['CFBundleURLSchemes', 'wrong-scheme'],
 ])('macOS rejects altered bundle metadata: %s', async (field, value) => {
   const directory = await fixture();
@@ -123,7 +151,8 @@ test.skipIf(process.platform !== 'darwin').each([
   const info = {
     CFBundleIdentifier: 'org.openkraken.desktop',
     CFBundleExecutable: 'openkraken',
-    CFBundleShortVersionString: '0.1.0',
+    CFBundleShortVersionString: '0.2.0',
+    CFBundleVersion: '2',
     CFBundlePackageType: 'APPL',
     CFBundleURLTypes: [{ CFBundleURLSchemes: ['openkraken'] }],
   };
@@ -133,9 +162,9 @@ test.skipIf(process.platform !== 'darwin').each([
   await writeFile(plist, JSON.stringify(info));
   await run('/usr/bin/plutil', ['-convert', 'xml1', plist]);
   expect(await readFile(plist, 'utf8')).toContain('<plist');
-  await expect(verifyMacBundle(bundle, '0.1.0')).rejects.toThrow(
-    'macOS bundle identity, version, executable or repository scheme differs',
-  );
+  await expect(
+    verifyMacBundle(bundle, { version: '0.2.0-beta.1', macBuildNumber: 2 }),
+  ).rejects.toThrow('macOS bundle identity, version, executable or repository scheme differs');
 });
 
 test('a signed DMG receipt requires the same certificate selected independently', () => {
