@@ -176,6 +176,28 @@ test('pin reserves lane zero for the first-parent chain across pages and converg
   expect(all.checkpoint.lanes).toEqual([]);
 });
 
+test('appended merge parents reuse later holes before wrapping to earlier lanes', () => {
+  const parents = Array.from({ length: 32 }, (_, i) => String(i));
+  const first = allocateLanes(
+    [
+      { oid: 'merge', parents },
+      { oid: '1', parents: [] },
+      { oid: '28', parents: [] },
+    ],
+    emptyCheckpoint(),
+    true,
+  );
+  const next = allocateLanes(
+    [{ oid: '24', parents: ['main', 'right', 'left', 'new'] }],
+    first.checkpoint,
+    true,
+  );
+  expect(next.rows[0]!.edges.map((edge) => edge.to)).toEqual([24, 24, 28, 1, 32]);
+  expect(first.checkpoint.lanes).toHaveLength(32);
+  expect(first.checkpoint.lanes[1]).toBeNull();
+  expect(next.checkpoint.maxColumns).toBe(33);
+});
+
 test('refresh reuses a stable prefix and converged suffix, then appends from the right state', () => {
   const engine = new GraphEngine(),
     commits = documents(2000);

@@ -76,8 +76,10 @@ export function allocateLanes(
       });
   };
   const targets = new Map<string, Set<number>>();
+  let occupied = 0;
   state.lanes.forEach((lane, column) => {
     if (lane) {
+      occupied++;
       const columns = targets.get(lane.target) ?? new Set<number>();
       columns.add(column);
       targets.set(lane.target, columns);
@@ -86,12 +88,14 @@ export function allocateLanes(
   const setLane = (column: number, lane: Lane | null) => {
     const old = state.lanes[column];
     if (old) {
+      occupied--;
       const columns = targets.get(old.target)!;
       columns.delete(column);
       if (!columns.size) targets.delete(old.target);
     }
     state.lanes[column] = lane;
     if (lane) {
+      occupied++;
       const columns = targets.get(lane.target) ?? new Set<number>();
       columns.add(column);
       targets.set(lane.target, columns);
@@ -103,9 +107,11 @@ export function allocateLanes(
     return column === Infinity ? -1 : column;
   };
   const reserve = (target: string, preferred = 0, dashed = false) => {
-    let column = state.lanes.findIndex((lane, i) => i >= preferred && !lane);
-    if (column < 0) column = state.lanes.findIndex((lane) => !lane);
-    if (column < 0) column = state.lanes.length;
+    let column = state.lanes.length;
+    if (occupied < column) {
+      column = state.lanes.indexOf(null, preferred);
+      if (column < 0) column = state.lanes.indexOf(null);
+    }
     setLane(column, { target, color: state.nextColor++ % 10, dashed });
     return column;
   };
