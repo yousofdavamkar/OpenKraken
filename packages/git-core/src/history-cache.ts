@@ -120,7 +120,17 @@ export class HistoryCache {
       try {
         if (signal?.aborted) return;
         const metadata = await file.stat({ bigint: true });
-        if (metadata.size > maxBytes) return;
+        if (!metadata.isFile() || metadata.size > maxBytes) return;
+        if (key !== undefined && metadata.size > 64 * 1024) {
+          // Our writer puts the 64-digit cache key first. Read positionally to
+          // leave the normal JSON reader at byte zero for matching or older files.
+          const header = Buffer.allocUnsafe(96);
+          const { bytesRead } = await file.read(header, 0, header.length, 0);
+          const stored = /^\{"key":"([a-f0-9]{64})","offset":/.exec(
+            header.toString('latin1', 0, bytesRead),
+          );
+          if (stored && stored[1] !== key) return;
+        }
         stamp = fileStamp(metadata);
         content = await file.readFile({ encoding: 'utf8', signal });
       } finally {

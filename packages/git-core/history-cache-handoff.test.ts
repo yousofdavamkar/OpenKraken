@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
 import { RepositoryService } from './src/repository.js';
+import { HistoryCache } from './src/history-cache.js';
 import * as runner from './src/runner.js';
 
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -61,6 +62,43 @@ test('a restarted service reads its cached prefix while Git enumerates changed r
   } finally {
     finishRefs();
     vi.restoreAllMocks();
+    await service.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a stale cache key is rejected without reading its commit bodies', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-stale-disk-prefix-'));
+  const dataDir = join(root, 'profile');
+  const service = new RepositoryService('git', { dataDir });
+  const fs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+  try {
+    const repo = await service.open(createFixture(join(root, 'source'), 'linear', 500));
+    const { commits } = await service.snapshot(repo.id);
+    await service.dispose();
+    const prefix = join(dataDir, 'history', repo.id, 'prefix.json');
+    const text = await fs.readFile(prefix, 'utf8');
+    const { key } = JSON.parse(text);
+    const readBody = vi.fn();
+    vi.mocked(open).mockImplementation(async (...args) => {
+      const handle = await fs.open(...args);
+      if (args[0] === prefix) {
+        const read = handle.readFile.bind(handle);
+        vi.spyOn(handle, 'readFile').mockImplementation((...options) => {
+          readBody();
+          return read(...options);
+        });
+      }
+      return handle;
+    });
+    const staleKey = key === 'a'.repeat(64) ? 'b'.repeat(64) : 'a'.repeat(64);
+    expect(await new HistoryCache(dataDir, repo.id, staleKey).load()).toBeUndefined();
+    expect(readBody).not.toHaveBeenCalled();
+    expect((await new HistoryCache(dataDir, repo.id, key).load())?.commits).toEqual(commits);
+    await fs.writeFile(prefix, '  ' + text);
+    expect((await new HistoryCache(dataDir, repo.id, key).load())?.commits).toEqual(commits);
+  } finally {
+    vi.mocked(open).mockImplementation(fs.open);
     await service.dispose();
     await rm(root, { recursive: true, force: true });
   }
