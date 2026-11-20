@@ -243,68 +243,76 @@ test('cancelling the opening cache read preserves the displayed history cursor',
   }
 });
 
-test('cancelling a switch releases the outgoing cursor while its cache write finishes', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'openkraken-cancel-cache-write-'));
-  const dataDir = join(root, 'profile');
-  const service = new RepositoryService('git', { dataDir });
-  const original = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let writing!: () => void;
-  const pendingWrite = new Promise<void>((resolve) => {
-    writing = resolve;
-  });
-  try {
-    const source = await service.open(createFixture(join(root, 'source'), 'linear', 2003));
-    const destination = await service.open(createFixture(join(root, 'destination')));
-    const { snapshot } = await service.observeInitialSnapshot(source.id);
-    vi.mocked(open).mockImplementation(async (...args) => {
-      if (
-        String(args[0]).startsWith(join(dataDir, 'history', source.id, 'prefix.json.')) &&
-        args[1] === 'wx'
-      ) {
-        writing();
-        await gate;
-      }
-      return original.open(...args);
+test.each(['cancelled', 'failed'])(
+  'a %s switch releases the outgoing cursor while its cache write finishes',
+  async (outcome) => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-cancel-cache-write-'));
+    const dataDir = join(root, 'profile');
+    const service = new RepositoryService('git', { dataDir });
+    const original = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    const controller = new AbortController();
-    const attempt = expect(
-      service.observeInitialSnapshot(destination.id, controller.signal),
-    ).rejects.toMatchObject({ code: 'CANCELLED' });
+    let writing!: () => void;
+    const pendingWrite = new Promise<void>((resolve) => {
+      writing = resolve;
+    });
     try {
-      await pendingWrite;
-      controller.abort();
-      expect(
-        await Promise.race([attempt.then(() => true), delay(2000, false, { ref: false })]),
-      ).toBe(true);
-      const tail = await service.page(source.id, snapshot.cursor, 2000, 5000);
-      expect(tail.commits.map((c) => c.oid)).toEqual(
-        fixtureGit(source.path, ['rev-list', '--date-order', '--all']).split('\n').slice(2000),
+      const source = await service.open(createFixture(join(root, 'source'), 'linear', 2003));
+      const destination = await service.open(createFixture(join(root, 'destination')));
+      const { snapshot } = await service.observeInitialSnapshot(source.id);
+      vi.mocked(open).mockImplementation(async (...args) => {
+        if (
+          String(args[0]).startsWith(join(dataDir, 'history', source.id, 'prefix.json.')) &&
+          args[1] === 'wx'
+        ) {
+          writing();
+          await gate;
+        }
+        return original.open(...args);
+      });
+      const moved = join(root, 'moved-destination');
+      if (outcome === 'failed') await rename(destination.path, moved);
+      const controller = new AbortController();
+      const rejection = expect(
+        service.observeInitialSnapshot(destination.id, controller.signal),
+      ).rejects;
+      const attempt =
+        outcome === 'failed' ? rejection.toThrow() : rejection.toMatchObject({ code: 'CANCELLED' });
+      try {
+        await pendingWrite;
+        if (outcome === 'cancelled') controller.abort();
+        expect(
+          await Promise.race([attempt.then(() => true), delay(2000, false, { ref: false })]),
+        ).toBe(true);
+        const tail = await service.page(source.id, snapshot.cursor, 2000, 5000);
+        expect(tail.commits.map((c) => c.oid)).toEqual(
+          fixtureGit(source.path, ['rev-list', '--date-order', '--all']).split('\n').slice(2000),
+        );
+        expect(tail.hasMore).toBe(false);
+      } finally {
+        release();
+        await attempt;
+      }
+      if (outcome === 'failed') await rename(moved, destination.path);
+      await service.observeInitialSnapshot(destination.id);
+      const stored = JSON.parse(
+        await original.readFile(join(dataDir, 'history', source.id, 'prefix.json'), 'utf8'),
       );
-      expect(tail.hasMore).toBe(false);
+      expect(stored.commits.map((c: { oid: string }) => c.oid)).toEqual(
+        snapshot.commits.map((c) => c.oid),
+      );
+      const tail = JSON.parse(
+        await original.readFile(join(dataDir, 'history', source.id, 'tail-0.json'), 'utf8'),
+      );
+      expect(tail.offset).toBe(2000);
+      expect(tail.commits).toHaveLength(3);
     } finally {
       release();
-      await attempt;
+      vi.mocked(open).mockImplementation(original.open);
+      await service.dispose();
+      await rm(root, { recursive: true, force: true });
     }
-    await service.observeInitialSnapshot(destination.id);
-    const stored = JSON.parse(
-      await original.readFile(join(dataDir, 'history', source.id, 'prefix.json'), 'utf8'),
-    );
-    expect(stored.commits.map((c: { oid: string }) => c.oid)).toEqual(
-      snapshot.commits.map((c) => c.oid),
-    );
-    const tail = JSON.parse(
-      await original.readFile(join(dataDir, 'history', source.id, 'tail-0.json'), 'utf8'),
-    );
-    expect(tail.offset).toBe(2000);
-    expect(tail.commits).toHaveLength(3);
-  } finally {
-    release();
-    vi.mocked(open).mockImplementation(original.open);
-    await service.dispose();
-    await rm(root, { recursive: true, force: true });
-  }
-});
+  },
+);
