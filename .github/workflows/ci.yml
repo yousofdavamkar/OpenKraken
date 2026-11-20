@@ -121,6 +121,24 @@ jobs:
       - name: Compare every page of the 50,000-reference Linux fixture with native Git
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.linux_distinct.outcome == 'success' }}
         run: bash scripts/run-scale-test.sh traversal "$RUNNER_TEMP/linux-refs-distinct/repository.git" test-results/performance/linux-refs-distinct-traversal
+      - name: Check opening and full traversal with sparse annotations and nested tag aliases
+        if: ${{ !cancelled() && steps.linux_history.outcome == 'success' }}
+        run: |
+          failed=0
+          for mode in one-annotation nested-aliases; do
+            fixture="$RUNNER_TEMP/linux-refs-$mode"
+            output="test-results/performance/linux-refs-$mode"
+            if ! node scripts/create-reference-performance-fixture.mjs "$RUNNER_TEMP/linux-history.git" "$fixture" "$mode" > "$output-fixture.log" 2>&1; then
+              cat "$output-fixture.log" >&2
+              failed=1
+              continue
+            fi
+            cp "$fixture/fixture.json" "$output-fixture.json"
+            for suite in graph traversal; do
+              bash scripts/run-scale-test.sh "$suite" "$fixture/repository.git" "$output-$suite" || failed=1
+            done
+          done
+          exit "$failed"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
