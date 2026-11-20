@@ -4,6 +4,8 @@ The Linux x64 synthetic scale gates pass after removing a duplicate index finger
 
 ## Comparing a restarted graph with native Git
 
+The platform matrix times three restarts of full Linux history with 50,000 distinct ref targets. A separate restarted traversal checks every page against Git even if the timing gate fails.
+
 Set `OPENKRAKEN_BENCH_WARM=1` when running the traversal against a scale fixture. The first Electron process loads 17,000 commits and quits. The test checks that the profile contains four contiguous pages under the expected repository ID and that they share a cache key. A second process then compares every displayed commit ID and ordered parent list with native Git through the last page. The JSON result includes the number of commits persisted before restart. The annotated-ref CI job exercises this mode with the one-annotation fixture.
 
 ```sh

@@ -121,6 +121,17 @@ jobs:
       - name: Compare every page of the 50,000-reference Linux fixture with native Git
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.linux_distinct.outcome == 'success' }}
         run: bash scripts/run-scale-test.sh traversal "$RUNNER_TEMP/linux-refs-distinct/repository.git" test-results/performance/linux-refs-distinct-traversal
+      - name: Check restarted opening and traversal with 50,000 distinct targets
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.linux_distinct.outcome == 'success' }}
+        env:
+          OPENKRAKEN_BENCH_WARM: '1'
+        run: |
+          failed=0
+          for suite in graph traversal; do
+            bash scripts/run-scale-test.sh "$suite" "$RUNNER_TEMP/linux-refs-distinct/repository.git" \
+              "test-results/performance/linux-refs-distinct-restarted-$suite" || failed=1
+          done
+          exit "$failed"
       - name: Check fresh and restarted openings and full traversal with annotated refs
         if: ${{ !cancelled() && steps.linux_history.outcome == 'success' }}
         run: |
