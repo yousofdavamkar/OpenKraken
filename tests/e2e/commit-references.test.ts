@@ -16,9 +16,21 @@ test('collocated refs stay bounded and every name is available in the keyboard-a
       (_, index) => `create refs/heads/topic-${String(index).padStart(4, '0')} ${head}\n`,
     ).join(''),
   );
+  const commits = fixtureGit(repository, ['rev-list', 'HEAD']).split('\n');
+  const rootCommit = commits.at(-1)!;
+  fixtureGit(
+    repository,
+    ['update-ref', '--stdin'],
+    Array.from({ length: 7500 }, (_, index) => {
+      const target = commits[1 + (index % (commits.length - 2))]!;
+      return `create refs/tags/history-${index} ${target}\n`;
+    }).join(''),
+  );
+  fixtureGit(repository, ['tag', '-a', 'root-release', '-m', 'First release', rootCommit]);
   fixtureGit(repository, ['branch', 'Ångström']);
   fixtureGit(repository, ['update-ref', 'refs/remotes/origin/topic-0000', head]);
   fixtureGit(repository, ['tag', '-a', 'z-shared', '-m', 'A peeled tag on the same commit']);
+  fixtureGit(repository, ['pack-refs', '--all']);
   const count = fixtureGit(repository, [
     'for-each-ref',
     '--format=%(refname)%00%(objectname)%00%(*objectname)',
@@ -103,6 +115,17 @@ test('collocated refs stay bounded and every name is available in the keyboard-a
     await dialog.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(updatedOpener).toBeFocused();
+
+    await page.getByRole('button', { name: 'Load more commits', exact: true }).click();
+    await expect(page.getByTestId('commit-count')).toHaveText('2,200 commits');
+    await grid.focus();
+    await grid.press('End');
+    const rootRow = grid.getByRole('row', { selected: true });
+    await expect(rootRow).toHaveAttribute('data-oid', rootCommit);
+    await expect(rootRow.getByText('root-release', { exact: true })).toHaveAttribute(
+      'title',
+      'refs/tags/root-release',
+    );
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

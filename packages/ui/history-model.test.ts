@@ -201,6 +201,46 @@ test(
   },
 );
 
+test.each([40, 64])('large badge indexes distinguish colliding %i-character IDs', (width) => {
+  const refs: Ref[] = Array.from({ length: 10000 }, (_, i) => ({
+    name: `refs/heads/branch-${i}`,
+    shortName: `branch-${i}`,
+    kind: 'local',
+    target: (i % 2 ? 'ab' : 'cd') + i.toString(16).padStart(width - 2, '0'),
+    objectType: 'commit',
+    peeledType: '',
+    isHead: false,
+  }));
+  const tip = refs[1]!;
+  const alias: Ref = {
+    ...tip,
+    kind: 'tag',
+    name: 'refs/tags/release',
+    shortName: 'release',
+    target: 'e'.repeat(width),
+    objectType: 'tag',
+    peeled: tip.target,
+    peeledType: 'commit',
+  };
+  const remote: Ref = {
+    ...tip,
+    kind: 'remote',
+    name: 'refs/remotes/origin/tip',
+    shortName: 'origin/tip',
+  };
+  const source = [alias, ...refs, remote];
+  const index = refsByTarget(source, { hiddenRefs: [refs[2]!.name] });
+  expect(index.get('ab' + 'f'.repeat(width - 2))).toBeUndefined();
+  const badges = index.get(tip.target);
+  expect(badges).toEqual([alias, tip, remote]);
+  expect(index.get(alias.target)).toBeUndefined();
+  expect(index.get(refs[2]!.target)).toBeUndefined();
+  expect(index.get(refs.at(-2)!.target)).toEqual([refs.at(-2)]);
+  expect(index.size).toBe(9999);
+  expect(index.get(tip.target)).toBe(badges);
+  for (const ref of refs.slice(3)) expect(index.get(ref.target)).toEqual([ref]);
+});
+
 test('large hidden-ref lists preserve visible badge order and solo takes precedence', () => {
   const refs: Ref[] = Array.from({ length: 50000 }, (_, i) => ({
     name: `refs/tags/benchmark-${String(i).padStart(5, '0')}`,

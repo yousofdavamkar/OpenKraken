@@ -96,17 +96,42 @@ export function projectCommits(
 export function refsByTarget(refs: readonly Ref[], view: GraphView = { hiddenRefs: [] }) {
   const isVisible = graphRefVisibility(view);
   const targets = new Map<string, Ref | Ref[]>();
-  for (const ref of refs) {
-    if (!isVisible(ref.name)) continue;
+  // Keep small or concentrated ref sets in the direct map. Once a large snapshot
+  // has 256 distinct targets, defer the remaining full-ID lookups by first byte.
+  const pending = new Map<string, Ref[]>();
+  function indexTarget(ref: Ref) {
     const oid = ref.peeled ?? ref.target;
     const bucket = targets.get(oid);
     if (!bucket) targets.set(oid, ref);
     else if (Array.isArray(bucket)) bucket.push(ref);
     else targets.set(oid, [bucket, ref]);
   }
+  for (const ref of refs) {
+    if (!isVisible(ref.name)) continue;
+    if (refs.length < 10000 || targets.size < 256) {
+      indexTarget(ref);
+      continue;
+    }
+    const prefix = (ref.peeled ?? ref.target).slice(0, 2);
+    const group = pending.get(prefix);
+    if (group) group.push(ref);
+    else pending.set(prefix, [ref]);
+  }
+  function indexPrefix(prefix: string, group: Ref[]) {
+    for (const ref of group) indexTarget(ref);
+    pending.delete(prefix);
+  }
   return {
-    size: targets.size,
+    get size() {
+      for (const [prefix, group] of pending) indexPrefix(prefix, group);
+      return targets.size;
+    },
     get(oid: string) {
+      if (pending.size) {
+        const prefix = oid.slice(0, 2);
+        const group = pending.get(prefix);
+        if (group) indexPrefix(prefix, group);
+      }
       const bucket = targets.get(oid);
       if (!bucket || Array.isArray(bucket)) return bucket;
       // Allocate a stable badge list only when this single target is displayed.
