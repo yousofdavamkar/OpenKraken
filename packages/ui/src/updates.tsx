@@ -36,6 +36,8 @@ function updateStatus(state?: UpdateState): string {
       return `Version ${state.version} has no download for this platform.`;
     case 'available':
       return `Version ${state.version} is available.`;
+    case 'verifying':
+      return `Verifying saved installer for version ${state.version}…`;
     case 'downloading':
       return `Downloading version ${state.version}…`;
     case 'verified':
@@ -169,7 +171,8 @@ function UpdatesDialog({
       setDispatching(false);
     }
   };
-  const running = state && ['checking', 'downloading', 'preparing', 'saving'].includes(state.phase);
+  const running =
+    state && ['checking', 'downloading', 'verifying', 'preparing', 'saving'].includes(state.phase);
   const status = updateStatus(state);
   const dismiss = () => {
     dialog.current?.close();
@@ -230,9 +233,9 @@ function UpdatesDialog({
         </div>
       )}
       {error && <p role="alert">{error}</p>}
-      {state?.phase === 'downloading' && (
+      {(state?.phase === 'downloading' || state?.phase === 'verifying') && (
         <progress
-          aria-label="Download progress"
+          aria-label={state.phase === 'verifying' ? 'Verification progress' : 'Download progress'}
           value={state.downloaded}
           max={state.artifacts.find((artifact) => artifact.format === state.selected)?.size ?? 1}
         />
@@ -318,9 +321,14 @@ export function UpdatesControl() {
     state?.recovery === 'restored'
       ? 'An update failed to start; the previous version was restored'
       : state?.version &&
-          ['available', 'downloading', 'verified', 'preparing', 'restart-ready'].includes(
-            state.phase,
-          )
+          [
+            'available',
+            'downloading',
+            'verifying',
+            'verified',
+            'preparing',
+            'restart-ready',
+          ].includes(state.phase)
         ? `OpenKraken ${state.version} is available`
         : undefined;
   return (

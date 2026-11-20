@@ -11,6 +11,7 @@ export const updatesStateSchema = z.strictObject({
     'unsupported',
     'available',
     'downloading',
+    'verifying',
     'verified',
     'saving',
     'saved',

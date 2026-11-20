@@ -650,11 +650,15 @@ export class Updates {
     const before = await this.cachedFile();
     if (before?.size !== artifact.size) return false;
     const file = await this.openCachedArtifact(before);
+    this.state.phase = 'verifying';
     try {
       await verifyUpdateArtifact(
         file.createReadStream({ autoClose: false, signal }),
         artifact,
         signal,
+        (chunk) => {
+          this.state.downloaded += chunk.byteLength;
+        },
       );
       const current = await this.cachedFile();
       if (
@@ -664,7 +668,6 @@ export class Updates {
         current.ctimeMs !== before.ctimeMs
       )
         throw new UpdateFailure('storage');
-      this.state.downloaded = artifact.size;
       return true;
     } catch (error) {
       signal.throwIfAborted();
@@ -694,10 +697,13 @@ export class Updates {
       await this.removeOwned('artifact.part', 2 * 1024 ** 3);
       const recovered =
         this.recoverableArtifact && (await this.matchesRecoveredArtifact(artifact, signal));
-      this.recoverableArtifact = false;
+      signal.throwIfAborted();
       let created = false;
       try {
         if (!recovered) {
+          this.recoverableArtifact = false;
+          this.state.phase = 'downloading';
+          this.state.downloaded = 0;
           await this.removeOwned('artifact.ready', 2 * 1024 ** 3);
           const body = await requestUpdateFile(
             this.send,
@@ -736,6 +742,7 @@ export class Updates {
           });
           created = false;
         }
+        this.recoverableArtifact = false;
         this.state.phase = 'verified';
         this.state.installId =
           artifact.format === 'AppImage' && this.runtime.appImage ? randomUUID() : null;

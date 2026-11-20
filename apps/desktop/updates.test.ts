@@ -15,6 +15,7 @@ import { readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Updates } from './src/updates.js';
+import * as transfer from './src/update-transfer.js';
 
 const keys = generateKeyPairSync('ed25519');
 const configuration = {
@@ -907,6 +908,65 @@ test.each([
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test.each(['cancel', 'expire'])(
+  'can %s a recovered installer during verification',
+  async (scenario) => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-recheck-'));
+    const directory = join(root, 'updates');
+    let clock = now;
+    const send = vi.fn<typeof fetch>(
+      async (url) =>
+        new Response(String(url) === configuration.feed ? signed(release()) : 'fixture'),
+    );
+    let updater = new Updates(directory, configuration, runtime, send, () => clock);
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    try {
+      await updater.check();
+      await updater.download('AppImage');
+      await updater.close();
+      updater = new Updates(directory, configuration, runtime, send, () => clock);
+      await updater.check();
+      let reached!: () => void;
+      const hashed = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      const verify = transfer.verifyUpdateArtifact;
+      vi.spyOn(transfer, 'verifyUpdateArtifact').mockImplementationOnce(async (...args) => {
+        await verify(...args);
+        reached();
+        await gate;
+      });
+      const recovering = updater.download('AppImage');
+      await hashed;
+      expect(await updater.read()).toMatchObject({ phase: 'verifying', downloaded: 7 });
+      if (scenario === 'cancel') updater.cancel();
+      else clock = release().expiresAt + 1;
+      finish();
+      const result = await recovering;
+      expect(result).toMatchObject({
+        phase: 'error',
+        error: scenario === 'cancel' ? 'cancelled' : 'invalid-release',
+        installId: null,
+      });
+      expect(result.saveId).toBeUndefined();
+      expect(send).toHaveBeenCalledTimes(3);
+      if (scenario === 'cancel') {
+        expect((await updater.check()).phase).toBe('available');
+        expect((await updater.download('AppImage')).phase).toBe('verified');
+        expect(send).toHaveBeenCalledTimes(4);
+      }
+    } finally {
+      finish();
+      await updater.close();
+      vi.restoreAllMocks();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test('signed downloads are verified and rollback protection survives an app restart', async () => {
   const root = await mkdtemp(join(tmpdir(), 'openkraken-updates-'));

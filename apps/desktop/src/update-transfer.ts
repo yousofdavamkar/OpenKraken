@@ -64,7 +64,7 @@ export async function verifyUpdateArtifact(
   body: AsyncIterable<Uint8Array>,
   artifact: UpdateArtifact,
   signal: AbortSignal,
-  write?: (chunk: Uint8Array) => Promise<void>,
+  onChunk?: (chunk: Uint8Array) => Promise<void> | void,
 ) {
   const hash = createHash('sha256');
   let size = 0;
@@ -72,7 +72,7 @@ export async function verifyUpdateArtifact(
     signal.throwIfAborted();
     size += chunk.byteLength;
     if (size > artifact.size) throw new UpdateFailure('integrity');
-    if (write) await write(chunk);
+    if (onChunk) await onChunk(chunk);
     hash.update(chunk);
   }
   signal.throwIfAborted();
