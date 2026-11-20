@@ -2,6 +2,21 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Wide graph drawing and append-only passage indexing
+
+A Linux x64 Electron Canvas probe drew a 400 × 560 CSS-pixel viewport straddling rows 499 and 500 at device pixel ratio 1. It alternated between the first lane and the middle of the graph. Each case included a diagonal crossing the viewport, dashed passages and two warm-up draws. Both builds produced identical RGBA hashes at both horizontal positions for each case.
+
+| Concurrent vertical passages | Previous median draw | Median with viewport clipping |
+| ---------------------------: | -------------------: | ----------------------------: |
+|                            1 |               0.1 ms |                        0.1 ms |
+|                          100 |               0.5 ms |                        0.5 ms |
+|                        5,000 |               6.5 ms |                        0.4 ms |
+|                       50,000 |              51.2 ms |                        1.6 ms |
+
+Each median covers ten calls to the painter. A separate compact allocator comparison with 100, 5,000 and 50,000 parents returned identical serialized rows, lane checkpoints and passages before and after the full-frontier change. A native Git fixture in Electron verifies both lane pixels across graph rows 2,000 and 2,001, where an uncommitted working-tree row shifts the page boundary, and follows the surviving lane below the merge's ancestor. [Graph layout decision](../decisions/0006-compact-graph-passages.md#drawing-and-appending-wide-histories)
+
+At `8022374`, five fresh-profile desktop runs opened 2,000 commits and appended three pages of 5,000 commits from full Linux history. Git was 2.53.0 and OS caches stayed populated. First paint took 324.3 ms with one ref and 487.4 ms with 50,000 refs sharing HEAD. With 50,000 distinct targets it took 666.6, 724.1 and 752.9 ms, exceeding the 500 ms budget in every run. All fifteen appends took 179.6–238.3 ms. Graph scrolling measured 16.7–16.8 ms p95. [Individual runs and phase timings](m8-opening-experiments.csv)
+
 ## Reading tentative history roots from packed refs
 
 On the pinned full Linux fixture with 50,000 distinct targets, a scratch service read the 3.4 MB packed-refs file directly to start a speculative history walk. The complete native enumeration still decided whether the ordered roots matched before the walk could be used. After one warm-up pair, five alternating fresh-profile pairs measured median first paint of 699.4 ms with the existing Git query and 722.0 ms with the file read. The corresponding native snapshot medians were 381.3 and 387.5 ms. The shipped service retains the Git query.

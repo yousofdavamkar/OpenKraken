@@ -2,6 +2,16 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest three runs. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Wide history graphs on Linux x64
+
+The Canvas now clips vertical passages once per visible 500-row bucket. Paging retains the completed buckets, including when an uncommitted change shifts the page boundary by a row. On a synthetic graph with 50,000 simultaneous lanes, median draw time fell from 51.2 to 1.6 ms with matching pixels. The packaged app passed graph drawing, two appends, repository search and keyboard navigation.
+
+Full Linux history painted in 324.3 ms with one ref and 487.4 ms with 50,000 refs sharing HEAD. Three runs with distinct targets exceeded 500 ms. All fifteen page appends met 300 ms. [Measurements](m8-reference-performance.md#wide-graph-drawing-and-append-only-passage-indexing)
+
+On Linux x64, 1,040 unit/native tests and 271 desktop tests passed. The unit suite skipped 14 tests. The desktop suite skipped three opt-in scale tests, which ran separately. Typechecking, lint, the production build and unsigned package smoke passed. Five focused desktop checks passed with Git 2.38.0. The build used React 19.3.1 and TypeScript 7.0.2.
+
+The traversal test initially hit Node's synchronous output limit while collecting 50,000 ref IDs for its comparison. Native Git now enumerates its own roots with `rev-list --all`. The desktop pages matched every ordered commit ID and parent list in full Linux history (1,505,199 commits across 302 pages) and in the synthetic two-million-commit checkout (401 pages). On its 100,000 files, the ten clean and dirty status reads took 178.2–257.6 ms after watcher warm-up. An external edit appeared in 860.1 ms.
+
 ## Packaged graph and installer acceptance
 
 On Linux x64, the packaged desktop at `2c44546` opened a 7,003-commit repository through the consent dialog. Its first ten commit IDs matched native Git. Those rows kept their IDs, lanes and positions across a full 5,000-commit append and the three-commit final page. Repository search opened the root before it was loaded. After the append, Enter selected it from loaded search, and Home and Enter opened HEAD. The same checks passed through both the FUSE and extract-and-run launches of the unsigned test AppImage. The virtualized grid now reports an unknown total while more history is available. A separate linked-checkout test reported 2,201 rows for 2,200 commits and one worktree. [Packaged graph check](../../scripts/check-packaged-history.mjs)
