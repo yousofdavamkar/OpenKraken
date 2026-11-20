@@ -41,6 +41,14 @@ let client: GraphClient | undefined;
 const graph = () => (client ??= new GraphClient());
 let querySequence = 0;
 let cancellingSearch: string | undefined;
+let queuedSearch: string | undefined;
+function stopHistorySearch(id: string) {
+  if (queuedSearch === id) {
+    queuedSearch = undefined;
+    return;
+  }
+  return window.openkraken.cancel(id);
+}
 let navigationSequence = 0;
 interface State {
   snapshot?: Snapshot;
@@ -303,6 +311,8 @@ export const useRepository = create<State>()(
           freeze(nextPassages, true);
           const query = sameRepository ? get().query : '';
           const previousSearch = get().searching;
+          const retainedSearch =
+            sameRepository && previousSearch === queuedSearch ? previousSearch : undefined;
           if (target === candidate) {
             client?.close();
             client = target;
@@ -329,7 +339,7 @@ export const useRepository = create<State>()(
             s.query = query;
             s.matches = undefined;
             s.searchResults = undefined;
-            s.searching = undefined;
+            s.searching = retainedSearch;
             s.paging = undefined;
             s.detail = undefined;
             const focus =
@@ -351,9 +361,10 @@ export const useRepository = create<State>()(
               selected: selected.length ? selected : focus ? [focus] : [],
             };
           });
-          if (previousSearch) void window.openkraken.cancel(previousSearch);
+          if (previousSearch && previousSearch !== retainedSearch)
+            void stopHistorySearch(previousSearch);
           performance.mark('repository-state-published');
-          if (query) await get().search(query);
+          if (query) await updateLoadedMatches();
         } else if (result.kind === 'error') throw new Error(result.message);
       } catch (error) {
         set((s) => {
@@ -455,24 +466,31 @@ export const useRepository = create<State>()(
         s.searchResults = undefined;
         s.searching = undefined;
       });
-      if (previous) void window.openkraken.cancel(previous);
+      if (previous) void stopHistorySearch(previous);
       await updateLoadedMatches();
     },
     searchAll: async () => {
-      if (get().syncing) await waitForBackground();
-      const { snapshot, query } = get();
-      if (!snapshot || !query.trim() || get().searching) return;
+      const { snapshot, query, searching, syncing } = get();
+      if (!snapshot || !query.trim() || searching) return;
       const id = crypto.randomUUID();
+      if (syncing) queuedSearch = id;
       set((s) => {
         s.searching = id;
         s.error = undefined;
       });
       try {
+        if (syncing) {
+          await waitForBackground();
+          if (queuedSearch !== id) return;
+          queuedSearch = undefined;
+        }
+        const current = get().snapshot;
+        if (get().searching !== id || current?.repository.id !== snapshot.repository.id) return;
         const result = await window.openkraken.request({
           id,
           method: 'search',
-          repoId: snapshot.repository.id,
-          cursor: snapshot.cursor,
+          repoId: current.repository.id,
+          cursor: current.cursor,
           query,
         });
         if (get().searching !== id || cancellingSearch === id) return;
@@ -498,7 +516,7 @@ export const useRepository = create<State>()(
       if (!id || cancellingSearch === id) return;
       cancellingSearch = id;
       try {
-        await window.openkraken.cancel(id);
+        await stopHistorySearch(id);
         if (get().searching === id) set({ searching: undefined });
       } catch (error) {
         if (get().searching === id) set({ error: String(error) });

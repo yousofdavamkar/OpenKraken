@@ -445,6 +445,56 @@ test.each(['result', 'error'])(
   },
 );
 
+test.each(['cancel', 'edit', 'switch', 'refresh'] as const)(
+  'full-history search queued during a background snapshot handles %s',
+  async (action) => {
+    const snapshot = fixture();
+    await open(snapshot);
+    const state = useRepository.getState;
+    await state().search('First');
+    const update = deferred();
+    request.mockReturnValueOnce(update.promise);
+    const refreshing = state().run(
+      { id: crypto.randomUUID(), method: 'refresh', repoId: snapshot.repository.id },
+      true,
+    );
+    const searching = state().searchAll();
+    expect(state().searching).toBeDefined();
+    if (action === 'cancel') await state().cancelSearch();
+    if (action === 'edit') {
+      await state().search('Changed');
+      await state().search('First');
+    }
+    const next = fixture();
+    if (action === 'switch') next.repository.id = 'e'.repeat(64);
+    update.resolve({ kind: 'snapshot', snapshot: next });
+    request.mockResolvedValueOnce({
+      kind: 'search',
+      cursor: next.cursor,
+      commits: next.commits,
+      truncated: false,
+    });
+    await Promise.all([refreshing, searching]);
+    if (action === 'refresh') {
+      expect(request).toHaveBeenCalledTimes(3);
+      expect(request).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          method: 'search',
+          query: 'First',
+          cursor: next.cursor,
+          repoId: next.repository.id,
+        }),
+      );
+      expect(state().searchResults).toEqual(next.commits);
+    } else {
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(state().searchResults).toBeUndefined();
+    }
+    expect(window.openkraken.cancel).not.toHaveBeenCalled();
+    expect(state().searching).toBeUndefined();
+  },
+);
+
 test('a failed cancellation can be retried while the search is running', async () => {
   const snapshot = fixture();
   await open(snapshot);
