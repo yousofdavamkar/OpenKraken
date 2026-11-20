@@ -2,6 +2,28 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Memory used to locate sparse annotated tags
+
+On the Linux history fixture with 50,000 distinct ref targets and one annotation, the packed-ref file occupied 3,410,078 bytes. Reading it to locate sparse annotated tags previously grew Node's array-buffer usage by 3,672,382 bytes. Reusing the 256 KiB prefix buffer reduced growth to 262,304 bytes. On a separate 7,800,100-byte packed-ref input with a Unicode tag near the end, growth fell from 7,996,724–8,062,404 bytes to 262,304 bytes. Each measurement used a fresh Node process, forced GC before the read and compared buffer usage immediately afterward. All three runs per build and input recovered the same tag.
+
+To repeat the buffer measurement, set `REPO` to the bare repository produced by the `one-annotation` fixture. Run this from each checkout with its dependencies installed. The baseline is `8b47f33`. Commit `932ec89` introduces the bounded scan and `5cb1751` adds the 8 KiB initial allocation for repeated targets.
+
+```sh
+node --expose-gc --import tsx --input-type=module - "$REPO" <<'JS'
+import { samplePackedRefs } from './packages/git-core/src/reference-reader.ts';
+global.gc();
+const before = process.memoryUsage().arrayBuffers;
+const sample = await samplePackedRefs(process.argv[2]);
+console.log(process.memoryUsage().arrayBuffers - before, sample.annotationNames);
+JS
+```
+
+Three fresh Electron profiles opened the 50,000-ref Linux fixture in 738.4, 706.5 and 738.1 ms against the 500 ms budget. The nine 5,000-commit appends took 189.2–250.2 ms, and both scroll views measured at most 16.8 ms p95. An earlier batch overlapped the native reference tests in its first run. That opening took 996 ms and one append took 312.9 ms. The other two openings in that batch took 790.1 and 738.1 ms. These runs establish the buffer reduction and the outstanding opening gate. [Reader and boundary checks](../decisions/0098-direct-first-reference-enumeration.md#bounded-annotation-sampling)
+
+On the fixture with 49,999 aliases of a nested annotated tag, the reader can stop after its first 8 KiB read. Allocating only that preview reduced measured array-buffer growth from 262,304 to 160 bytes in three fresh processes per build. Node's buffer pool supplied the small allocation in these runs. The native tests check individual allocation limits directly for both this case and the larger scan.
+
+The final build exercised three more fresh profiles per distribution. The distinct-target fixture painted in 699.2, 794.4 and 923.0 ms. The nested-tag fixture painted in 1,282.2, 741.6 and 768.1 ms. All six openings exceeded the 500 ms budget. All 18 appends took 180.1–245.1 ms and both scroll views stayed within 16.8 ms p95. Independent 302-page traversals matched native Git through all 1,505,199 and 1,505,200 commits respectively, including every parent in order.
+
 ## Git object cache and snapshot transfer on November 20
 
 A Git trace of a fresh Electron profile on Linux x64 measured 889.1 ms from opening the repository to painting 2,000 commits. The native snapshot took 470.4 ms. Within that interval Git spent 287.7 ms enumerating the 50,000 refs and their types. The three subsequent 5,000-commit pages took 299.2, 256.6 and 228.6 ms. Scrolling measured 16.8 ms p95 for history and 16.7 ms for references. The fixture contains 1,505,199 Linux commits, distinct ref targets and one annotated tag.

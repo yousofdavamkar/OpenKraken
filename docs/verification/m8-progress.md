@@ -1,6 +1,10 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. On Linux x64, full Linux history with one ref and with 49,999 aliases on the first row met the 500 ms opening and 300 ms paging budgets in the latest fresh-profile runs. One nested-tag restart exceeded 500 ms. The 50,000-distinct-target fixture still exceeds the opening budget. Native Windows/macOS and ARM64 acceptance, the production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+M8 remains in progress. On Linux x64, full Linux history with one ref and with 49,999 aliases on the first row met the 500 ms opening and 300 ms paging budgets in the latest fresh-profile runs. Fresh-profile runs with 50,000 distinct ref targets or 49,999 aliases of a nested annotated tag exceeded the opening budget. Native Windows/macOS and ARM64 acceptance, the production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+
+## Packed-ref memory and history verification
+
+The sparse-annotation scan now reuses a 256 KiB buffer. On Linux history with 50,000 distinct ref targets and one annotation, array-buffer growth during sampling fell from 3,672,382 to 262,304 bytes. On the final build, three fresh profiles painted in 699.2–923.0 ms on that fixture and 741.6–1,282.2 ms on the nested-tag fixture. All 18 appends met 300 ms. On both fixtures the desktop matched native Git’s ordered IDs and parent lists through all 302 pages. The distinct targets reached 1,505,199 commits, and the nested tag added one independent commit. [Memory and desktop measurements](m8-reference-performance.md#memory-used-to-locate-sparse-annotated-tags)
 
 ## Installed DEB upgrades on Debian and Ubuntu
 
