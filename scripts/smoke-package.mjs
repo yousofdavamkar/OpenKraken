@@ -258,12 +258,30 @@ try {
     await promisify(execFile)('git', ['init', repository]);
     const xdo = (...args) =>
       promisify(execFile)(process.env.OPENKRAKEN_XDOTOOL, args, { timeout: 10000 });
+    async function findWindow(...filters) {
+      let id;
+      await expect
+        .poll(
+          async () => {
+            try {
+              const { stdout } = await xdo('search', '--onlyvisible', ...filters);
+              id = stdout.trim().split('\n').at(-1);
+              return /^\d+$/.test(id);
+            } catch (error) {
+              // X11 can destroy a transient window while xdotool reads its attributes.
+              if ((error.code === 1 && !error.stderr) || error.stderr?.includes('BadWindow'))
+                return false;
+              throw error;
+            }
+          },
+          { timeout: 10000, message: 'Waiting for the native X11 window: ' + filters.join(' ') },
+        )
+        .toBe(true);
+      return id;
+    }
     const pickFolder = async (button, path) => {
       await page.getByRole('button', { name: button, exact: true }).click();
-      const windows = await xdo('search', '--sync', '--onlyvisible', '--name', '^Open repository$');
-      const picker = windows.stdout.trim().split('\n').at(-1);
-      if (!picker || !/^\d+$/.test(picker))
-        throw new Error('Native repository picker was not found');
+      const picker = await findWindow('--name', '^Open repository$');
       await xdo('windowfocus', '--sync', picker);
       await xdo('mousemove', '--window', picker, '500', '400', 'click', '1');
       await xdo('key', '--clearmodifiers', 'ctrl+l');
@@ -299,12 +317,7 @@ try {
     await input.press('Enter');
     // An AppImage runtime can supervise Electron in a child process. Ask the
     // connected browser for its actual PID instead of assuming the launcher PID.
-    const mainWindow = (
-      await xdo('search', '--onlyvisible', '--pid', String(mainProcessId), '--name', '^OpenKraken$')
-    ).stdout
-      .trim()
-      .split('\n')
-      .at(-1);
+    const mainWindow = await findWindow('--pid', String(mainProcessId), '--name', '^OpenKraken$');
     await xdo('windowfocus', '--sync', mainWindow);
     await xdo('key', '--clearmodifiers', 'ctrl+p');
     await expect(page.getByRole('dialog', { name: 'Command palette' })).toHaveCount(0);

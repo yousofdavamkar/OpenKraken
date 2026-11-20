@@ -59,6 +59,12 @@ export async function checkPackagedHistory(page, repository) {
   await expect(selected).toHaveAttribute('data-oid', root);
   await expect(selected).toBeInViewport();
   expect(await grid.getByRole('row').count()).toBeLessThan(100);
+  const previous = fixtureGit(repository, ['rev-list', '--reverse', 'HEAD']).split('\n')[1];
+  await grid.press('ArrowUp');
+  await expect(selected).toHaveAttribute('data-oid', previous);
+  await grid.press('Enter');
+  await expect(details).toContainText(previous);
+  await page.getByRole('button', { name: 'Close details' }).click();
   await grid.press('Home');
   await expect(selected).toHaveAttribute('data-oid', tip);
   await grid.press('Enter');
