@@ -130,6 +130,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
           mark('repository-painted').startTime - mark('repository-state-published').startTime,
       };
     });
+    await expect(page.getByTestId('commit-count')).toHaveText('2,000 commits · more available');
     const grid = page.getByRole('grid'),
       pages: number[] = [];
     for (const loaded of [7000, 12000]) {
@@ -239,6 +240,11 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       await expect(page.getByLabel('Active graph view', { exact: true })).toContainText(
         `Solo: ${soloRef}`,
       );
+    await expect(
+      page.getByRole('heading', { name: `References ${measurement.refs}`, exact: true }),
+    ).toBeVisible();
+    expect(mountedRows).toBeGreaterThan(0);
+    if (measurement.refs) expect(mountedReferences).toBeGreaterThan(0);
     expect(mountedRows).toBeLessThan(100);
     expect.soft(mountedReferences).toBeLessThan(100);
     expect.soft(firstPaintMs).toBeLessThan(500);
