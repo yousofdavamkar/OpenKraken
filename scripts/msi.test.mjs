@@ -4,7 +4,13 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { msiVersion, verifyMsiMetadata } from './msi.mjs';
+import {
+  msiVersion,
+  verifyMsiMetadata,
+  verifyMsiReceipt,
+  windowsIdentity,
+  windowsTimestamp,
+} from './msi.mjs';
 
 const run = promisify(execFile);
 const powershell =
@@ -344,4 +350,46 @@ test('stable MSI refuses a leftover beta search and downgrade condition', () => 
   expect(() => verifyMsiMetadata(info, manifest)).toThrow(
     'Stable MSI contains a beta upgrade policy',
   );
+});
+
+const publisher = 'AB'.repeat(32);
+test('MSI signing uses a SHA-256 certificate selection and an optional HTTPS timestamp service', () => {
+  expect(windowsIdentity('msi', publisher.toLowerCase())).toBe(publisher);
+  expect(windowsIdentity('msi', undefined)).toBeUndefined();
+  expect(windowsTimestamp(publisher, 'https://timestamp.example/tsa')).toBe(
+    'https://timestamp.example/tsa',
+  );
+  for (const args of [
+    ['deb', publisher],
+    ['msi', 'AB'.repeat(20)],
+    ['msi', ''],
+  ])
+    expect(() => windowsIdentity(...args)).toThrow('--win-identity');
+  for (const url of [
+    'http://timestamp.example',
+    'not a URL',
+    'https://user@timestamp.example',
+    'https://timestamp.example/#part',
+  ])
+    expect(() => windowsTimestamp(publisher, url)).toThrow('--win-timestamp-url');
+  expect(() => windowsTimestamp(undefined, 'https://timestamp.example')).toThrow(
+    '--win-timestamp-url',
+  );
+});
+
+test('MSI verification binds signed receipts to an independent publisher pin and timestamp requirement', () => {
+  const signed = { signed: true, signingFingerprint: publisher, timestamped: false };
+  verifyMsiReceipt({ signed: false }, undefined, false);
+  verifyMsiReceipt(signed, publisher, false);
+  verifyMsiReceipt({ ...signed, timestamped: true }, publisher, true);
+  for (const [receipt, pin] of [
+    [signed, undefined],
+    [signed, 'CD'.repeat(32)],
+    [{ signed: false }, publisher],
+    [{ ...signed, signed: false }, undefined],
+    [{ ...signed, timestamped: undefined }, publisher],
+    [{ signed: false, timestamped: false }, undefined],
+  ])
+    expect(() => verifyMsiReceipt(receipt, pin, false)).toThrow('independently supplied');
+  expect(() => verifyMsiReceipt(signed, publisher, true)).toThrow('timestamped MSI receipt');
 });

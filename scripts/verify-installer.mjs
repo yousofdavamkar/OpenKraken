@@ -13,7 +13,7 @@ import {
 } from './package-security.mjs';
 import { macIdentity, verifyDmgReceipt } from './mac-signing.mjs';
 import { verifyDmg } from './dmg.mjs';
-import { verifyMsi } from './msi.mjs';
+import { verifyMsi, windowsIdentity } from './msi.mjs';
 
 // RPM may omit implicit parent directory entries. Create those with safe modes,
 // while -p below preserves all explicitly archived permissions for inspection.
@@ -25,6 +25,8 @@ const { positionals, values } = parseArgs({
   allowPositionals: true,
   options: {
     'require-notarization': { type: 'boolean' },
+    'win-identity': { type: 'string' },
+    'require-timestamp': { type: 'boolean', default: false },
     'mac-identity': { type: 'string' },
     'rpm-key': { type: 'string' },
   },
@@ -49,6 +51,9 @@ if (
   !manifest.artifact.file.endsWith(`.${manifest.target}`)
 )
   throw new Error('Expected a native platform installer manifest');
+const winIdentity = windowsIdentity(manifest.target, values['win-identity']);
+if (values['require-timestamp'] && !winIdentity)
+  throw new Error('--require-timestamp requires --win-identity');
 const identity = macIdentity(manifest.target, values['mac-identity']);
 if (values['require-notarization'] && manifest.target !== 'dmg')
   throw new Error('--require-notarization requires a DMG');
@@ -68,11 +73,11 @@ async function verifyChecksum(file) {
     throw new Error('Installer checksum or size mismatch');
 }
 const source = join(dirname(manifestPath), manifest.artifact.file);
-if (!rpmKey && manifest.target !== 'dmg') await verifyChecksum(source);
+if (!rpmKey && !['dmg', 'msi'].includes(manifest.target)) await verifyChecksum(source);
 if (manifest.target === 'dmg') {
   await verifyDmg(source, manifest, identity);
 } else if (manifest.target === 'msi') {
-  await verifyMsi(source, manifest);
+  await verifyMsi(source, manifest, winIdentity, values['require-timestamp']);
 } else {
   await verifyLinuxInstaller();
 }

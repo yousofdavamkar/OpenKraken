@@ -1,13 +1,15 @@
 import { build, Platform, Arch } from 'electron-builder';
 import { execFile, spawn } from 'node:child_process';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import {
   comparePayload,
   payloadManifest,
+  sha256,
   verifyFuses,
+  verifyAsarUnpackedFile,
   verifyPackagedApplication,
 } from './package-security.mjs';
 
@@ -41,6 +43,59 @@ async function powershell(script, args) {
   );
 }
 
+export const msiExecutables = [
+  'openkraken.exe',
+  'resources/app.asar.unpacked/dist/helpers/openkraken-askpass.exe',
+];
+
+export function windowsIdentity(target, fingerprint) {
+  if (fingerprint === undefined) return undefined;
+  if (target !== 'msi' || typeof fingerprint !== 'string' || !/^[0-9a-f]{64}$/i.test(fingerprint))
+    throw new Error('--win-identity requires an MSI target and a SHA-256 certificate fingerprint');
+  return fingerprint.toUpperCase();
+}
+
+export function windowsTimestamp(identity, url) {
+  if (url === undefined) return undefined;
+  const server = URL.canParse(url) ? new URL(url) : null;
+  if (
+    !identity ||
+    server?.protocol !== 'https:' ||
+    server.username ||
+    server.password ||
+    server.hash
+  )
+    throw new Error('--win-timestamp-url requires --win-identity and an HTTPS timestamp server');
+  return server.href;
+}
+
+export function verifyMsiReceipt(manifest, identity, requireTimestamp) {
+  if (
+    manifest.signed !== Boolean(identity) ||
+    manifest.signingFingerprint !== identity ||
+    (identity ? typeof manifest.timestamped !== 'boolean' : manifest.timestamped !== undefined)
+  )
+    throw new Error('MSI signing receipt differs from the independently supplied --win-identity');
+  if (requireTimestamp && !manifest.timestamped)
+    throw new Error('Expected a timestamped MSI receipt');
+}
+
+export function authenticode(
+  path,
+  fingerprint,
+  { sign = false, timestampUrl, requireTimestamp = false } = {},
+) {
+  return powershell('./windows-authenticode.ps1', [
+    '-Path',
+    path,
+    '-Fingerprint',
+    fingerprint,
+    ...(sign ? ['-Sign'] : []),
+    ...(timestampUrl ? ['-TimestampUrl', timestampUrl] : []),
+    ...(requireTimestamp ? ['-RequireTimestamp'] : []),
+  ]);
+}
+
 export function msiVersion(version) {
   const match =
     typeof version === 'string' &&
@@ -58,7 +113,15 @@ export function msiVersion(version) {
   return `${match[1]}.${match[2]}.${match[3]}.0`;
 }
 
-export async function buildMsi({ root, prepackaged, work, version, metadata, testMetadata }) {
+export async function buildMsi({
+  root,
+  prepackaged,
+  work,
+  version,
+  metadata,
+  testMetadata,
+  signed = false,
+}) {
   nativeTool('msiexec.exe');
   msiVersion(version);
   const beta = version.split('-beta.')[1];
@@ -76,7 +139,7 @@ export async function buildMsi({ root, prepackaged, work, version, metadata, tes
       npmRebuild: false,
       publish: null,
       directories: { output: join(work, 'output'), buildResources: 'build-resources' },
-      artifactName: `OpenKraken-${version}-win32-x64${testMetadata ? '-TEST-ONLY' : '-unsigned'}.\${ext}`,
+      artifactName: `OpenKraken-${version}-win32-x64${testMetadata ? '-TEST-ONLY' : signed ? '' : '-unsigned'}.\${ext}`,
       extraMetadata: {
         name: 'openkraken',
         version,
@@ -244,17 +307,29 @@ function verifyBetaPolicy(info, version, beta) {
   }
 }
 
-export async function verifyMsi(artifact, manifest) {
+export async function verifyMsi(source, manifest, identity, requireTimestamp = false) {
+  verifyMsiReceipt(manifest, identity, requireTimestamp);
   const installer = nativeTool('msiexec.exe');
-  verifyMsiMetadata(await readMsiMetadata(artifact), manifest);
   await mkdir('release', { recursive: true });
   const temporary = await mkdtemp(resolve('release/msi-check-'));
-  let passed = false;
+  let safeToRemove = true;
   try {
+    // Authenticate, inspect and extract the same bytes even if the output is rebuilt.
+    const artifact = join(temporary, 'candidate.msi');
+    await copyFile(source, artifact);
+    if (
+      (await stat(artifact)).size !== manifest.artifact.size ||
+      (await sha256(artifact)) !== manifest.artifact.sha256
+    )
+      throw new Error('Installer checksum or size mismatch');
+    const signatureOptions = { requireTimestamp: manifest.timestamped };
+    if (identity) await authenticode(artifact, identity, signatureOptions);
+    await verifyMsiMetadata(await readMsiMetadata(artifact), manifest);
     const extracted = join(temporary, 'extracted');
     await mkdir(extracted);
     // Administrative extraction does not register/install the product. Only
     // locally built or independently authenticated MSI files may be inspected.
+    safeToRemove = false;
     await run(
       installer,
       [
@@ -278,6 +353,14 @@ export async function verifyMsi(artifact, manifest) {
     const executable = join(extracted, executables[0][0]);
     const directory = dirname(executable);
     comparePayload(manifest.payload, await payloadManifest(directory));
+    if (identity) {
+      for (const name of msiExecutables)
+        await authenticode(join(directory, name), identity, signatureOptions);
+      await verifyAsarUnpackedFile(
+        join(directory, 'resources'),
+        'dist/helpers/openkraken-askpass.exe',
+      );
+    }
     await verifyFuses(executable);
     verifyPackagedApplication(directory, manifest.version, manifest.source ?? null);
     console.log('MSI tables, extracted payload, Windows access and Electron fuses verified');
@@ -295,12 +378,12 @@ export async function verifyMsi(artifact, manifest) {
         code === 0 ? resolve() : reject(new Error(`MSI smoke failed: ${code ?? signal}`)),
       );
     });
-    passed = true;
+    safeToRemove = true;
     console.log(
       'Verified extracted MSI desktop; install/upgrade/uninstall remains a separate gate',
     );
   } finally {
-    if (passed) await rm(temporary, { recursive: true, force: true });
+    if (safeToRemove) await rm(temporary, { recursive: true, force: true });
     else console.error(`Retained MSI verification files and log: ${temporary}`);
   }
 }

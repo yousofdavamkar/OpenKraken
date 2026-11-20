@@ -3,9 +3,17 @@ import { authenticateRpm } from './rpm-signature.mjs';
 import { verifyLinuxPackage } from './linux-package.mjs';
 import { build, Platform, Arch } from 'electron-builder';
 import { buildAppImage } from './appimage.mjs';
-import { saveSignedInstaller } from './signed-installer.mjs';
 import { buildDmg, verifyMacBundle } from './dmg.mjs';
-import { buildMsi, readMsiMetadata, verifyMsiMetadata } from './msi.mjs';
+import { saveSignedInstaller } from './signed-installer.mjs';
+import {
+  authenticode,
+  buildMsi,
+  msiExecutables,
+  readMsiMetadata,
+  verifyMsiMetadata,
+  windowsIdentity,
+  windowsTimestamp,
+} from './msi.mjs';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -14,6 +22,7 @@ import {
   payloadManifest,
   sha256,
   verifyFuses,
+  verifyAsarUnpackedFile,
   verifyPackagedApplication,
 } from './package-security.mjs';
 
@@ -25,12 +34,16 @@ const { values } = parseArgs({
     'test-metadata': { type: 'boolean', default: false },
     metadata: { type: 'string' },
     'notary-profile': { type: 'string' },
+    'win-identity': { type: 'string' },
+    'win-timestamp-url': { type: 'string' },
     'mac-identity': { type: 'string' },
     'rpm-key': { type: 'string' },
   },
 });
 const target = values.target;
 const identity = macIdentity(target, values['mac-identity']);
+const winIdentity = windowsIdentity(target, values['win-identity']);
+const timestampUrl = windowsTimestamp(winIdentity, values['win-timestamp-url']);
 const notaryProfile = values['notary-profile'];
 if (
   notaryProfile !== undefined &&
@@ -90,7 +103,11 @@ const executableName = target === 'msi' ? 'openkraken.exe' : 'openkraken';
 await verifyFuses(target === 'dmg' ? source : join(source, executableName));
 const { version } = JSON.parse(await readFile('package.json', 'utf8'));
 if (target === 'dmg') await verifyMacBundle(source, version);
-const signingMode = notaryProfile ? 'notarized' : identity || rpmKey ? 'signed' : 'unsigned';
+const signingMode = notaryProfile
+  ? 'notarized'
+  : identity || winIdentity || rpmKey
+    ? 'signed'
+    : 'unsigned';
 const outputMode = testMetadata
   ? signingMode === 'unsigned'
     ? 'test'
@@ -113,7 +130,25 @@ try {
   let artifacts;
   let appdir;
   if (target === 'msi') {
-    artifacts = await buildMsi({ root, prepackaged, work, version, metadata, testMetadata });
+    if (winIdentity) {
+      for (const name of msiExecutables)
+        await authenticode(join(prepackaged, name), winIdentity, {
+          requireTimestamp: !!timestampUrl,
+        });
+      await verifyAsarUnpackedFile(
+        join(prepackaged, 'resources'),
+        'dist/helpers/openkraken-askpass.exe',
+      );
+    }
+    artifacts = await buildMsi({
+      root,
+      prepackaged,
+      work,
+      version,
+      metadata,
+      testMetadata,
+      signed: !!winIdentity,
+    });
   } else if (target === 'dmg') {
     if (identity) {
       await signMacBundle(prepackaged, identity);
@@ -229,9 +264,10 @@ try {
   const notarySubmissionId = notaryProfile
     ? await notarizeDiskImage(artifact, notaryProfile, identity)
     : undefined;
+  if (winIdentity) await authenticode(artifact, winIdentity, { sign: true, timestampUrl });
   const signer = rpmKey
     ? await authenticateRpm(artifact, resolve(rpmKey), work, { sign: true })
-    : identity;
+    : (identity ?? winIdentity);
   if (target === 'msi') verifyMsiMetadata(await readMsiMetadata(artifact), { version, metadata });
   const nativePackageVersion =
     target === 'deb' || target === 'rpm'
@@ -247,6 +283,7 @@ try {
     metadata,
     signed: !!signer,
     ...(signer && { signingFingerprint: signer }),
+    ...(winIdentity && { timestamped: !!timestampUrl }),
     ...(notarySubmissionId && { notarySubmissionId }),
     source: buildSource,
     nativePackageVersion,
@@ -258,7 +295,7 @@ try {
     payload,
   };
   let file = basename(artifact);
-  if (identity) file = await saveSignedInstaller(output, artifact, manifest);
+  if (identity || winIdentity) file = await saveSignedInstaller(output, artifact, manifest);
   else {
     await cp(artifact, join(output, file));
     await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
@@ -267,7 +304,7 @@ try {
     `${signer ? 'Signed' : 'Unsigned'} ${testMetadata ? 'TEST-ONLY ' : ''}installer: ${join(output, file)}`,
   );
   console.log(
-    `Verify and smoke-test with: node scripts/verify-installer.mjs ${join(output, 'manifest.json')}${identity ? ' --mac-identity <trusted-fingerprint>' : rpmKey ? ' --rpm-key <trusted-certificate-file>' : ''}${notarySubmissionId ? ' --require-notarization' : ''}`,
+    `Verify and smoke-test with: node scripts/verify-installer.mjs ${join(output, 'manifest.json')}${identity ? ' --mac-identity <trusted-fingerprint>' : winIdentity ? ' --win-identity <trusted-fingerprint>' : rpmKey ? ' --rpm-key <trusted-certificate-file>' : ''}${notarySubmissionId ? ' --require-notarization' : ''}`,
   );
 } finally {
   await rm(work, { recursive: true, force: true });
