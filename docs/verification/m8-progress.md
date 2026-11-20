@@ -1,6 +1,25 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. On Linux x64, full Linux history with one ref and with 49,999 aliases on the first row met the 500 ms opening and 300 ms paging budgets in the latest runs. The 50,000-distinct-target fixture still exceeds the opening budget. Native Windows/macOS and ARM64 acceptance, the production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+M8 remains in progress. On Linux x64, full Linux history with one ref and with 49,999 aliases on the first row met the 500 ms opening and 300 ms paging budgets in the latest fresh-profile runs. One nested-tag restart exceeded 500 ms. The 50,000-distinct-target fixture still exceeds the opening budget. Native Windows/macOS and ARM64 acceptance, the production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+
+## Crossing from cached history into live Git pages
+
+With cached rows left to display, the retained Git walk could pause before verifying later commit IDs and parent lists. In a 7,009-commit regression, the opening 2,000 rows appeared immediately, but the reader missed a disagreement at the end of the cached window until more pages were requested. The walk now compares those rows while the user reads the opening page. Once it detects a changed or extra commit, the cursor immediately rejects further page requests as stale, including requests received while the Git process is exiting. [History cache behavior](../decisions/0008-bounded-history-cache.md)
+
+Each restarted Electron profile verified a contiguous 17,000-commit cache on disk, displayed its three 5,000-commit pages, and selected the last loaded row. One ArrowDown loaded the first live page and selected the adjacent row. ArrowUp restored the previous commit. All measured live appends met 300 ms. These are consecutive cohorts with populated OS caches on Linux x64 and Git 2.53.0. [Opening and cached-page timings](m8-opening-experiments.csv)
+
+| 50,000-ref fixture               | Reader                 |       First paint, ms | First live append, ms |
+| -------------------------------- | ---------------------- | --------------------: | --------------------: |
+| Nested tag aliases               | Previous               | 491.9 / 470.3 / 477.3 | 202.1 / 208.8 / 203.1 |
+| Nested tag aliases               | Verify cached tails    | 469.9 / 509.5 / 476.9 | 209.3 / 192.6 / 208.9 |
+| Nested tag aliases               | Final stale-page check |                 498.1 |                 186.9 |
+| Distinct targets, one annotation | Previous               | 718.8 / 682.2 / 723.6 | 192.0 / 203.1 / 213.0 |
+| Distinct targets, one annotation | Verify cached tails    | 706.4 / 727.3 / 735.0 | 217.9 / 189.0 / 197.5 |
+| Distinct targets, one annotation | Final stale-page check |                 746.2 |                 198.6 |
+
+At `b8e7583`, a desktop restart followed by a complete traversal matched native Git through page 302 on both fixtures. The nested-alias fixture on Git 2.53.0 included 1,505,200 commits. The distinct-target fixture with one annotation on Git 2.38.0 included 1,505,199. Each run first verified that all 17,000 commits had been persisted. The resulting hashes matched the fresh-profile traversals below.
+
+The full Linux unit and native suite passed 1,137 tests with nine skips. All 39 focused Electron tests passed, including the six graph visual goldens, keyboard navigation, cache recovery and snapshot transfer. The focused Git 2.38.0 history, cache, reference-reader and prefetch suites passed 105 with twelve skips. Typechecking, build, lint and workflow validation passed. Unsigned Linux x64 DEB, RPM and AppImage packages built from clean `b8e7583` each passed the packaged Canvas, two appends, repository search and keyboard smoke.
 
 ## Fresh-profile graph opening with annotated refs
 
