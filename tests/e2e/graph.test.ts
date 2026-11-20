@@ -422,6 +422,57 @@ test('an incomplete append layout keeps the displayed page and refresh recovers 
   }
 });
 
+test('a side lane stays painted across an append that splits a 500-row bucket', async () => {
+  const { page, close } = await launch('linear', 2200, (repo) => {
+    const ancestor = fixtureGit(repo, ['rev-parse', 'HEAD~2150']);
+    const merge = fixtureGit(repo, [
+      'commit-tree',
+      'HEAD^{tree}',
+      '-p',
+      'HEAD',
+      '-p',
+      ancestor,
+      '-m',
+      'Long side lane',
+    ]);
+    fixtureGit(repo, ['update-ref', 'refs/heads/main', merge]);
+    // The working-tree row shifts the first 2,000-commit boundary to graph row 2,001.
+    writeFileSync(join(repo, 'dirty.txt'), 'working change');
+  });
+  try {
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    const canvas = page.getByTestId('commit-graph');
+    const paintedLanes = async (row: number) => {
+      await grid.evaluate((element, index) => {
+        element.scrollTop = (index - 3) * 28;
+      }, row);
+      await expect(grid.locator(`[aria-rowindex="${row + 1}"]`)).toBeInViewport();
+      return canvas.evaluate(async (element, index) => {
+        await new Promise<void>((done) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => done())),
+        );
+        const context = (element as HTMLCanvasElement).getContext('2d')!;
+        const top = document.getElementById('commit-history')!.scrollTop;
+        const y = Math.floor((index * 28 + 14 - top) * devicePixelRatio);
+        return [14, 34].map((x) => {
+          const pixel = context.getImageData(Math.floor(x * devicePixelRatio), y, 1, 1);
+          return pixel.data[3]! > 0;
+        });
+      }, row);
+    };
+    expect(await paintedLanes(503)).toEqual([true, true]);
+    await page.getByRole('button', { name: 'Load more commits', exact: true }).click();
+    await expect(page.getByTestId('commit-count')).toHaveText('2,201 commits');
+    expect(await paintedLanes(503)).toEqual([true, true]);
+    expect(await paintedLanes(2000)).toEqual([true, true]);
+    expect(await paintedLanes(2001)).toEqual([true, true]);
+    // The first-parent chain joins the reserved second lane at the ancestor.
+    expect(await paintedLanes(2170)).toEqual([false, true]);
+  } finally {
+    await close();
+  }
+});
+
 test('one Down key moves past the last initially loaded commit', async () => {
   const { page, close } = await launch('linear', 2003);
   try {
