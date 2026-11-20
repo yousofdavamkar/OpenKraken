@@ -182,6 +182,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       repository: path,
       head: git('rev-parse', 'HEAD'),
       commits: Number(git('rev-list', '--count', 'HEAD')),
+      commitsFromAllRefs: Number(git('rev-list', '--count', '--all')),
       refs: git('for-each-ref', '--format=.').split('\n').filter(Boolean).length,
       shallow: git('rev-parse', '--is-shallow-repository'),
       git: git('--version'),

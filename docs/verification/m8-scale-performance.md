@@ -4,7 +4,7 @@ The Linux x64 synthetic scale gates pass after removing a duplicate index finger
 
 ## Native desktop CI gates
 
-The scale job now runs separately on Ubuntu x64, Ubuntu ARM64, macOS and Windows. Each runner opens the synthetic checkout, the three synthetic 50,000-ref distributions, full Linux history and full Linux history with 50,000 distinct ref targets. Each opening gate uses three fresh profiles and checks the initial 2,000 commits, displayed reference count, three appends and scrolling. Each runner also compares every page of both full Linux fixtures and the synthetic checkout with native Git. Job artifacts use the runner label so a failed measurement can be inspected independently.
+The scale job now runs separately on Ubuntu x64, Ubuntu ARM64, macOS and Windows. Each runner opens the synthetic checkout, the three synthetic 50,000-ref distributions, full Linux history and full Linux history with 50,000 distinct ref targets. Each opening gate uses three fresh profiles and checks the initial 2,000 commits, displayed reference count, three appends and scrolling. The full Linux fixtures also include one annotated tag among 50,000 distinct targets and 49,999 aliases of a three-level annotation pointing to an independent root. Each runner compares every page of the full Linux fixtures and the synthetic checkout with native Git. Job artifacts use the runner label so a failed measurement can be inspected independently.
 
 Local Linux x64 verification used Git 2.53.0, fresh profiles and retained OS caches. The fixture generator created a new bare repository with 50,000 distinct targets over full Linux history at `46fec1c3029b552ec63b2d01af9d43a386f043ea`.
 
@@ -17,7 +17,7 @@ The one-ref gate passed. All three distinct-target runs failed the 500 ms first-
 
 ## Fixture and measurement boundaries
 
-The disposable fixture has **2,000,000 reachable commits, 100,000 tracked files, 1,999 genuine merges and two branch tips**, with a complete checkout and native commit graph. HEAD is `606403fd8ea711764e0ca26ada7fc10bbbde974a`. HEAD alone reaches 1,999,999 commits; the final topic tip supplies the remaining commit and is included in the app's history roots. The graph harness records the HEAD-only count, while the generator manifest records `--all`.
+The disposable fixture has **2,000,000 reachable commits, 100,000 tracked files, 1,999 genuine merges and two branch tips**, with a complete checkout and native commit graph. HEAD is `606403fd8ea711764e0ca26ada7fc10bbbde974a`. HEAD alone reaches 1,999,999 commits; the final topic tip supplies the remaining commit and is included in the app's history roots. The graph harness records the HEAD-only count in `commits` and the count from `git rev-list --count --all` in `commitsFromAllRefs`. It collects both after the timed interactions.
 
 This is a history/path-count scale fixture, not Chromium contents or its topology. Most commits reuse a tree. Files share a five-byte blob except one probe updated every thousand commits. It does not model large blobs, extensive ignored trees, submodules or real Chromium checkout cost. See [ADR 0100](../decisions/0100-large-history-and-warm-status-gates.md).
 
