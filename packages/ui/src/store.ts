@@ -14,7 +14,7 @@ import {
   decodeSnapshotBodies,
   expandGitServiceResult,
 } from '@openkraken/ipc-contract';
-import { patchPassages } from '@openkraken/graph';
+import { passageBuckets, refreshPassageBuckets } from '@openkraken/graph';
 import type { GraphRow, GraphPassage } from '@openkraken/graph';
 import { GraphClient } from './graph-client.js';
 import { projectCommits, sameWorkingRow, selectRow, singleSelection } from './history-model.js';
@@ -35,7 +35,7 @@ interface State {
   refreshStatus: (background?: boolean, updateWorktrees?: boolean) => Promise<void>;
   rows: DisplayCommit[];
   layout: GraphRow[];
-  passages: GraphPassage[];
+  passages: GraphPassage[][];
   maxColumns: number;
   busy?: string;
   syncing?: string;
@@ -137,7 +137,7 @@ export const useRepository = create<State>()(
           ...previous.layout.slice(rows.length - layout.reusedTail, rows.length),
         ];
         freeze(nextLayout, true);
-        const passages = patchPassages(
+        const passages = refreshPassageBuckets(
           previous.passages,
           layout.offset,
           layout.offset + layout.rows.length,
@@ -254,7 +254,7 @@ export const useRepository = create<State>()(
             ...previous.layout.slice(rows.length - layout.reusedTail, rows.length),
           ];
           freeze(nextLayout, true);
-          const nextPassages = patchPassages(
+          const nextPassages = refreshPassageBuckets(
             previous.passages,
             layout.offset,
             layout.offset + layout.rows.length,
@@ -379,7 +379,7 @@ export const useRepository = create<State>()(
         };
         const nextRows = [...current.rows, ...rows],
           nextLayout = [...current.layout, ...layout.rows];
-        const nextPassages = [...current.passages, ...layout.passages];
+        const nextPassages = passageBuckets(layout.passages, current.passages);
         freeze(nextPassages, true);
         freeze(nextSnapshot, true);
         freeze(nextRows, true);

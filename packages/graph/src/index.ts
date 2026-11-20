@@ -193,7 +193,7 @@ export function allocateLanes(
 
 /** Clip old spans around the changed interval, preserving an unchanged prefix/suffix. */
 export function patchPassages(
-  previous: readonly GraphPassage[],
+  previous: Iterable<GraphPassage>,
   offset: number,
   end: number,
   totalRows: number,
@@ -212,10 +212,33 @@ export function patchPassages(
 }
 
 /** Each viewport consults only the overlapping 500-row buckets, regardless of history length. */
-export function passageBuckets(passages: readonly GraphPassage[]) {
-  const buckets: GraphPassage[][] = [];
-  for (const p of passages)
-    for (let i = Math.floor(p.start / 500); i <= Math.floor((p.end - 1) / 500); i++)
-      (buckets[i] ??= []).push(p);
+export function passageBuckets(passages: readonly GraphPassage[], previous: GraphPassage[][] = []) {
+  if (!passages.length) return previous;
+  const buckets = previous.slice();
+  for (const p of passages) {
+    for (let i = Math.floor(p.start / 500); i <= Math.floor((p.end - 1) / 500); i++) {
+      if (buckets[i] === previous[i]) buckets[i] = previous[i]?.slice() ?? [];
+      buckets[i]!.push(p);
+    }
+  }
   return buckets;
+}
+
+/** A long passage belongs to several buckets. Clip it only once during a refresh. */
+function* originalPassages(buckets: GraphPassage[][]) {
+  for (let i = 0; i < buckets.length; i++)
+    for (const p of buckets[i] ?? []) if (Math.floor(p.start / 500) === i) yield p;
+}
+
+export function refreshPassageBuckets(
+  previous: GraphPassage[][],
+  offset: number,
+  end: number,
+  totalRows: number,
+  replacement: readonly GraphPassage[],
+) {
+  if (offset === 0 && end === totalRows) return passageBuckets(replacement);
+  return passageBuckets(
+    patchPassages(originalPassages(previous), offset, end, totalRows, replacement),
+  );
 }

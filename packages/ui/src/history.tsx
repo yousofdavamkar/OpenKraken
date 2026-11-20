@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { passageBuckets } from '@openkraken/graph';
 import { paintGraph, ROW_HEIGHT, LANE_WIDTH, GRAPH_PADDING } from '@openkraken/graph/canvas';
 import { navigationTarget, refsByTarget, refNavigationTargets } from './history-model.js';
 import { AuthorAvatar, useVisibleAvatars } from './avatars.js';
@@ -74,7 +73,6 @@ export function History() {
     overscan: 10,
   });
   useVisibleAvatars(virtual.getVirtualItems().map((item) => rows[item.index]!.author.email));
-  const buckets = useMemo(() => passageBuckets(passages), [passages]);
   const selected = useMemo(() => new Set(selection.selected), [selection.selected]);
   const matching = useMemo(() => (matches ? new Set(matches) : undefined), [matches]);
   const synthetic = useMemo(
@@ -106,7 +104,7 @@ export function History() {
       matches: matching,
       selected,
       synthetic,
-      passages: buckets,
+      passages,
       colors: graphColors,
       background: theme.colors.background,
     });
@@ -118,7 +116,7 @@ export function History() {
     matching,
     selected,
     synthetic,
-    buckets,
+    passages,
     graphColors,
     theme.colors.background,
   ]);

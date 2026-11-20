@@ -1,6 +1,12 @@
 import { expect, test } from 'vitest';
 import { GraphEngine, type GraphDocument } from './src/engine.js';
-import { allocateLanes, emptyCheckpoint, patchPassages, passageBuckets } from './src/index.js';
+import {
+  allocateLanes,
+  emptyCheckpoint,
+  patchPassages,
+  passageBuckets,
+  refreshPassageBuckets,
+} from './src/index.js';
 import { rowSegments, paintGraph } from './src/canvas.js';
 const documents = (count: number): GraphDocument[] =>
   Array.from({ length: count }, (_, i) => ({
@@ -413,6 +419,33 @@ test('compact worker spans preserve graph geometry across append and checkpoint 
   }));
   expect(expanded).toEqual(allocateLanes(next).rows);
   expect(patchPassages(spans, 500, 750, 750, []).every((p) => p.end <= 500)).toBe(true);
+});
+
+test('appending passages preserves completed buckets and extends a split bucket immutably', () => {
+  const span = (start: number, end: number, column: number) => ({
+    start,
+    end,
+    column,
+    colorIndex: column,
+    dashed: false,
+    target: String(column),
+  });
+  const first = [span(1, 750, 1), span(510, 730, 2)];
+  const next = [span(750, 1002, 1), span(760, 1501, 2)];
+  const before = passageBuckets(first);
+  const after = passageBuckets(next, before);
+
+  expect(after).toEqual(passageBuckets([...first, ...next]));
+  expect(after[0]).toBe(before[0]);
+  expect(after[1]).not.toBe(before[1]);
+  expect(before).toEqual(passageBuckets(first));
+  expect(passageBuckets([], after)).toBe(after);
+  const replacement = [span(500, 1000, 3)];
+  const refreshed = refreshPassageBuckets(after, 500, 1000, 1210, replacement);
+  expect(refreshed).toEqual(
+    passageBuckets(patchPassages([...first, ...next], 500, 1000, 1210, replacement)),
+  );
+  expect(refreshPassageBuckets(refreshed, 0, 1, 1, [])).toEqual([]);
 });
 
 test('search flushes any remaining cooperative indexing batches after a reset', () => {
