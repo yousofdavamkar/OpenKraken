@@ -3,10 +3,12 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
-import { verifyPackagedApplication } from './package-security.mjs';
+import { verifyPackagedApplication, verifyAsarUnpackedFile } from './package-security.mjs';
 
 const require = createRequire(import.meta.url);
-const { createPackage } = createRequire(require.resolve('@electron/packager'))('@electron/asar');
+const { createPackage, createPackageWithOptions } = createRequire(
+  require.resolve('@electron/packager'),
+)('@electron/asar');
 const application = {
   version: '0.2.0-beta.2',
   name: 'openkraken',
@@ -78,4 +80,22 @@ test('an export records unknown source and older archives can still be verified'
       /Invalid packaged application source/,
     );
   });
+});
+
+test('an unpacked helper must match the size and SHA-256 sealed in the ASAR', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-unpacked-helper-'));
+  try {
+    const source = join(root, 'source');
+    const name = 'helper.exe';
+    await mkdir(source);
+    await writeFile(join(source, name), 'signed helper');
+    await createPackageWithOptions(source, join(root, 'app.asar'), { unpack: '*.exe' });
+    await verifyAsarUnpackedFile(root, name);
+    for (const contents of ['changed bytes', 'different length']) {
+      await writeFile(join(root, 'app.asar.unpacked', name), contents);
+      await expect(verifyAsarUnpackedFile(root, name)).rejects.toThrow('ASAR integrity record');
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
