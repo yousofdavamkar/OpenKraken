@@ -24,6 +24,12 @@ declare global {
     openkraken: DesktopApi;
   }
 }
+function rowPositions(rows: DisplayCommit[]) {
+  const positions = new Map<string, number>();
+  rows.forEach((row, index) => positions.set(row.oid, index));
+  return positions;
+}
+
 let client: GraphClient | undefined;
 const graph = () => (client ??= new GraphClient());
 let querySequence = 0;
@@ -54,7 +60,7 @@ interface State {
   loadMore: (count?: number) => Promise<void>;
   search: (query: string) => Promise<void>;
   searchAll: () => Promise<void>;
-  select: (oid: string, mode?: 'single' | 'toggle' | 'range') => void;
+  select: (oid: string, mode?: 'single' | 'toggle' | 'range', position?: number) => void;
   navigate: (target: string | number) => Promise<void>;
   setDetail: (commit?: Commit | DisplayCommit) => void;
 }
@@ -154,12 +160,16 @@ export const useRepository = create<State>()(
           s.layout = nextLayout;
           s.passages = passages;
           s.maxColumns = layout.maxColumns;
-          const available = new Set(rows.map((r) => r.oid));
+          const available = rowPositions(rows);
           s.selection.selected = s.selection.selected.filter((oid) => available.has(oid));
           if (s.selection.focus && !available.has(s.selection.focus))
             s.selection.focus = rows[0]?.oid;
           if (s.selection.anchor && !available.has(s.selection.anchor))
             s.selection.anchor = s.selection.focus;
+          s.selection.focusIndex = s.selection.focus ? available.get(s.selection.focus) : undefined;
+          s.selection.anchorIndex = s.selection.anchor
+            ? available.get(s.selection.anchor)
+            : undefined;
         });
         if (get().query) await updateLoadedMatches();
       } catch (error) {
@@ -242,7 +252,7 @@ export const useRepository = create<State>()(
           // The graph worker owns a clone. Prepare immutable store data while it lays out the page.
           freeze(result.snapshot, true);
           freeze(rows, true);
-          const available = new Set(rows.map((row) => row.oid));
+          const available = rowPositions(rows);
           const layout = await pendingLayout;
           if (layout.kind !== 'layout') throw new Error('Invalid graph response');
           if (get().busy !== request.id) return;
@@ -306,7 +316,9 @@ export const useRepository = create<State>()(
                 : focus;
             s.selection = {
               focus,
+              focusIndex: focus ? available.get(focus) : undefined,
               anchor,
+              anchorIndex: anchor ? available.get(anchor) : undefined,
               selected: selected.length ? selected : focus ? [focus] : [],
             };
           });
@@ -453,9 +465,9 @@ export const useRepository = create<State>()(
         });
       }
     },
-    select: (oid, mode) => {
+    select: (oid, mode, position) => {
       const { rows, selection } = get();
-      const next = selectRow(rows, selection, oid, mode);
+      const next = selectRow(rows, selection, oid, mode, position);
       if (next === selection) return;
       set((s) => {
         s.selection = next;
@@ -472,18 +484,18 @@ export const useRepository = create<State>()(
         sequence === navigationSequence
       ) {
         const { rows, busy, paging, snapshot: current } = get();
-        let row: DisplayCommit | undefined;
-        if (typeof target === 'number') row = rows[target];
-        else {
+        let position = typeof target === 'number' ? target : -1;
+        if (typeof target === 'string') {
           for (let i = checked; i < rows.length; i++) {
             if (rows[i]!.oid === target) {
-              row = rows[i];
+              position = i;
               break;
             }
           }
         }
+        const row = rows[position];
         if (row) {
-          const nextSelection = singleSelection(row.oid);
+          const nextSelection = singleSelection(row.oid, position);
           set((s) => {
             s.selection = nextSelection;
           });

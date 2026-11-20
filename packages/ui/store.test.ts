@@ -219,7 +219,9 @@ test('deep range selection preserves the loaded page and ignores a missing targe
   expect(state.rows).toBe(rows);
   expect(state.selection).toEqual({
     anchor: start,
+    anchorIndex: 4998,
     focus: last,
+    focusIndex: 5000,
     selected: commits.slice(-3).map((row) => row.oid),
   });
   select('missing', 'range');

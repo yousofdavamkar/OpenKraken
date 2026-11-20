@@ -2,7 +2,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { paintGraph, ROW_HEIGHT, LANE_WIDTH, GRAPH_PADDING } from '@openkraken/graph/canvas';
-import { navigationTarget, refsByTarget, refNavigationTargets } from './history-model.js';
+import {
+  locateRow,
+  navigationTarget,
+  refsByTarget,
+  refNavigationTargets,
+} from './history-model.js';
 import { AuthorAvatar, useVisibleAvatars } from './avatars.js';
 import { CommandButton } from './commands.js';
 import { useRepository } from './store.js';
@@ -139,8 +144,8 @@ export function History() {
     };
   }, [snapshot?.cursor]);
   const focused = useMemo(
-    () => (selection.focus ? rows.findIndex((row) => row.oid === selection.focus) : -1),
-    [rows, selection.focus],
+    () => locateRow(rows, selection.focus, selection.focusIndex),
+    [rows, selection.focus, selection.focusIndex],
   );
   useEffect(() => {
     if (focused >= 0) virtual.scrollToIndex(focused, { align: 'auto' });
@@ -149,7 +154,7 @@ export function History() {
     if (index < 0) return;
     // A repeated selection keeps the same focus ID, so the focus effect will not scroll.
     if (index === focused) virtual.scrollToIndex(index, { align: 'auto' });
-    state.select(rows[index]!.oid);
+    state.select(rows[index]!.oid, 'single', index);
   }
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (!snapshot || event.nativeEvent.isComposing) return;
@@ -167,7 +172,7 @@ export function History() {
     }
     if (event.key === 'Enter') {
       event.preventDefault();
-      state.setDetail(rows.find((r) => r.oid === selection.focus));
+      state.setDetail(rows[focused]);
       return;
     }
     if (
@@ -337,6 +342,7 @@ export function History() {
                         : event.ctrlKey || event.metaKey
                           ? 'toggle'
                           : 'single',
+                      item.index,
                     );
                     viewport.current?.focus({ preventScroll: true });
                   }}

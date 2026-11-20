@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 import {
+  locateRow,
   navigationTarget,
   projectCommits,
   refsByTarget,
@@ -40,6 +41,31 @@ test('range, toggle and ancestry navigation preserve stable OID selection', () =
   expect(navigationTarget(rows, 1, 'H', true, 'merge', 'right')).toBe('right');
   expect(navigationTarget(rows, 1, 'h', false, 'merge')).toBe('merge');
 });
+test('deep selection uses known positions and recovers by OID after a refresh moves rows', () => {
+  let reads = 0;
+  const history = Array<{ oid: string }>(32000).fill({
+    get oid() {
+      reads++;
+      return 'earlier';
+    },
+  });
+  history[31997] = { oid: 'anchor' };
+  history[31998] = { oid: 'middle' };
+  history[31999] = { oid: 'focus' };
+  const selected = selectRow(history, { selected: [] }, 'anchor', 'single', 31997);
+  const range = selectRow(history, selected, 'focus', 'range', 31999);
+  expect(range.selected).toEqual(['anchor', 'middle', 'focus']);
+  expect(locateRow(history, range.focus, range.focusIndex)).toBe(31999);
+  expect(reads).toBe(0);
+  const shifted = [{ oid: 'worktree' }, ...history];
+  expect(locateRow(shifted, range.focus, range.focusIndex)).toBe(32000);
+  expect(selectRow(shifted, range, 'middle', 'range', 31998).selected).toEqual([
+    'anchor',
+    'middle',
+  ]);
+  expect(locateRow(shifted, 'removed', range.focusIndex)).toBe(-1);
+});
+
 test('navigation at row 32,000 reads only the rows needed to locate its closest child', () => {
   const history = Array<DisplayCommit>(32000).fill(rows[0]!);
   history[31998] = rows[2]!;

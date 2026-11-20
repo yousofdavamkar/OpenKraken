@@ -156,41 +156,59 @@ export function groupRefBadges(refs: readonly Ref[], limit = Infinity) {
 }
 export interface Selection {
   focus?: string;
+  focusIndex?: number;
   anchor?: string;
+  anchorIndex?: number;
   selected: string[];
 }
+// Positions survive appends. A refresh or a working-tree row can move the OID.
+export function locateRow(rows: readonly { oid: string }[], oid?: string, hint?: number) {
+  if (oid === undefined) return -1;
+  if (hint !== undefined && rows[hint]?.oid === oid) return hint;
+  return rows.findIndex((row) => row.oid === oid);
+}
+
 export function selectRow(
   rows: readonly { oid: string }[],
   selection: Selection,
   oid: string,
   mode: 'single' | 'toggle' | 'range' = 'single',
+  position?: number,
 ): Selection {
-  const index = rows.findIndex((r) => r.oid === oid);
+  const index = locateRow(rows, oid, position);
   if (index < 0) return selection;
   if (mode === 'range') {
     const anchor = Math.max(
       0,
-      rows.findIndex((r) => r.oid === (selection.anchor ?? selection.focus ?? oid)),
+      locateRow(
+        rows,
+        selection.anchor ?? selection.focus ?? oid,
+        selection.anchorIndex ?? selection.focusIndex ?? index,
+      ),
     );
     return {
       focus: oid,
+      focusIndex: index,
       anchor: rows[anchor]!.oid,
+      anchorIndex: anchor,
       selected: rows.slice(Math.min(anchor, index), Math.max(anchor, index) + 1).map((r) => r.oid),
     };
   }
   if (mode === 'toggle')
     return {
       focus: oid,
+      focusIndex: index,
       anchor: oid,
+      anchorIndex: index,
       selected: selection.selected.includes(oid)
         ? selection.selected.filter((id) => id !== oid)
         : [...selection.selected, oid],
     };
-  return singleSelection(oid);
+  return singleSelection(oid, index);
 }
 
-export function singleSelection(oid: string): Selection {
-  return { focus: oid, anchor: oid, selected: [oid] };
+export function singleSelection(oid: string, index: number): Selection {
+  return { focus: oid, focusIndex: index, anchor: oid, anchorIndex: index, selected: [oid] };
 }
 // Loaded positions stay numeric. A parent or ref tip can require another page.
 export function navigationTarget(
