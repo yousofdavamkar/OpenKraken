@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { readFile, realpath } from 'node:fs/promises';
+import { join } from 'node:path';
 import { expect } from '@playwright/test';
 import { fixtureGit } from '../packages/test-fixtures/src/index.ts';
 
@@ -81,4 +84,40 @@ export async function checkPackagedHistory(page, repository) {
   console.log(
     'Packaged Canvas, two history appends, repository search and keyboard navigation passed.',
   );
+}
+
+export async function advanceCachedFixture(profile, repository) {
+  const id = createHash('sha256')
+    .update(await realpath(repository))
+    .digest('hex');
+  const cached = JSON.parse(await readFile(join(profile, 'history', id, 'prefix.json'), 'utf8'));
+  expect(cached.commits).toHaveLength(2000);
+  expect(cached.commits[0].oid).toBe(fixtureGit(repository, ['rev-parse', 'HEAD']));
+  fixtureGit(repository, [
+    'commit',
+    '--allow-empty',
+    '-m',
+    'Commit made while another repository was open',
+  ]);
+  return fixtureGit(repository, ['rev-parse', 'HEAD']);
+}
+
+export async function checkReopenedHistory(page, repository, tip) {
+  const grid = page.getByRole('grid', { name: 'Commit history' });
+  const count = page.getByTestId('commit-count');
+  await expect(count).toHaveText('2,000 commits · more available');
+  await grid.press('Home');
+  const selected = grid.getByRole('row', { selected: true });
+  await expect(selected).toHaveAttribute('data-oid', tip);
+  const more = page.getByRole('button', { name: 'Load more commits' });
+  await more.click();
+  await expect(count).toHaveText('7,000 commits · more available');
+  await more.click();
+  await expect(count).toHaveText('7,004 commits');
+  await grid.press('End');
+  await expect(selected).toHaveAttribute(
+    'data-oid',
+    fixtureGit(repository, ['rev-list', '--max-parents=0', 'HEAD']),
+  );
+  console.log('Packaged graph reopened a changed cached repository and paged to its root.');
 }

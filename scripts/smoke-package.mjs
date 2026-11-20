@@ -9,7 +9,11 @@ import { basename, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { createFixture } from '../packages/test-fixtures/src/index.ts';
 import { checkReleaseKeyboard } from '../tests/e2e/check-release-keyboard.ts';
-import { checkPackagedHistory } from './check-packaged-history.mjs';
+import {
+  advanceCachedFixture,
+  checkPackagedHistory,
+  checkReopenedHistory,
+} from './check-packaged-history.mjs';
 import { assertMsiSmokeProfile } from './msi-lifecycle.mjs';
 
 const msiProfile = process.env.OPENKRAKEN_MSI_PROFILE;
@@ -255,7 +259,8 @@ try {
     await new Promise((resolve) => server.close(resolve));
   }
   await mkdir('test-results', { recursive: true });
-  if (process.platform === 'linux' && process.env.OPENKRAKEN_XDOTOOL) {
+  let changedTip;
+  if (nativePicker) {
     const repository = join(profile, 'terminal-repository');
     await mkdir(repository);
     await promisify(execFile)('git', ['init', repository]);
@@ -368,6 +373,7 @@ try {
     console.log(
       `Packaged native terminal opened the repository, tracked ${basename(packageShell)} commands, received native keyboard input and exited cleanly.`,
     );
+    if (history) changedTip = await advanceCachedFixture(profile, linkedRepository);
   }
   if (process.platform !== 'darwin') {
     if (msiProfile) {
@@ -402,6 +408,7 @@ try {
     await expect(
       page.getByRole('heading', { name: 'linked repository', exact: true }),
     ).toBeVisible();
+    if (changedTip) await checkReopenedHistory(page, linkedRepository, changedTip);
     console.log(
       msiProfile
         ? 'Installed repository link delivered through the Windows URI handler and explicitly accepted.'
