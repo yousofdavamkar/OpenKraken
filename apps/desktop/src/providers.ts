@@ -87,6 +87,8 @@ import {
   type ProviderPullTemplatesOptions,
   type ProviderPullTemplateOptions,
   providerPullSourceSchema,
+  providerCreateRepositorySchema,
+  type ProviderCreateRepository,
   providerCreatePullSchema,
   type ProviderPullSource,
   type ProviderCreatePull,
@@ -444,6 +446,24 @@ export class ProviderService {
       if (account.provider !== 'bitbucket')
         throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
       return this.bitbucket.repositories(account.origin, token, options, signal);
+    });
+  }
+  createRepository(id: string, input: ProviderCreateRepository, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerCreateRepositorySchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (options.owner !== account.login)
+        throw new ProviderError(
+          'PROVIDER_ACCOUNT',
+          'The account name has changed. Reopen Provider accounts before creating the repository.',
+        );
+      return this.repositoryDriver(account).createRepository(
+        account.origin,
+        token,
+        account.providerUserId,
+        options,
+        signal,
+      );
     });
   }
   repositories(id: string, page: number, signal?: AbortSignal) {

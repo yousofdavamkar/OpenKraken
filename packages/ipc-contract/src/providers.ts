@@ -145,6 +145,14 @@ export const providerNamespaceSchema = z
   .refine((value) =>
     value.split('/').every((part) => providerRepositoryPathComponentSchema.safeParse(part).success),
   );
+export const providerCreateRepositorySchema = z.strictObject({
+  owner: providerRepositoryPathComponentSchema,
+  name: providerRepositoryNameSchema,
+  description: z.string().max(350),
+  visibility: z.enum(['private', 'public']),
+  readme: z.boolean(),
+});
+export type ProviderCreateRepository = z.infer<typeof providerCreateRepositorySchema>;
 export const providerRepositoryPageNumberSchema = z.number().int().min(1).max(100);
 export const providerBitbucketWorkspaceSchema = z
   .object({

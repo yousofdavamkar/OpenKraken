@@ -66,6 +66,9 @@ import {
   type ProviderPullDetails,
   providerOriginSchema,
   providerRepositoryPageSchema,
+  providerRepositorySchema,
+  type ProviderCreateRepository,
+  type ProviderRepository,
   providerRepositoryNameSchema,
   providerRepositoryPageNumberSchema,
   type ProviderRepositoryPage,
@@ -85,6 +88,13 @@ import { ProviderPollingPolicy } from './provider-polling-policy.js';
 export { ProviderError } from './provider-error.js';
 import { loadPullTemplates, loadPullTemplate } from './github-templates.js';
 export interface ProviderDriver {
+  createRepository(
+    origin: string,
+    token: string,
+    userId: string,
+    options: ProviderCreateRepository,
+    signal?: AbortSignal,
+  ): Promise<ProviderRepository>;
   clearReadCache(): void;
   pollingPolicy(origin: string, token: string): PollingPolicy;
   previewIssueAction(
@@ -299,6 +309,55 @@ export class GitHubProvider implements ProviderDriver {
           'The provider returned an invalid account identity.',
         );
       return { id: String(data.id), login: data.login };
+    });
+  }
+  async createRepository(
+    origin: string,
+    token: string,
+    userId: string,
+    options: ProviderCreateRepository,
+    signal?: AbortSignal,
+  ) {
+    return this.request(origin, token, signal, async (client, headers) => {
+      try {
+        const { data, status } = await client.repos.createForAuthenticatedUser({
+          headers,
+          name: options.name,
+          description: options.description,
+          private: options.visibility === 'private',
+          auto_init: options.readme,
+        });
+        if (
+          status !== 201 ||
+          String(data.owner.id) !== userId ||
+          data.owner.login.toLowerCase() !== options.owner.toLowerCase() ||
+          data.name.toLowerCase() !== options.name.toLowerCase() ||
+          data.private !== (options.visibility === 'private') ||
+          !Number.isSafeInteger(data.id)
+        )
+          throw new Error('Unexpected repository acknowledgment');
+        return providerRepositorySchema.parse({
+          id: String(data.id),
+          owner: data.owner.login,
+          name: data.name,
+          archived: data.archived,
+          private: data.private,
+          description: data.description ?? '',
+          cloneUrl: `${origin}/${data.owner.login}/${data.name}.git`,
+        });
+      } catch (error) {
+        const status =
+          error && typeof error === 'object' && 'status' in error ? error.status : undefined;
+        if ([400, 401, 403, 404, 409, 422, 429].includes(Number(status)))
+          throw new ProviderError(
+            'PROVIDER_WRITE_REJECTED',
+            'GitHub rejected repository creation. Check the name and your account permissions.',
+          );
+        throw new ProviderError(
+          'PROVIDER_WRITE_UNCERTAIN',
+          'GitHub may have created the repository. Check your repositories before trying again.',
+        );
+      }
     });
   }
   async repositories(origin: string, token: string, page: number, signal?: AbortSignal) {
