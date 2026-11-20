@@ -1,6 +1,23 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met the first-paint budget in the latest run. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest three runs. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+
+## Paging through complete histories
+
+On Linux x64 the retained Git walk previously stopped at 1,147,000 commits of the pinned Linux history. The following page exceeded the runner's lifetime output limit. At `ad22690` the runner renews the stdout allowance when it delivers a page. A native regression forces a lower allowance and checks every commit and parent across one retained walk. Separate regressions exercise one oversized page and cumulative stderr.
+
+| Fixture                              |   Commits | Desktop pages including the initial 2,000 | SHA-256 of ordered commit IDs and parents                          |
+| ------------------------------------ | --------: | ----------------------------------------: | ------------------------------------------------------------------ |
+| Full Linux history at `46fec1c3029b` | 1,505,199 |                                       302 | `eaab85397038b87b505b45e66e7e53b612d3a56a395ad1d5a1a386d7ece5e14f` |
+| Two-million-commit checkout          | 2,000,000 |                                       401 | `33e170b785447b13fde786c4d26232871c4a7e83d678f864310b4a8e1b9da260` |
+
+The Electron test requests each page through the sandbox bridge and compares the final count and digest with an independent native Git walk. Pages are consumed one at a time. The scale CI job now runs this check on both fixtures. The full Linux digest also matched on Git 2.38.0 in both Git-service and Electron runs. [Desktop traversal test](../../tests/e2e/history-traversal.test.ts)
+
+The interactive graph test opened 12,003 commits in a linear history with the branch upstream pointing at its root. Shift+H loaded three further pages, scrolled the root into view and selected it. Enter opened its details. A packaged Linux x64 run repeated the jump and opened the root details with X11 keyboard input. Across three appends, the store regression counted four reads of the first commit ID before the fix and one after. [Keyboard navigation decision](../decisions/0004-m1-history-and-interaction.md#keyboard-navigation-across-a-page-boundary)
+
+Three fresh desktop profiles on full Linux history with one ref painted in 326.9–350.0 ms. All nine 5,000-commit appends took 162.7–232.4 ms, and scrolling at 12,000 loaded rows took 16.7–16.8 ms p95. The two-million-commit checkout painted in 382.8 ms. The distinct-target 50,000-ref fixture painted in 1,101.9 ms, exceeding the 500 ms budget. Its three appends took 171.8–205.2 ms. With the desktop regression suite running, the shared-target fixture painted in 620.3–969.9 ms. After the suite exited, three fresh profiles per fixture painted in 503.3–540.0 ms with shared targets and 724.4–1,067.6 ms with distinct targets. All 18 appends in those last six runs met 300 ms.
+
+The Linux x64 build passed typechecking, lint and 1,036 unit/native tests (14 skipped). The complete default desktop suite passed 267 tests, including six Canvas goldens. It skipped six opt-in cases. Separate runs exercised those six cases against the scale fixtures and the isolated Gitea server. Three fresh profiles on the 100,000-file checkout returned all 30 watcher-warm clean and dirty working-state reads in 173.7–219.5 ms. External edits appeared in 854.9–858.2 ms. The unsigned DEB, RPM and AppImage test installers passed payload verification and launch checks. AppImage ran both through FUSE and in extract-and-run mode. With a temporary signing key and a loopback HTTPS feed, Electron downloaded the exact DEB and rejected altered content. All three isolated Gitea HTTPS/SSH checks passed. A packaged run also recovered a draft after restarting the app and its private GNOME keyring. The npm registry audit returned zero reported advisories across 655 dependencies.
 
 ## AppImage updates that stall before the desktop opens
 
