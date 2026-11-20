@@ -163,7 +163,8 @@ export const REF_DIRECT_FORMAT =
 const directRefFormat =
   '%(refname)%00%(objectname)%00%(objecttype)%00%(upstream)%00%(upstream:track)%00%(HEAD)%00';
 const oid = (value: string) => {
-  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value)) throw new Error('Invalid object ID');
+  if ((value.length !== 40 && value.length !== 64) || /[^0-9a-f]/.test(value))
+    throw new Error('Invalid object ID');
   return value;
 };
 const refPrefixLength = {
@@ -175,6 +176,10 @@ const refPrefixLength = {
 };
 
 export class RefsParser {
+  // Git emits the same IDs for consecutive aliases. Retain the validated strings
+  // separately from the mutable records handed to the reference reader.
+  private lastTarget?: string;
+  private lastPeeled?: string;
   readonly value: Ref[] = [];
   private pendingFields: string[] = [];
   private decoder = new TextNulFields();
@@ -206,16 +211,20 @@ export class RefsParser {
           : name === 'refs/stash'
             ? 'stash'
             : 'other';
+    if (target !== this.lastTarget) this.lastTarget = oid(target);
     const ref: Ref = {
       name,
-      target: oid(target),
+      target: this.lastTarget,
       objectType,
       peeledType,
       shortName: name.slice(refPrefixLength[kind]),
       kind,
       isHead: head === '*',
     };
-    if (peeled) ref.peeled = oid(peeled);
+    if (peeled) {
+      if (peeled !== this.lastPeeled) this.lastPeeled = oid(peeled);
+      ref.peeled = this.lastPeeled;
+    }
     if (upstream)
       ref.upstream = {
         ref: upstream,

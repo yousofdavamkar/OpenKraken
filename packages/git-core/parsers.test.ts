@@ -196,6 +196,51 @@ describe('stream parsers', () => {
     partial.push(Buffer.from(fields[0]!.slice(0, 5).join('\0') + '\0'));
     expect(() => partial.finish()).toThrow('Truncated ref');
   });
+  test.each([40, 64])('ref aliases preserve complete %i-character IDs across reads', (width) => {
+    const outer = 'a'.repeat(width);
+    const commit = 'b'.repeat(width);
+    const other = 'c'.repeat(width);
+    const record = (name: string, target: string, peeled: string) =>
+      Buffer.from(
+        [`refs/tags/${name}`, target, 'tag', peeled, 'commit', '', '', ' ', '\n'].join('\0'),
+      );
+    const parser = new RefsParser();
+    for (const [name, target, peeled] of [
+      ['first', outer, commit],
+      ['same', outer, commit],
+      ['retagged', other, commit],
+      ['last', outer, other],
+    ] as const) {
+      parser.push(record(name, target, peeled));
+    }
+    expect(parser.finish().map(({ target, peeled }) => [target, peeled])).toEqual([
+      [outer, commit],
+      [outer, commit],
+      [other, commit],
+      [outer, other],
+    ]);
+    // An emitted record is mutable. It must never become the source of validation.
+    for (const bad of [
+      '',
+      outer.slice(1),
+      outer + 'a',
+      outer.slice(1) + 'g',
+      outer.slice(1) + 'A',
+      outer.slice(1) + 'é',
+      outer.slice(1) + '\n',
+    ]) {
+      const targets = new RefsParser();
+      targets.push(record('good', outer, commit));
+      targets.value[0]!.target = bad;
+      expect(() => targets.push(record('bad', bad, commit))).toThrow('Invalid object ID');
+      if (bad) {
+        const peels = new RefsParser();
+        peels.push(record('good', outer, commit));
+        peels.value[0]!.peeled = bad;
+        expect(() => peels.push(record('bad', outer, bad))).toThrow('Invalid object ID');
+      }
+    }
+  });
   test('history empty parents/body, unicode and fake header in messages', () => {
     fc.assert(
       fc.property(
