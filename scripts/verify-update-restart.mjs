@@ -32,8 +32,10 @@ const delayedStartup = lateExit || lateConfirmation;
 const rollbackSyncError = process.argv.includes('--rollback-sync-error');
 const pendingNotice = process.argv.includes('--pending-notice');
 const missingDocument = process.argv.includes('--missing-renderer-document');
+const missingModule = process.argv.includes('--missing-renderer-module');
+const damagedRenderer = missingDocument || missingModule;
 const failStartup =
-  missingDocument ||
+  damagedRenderer ||
   process.argv.includes('--failed-startup') ||
   delayedDescendant ||
   lateExit ||
@@ -198,8 +200,17 @@ try {
     const staging = join(root, version, 'staging');
     await mkdir(staging, { recursive: true });
     await cp(runtime, join(staging, 'dist'), { recursive: true });
-    if (missingDocument && version === replacementVersion)
-      await rm(join(staging, 'dist/renderer/index.html'));
+    if (damagedRenderer && version === replacementVersion) {
+      const renderer = join(staging, 'dist/renderer');
+      const document = join(renderer, 'index.html');
+      if (missingModule) {
+        const entries = [
+          ...(await readFile(document, 'utf8')).matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g),
+        ];
+        assert.equal(entries.length, 1);
+        await rm(join(renderer, entries[0][1]));
+      } else await rm(document);
+    }
     // Test trust and dialog responses are compiled into disposable fixture apps.
     // Production has no TLS bypass, test key or runtime test switch.
     const banner = `
@@ -294,7 +305,7 @@ try {
           require('node:fs').writeFileSync(${JSON.stringify(descendantMarker)}, JSON.stringify({ pid: descendant.pid, started: Date.now() }));
           descendant.unref();
         }
-        if (!${missingDocument}) process.exit(23);
+        if (!${damagedRenderer}) process.exit(23);
       }
       if (fixtureReturning && ${delayedDescendant}) {
         const descendant = JSON.parse(require('node:fs').readFileSync(${JSON.stringify(descendantMarker)}, 'utf8'));
@@ -673,7 +684,7 @@ try {
     }
     if (slowCommit)
       assert.equal(await readFile(join(root, 'slow-commit'), 'utf8'), 'rename resumed');
-    if (missingDocument)
+    if (damagedRenderer)
       assert.equal(
         await readFile(join(root, 'install-error'), 'utf8'),
         'OpenKraken could not start',
