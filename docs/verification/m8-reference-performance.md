@@ -2,6 +2,31 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Working-state fingerprint on 100,000 files
+
+Three alternating pairs of fresh Linux x64 Electron profiles measured the same two-million-commit checkout. Each run waited for the native watcher, warmed one status request, measured five clean requests, edited the fixture's tracked probe and measured five dirty requests. The harness restored the probe. Git was 2.53.0 and the OS caches stayed populated. A preceding baseline run exceeded 300 ms on one clean read at 316.8 ms.
+
+| Status reads                            | Buffered index | Streamed index |
+| --------------------------------------- | -------------: | -------------: |
+| Median clean, 15 reads                  |       249.3 ms |       228.8 ms |
+| Median dirty, 15 reads                  |       260.7 ms |       214.6 ms |
+| Maximum across clean and dirty reads    |       410.3 ms |       314.1 ms |
+| Reads below 300 ms                      |          28/30 |          29/30 |
+| Edit visible in UI, range across 3 runs | 859.9–877.0 ms | 855.9–880.6 ms |
+
+Each of the three paired runs had a lower median for both clean and dirty reads after streaming. The first streamed run missed the status budget on one dirty read. The other two passed every status check. All six external edits became visible within 1,500 ms. [Fingerprint compatibility](../decisions/0101-one-fingerprint-per-working-state.md#streaming-the-index-listing)
+
+## Keyboard navigation with 32,000 loaded commits
+
+On full Linux history, three alternating pairs compared `6933166` with `c8a5ec9` using fresh profiles. Each run loaded 32,000 commits. The first End/Home cycle warmed the handler, followed by ten measured cycles. Holding the scroll position fixed avoided prefetch during timing. The driver checked that End moved the selection offscreen and Home returned it to the first visible row.
+
+| Key  | Baseline medians by pair | New medians by pair |
+| ---- | -----------------------: | ------------------: |
+| End  |      2.70, 2.60, 2.65 ms | 0.10, 0.10, 0.10 ms |
+| Home |      1.40, 1.40, 1.45 ms | 0.10, 0.10, 0.10 ms |
+
+These timings cover synchronous key dispatch. The separate 12,000-row Electron regression checked the visible selection and scroll behavior. The row-access regression at position 32,000 checks that Home and PageUp read no row objects and that Shift+Up inspects only the parent and its immediately preceding child in that fixture.
+
 ## Opening a bare repository with 50,000 distinct refs
 
 On the 1,505,199-commit Linux fixture, a Git process trace captured a 517 ms cached diff against the entire HEAD tree despite the absence of an index. A separate trace showed two full watcher ref scans during startup. The updated app skips the diff when the bare index is absent, coalesces the initial ref checks when subscription completes promptly, and resolves HEAD while reading repository metadata. A trace of the resulting opening recorded one watcher scan and zero cached diffs.

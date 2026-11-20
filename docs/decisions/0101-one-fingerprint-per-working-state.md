@@ -17,3 +17,10 @@ The native rebase test now obtains unresolved/resolved operation controls throug
 Working-state and operation inspection now check for the bare repository's index. If it is absent, HEAD and the operation markers identify the operation state. Running a cached diff in that case would enumerate the entire HEAD tree as staged deletions. If the index is present, or a transaction supplies its own index, inspection still fingerprints its entries and staged diff. Only a missing index selects the shortcut. Other filesystem errors propagate. The working-state revision for a bare repository still depends on HEAD alone.
 
 The native regression checks both public reads before an index exists, after loading HEAD into an index and after emptying it. Removing the index restores the original operation token, and moving HEAD changes it again.
+
+
+## Streaming the index listing
+
+The fingerprint feeds each stdout chunk from `git ls-files --stage -v -z` directly into SHA-256. The staged diff can run at the same time. Its raw bytes enter the hash after the index command completes, preserving the byte order used by existing journals and reviewed operations. Both commands retain their output limits and cancellation. On the 100,000-file fixture the index listing alone was 8,299,986 bytes.
+
+A native regression compares the public revision byte for byte with the previous calculation on a clean index and after staging a UTF-8 filename. [Linux measurements](../verification/m8-reference-performance.md#working-state-fingerprint-on-100000-files)

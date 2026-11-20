@@ -30,6 +30,8 @@ When an object ID resolves to a visible commit, put that commit first and fill t
 
 Down on the last loaded row selects the first appended row when more history exists. A jump can wait for the page already loading under the pointer or request another page if its target lies farther back. A newer navigation request, a changed selection, or a different snapshot cursor supersedes the pending jump. A failed or cancelled page that adds no rows ends the jump.
 
+The grid passes its known focused index to keyboard navigation. Home, End, page keys and ordinary arrows can select loaded positions directly. Shift+Up scans backward to the nearest child. Parent and ref jumps still resolve commit IDs so they can continue across pages.
+
 When keyboard navigation targets the already focused commit, bring its row back into view even if the user has scrolled away. Ordinary scrolling can leave the selection offscreen until the next navigation command. The grid publishes its active descendant only while that row is mounted.
 
 ## Starting the graph worker on repository open
