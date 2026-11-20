@@ -143,6 +143,7 @@ export class Updates {
   private directoryIdentity = '';
   private failedStorage = false;
   private release: UpdateRelease | null = null;
+  private recoverableArtifact = false;
   private controller: AbortController | null = null;
   private work: Promise<UpdateState> | null = null;
   private closed = false;
@@ -302,10 +303,11 @@ export class Updates {
       !this.matchesPredecessor(this.watermark.configuration)
     )
       throw new UpdateFailure('storage');
-    // A prior verified file is never trusted after restart without a fresh check/download.
     await this.removeOwned('trusted-release.tmp', 4096);
     await this.removeOwned('artifact.part', 2 * 1024 ** 3);
-    await this.removeOwned('artifact.ready', 2 * 1024 ** 3);
+    const cached = await this.cachedFile();
+    if (cached && this.watermark?.configuration === this.binding()) this.recoverableArtifact = true;
+    else if (cached) await this.removeOwned('artifact.ready', 2 * 1024 ** 3);
     this.recoveryNotice = await this.loadRecoveryNotice();
     try {
       this.automaticSource = await this.readSource('automatic-checks.json');
@@ -479,6 +481,11 @@ export class Updates {
       throw new UpdateFailure('rollback');
     if (sequence === this.watermark?.sequence && this.watermark.configuration === this.binding())
       return;
+    // Retire the previous download before publishing a new trusted generation.
+    if (this.recoverableArtifact) {
+      await this.removeOwned('artifact.ready', 2 * 1024 ** 3);
+      this.recoverableArtifact = false;
+    }
     const next = {
       schemaVersion: 1 as const,
       configuration: this.binding(),
@@ -573,7 +580,7 @@ export class Updates {
       signal.throwIfAborted();
       this.release = null;
       this.state = this.empty('checking');
-      await this.removeOwned('artifact.ready', 2 * 1024 ** 3);
+      if (!this.recoverableArtifact) await this.removeOwned('artifact.ready', 2 * 1024 ** 3);
       const body = await requestUpdateFile(this.send, this.config!.feed, signal);
       const envelope = await readUpdateEnvelope(body, updateEnvelopeLimit, signal);
       let verified;
@@ -601,7 +608,71 @@ export class Updates {
         artifacts: artifacts.map(({ format, size }) => ({ format, size })),
       };
       if (this.state.phase === 'available') this.release = release;
+      else if (this.recoverableArtifact) {
+        this.recoverableArtifact = false;
+        await this.removeOwned('artifact.ready', 2 * 1024 ** 3);
+      }
     });
+  }
+  private async cachedFile() {
+    try {
+      const info = await lstat(this.file('artifact.ready'));
+      if (!this.safeFile(info, 2 * 1024 ** 3)) throw new UpdateFailure('storage');
+      return info;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new UpdateFailure('storage');
+    }
+  }
+  private async openCachedArtifact(original: Stats) {
+    const file = await open(
+      this.file('artifact.ready'),
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    ).catch(() => {
+      throw new UpdateFailure('storage');
+    });
+    try {
+      const info = await file.stat();
+      if (
+        !this.safeFile(info, original.size) ||
+        info.size !== original.size ||
+        info.dev !== original.dev ||
+        info.ino !== original.ino ||
+        info.ctimeMs !== original.ctimeMs
+      )
+        throw new UpdateFailure('integrity');
+      return file;
+    } catch (error) {
+      await file.close();
+      throw error;
+    }
+  }
+  private async matchesRecoveredArtifact(artifact: UpdateArtifact, signal: AbortSignal) {
+    const before = await this.cachedFile();
+    if (before?.size !== artifact.size) return false;
+    const file = await this.openCachedArtifact(before);
+    try {
+      await verifyUpdateArtifact(
+        file.createReadStream({ autoClose: false, signal }),
+        artifact,
+        signal,
+      );
+      const current = await this.cachedFile();
+      if (
+        !current ||
+        current.ino !== before.ino ||
+        current.dev !== before.dev ||
+        current.ctimeMs !== before.ctimeMs
+      )
+        throw new UpdateFailure('storage');
+      this.state.downloaded = artifact.size;
+      return true;
+    } catch (error) {
+      signal.throwIfAborted();
+      if (error instanceof UpdateFailure && error.code === 'integrity') return false;
+      throw new UpdateFailure('storage');
+    } finally {
+      await file.close();
+    }
   }
   download(format: string): Promise<UpdateState> {
     if (this.work || this.closed || this.state.phase !== 'available' || !this.release)
@@ -621,31 +692,36 @@ export class Updates {
       this.state.selected = artifact.format;
       this.state.downloaded = 0;
       await this.removeOwned('artifact.part', 2 * 1024 ** 3);
-      await this.removeOwned('artifact.ready', 2 * 1024 ** 3);
+      const recovered =
+        this.recoverableArtifact && (await this.matchesRecoveredArtifact(artifact, signal));
+      this.recoverableArtifact = false;
       let created = false;
       try {
-        const body = await requestUpdateFile(
-          this.send,
-          new URL(artifact.name, this.config!.feed).href,
-          signal,
-          artifact.size,
-        );
-        const file = await open(this.file('artifact.part'), 'wx', 0o600).catch(() => {
-          throw new UpdateFailure('storage');
-        });
-        created = true;
-        try {
-          await verifyUpdateArtifact(body, artifact, signal, async (chunk) => {
-            await file.writeFile(chunk).catch(() => {
-              throw new UpdateFailure('storage');
-            });
-            this.state.downloaded += chunk.byteLength;
-          });
-          await file.sync().catch(() => {
+        if (!recovered) {
+          await this.removeOwned('artifact.ready', 2 * 1024 ** 3);
+          const body = await requestUpdateFile(
+            this.send,
+            new URL(artifact.name, this.config!.feed).href,
+            signal,
+            artifact.size,
+          );
+          const file = await open(this.file('artifact.part'), 'wx', 0o600).catch(() => {
             throw new UpdateFailure('storage');
           });
-        } finally {
-          await file.close();
+          created = true;
+          try {
+            await verifyUpdateArtifact(body, artifact, signal, async (chunk) => {
+              await file.writeFile(chunk).catch(() => {
+                throw new UpdateFailure('storage');
+              });
+              this.state.downloaded += chunk.byteLength;
+            });
+            await file.sync().catch(() => {
+              throw new UpdateFailure('storage');
+            });
+          } finally {
+            await file.close();
+          }
         }
         try {
           validateUpdateRelease(release, this.now());
@@ -654,10 +730,12 @@ export class Updates {
         }
         await this.checkStorage();
         signal.throwIfAborted();
-        await rename(this.file('artifact.part'), this.file('artifact.ready')).catch(() => {
-          throw new UpdateFailure('storage');
-        });
-        created = false;
+        if (created) {
+          await rename(this.file('artifact.part'), this.file('artifact.ready')).catch(() => {
+            throw new UpdateFailure('storage');
+          });
+          created = false;
+        }
         this.state.phase = 'verified';
         this.state.installId =
           artifact.format === 'AppImage' && this.runtime.appImage ? randomUUID() : null;
@@ -709,26 +787,11 @@ export class Updates {
           extname(path).toLowerCase() !== '.' + artifact.format.toLowerCase()
         )
           throw new UpdateFailure('save');
-        const source = this.file('artifact.ready');
-        const original = await lstat(source).catch(() => {
-          throw new UpdateFailure('storage');
-        });
-        if (!this.safeFile(original, artifact.size) || original.size !== artifact.size)
-          throw new UpdateFailure('integrity');
-        const input = await open(
-          source,
-          constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-        ).catch(() => {
-          throw new UpdateFailure('storage');
-        });
+        const original = await this.cachedFile();
+        if (!original) throw new UpdateFailure('storage');
+        if (original.size !== artifact.size) throw new UpdateFailure('integrity');
+        const input = await this.openCachedArtifact(original);
         try {
-          const info = await input.stat();
-          if (
-            !this.safeFile(info, artifact.size) ||
-            info.dev !== original.dev ||
-            info.ino !== original.ino
-          )
-            throw new UpdateFailure('integrity');
           await exportInstaller(input, artifact, path, this.directory, signal, async () => {
             await this.checkStorage();
             validate();

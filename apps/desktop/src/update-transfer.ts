@@ -61,7 +61,7 @@ export async function readUpdateEnvelope(
 }
 
 export async function verifyUpdateArtifact(
-  body: ReadableStream<Uint8Array>,
+  body: AsyncIterable<Uint8Array>,
   artifact: UpdateArtifact,
   signal: AbortSignal,
   write?: (chunk: Uint8Array) => Promise<void>,

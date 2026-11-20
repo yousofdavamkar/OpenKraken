@@ -854,6 +854,60 @@ function signed(value: unknown, key = keys.privateKey) {
   });
 }
 
+test.each([
+  'matching file',
+  'rejected check then retry',
+  'changed bytes',
+  'new release',
+  'partial file',
+])('restarts after a verified download with %s', async (scenario) => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-restart-download-'));
+  const directory = join(root, 'updates');
+  let manifest = signed(release());
+  const artifactRequests: string[] = [];
+  const send: typeof fetch = async (url) => {
+    if (String(url) === configuration.feed) return new Response(manifest);
+    artifactRequests.push(String(url));
+    return new Response('fixture');
+  };
+  let updater = new Updates(directory, configuration, runtime, send);
+  try {
+    await updater.check();
+    const previous = await updater.download('AppImage');
+    expect(previous.phase).toBe('verified');
+    await updater.close();
+    const ready = join(directory, 'artifact.ready');
+    if (scenario === 'changed bytes') await writeFile(ready, 'changed');
+    if (scenario === 'new release') manifest = signed(release(8, '0.3.0'));
+    if (scenario === 'partial file') await rename(ready, join(directory, 'artifact.part'));
+    updater = new Updates(directory, configuration, runtime, send);
+    expect((await updater.started()).phase).toBe('idle');
+    expect((await updater.download('AppImage')).phase).toBe('idle');
+    const stalePicker = vi.fn();
+    await updater.save(previous.saveId!, stalePicker);
+    expect(stalePicker).not.toHaveBeenCalled();
+    if (scenario === 'rejected check then retry') {
+      manifest = signed(release(6));
+      expect((await updater.check()).error).toBe('rollback');
+      expect((await updater.download('AppImage')).phase).toBe('error');
+      manifest = signed(release());
+    }
+    expect((await updater.check()).phase).toBe('available');
+    const verified = await updater.download('AppImage');
+    expect(verified).toMatchObject({ phase: 'verified', downloaded: 7 });
+    expect(verified.saveId).not.toBe(previous.saveId);
+    expect(artifactRequests).toHaveLength(
+      ['matching file', 'rejected check then retry'].includes(scenario) ? 1 : 2,
+    );
+    const destination = join(root, 'recovered.AppImage');
+    expect((await updater.save(verified.saveId!, async () => destination)).phase).toBe('saved');
+    expect(await readFile(destination, 'utf8')).toBe('fixture');
+  } finally {
+    await updater.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('signed downloads are verified and rollback protection survives an app restart', async () => {
   const root = await mkdtemp(join(tmpdir(), 'openkraken-updates-'));
   const directory = join(root, 'updates');
