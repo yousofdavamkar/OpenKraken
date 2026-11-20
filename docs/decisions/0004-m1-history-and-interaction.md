@@ -26,6 +26,10 @@ Resolve hexadecimal queries against Git object IDs before peeling a unique match
 
 When an object ID resolves to a visible commit, put that commit first and fill the remaining results with text matches ordered by commit time. Deduplicate before applying the 100-result limit so an older commit can still be found when many newer messages cite its ID.
 
+## Keyboard input during commit search
+
+Enter selects the first loaded match and Escape clears the query. Both move focus to the history grid. While a text input method is composing, it owns both keys so the user can accept or cancel a candidate without leaving search. The grid acts on the initial Enter or Escape keydown. Repeats from the same held key after focus moves leave the selected row and its details alone. Arrow navigation continues to support key repeat.
+
 ## Keyboard navigation across a page boundary
 
 Down on the last loaded row selects the first appended row when more history exists. A jump can wait for the page already loading under the pointer or request another page if its target lies farther back. A newer navigation request, a changed selection, or a different snapshot cursor supersedes the pending jump. A failed or cancelled page that adds no rows ends the jump.

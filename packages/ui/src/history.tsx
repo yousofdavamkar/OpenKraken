@@ -154,7 +154,9 @@ export function History() {
     state.select(rows[index]!.oid);
   }
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (!snapshot) return;
+    if (!snapshot || event.nativeEvent.isComposing) return;
+    // Search hands focus here on Enter or Escape while the key may still be held.
+    if (event.repeat && (event.key === 'Enter' || event.key === 'Escape')) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
       event.preventDefault();
       useRepository.setState({ selection: { ...selection, selected: rows.map((r) => r.oid) } });
@@ -218,6 +220,7 @@ export function History() {
           maxLength={200}
           onChange={(event) => void state.search(event.target.value)}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || event.repeat) return;
             if (event.key === 'Escape') {
               void state.search('');
               viewport.current?.focus();

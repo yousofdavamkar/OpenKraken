@@ -606,3 +606,40 @@ test('sidebar hide, solo and pin change graph roots and survive refresh', async 
     await close();
   }
 });
+
+test('commit search keeps IME composition and held keys from changing the graph selection', async () => {
+  const { page, close } = await launch('linear', 4, (repo) => {
+    fixtureGit(repo, ['commit', '--allow-empty', '-m', '検索対象']);
+    fixtureGit(repo, ['commit', '--allow-empty', '-m', 'Newest change']);
+  });
+  try {
+    const search = page.getByRole('textbox', { name: 'Search commits' });
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    const selected = grid.getByRole('row', { selected: true });
+    await search.fill('検索');
+    await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
+    for (const key of ['Enter', 'Escape']) {
+      await search.dispatchEvent('keydown', { key, isComposing: true });
+      await expect(search).toBeFocused();
+      await expect(search).toHaveValue('検索');
+      await expect(selected).toContainText('Newest change');
+    }
+    await search.dispatchEvent('keydown', { key: 'Enter', repeat: true });
+    await expect(search).toBeFocused();
+    await search.press('Enter');
+    await expect(grid).toBeFocused();
+    await expect(selected).toContainText('検索対象');
+    await grid.dispatchEvent('keydown', { key: 'Enter', repeat: true });
+    await expect(page.getByRole('region', { name: 'Commit details' })).toHaveCount(0);
+    await search.focus();
+    await search.press('Escape');
+    await expect(search).toHaveValue('');
+    await expect(grid).toBeFocused();
+    await grid.dispatchEvent('keydown', { key: 'Escape', repeat: true });
+    await expect(selected).toContainText('検索対象');
+    await grid.press('Escape');
+    await expect(selected).toHaveCount(0);
+  } finally {
+    await close();
+  }
+});
