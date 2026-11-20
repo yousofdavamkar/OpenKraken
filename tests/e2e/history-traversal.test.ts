@@ -1,6 +1,6 @@
 import { _electron as electron, expect, test } from '@playwright/test';
 import { loadHistory, warmHistoryProfile } from '../history-profile.js';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
@@ -25,6 +25,46 @@ async function nativeHistory(cwd: string) {
   return { count, digest: hash.digest('hex') };
 }
 
+function nativeRefDigest(cwd: string) {
+  const git = (args: string[], input?: string) =>
+    execFileSync('git', args, {
+      cwd,
+      input,
+      encoding: 'utf8',
+      env: { ...process.env, LC_ALL: 'C' },
+      maxBuffer: 32 * 1024 * 1024,
+    });
+  // Git forbids tabs and line feeds in ref names. Preserve the space emitted for a non-HEAD ref.
+  const format =
+    '%(refname)%09%(objectname)%09%(objecttype)%09%(upstream)%09%(upstream:track,nobracket)%09%(HEAD)';
+  const rows = git(['for-each-ref', '--format=' + format]).split('\n');
+  expect(rows.pop()).toBe('');
+  const records = rows.map((row) => row.split('\t'));
+  const tags = [...new Set(records.filter((row) => row[2] === 'tag').map((row) => row[1]!))];
+  const peeled = new Map<string, string>();
+  if (tags.length) {
+    const objects = git(
+      ['cat-file', '--batch-check=%(objectname) %(objecttype)'],
+      tags.map((id) => id + '^{}\n').join(''),
+    )
+      .trimEnd()
+      .split('\n');
+    expect(objects).toHaveLength(tags.length);
+    for (const [index, id] of tags.entries()) {
+      const object = objects[index]!;
+      if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64}) (?:commit|tree|blob)$/.test(object))
+        throw new Error('Incomplete native tag target for ' + id);
+      peeled.set(id, object.replace(' ', '\t'));
+    }
+  }
+  const hash = createHash('sha256');
+  for (const [name, target, type, upstream, track, head] of records) {
+    const object = type === 'tag' ? peeled.get(target!)! : '\t';
+    hash.update([name, target, type, object, upstream, track, head].join('\t') + '\n');
+  }
+  return { count: records.length, digest: hash.digest('hex') };
+}
+
 test('every desktop history page matches native Git through the final commit', async () => {
   const fixture = process.env.OPENKRAKEN_TRAVERSAL_REPO;
   test.skip(
@@ -37,6 +77,7 @@ test('every desktop history page matches native Git through the final commit', a
   const switchedFrom = source ? realpathSync(source) : undefined;
   expect(switchedFrom).not.toBe(cwd);
   const expected = await nativeHistory(cwd);
+  const expectedRefs = nativeRefDigest(cwd);
   const profile = mkdtempSync(join(tmpdir(), 'openkraken-traversal-'));
   let app;
   try {
@@ -56,8 +97,32 @@ test('every desktop history page matches native Git through the final commit', a
     const first = await page.evaluate(async () => {
       const opened = await window.openkraken.request({ id: crypto.randomUUID(), method: 'open' });
       if (opened.kind !== 'snapshot') throw Error(JSON.stringify(opened));
-      const { repository, cursor, commits, hasMore } = opened.snapshot;
+      const { repository, cursor, commits, hasMore, refs } = opened.snapshot;
+      const rows = refs.map((ref) => {
+        const { upstream } = ref;
+        const counts = [];
+        if (upstream?.ahead) counts.push('ahead ' + upstream.ahead);
+        if (upstream?.behind) counts.push('behind ' + upstream.behind);
+        return (
+          [
+            ref.name,
+            ref.target,
+            ref.objectType,
+            ref.peeled ?? '',
+            ref.peeledType,
+            upstream?.ref ?? '',
+            upstream?.gone ? 'gone' : counts.join(', '),
+            ref.isHead ? '*' : ' ',
+          ].join('\t') + '\n'
+        );
+      });
+      const bytes = new TextEncoder().encode(rows.join(''));
+      const refHash = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
       return {
+        refs: {
+          count: refs.length,
+          digest: Array.from(refHash, (byte) => byte.toString(16).padStart(2, '0')).join(''),
+        },
         repoId: repository.id,
         path: repository.path,
         cursor,
@@ -67,6 +132,7 @@ test('every desktop history page matches native Git through the final commit', a
       };
     });
 
+    expect(first.refs).toEqual(expectedRefs);
     expect(realpathSync(first.path)).toBe(cwd);
     const hash = createHash('sha256').update(first.lines);
     const { repoId, cursor } = first;
@@ -104,7 +170,9 @@ test('every desktop history page matches native Git through the final commit', a
     }
     const digest = hash.digest('hex');
     expect({ count, digest }).toEqual(expected);
-    console.log(JSON.stringify({ count, pages, digest, persistedCommits, switchedFrom }));
+    console.log(
+      JSON.stringify({ count, pages, digest, refs: first.refs, persistedCommits, switchedFrom }),
+    );
   } finally {
     await app?.close();
     rmSync(profile, { recursive: true, force: true });
