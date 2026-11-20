@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -30,6 +30,22 @@ test('the scale fixture has deterministic complete history, genuine merges and a
       'Revision 1001\n',
     );
     expect(JSON.parse(await readFile(join(root, 'first', 'fixture.json'), 'utf8'))).toEqual(first);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('the status benchmark manifest identifies the canonical checkout through a directory alias', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-scale-path-'));
+  try {
+    const alias = join(root, 'alias');
+    const original = join(root, 'original');
+    await mkdir(original);
+    await symlink(original, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const destination = join(alias, 'fixture');
+    await createPerformanceFixture(destination, { commits: 2, files: 2 });
+    const manifest = JSON.parse(await readFile(join(destination, 'fixture.json'), 'utf8'));
+    expect(manifest.repository).toBe(await realpath(join(destination, 'repository')));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

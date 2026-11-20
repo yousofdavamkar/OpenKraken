@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -117,7 +117,7 @@ export async function createPerformanceFixture(destination, options = {}) {
   const manifest = {
     format: 1,
     kind: 'openkraken-synthetic-scale',
-    repository,
+    repository: await realpath(repository),
     commits: actualCommits,
     files: actualFiles,
     merges: Number(git('rev-list', '--all', '--min-parents=2', '--count')),
