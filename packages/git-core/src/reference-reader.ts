@@ -51,7 +51,7 @@ function sparseAnnotationNames(packed: Buffer) {
     const field = packed.subarray(space + 1, end);
     if (!isUtf8(field) || field.some((byte) => byte <= 32)) return;
     const name = field.toString('utf8');
-    if (!name.startsWith('refs/') || /[*?\[]/.test(name)) return;
+    if (!name.startsWith('refs/') || /[[*?\\]/.test(name)) return;
     names.push(name);
   }
   return names.length ? names : undefined;
