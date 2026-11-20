@@ -57,9 +57,9 @@ function ReportingDialog({
       ref={dialog}
       className="reference-dialog crash-reporting-dialog"
       aria-label="Crash reporting"
+      onClose={onClose}
       onCancel={(event) => {
-        event.preventDefault();
-        if (!saving) onClose();
+        if (saving) event.preventDefault();
       }}
     >
       <h2>Crash reporting</h2>
@@ -123,15 +123,14 @@ function ReportingDialog({
       <div className="dialog-actions">
         <button
           onClick={() => void save()}
+          aria-disabled={saving}
           disabled={
-            saving ||
-            !state.destination ||
-            (!!state.warning && (state.warning !== 'session' || enabled))
+            !state.destination || (!!state.warning && (state.warning !== 'session' || enabled))
           }
         >
           Apply
         </button>
-        <button onClick={onClose} disabled={saving}>
+        <button onClick={() => dialog.current?.close()} disabled={saving}>
           Close
         </button>
       </div>
@@ -144,6 +143,7 @@ export function CrashReporting() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const open = async () => {
+    if (loading) return;
     setLoading(true);
     setError('');
     try {
@@ -162,7 +162,7 @@ export function CrashReporting() {
   };
   return (
     <>
-      <button onClick={() => void open()} disabled={loading}>
+      <button onClick={() => void open()} aria-disabled={loading}>
         Crash reporting
       </button>
       {error && <span role="alert">{error}</span>}

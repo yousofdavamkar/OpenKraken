@@ -420,10 +420,20 @@ reportingTest('crashes and interrupted sessions respect consent', async ({ recei
     await page.getByRole('button', { name: 'Crash reporting', exact: true }).click();
     let dialog = page.getByRole('dialog', { name: 'Crash reporting' });
     await expect(dialog).toContainText(`https://127.0.0.1:${address.port}`);
-    await dialog.getByRole('checkbox', { name: 'Send crash summaries' }).check();
-    await dialog.getByRole('button', { name: 'Apply' }).click();
+    const consent = dialog.getByRole('checkbox', { name: 'Send crash summaries' });
+    await expect(consent).toBeFocused();
+    await page.keyboard.press('Space');
+    await expect(consent).toBeChecked();
+    await page.keyboard.press('Tab');
+    const apply = dialog.getByRole('button', { name: 'Apply' });
+    await expect(apply).toBeFocused();
+    await page.keyboard.press('Enter');
     await expect(dialog.getByRole('status')).toHaveText('Crash reporting is on.');
-    await dialog.getByRole('button', { name: 'Close' }).click();
+    await expect(apply).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(dialog.getByRole('button', { name: 'Close' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('button', { name: 'Crash reporting', exact: true })).toBeFocused();
     await app.close();
 
     app = await launch();
@@ -674,6 +684,7 @@ reportingTest('a failed opt-in does not enable reporting on restart', async ({ r
     await expect(dialog().getByText(/off for this launch/)).toBeVisible();
     await expect(dialog().getByRole('checkbox')).not.toBeChecked();
     await expect(dialog().getByRole('button', { name: 'Apply' })).toBeEnabled();
+    await expect(dialog().getByRole('button', { name: 'Apply' })).toBeFocused();
     await expect(readFile(join(root, 'profile/crash-reporting.json'))).rejects.toMatchObject({
       code: 'ENOENT',
     });

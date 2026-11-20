@@ -169,7 +169,7 @@ function UpdatesDialog({
       ref={dialog}
       className="reference-dialog updates-dialog"
       aria-label="App updates"
-      onCancel={onClose}
+      onClose={onClose}
     >
       <h2>App updates</h2>
       {state?.channel === 'beta' && <p>Beta channel · This build receives prerelease updates.</p>}
@@ -265,7 +265,7 @@ function UpdatesDialog({
             Check for updates
           </button>
         )}
-        <button autoFocus onClick={onClose}>
+        <button autoFocus onClick={() => dialog.current?.close()}>
           Close
         </button>
       </div>
