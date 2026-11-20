@@ -296,7 +296,7 @@ try {
     payload,
   };
   let file = basename(artifact);
-  if (identity || winIdentity) file = await saveSignedInstaller(output, artifact, manifest);
+  if (signer) file = await saveSignedInstaller(output, artifact, manifest);
   else {
     await cp(artifact, join(output, file));
     await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');

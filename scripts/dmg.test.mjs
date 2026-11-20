@@ -232,7 +232,34 @@ test.skipIf(process.platform !== 'darwin')(
   },
 );
 
-test.each(['dmg', 'msi'])(
+test.each(['dmg', 'msi', 'rpm'])(
+  'preserves the published %s if a signed build no longer matches its receipt',
+  async (extension) => {
+    const directory = await fixture();
+    const output = join(directory, 'output');
+    const source = join(directory, 'OpenKraken.' + extension);
+    await mkdir(output);
+    await writeFile(source, 'original');
+    const artifact = { size: 8, sha256: await sha256(source) };
+    const file = await saveSignedInstaller(output, source, { artifact });
+    const previous = await readFile(join(output, 'manifest.json'), 'utf8');
+    for (const [contents, size] of [
+      ['modified', 8],
+      ['short', 8],
+      ['original', 7],
+    ]) {
+      await writeFile(source, contents);
+      await expect(
+        saveSignedInstaller(output, source, { artifact: { ...artifact, size } }),
+      ).rejects.toThrow('receipt');
+      expect(await readFile(join(output, file), 'utf8')).toBe('original');
+      expect(await readFile(join(output, 'manifest.json'), 'utf8')).toBe(previous);
+      expect((await readdir(output)).sort()).toEqual([file, 'manifest.json'].sort());
+    }
+  },
+);
+
+test.each(['dmg', 'msi', 'rpm'])(
   'concurrent signed %s saves retain the bytes referenced by each receipt',
   async (extension) => {
     const directory = await fixture();
@@ -244,7 +271,11 @@ test.each(['dmg', 'msi'])(
         await mkdir(build);
         const path = join(build, `OpenKraken.${extension}`);
         await writeFile(path, value);
-        return { path, value, manifest: { artifact: { sha256: await sha256(path) } } };
+        return {
+          path,
+          value,
+          manifest: { artifact: { size: Buffer.byteLength(value), sha256: await sha256(path) } },
+        };
       }),
     );
     const files = await Promise.all(
