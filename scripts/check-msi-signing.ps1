@@ -43,6 +43,18 @@ try {
     }
     Assert-Rejected $file ('AB' * 32) 'selected publisher'
     Assert-Rejected $file $pin 'Missing Authenticode timestamp' -Timestamp
+    $changed = Join-Path $fixture.FullName 'modified-helper.exe'
+    $helper = Join-Path $fixture.FullName 'release/OpenKraken-win32-x64/resources/app.asar.unpacked/dist/helpers/openkraken-askpass.exe'
+    Copy-Item -LiteralPath $helper -Destination $changed
+    $stream = [IO.File]::Open($changed, 'Open', 'ReadWrite', 'None')
+    try {
+        $stream.Position = 4096
+        $byte = $stream.ReadByte()
+        if ($byte -lt 0) { throw 'Expected bundled PE helper fixture' }
+        $stream.Position = 4096
+        $stream.WriteByte($byte -bxor 1)
+    } finally { $stream.Dispose() }
+    Assert-Rejected $changed $pin 'selected publisher'
     $unsigned = Get-Content -LiteralPath 'release/installers/win32-x64/test/msi/manifest.json' -Raw | ConvertFrom-Json
     Assert-Rejected (Join-Path 'release/installers/win32-x64/test/msi' $unsigned.artifact.file) $pin 'selected publisher'
 } finally {
