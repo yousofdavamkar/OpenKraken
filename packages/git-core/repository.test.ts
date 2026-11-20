@@ -201,6 +201,27 @@ test('shallow, sparse, submodule and SHA-256 repositories', async () => {
 });
 
 test.skipIf(process.platform === 'win32')(
+  'resolves unborn and committed HEAD in a checkout whose name contains a newline',
+  async () => {
+    const path = join(root, 'checkout\n' + 'a'.repeat(40));
+    mkdirSync(path);
+    fixtureGit(path, ['init', '-b', 'topic']);
+    const unborn = await service.open(path);
+    expect(unborn.head).toEqual({ kind: 'branch', ref: 'refs/heads/topic' });
+    expect(unborn.gitDir).toBe(realpathSync(join(path, '.git')));
+    expect(unborn.commonDir).toBe(unborn.gitDir);
+    fixtureGit(path, ['commit', '--allow-empty', '-m', 'First commit']);
+    fixtureGit(path, ['checkout', '--detach']);
+    const detached = await service.open(path);
+    expect(detached.id).toBe(unborn.id);
+    expect(detached.head).toEqual({
+      kind: 'detached',
+      oid: fixtureGit(path, ['rev-parse', 'HEAD']),
+    });
+  },
+);
+
+test.skipIf(process.platform === 'win32')(
   'opening a folder ending in a carriage return preserves its repository identity and history',
   async () => {
     const sibling = createFixture(join(root, 'peer'), 'linear', 2);

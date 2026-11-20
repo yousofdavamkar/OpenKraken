@@ -164,8 +164,8 @@ export class RepositoryService {
   }
   async open(input: string, signal?: AbortSignal): Promise<Repository> {
     const cwd = await realpath(input);
-    const metadata = (
-      await this.text(
+    const [description, headRef, sparse] = await Promise.all([
+      this.text(
         cwd,
         [
           'rev-parse',
@@ -174,10 +174,21 @@ export class RepositoryService {
           '--git-common-dir',
           '--is-bare-repository',
           '--is-shallow-repository',
+          '--verify',
+          '--quiet',
+          'HEAD',
         ],
         signal,
-      )
-    ).split(process.platform === 'win32' ? /\r?\n/ : '\n');
+        [0, 1],
+      ),
+      this.text(cwd, ['symbolic-ref', '-q', 'HEAD'], signal, [0, 1]),
+      this.text(cwd, ['config', '--bool', '--get', 'core.sparseCheckout'], signal, [0, 1]),
+    ]);
+    const metadata = description.split(process.platform === 'win32' ? /\r?\n/ : '\n');
+    // An unborn HEAD leaves the two paths and booleans intact, without a trailing object ID.
+    const headOid = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(metadata.at(-1) ?? '')
+      ? metadata.pop()!
+      : '';
     let [gitDir, commonDir] = metadata;
     const [bare, shallow] = metadata.slice(-2);
     // rev-parse separates values with newlines even when a path contains one.
@@ -198,11 +209,6 @@ export class RepositoryService {
     const path = await realpath(
       bare === 'true' ? gitDir : await this.text(cwd, ['rev-parse', '--show-toplevel'], signal),
     );
-    const [headRef, headOid, sparse] = await Promise.all([
-      this.text(cwd, ['symbolic-ref', '-q', 'HEAD'], signal, [0, 1]),
-      this.text(cwd, ['rev-parse', '--verify', '--quiet', 'HEAD'], signal, [0, 1]),
-      this.text(cwd, ['config', '--bool', '--get', 'core.sparseCheckout'], signal, [0, 1]),
-    ]);
     const stateMarkers: [string, Repository['state']][] = [
       ['rebase-merge/interactive', 'rebasing-interactive'],
       ['rebase-merge', 'rebasing'],
