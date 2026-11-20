@@ -266,6 +266,34 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     await save.click();
     await expect(save).toBeEnabled();
     await expect(stat(exported)).rejects.toMatchObject({ code: 'ENOENT' });
+    if (process.platform !== 'win32') {
+      // Fail just the first directory sync on the chosen volume after publication.
+      await app.evaluate(async (_, parent) => {
+        const fs = process.getBuiltinModule('fs')!.promises;
+        const directory = await fs.open(parent, 'r');
+        const target = await directory.stat();
+        const prototype: typeof directory = Object.getPrototypeOf(directory);
+        await directory.close();
+        const sync = prototype.sync;
+        prototype.sync = async function () {
+          const info = await this.stat();
+          if (info.dev === target.dev && info.ino === target.ino) {
+            prototype.sync = sync;
+            throw new Error('Fixture directory sync failed');
+          }
+          return sync.call(this);
+        };
+      }, root);
+      await save.click();
+      await expect(dialog.getByRole('status')).toContainText(
+        'filesystem could not confirm the save',
+        {
+          timeout: 60000,
+        },
+      );
+      expect(await fileDigest(exported)).toBe(sha256);
+      await expect(save).toBeEnabled();
+    }
     await save.click();
     await expect(dialog.getByRole('status')).toHaveText(`Version ${version} installer saved.`, {
       timeout: 60000,
