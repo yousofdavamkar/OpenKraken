@@ -49,6 +49,10 @@ function stopHistorySearch(id: string) {
   }
   return window.openkraken.cancel(id);
 }
+function retireHistorySearch(id: string) {
+  // The visible query or snapshot has changed. Its owner already ignores the old reply.
+  void stopHistorySearch(id)?.catch(() => {});
+}
 let navigationSequence = 0;
 interface State {
   snapshot?: Snapshot;
@@ -362,7 +366,7 @@ export const useRepository = create<State>()(
             };
           });
           if (previousSearch && previousSearch !== retainedSearch)
-            void stopHistorySearch(previousSearch);
+            retireHistorySearch(previousSearch);
           performance.mark('repository-state-published');
           if (query) await updateLoadedMatches();
         } else if (result.kind === 'error') throw new Error(result.message);
@@ -466,7 +470,7 @@ export const useRepository = create<State>()(
         s.searchResults = undefined;
         s.searching = undefined;
       });
-      if (previous) void stopHistorySearch(previous);
+      if (previous) retireHistorySearch(previous);
       await updateLoadedMatches();
     },
     searchAll: async () => {

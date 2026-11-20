@@ -514,6 +514,15 @@ test('a failed cancellation can be retried while the search is running', async (
   await searching;
 });
 
+function rejectRetiredSearchCancellation() {
+  const cancellations: string[] = [];
+  window.openkraken.cancel = async (id) => {
+    cancellations.push(id);
+    throw new Error('Retired request');
+  };
+  return cancellations;
+}
+
 test.each(['cancelled', 'snapshot'] as const)(
   'a picker returning %s retires search only on repository replacement',
   async (kind) => {
@@ -525,8 +534,9 @@ test.each(['cancelled', 'snapshot'] as const)(
     request.mockReturnValueOnce(read.promise).mockReturnValueOnce(picker.promise);
     const searching = useRepository.getState().searchAll();
     const searchId = useRepository.getState().searching;
+    const cancellations = rejectRetiredSearchCancellation();
     const switching = useRepository.getState().run({ id: crypto.randomUUID(), method: 'open' });
-    expect(window.openkraken.cancel).not.toHaveBeenCalled();
+    expect(cancellations).toEqual([]);
     picker.resolve(kind === 'snapshot' ? { kind, snapshot: fixture() } : { kind });
     await switching;
     read.resolve({
@@ -536,23 +546,28 @@ test.each(['cancelled', 'snapshot'] as const)(
       truncated: false,
     });
     await searching;
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(useRepository.getState().error).toBeUndefined();
     if (kind === 'cancelled') {
       expect(useRepository.getState().searchResults).toEqual(snapshot.commits);
-      expect(window.openkraken.cancel).not.toHaveBeenCalled();
+      expect(cancellations).toEqual([]);
     } else {
       expect(useRepository.getState().searchResults).toBeUndefined();
-      expect(window.openkraken.cancel).toHaveBeenCalledWith(searchId);
+      expect(cancellations).toEqual([searchId]);
     }
   },
 );
-test('late all-history search is discarded after query changes', async () => {
+test('editing a query discards late results even if cancelling the old search fails', async () => {
   const snapshot = fixture();
   await open(snapshot);
   await useRepository.getState().search('First');
   const pending = deferred();
   request.mockReturnValueOnce(pending.promise);
   const searching = useRepository.getState().searchAll();
+  const searchId = useRepository.getState().searching;
+  const cancellations = rejectRetiredSearchCancellation();
   await useRepository.getState().search('absent');
+  expect(cancellations).toEqual([searchId]);
   pending.resolve({
     kind: 'search',
     cursor: snapshot.cursor,
@@ -562,6 +577,8 @@ test('late all-history search is discarded after query changes', async () => {
   await searching;
   expect(useRepository.getState().searchResults).toBeUndefined();
   expect(useRepository.getState().matches).toEqual([]);
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(useRepository.getState().error).toBeUndefined();
 });
 test('wrong page offset fails before modifying visible history', async () => {
   const snapshot = fixture();
