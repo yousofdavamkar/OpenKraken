@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import {
   updateConfiguration,
@@ -50,6 +51,12 @@ async function verifyFeed() {
       channel: expected.release.channel,
       version: expected.release.version,
       sequence: expected.release.sequence,
+      publicKeySha256: createHash('sha256')
+        .update(Buffer.from(config.publicKey, 'base64'))
+        .digest('hex'),
+      payloadSha256: expected.digest,
+      issuedAt: expected.release.issuedAt,
+      expiresAt: expected.release.expiresAt,
       artifacts: expected.release.artifacts,
     }),
   );

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'vitest';
 import { execFile } from 'node:child_process';
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:https';
 import { tmpdir } from 'node:os';
@@ -118,7 +118,16 @@ function check(trust = true) {
 
 test('a served release verifies every platform and checks the manifest again at the end', async () => {
   const { stdout } = await check();
+  const config = JSON.parse(await readFile(join(directory, 'config.json'), 'utf8'));
+  const payload = Buffer.from(JSON.parse(envelope).payload, 'base64');
+  const signed = JSON.parse(payload.toString('utf8'));
   expect(JSON.parse(stdout)).toMatchObject({
+    publicKeySha256: createHash('sha256')
+      .update(Buffer.from(config.publicKey, 'base64'))
+      .digest('hex'),
+    payloadSha256: createHash('sha256').update(payload).digest('hex'),
+    issuedAt: signed.issuedAt,
+    expiresAt: signed.expiresAt,
     channel: 'beta',
     version: '0.2.0-beta.3',
     sequence: 3,
