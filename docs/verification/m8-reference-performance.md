@@ -2,6 +2,23 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Raw Git dates in the history stream
+
+On full Linux history, Git returned 21,207,090 bytes for 17,000 commits using the original author and committer dates. With raw dates it returned 20,527,090 bytes. All parsed fields matched on Git 2.53.0 and 2.38.0. The raw format also reads an epoch-zero commit whose negative timezone caused the original Git command to abort. [Format and compatibility](../decisions/0002-git-protocol.md#raw-author-and-committer-dates)
+
+A second comparison traversed all 1,505,199 commits from the 50,000 refs on Git 2.53.0. Each parser streamed complete ordered commit objects into SHA-256, including parent lists, author and committer records, summaries and bodies. Both digests were `a8d8aa93f10d02879da75d613294f7c6fb12db04dd35c2ba46655efd861762fa`. Native output fell from 1,319,948,216 to 1,259,740,256 bytes. On a separate set of 42 timestamp and timezone combinations, both Git versions returned all raw dates and refused six calendar dates near the epoch.
+
+Three pairs per fixture alternated Git utility bundles on Linux x64 under X11. Each opening used a fresh profile, loaded the first 2,000 commits and appended three 5,000-commit pages. The Linux checkout contained 1,505,199 commits. OS caches stayed populated.
+
+| Fixture                 | Median first paint, original | Median first paint, raw dates | Median append, original | Median append, raw dates |
+| ----------------------- | ---------------------------: | ----------------------------: | ----------------------: | -----------------------: |
+| One ref                 |                     328.2 ms |                      318.7 ms |                200.3 ms |                 203.9 ms |
+| 50,000 distinct targets |                     688.8 ms |                      697.9 ms |                212.5 ms |                 209.4 ms |
+
+With raw dates, the three distinct-target openings took 731.8, 665.7 and 697.9 ms. All 18 candidate appends met 300 ms and graph frame intervals were 16.7–16.8 ms p95. The reduced stream size and the epoch fix held independently of the timing variation. First paint on distinct targets still exceeds 500 ms. [Individual measurements](m8-opening-experiments.csv)
+
+A separate prototype piped the starting IDs into the history walk while Git enumerated refs. Across nine alternating native pairs after warm-up, median time to read the first 2,001 commits fell from 166.6 to 155.8 ms with identical output. In six alternating fresh-profile Electron pairs after warm-up, median native snapshot time fell from 368.0 to 352.8 ms while first paint rose from 682.4 to 689.9 ms. The shipping utility keeps the existing root enumeration.
+
 ## Commit type and renderer scheduling experiments
 
 On full Linux history with 50,000 distinct targets, a diagnostic utility ran a name and tracking read alongside `git --no-replace-objects rev-list --no-walk=unsorted --all`. It accepted commit types only for targets that appeared in the latter output and used the full native query if any target was unresolved or the repository used replacement refs. In a separate mixed-object repository, Git's no-walk command returned the commit ID and omitted the direct IDs of the annotated tag, tree and blob. Across six alternating fresh-profile pairs after warm-up on the large fixture, median native snapshot time rose from 374.9 to 399.7 ms and first paint rose from 713.5 to 737.5 ms.

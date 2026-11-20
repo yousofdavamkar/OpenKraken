@@ -2,6 +2,14 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest three runs. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Opening and searching commits at the Unix epoch
+
+A commit at Unix time zero with a `-0330` offset previously caused Git to abort while opening its history. The graph, stash projection, message search and exact-ID lookup now read native raw dates. An Electron fixture opened the commit, selected it from the loaded search and showed its details after a full-history hash search. Git 2.38.0 passed all 55 focused parser, history and prefetch tests.
+
+Across the 1,505,199-commit Linux history, the ordered digest of every decoded field matched the original format and the Git stream was 60,207,960 bytes smaller. All 18 candidate appends met 300 ms. The one-ref fixture painted in 312.6–348.7 ms. With 50,000 distinct targets, all three openings exceeded 500 ms. [Paired runs and complete traversal](m8-reference-performance.md#raw-git-dates-in-the-history-stream)
+
+On Linux x64, 1,105 unit and native tests passed with nine skips. Typechecking, lint, the production build and packaged desktop smoke passed. During concurrent verification, one synthetic 5,000-commit append took 347.1 ms against a 300 ms budget. All 24 graph and history-cache Electron tests passed in isolation, with the same append taking 145.6 ms.
+
 ## Verifying a hosted update feed
 
 The release check compares the hosted signed manifest with the approved candidate, streams every installer through the desktop download checks and reads the manifest again. A loopback feed failed the check for a missing, short, redirected or corrupted Windows installer after the Linux installer passed. A different signed payload for the same version and sequence failed both before download and when the feed changed during download. An invalid signature and an untrusted TLS certificate each stopped the check before any installer request. [Release-owner command and Caddy configuration](../decisions/0082-signed-update-release-protocol.md#serving-and-checking-a-release)
