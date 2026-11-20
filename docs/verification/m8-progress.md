@@ -1,6 +1,14 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. On Linux x64, full Linux history with one ref and with 49,999 aliases on the first row met the 500 ms opening and 300 ms paging budgets in the latest fresh-profile runs. Fresh-profile runs with 50,000 distinct ref targets or 49,999 aliases of a nested annotated tag exceeded the opening budget. Native Windows/macOS and ARM64 acceptance, the production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+M8 remains in progress. On Linux x64, the first 2,000 commits painted within 500 ms on full Linux history with one ref and with 49,999 nested tag aliases on the first row. The fixture with 50,000 distinct targets exceeded the budget in all three fresh profiles and after all three restarts. Native Windows, macOS and ARM64 acceptance, production release gates, and remaining [M6](m6-progress.md) and [M7](m7-progress.md) work are open.
+
+## Reference parsing and graph restarts
+
+Reusing validated object IDs reduced retained parser heap by 3.08 MiB on the full nested-tag stream and 1.51 MiB on the direct stream. All six nested-tag acceptance runs passed. First paints took 493.8–495.0 ms on fresh profiles and 437.6–487.9 ms after restart. Distinct targets took 738.2–823.0 ms fresh and 688.6–705.1 ms after restart. All 51 measured appends met 300 ms, including the first live page after each restart. [Measurements and protocol](m8-reference-performance.md#reusing-validated-object-ids)
+
+After restarting from 17,000 persisted commits, the desktop returned every ref and matched Git’s IDs and ordered parents through all 302 pages on both fixtures. The tag fixture contained 1,505,200 commits and the distinct-target fixture contained 1,505,199. The reference reader also matched native Git across all 50,000 records on Git 2.38.0 and 2.53.0. On both Git versions, a separate desktop fixture covered diverged and gone upstreams, nested tags, Unicode names, and tags ending at trees and blobs. [Traversal procedure](m8-scale-performance.md#comparing-a-restarted-graph-with-native-git)
+
+On Linux x64, 1,189 unit and native tests passed with nine skips. All 35 graph, commit-reference, sidebar and history-cache desktop tests passed, including six Canvas goldens. Typechecking, lint, build and packaging passed. The unsigned package verified the first-row list of 49,999 aliases, checked 207 mounted-row badges on the distinct-target fixture, and passed its history, search and keyboard smoke test.
 
 ## Commit badges on large histories
 

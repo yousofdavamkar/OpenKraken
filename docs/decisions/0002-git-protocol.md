@@ -37,3 +37,7 @@ The opening metadata query asks `git rev-parse` for the Git directory, common di
 ## Nested annotated tags
 
 Git 2.38 can return an intermediate tag in the dereferenced fields of `for-each-ref`. The reference reader resolves those remaining tag IDs with one bounded `cat-file --batch-check` request. Each input uses the captured object ID and the recursive `^{}` suffix. The ref retains the outer tag ID for identity and uses the final object ID and type for badges, graph roots and search. Tags ending at a tree or blob stay visible in the reference list. [Git revision syntax](https://git-scm.com/docs/gitrevisions) and [batch object information](https://git-scm.com/docs/git-cat-file).
+
+## Repeated object IDs in reference streams
+
+The reference parser keeps the last validated direct ID and the last nonempty peeled ID across Git output chunks. When another ref contains the same ID, its record shares the validated string. Every different ID must contain exactly 40 or 64 lowercase hexadecimal characters. Callers may update emitted reference records during tag resolution, so validation uses private parser state. The parser retains at most two ID strings for reuse. [Parsing and desktop measurements](../verification/m8-reference-performance.md#reusing-validated-object-ids)

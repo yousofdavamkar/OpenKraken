@@ -2,6 +2,29 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Reusing validated object IDs
+
+On Linux x64, five paired parser runs compared `4e20003` and `c6b8c9a` on native output from 50,000 refs. Each run started a new Node process, streamed the same bytes in 64 KiB chunks, and measured retained heap after GC. All four streams produced identical digests for every record across builds. The full format includes peeled fields. The direct format omits them.
+
+| Native stream            | Median parse time, before → after | Median retained heap, before → after |
+| ------------------------ | --------------------------------: | -----------------------------------: |
+| Full, nested aliases     |                    73.6 → 58.8 ms |        21,491,416 → 18,264,968 bytes |
+| Direct, nested aliases   |                    47.9 → 32.9 ms |        12,922,640 → 11,340,488 bytes |
+| Full, distinct targets   |                    62.3 → 56.0 ms |        14,686,008 → 14,687,392 bytes |
+| Direct, distinct targets |                    60.1 → 58.5 ms |        14,584,008 → 14,585,024 bytes |
+
+Five fresh-profile Electron pairs after warm-up used the same renderer and alternated Git-service build order. With nested tags, median first paint changed from 531.2 to 525.2 ms and native snapshot time from 214.8 to 196.5 ms. With distinct targets, median first paint changed from 749.1 to 735.4 ms and native snapshot time from 429.5 to 427.0 ms.
+
+The independent acceptance runs used Git 2.53.0, retained OS caches and three profiles per condition. The restart cases reopened a profile after persisting 17,000 commits. Every nested-tag run exercised the first-row overflow dialog.
+
+| Complete Linux history                         | First paint, fresh profile | First paint, restarted profile |
+| ---------------------------------------------- | -------------------------: | -----------------------------: |
+| One ref                                        |             332.2–340.0 ms |                              — |
+| 49,999 aliases of a three-level annotated tag  |             493.8–495.0 ms |                 437.6–487.9 ms |
+| 50,000 distinct targets with one annotated tag |             738.2–823.0 ms |                 688.6–705.1 ms |
+
+All 45 appends through 17,000 commits met 300 ms. After restart, keyboard navigation triggered six more appends past the persisted window, taking 200.3–244.9 ms. The distinct-target first paint exceeded 500 ms on every run. [Individual desktop measurements](m8-opening-experiments.csv) · [Parser decision](../decisions/0002-git-protocol.md#repeated-object-ids-in-reference-streams)
+
 ## Commit badge lookups by object ID prefix
 
 On Linux x64, five pairs of fresh Electron profiles compared eager indexing with resolving groups of target IDs as their commit rows mounted. Each pair alternated renderer build order after a warm-up pair. Both builds used the same Git utility and fixture, displayed 2,000 commits and 50,000 matching refs, and matched on the first ten mounted rows’ commit IDs, badge labels and tooltips. A renderer GC after the paint measurement preceded the heap sample and the first 5,000-commit append.
