@@ -7,6 +7,8 @@ import { mkdtemp, rm, mkdir, writeFile, readFile, lstat, symlink } from 'node:fs
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
+import { createFixture } from '../packages/test-fixtures/src/index.ts';
+import { checkPackagedHistory } from './check-packaged-history.mjs';
 import { assertMsiSmokeProfile } from './msi-lifecycle.mjs';
 
 const msiProfile = process.env.OPENKRAKEN_MSI_PROFILE;
@@ -46,9 +48,16 @@ const executable =
     ? join(directory, 'OpenKraken.app/Contents/MacOS/openkraken')
     : join(directory, process.platform === 'win32' ? 'openkraken.exe' : 'openkraken'));
 const profile = msiProfile ?? (await mkdtemp(join(tmpdir(), 'openkraken-package-')));
-const linkedRepository = join(profile, 'linked repository');
-await mkdir(linkedRepository, { recursive: !!msiProfile });
-await promisify(execFile)('git', ['init', '--initial-branch=main', linkedRepository]);
+const history = process.argv.includes('--history');
+const linkedRepository = join(
+  history ? await mkdtemp(join(profile, 'history-')) : profile,
+  'linked repository',
+);
+if (history) createFixture(linkedRepository, 'linear', 7003);
+else {
+  await mkdir(linkedRepository, { recursive: !!msiProfile });
+  await promisify(execFile)('git', ['init', '--initial-branch=main', linkedRepository]);
+}
 const repositoryUri = `openkraken://repo?path=${encodeURIComponent(linkedRepository)}`;
 const nativePicker = process.platform === 'linux' && !!process.env.OPENKRAKEN_XDOTOOL;
 const packageShell = process.env.OPENKRAKEN_PACKAGE_SHELL ?? '/bin/bash';
@@ -169,11 +178,16 @@ try {
   await page.getByRole('button', { name: 'Review repository link', exact: true }).click();
   const linkDialog = page.getByRole('dialog', { name: 'Open linked repository', exact: true });
   await expect(linkDialog).toContainText(linkedRepository);
-  await linkDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-  if (!msiProfile)
-    await expect(
-      page.getByRole('heading', { name: 'A clear view of your history.' }),
-    ).toBeVisible();
+  if (history) {
+    await linkDialog.getByRole('button', { name: 'Open repository', exact: true }).click();
+    await checkPackagedHistory(page, linkedRepository);
+  } else {
+    await linkDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    if (!msiProfile)
+      await expect(
+        page.getByRole('heading', { name: 'A clear view of your history.' }),
+      ).toBeVisible();
+  }
   const socketPath =
     process.platform === 'win32'
       ? `\\\\.\\pipe\\openkraken-${randomUUID()}`
@@ -257,7 +271,7 @@ try {
       await xdo('type', '--clearmodifiers', '--delay', '1', path);
       await xdo('key', '--clearmodifiers', 'alt+o');
     };
-    await pickFolder('Open a repository', repository);
+    await pickFolder(history ? 'Open repository' : 'Open a repository', repository);
     await expect(
       page.getByRole('heading', { name: 'terminal-repository', exact: true }),
     ).toBeVisible();

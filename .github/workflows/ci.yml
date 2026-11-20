@@ -241,7 +241,7 @@ jobs:
       - if: runner.os == 'Linux'
         env:
           OPENKRAKEN_XDOTOOL: xdotool
-        run: xvfb-run -a pnpm smoke:package
+        run: xvfb-run -a pnpm smoke:package --history
       - if: runner.os == 'Linux'
         name: Packaged merge draft recovery with a private GNOME keyring
         run: xvfb-run -a node scripts/verify-linux-merge-keyring.mjs
@@ -252,7 +252,7 @@ jobs:
           OPENKRAKEN_PACKAGE_SHELL: /usr/bin/zsh
         run: xvfb-run -a pnpm smoke:package
       - if: runner.os != 'Linux'
-        run: pnpm smoke:package
+        run: pnpm smoke:package --history
       - if: runner.os == 'macOS'
         name: Build and verify unsigned DMG copy-install
         timeout-minutes: 15
