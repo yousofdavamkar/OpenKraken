@@ -251,29 +251,31 @@ test('large annotated alias runs preserve ordinary reference records on the rend
     names.map((name) => `create ${name} ${target}\n`).join(''),
   );
   fixtureGit(repository, ['pack-refs', '--all']);
-  const app = await electron.launch({
-    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
-  });
+  const entry = join(root, 'observe-transfer.cjs');
+  writeFileSync(
+    entry,
+    `
+    const { utilityProcess } = require('electron');
+    const fork = utilityProcess.fork.bind(utilityProcess);
+    utilityProcess.fork = (...args) => {
+      const child = fork(...args);
+      if (args[0].endsWith('git-service.cjs')) {
+        utilityProcess.fork = fork;
+        child.on('message', (message) => {
+          if (message?.snapshotPart === 'tagAliases')
+            globalThis.annotationAliases = message.refs.filter(row => typeof row === 'string').length;
+        });
+      }
+      return child;
+    };
+    require(${JSON.stringify(resolve('apps/desktop/dist/main.cjs'))});
+  `,
+  );
+  const app = await electron.launch({ args: [entry, `--user-data-dir=${join(root, 'profile')}`] });
   try {
     const page = await app.firstWindow();
-    await app.evaluate(({ dialog, utilityProcess }, path) => {
+    await app.evaluate(({ dialog }, path) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
-      const fork = utilityProcess.fork.bind(utilityProcess);
-      utilityProcess.fork = (...args) => {
-        const child = fork(...args);
-        if (args[0].endsWith('git-service.cjs')) {
-          utilityProcess.fork = fork;
-          child.on('message', (message) => {
-            if (message?.snapshotPart === 'tagAliases')
-              Reflect.set(
-                globalThis,
-                'annotationAliases',
-                message.refs.filter((row: unknown) => typeof row === 'string').length,
-              );
-          });
-        }
-        return child;
-      };
     }, repository);
     const raw = await page.evaluate(() =>
       window.openkraken.request({ id: crypto.randomUUID(), method: 'open' }, 'snapshot-transfer'),
