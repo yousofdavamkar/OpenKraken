@@ -134,8 +134,10 @@ jobs:
               continue
             fi
             cp "$fixture/fixture.json" "$output-fixture.json"
+            alias_ref=""
+            if [[ "$mode" == nested-aliases ]]; then alias_ref=refs/tags/release-49998; fi
             for suite in graph traversal; do
-              bash scripts/run-scale-test.sh "$suite" "$fixture/repository.git" "$output-$suite" || failed=1
+              OPENKRAKEN_BENCH_ALIAS_REF="$alias_ref" bash scripts/run-scale-test.sh "$suite" "$fixture/repository.git" "$output-$suite" || failed=1
             done
           done
           exit "$failed"

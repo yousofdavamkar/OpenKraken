@@ -20,15 +20,18 @@ function tagObject(repository, name, type, oid) {
   );
 }
 
-function nestedAnnotation(repository) {
+function nestedAnnotation(repository, head) {
+  // Keep the collocated aliases on the first measured graph row.
+  const [headTime] = git(repository, ['rev-list', '--timestamp', '--max-count=1', head]).split(' ');
+  const commitIdentity = `Fixture Author <author@example.test> ${BigInt(headTime) + 1n} +0000`;
   const tree = git(repository, ['mktree'], '');
   const commit = git(
     repository,
     ['hash-object', '-w', '-t', 'commit', '--stdin'],
     [
       'tree ' + tree,
-      'author ' + identity,
-      'committer ' + identity,
+      'author ' + commitIdentity,
+      'committer ' + commitIdentity,
       '',
       'Reachable through nested annotated tags',
       '',
@@ -81,7 +84,7 @@ export async function createReferenceFixture(source, destination, mode, count = 
   let annotation;
   const commands = [`create refs/heads/main ${commits[0]}`];
   if (mode === 'nested-aliases') {
-    const { commit, outer } = nestedAnnotation(repository);
+    const { commit, outer } = nestedAnnotation(repository, commits[0]);
     annotation = { name: 'refs/tags/release-00000', commit };
     for (let index = 0; index < count - 1; index++) {
       commands.push(`create refs/tags/release-${String(index).padStart(5, '0')} ${outer}`);

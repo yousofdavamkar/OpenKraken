@@ -106,6 +106,7 @@ test('nested aliases reach one independent commit and leave the source refs and 
       target = git(repo, ['cat-file', '-p', target]).split('\n')[0].slice('object '.length);
     }
     expect(result.annotation.commit).toBe(target);
+    expect(git(repo, ['rev-list', '--date-order', '--max-count=1', '--all'])).toBe(target);
     expect(git(repo, ['rev-list', '--parents', target])).toBe(target);
     expect(git(repo, ['rev-list', '--count', '--all'])).toBe('4');
     expect(git(source, ['show-ref'])).toBe(original);

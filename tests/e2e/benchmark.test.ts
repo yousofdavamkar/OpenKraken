@@ -228,6 +228,26 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       contentType: 'application/json',
     });
     await page.screenshot({ path: testInfo.outputPath('real-repository.png') });
+    const alias = process.env.OPENKRAKEN_BENCH_ALIAS_REF;
+    if (alias) {
+      const commit = git('rev-parse', '--verify', alias + '^{commit}');
+      const object = git('rev-parse', '--verify', alias);
+      const count = git('for-each-ref', '--format=.', '--points-at=' + object).split('\n').length;
+      await grid.press('Home');
+      const first = grid.getByRole('row', { selected: true });
+      await expect(first).toHaveAttribute('aria-rowindex', '1');
+      await expect(first).toHaveAttribute('data-oid', commit);
+      const opener = first.getByRole('button', {
+        name: `Show all ${count.toLocaleString()} references for commit ${commit.slice(0, 8)}`,
+        exact: true,
+      });
+      await opener.press('Enter');
+      const dialog = page.getByRole('dialog', { name: 'Commit references' });
+      await dialog.getByRole('textbox', { name: 'Filter commit references' }).fill(alias);
+      await expect(dialog.getByRole('listitem')).toHaveText(alias);
+      await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+      await expect(opener).toBeFocused();
+    }
     if (hiddenTags.length) {
       // Check the saved view after taking timings and the screenshot.
       const name = hiddenTags[0]!;
