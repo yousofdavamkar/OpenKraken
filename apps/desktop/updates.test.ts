@@ -859,6 +859,61 @@ function signed(value: unknown, key = keys.privateKey) {
   });
 }
 
+test.each(['same release', 'check failed', 'new release', 'changed bytes', 'different format'])(
+  'rechecks a verified installer in the running app with %s',
+  async (scenario) => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-session-download-'));
+    const directory = join(root, 'updates');
+    const meta = release();
+    const deb = {
+      ...meta.artifacts[0]!,
+      format: 'deb',
+      name: 'OpenKraken.deb',
+      sha256: createHash('sha256').update('package').digest('hex'),
+    };
+    meta.artifacts.push(deb);
+    let offline = false;
+    const requests: string[] = [];
+    const updater = new Updates(directory, configuration, runtime, async (url) => {
+      if (String(url) === configuration.feed) {
+        if (offline) throw new Error('Feed offline');
+        return new Response(signed(meta));
+      }
+      requests.push(String(url));
+      return new Response(String(url).endsWith('.deb') ? 'package' : 'fixture');
+    });
+    try {
+      await updater.check();
+      const original = await updater.download('AppImage');
+      expect(original.phase).toBe('verified');
+      if (scenario === 'check failed') {
+        offline = true;
+        expect((await updater.check()).error).toBe('network');
+        offline = false;
+      }
+      if (scenario === 'new release') meta.sequence++;
+      if (scenario === 'changed bytes')
+        await writeFile(join(directory, 'artifact.ready'), 'damaged');
+      expect((await updater.check()).phase).toBe('available');
+      const stalePicker = vi.fn();
+      await updater.save(original.saveId!, stalePicker);
+      expect(stalePicker).not.toHaveBeenCalled();
+      const format = scenario === 'different format' ? 'deb' : 'AppImage';
+      const verified = await updater.download(format);
+      expect(verified).toMatchObject({ phase: 'verified', downloaded: 7 });
+      expect(verified.saveId).toBeTruthy();
+      expect(verified.saveId).not.toBe(original.saveId);
+      expect(requests).toHaveLength(['same release', 'check failed'].includes(scenario) ? 1 : 2);
+      const destination = join(root, 'verified.' + format);
+      expect((await updater.save(verified.saveId!, async () => destination)).phase).toBe('saved');
+      expect(await readFile(destination, 'utf8')).toBe(format === 'deb' ? 'package' : 'fixture');
+    } finally {
+      await updater.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
 test.each([
   'matching file',
   'rejected check then retry',

@@ -743,7 +743,7 @@ export class Updates {
           });
           created = false;
         }
-        this.recoverableArtifact = false;
+        this.recoverableArtifact = true;
         this.state.phase = 'verified';
         this.state.installId =
           artifact.format === 'AppImage' && this.runtime.appImage ? randomUUID() : null;

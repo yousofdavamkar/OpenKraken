@@ -296,6 +296,12 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
         JSON.stringify(receipt, null, 2),
       );
     }
+    const beforeRecheck = requests.length;
+    await dialog.getByRole('button', { name: 'Check for updates' }).click();
+    await dialog.getByRole('button', { name: `Download ${format}` }).click();
+    await expect(dialog.getByRole('status')).toContainText('download verified', { timeout: 60000 });
+    expect(requests.slice(beforeRecheck)).toEqual([feedPath]);
+    sequence = 8;
     slow = true;
     await dialog.getByRole('button', { name: 'Check for updates' }).click();
     await dialog.getByRole('button', { name: `Download ${format}` }).press('Enter');
