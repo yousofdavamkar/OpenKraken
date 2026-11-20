@@ -331,12 +331,18 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
     );
   }
 }
-void themeReady.then(() => {
-  createRoot(document.getElementById('root')!).render(
-    <ErrorBoundary>
-      <CommandProvider>
-        <App />
-      </CommandProvider>
-    </ErrorBoundary>,
-  );
-});
+const container = document.getElementById('root');
+if (container) {
+  const root = createRoot(container);
+  void themeReady.then(() => {
+    root.render(
+      <ErrorBoundary>
+        <CommandProvider>
+          <App />
+        </CommandProvider>
+      </ErrorBoundary>,
+    );
+  });
+  // The desktop checks this after document load. Theme reads can finish later.
+  container.setAttribute('data-openkraken-entry-loaded', '');
+}

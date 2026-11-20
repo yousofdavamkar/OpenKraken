@@ -3,9 +3,9 @@ import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 import { reportingTest } from './reporting-fixture.js';
 
@@ -166,6 +166,21 @@ for (const failure of [
         return load.call(this, require('node:path').join(__dirname, 'PRIVATE-missing.html'));
       };`,
   },
+  {
+    name: 'a missing renderer entry module',
+    reason: 'unhandled-rejection',
+    damage: 'missing',
+  },
+  {
+    name: 'a renderer entry module that throws during evaluation',
+    reason: 'unhandled-rejection',
+    damage: 'exception',
+  },
+  {
+    name: 'a renderer document missing its React root',
+    reason: 'unhandled-rejection',
+    damage: 'missing-root',
+  },
 ])
   reportingTest(
     `${failure.name} releases the profile and honors saved consent`,
@@ -175,6 +190,22 @@ for (const failure of [
       const profile = join(root, 'profile');
       const metadata = JSON.parse(await readFile(join(root, 'app/package.json'), 'utf8'));
       await mkdir(directory);
+      let main = metadata.main;
+      if (failure.damage) {
+        const dist = join(directory, 'dist');
+        await cp(dirname(main), dist, { recursive: true });
+        main = join(dist, basename(main));
+        const renderer = join(dist, 'renderer');
+        const html = await readFile(join(renderer, 'index.html'), 'utf8');
+        const entries = [...html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)];
+        expect(entries).toHaveLength(1);
+        const entry = join(renderer, entries[0]![1]!);
+        if (failure.damage === 'missing-root') {
+          expect(html).toContain('<div id="root"></div>');
+          await writeFile(join(renderer, 'index.html'), html.replace('<div id="root"></div>', ''));
+        } else if (failure.damage === 'missing') await rm(entry);
+        else await writeFile(entry, "throw new Error('PRIVATE renderer entry exception')");
+      }
       await writeFile(
         join(directory, 'package.json'),
         JSON.stringify({ ...metadata, main: 'failure.cjs' }),
@@ -184,8 +215,8 @@ for (const failure of [
         `
     const { dialog } = require('electron');
     dialog.showErrorBox = (title) => require('node:fs').writeFileSync(require('node:path').join(__dirname, 'error-title'), title);
-    ${failure.trigger}
-    require(${JSON.stringify(metadata.main)});
+    ${failure.trigger ?? ''}
+    require(${JSON.stringify(main)});
   `,
       );
       const failStartup = async () => {
@@ -251,6 +282,53 @@ for (const failure of [
       expect(received).toHaveLength(1);
     },
   );
+
+test('a delayed theme read lets the document load before the desktop acknowledges startup', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-startup-theme-'));
+  let app: Awaited<ReturnType<typeof electron.launch>> | undefined;
+  try {
+    await writeFile(
+      join(root, 'package.json'),
+      JSON.stringify({ name: 'openkraken', version: '0.1.0', main: 'delay.cjs' }),
+    );
+    await writeFile(
+      join(root, 'delay.cjs'),
+      `
+      const { ipcMain, dialog } = require('electron');
+      const handle = ipcMain.handle.bind(ipcMain);
+      dialog.showErrorBox = (title) => require('node:fs').writeFileSync(require('node:path').join(__dirname, 'error-title'), title);
+      ipcMain.handle = (channel, handler) => handle(channel, async (event, request, ...args) => {
+        if (request.method === 'appearancePreferences' && !globalThis.resumeAppearance)
+          await new Promise(resolve => { globalThis.resumeAppearance = resolve; });
+        if (request.method === 'updatesStarted') globalThis.startupAcknowledged = true;
+        return handler(event, request, ...args);
+      });
+      require(${JSON.stringify(resolve('apps/desktop/dist/main.cjs'))});
+    `,
+    );
+    app = await electron.launch({ args: [root, `--user-data-dir=${join(root, 'profile')}`] });
+    const page = await app.firstWindow();
+    await page.waitForLoadState('load');
+    await expect
+      .poll(() => app!.evaluate(() => typeof Reflect.get(globalThis, 'resumeAppearance')))
+      .toBe('function');
+    expect(await page.locator('#root > *').count()).toBe(0);
+    expect(
+      await app.evaluate(() => Reflect.get(globalThis, 'startupAcknowledged')),
+    ).toBeUndefined();
+    await app.evaluate(() => Reflect.get(globalThis, 'resumeAppearance')());
+    await expect(
+      page.getByRole('button', { name: 'Open a repository', exact: true }),
+    ).toBeVisible();
+    await expect
+      .poll(() => app!.evaluate(() => Reflect.get(globalThis, 'startupAcknowledged')))
+      .toBe(true);
+    await expect(readFile(join(root, 'error-title'))).rejects.toMatchObject({ code: 'ENOENT' });
+  } finally {
+    await app?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('quitting during the first document load exits normally', async () => {
   const root = await mkdtemp(join(tmpdir(), 'openkraken-quit-loading-'));

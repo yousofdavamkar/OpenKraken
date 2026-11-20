@@ -326,7 +326,7 @@ function rendererFailure(reason: string) {
   diagnostics?.failure('renderer', reason);
   void crashReports?.capture('renderer', reason);
 }
-function createWindow() {
+function createWindow(checkEntry = false) {
   window = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -400,15 +400,25 @@ function createWindow() {
     providers?.gitlabCancel();
   });
   const opening = window;
-  return opening.loadFile(htmlPath).catch((error: unknown) => {
-    // Closing or reloading the window can cancel its original navigation.
-    if (
-      !closing &&
-      !opening.isDestroyed() &&
-      (error as NodeJS.ErrnoException)?.code !== 'ERR_ABORTED'
-    )
-      throw error;
-  });
+  return opening
+    .loadFile(htmlPath)
+    .then(async () => {
+      if (!checkEntry || closing || opening.isDestroyed()) return;
+      // A missing module or failed static import still lets Chromium finish loading the HTML.
+      const evaluated = await opening.webContents.executeJavaScriptInIsolatedWorld(1001, [
+        { code: 'document.querySelector("#root[data-openkraken-entry-loaded]") !== null' },
+      ]);
+      if (!evaluated) throw new Error('The renderer entry module did not start');
+    })
+    .catch((error: unknown) => {
+      // Closing or reloading the window can cancel its original navigation.
+      if (
+        !closing &&
+        !opening.isDestroyed() &&
+        (error as NodeJS.ErrnoException)?.code !== 'ERR_ABORTED'
+      )
+        throw error;
+    });
 }
 export function startDesktop(
   reports: CrashReports,
@@ -1670,7 +1680,7 @@ export function startDesktop(
     // Native installers own protocol registration and its uninstall lifecycle.
     // Launching an extracted/portable bundle must not leave a stale registry command.
     windowsReady = true;
-    const loaded = createWindow();
+    const loaded = createWindow(true);
     app.on('activate', () => {
       if (!window) createWindow();
     });
