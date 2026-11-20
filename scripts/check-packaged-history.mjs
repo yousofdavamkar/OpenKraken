@@ -67,6 +67,14 @@ export async function checkPackagedHistory(page, repository) {
   await page.getByRole('button', { name: 'Close details' }).click();
   await grid.press('Home');
   await expect(selected).toHaveAttribute('data-oid', tip);
+  const pageRows = await grid.evaluate((element) => {
+    const row = element.querySelector('[role=row]');
+    return Math.max(1, Math.floor(element.clientHeight / row.getBoundingClientRect().height));
+  });
+  await grid.press('PageDown');
+  await expect(selected).toHaveAttribute('aria-rowindex', String(pageRows + 1));
+  await grid.press('PageUp');
+  await expect(selected).toHaveAttribute('data-oid', tip);
   await grid.press('Enter');
   await expect(details).toContainText(tip);
   await page.getByRole('button', { name: 'Close details' }).click();
