@@ -78,7 +78,10 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
   const [snapshot, setSnapshot] = useState<ProviderMergeRequestMergeState>();
   const [preview, setPreview] = useState<ProviderMergeRequestMergePreview>();
   const [prepared, setPrepared] = useState<ProviderMergeRequestMergeIntent>();
-  const [squash, setSquash] = useState(false);
+  const [selectedSquash, setSelectedSquash] = useState<boolean>();
+  const squash =
+    snapshot?.policy.squash === 'always' ||
+    (snapshot?.policy.squash !== 'never' && (selectedSquash ?? snapshot?.squash ?? false));
   const [removeSource, setRemoveSource] = useState(false);
   const [defaults, setDefaults] = useState(true);
   const [mergeMessage, setMergeMessage] = useState('');
@@ -118,10 +121,6 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
         if (!alive) return;
         if (response.kind === 'providerMergeRequestMergeState') {
           setSnapshot(response.snapshot);
-          setSquash(
-            response.snapshot.policy.squash === 'always' ||
-              (response.snapshot.policy.squash !== 'never' && response.snapshot.squash),
-          );
         } else
           setError(response.kind === 'error' ? response.message : 'Merge state loading cancelled.');
       })
@@ -260,7 +259,7 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
             checked={squash}
             disabled={snapshot?.policy.squash === 'always' || snapshot?.policy.squash === 'never'}
             onChange={(event) => {
-              setSquash(event.target.checked);
+              setSelectedSquash(event.target.checked);
               setDirty(true);
             }}
           />

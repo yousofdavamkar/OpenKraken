@@ -14,6 +14,7 @@ test('GitLab direct merge reviews policy and actual tips, preserves stale messag
     await app.evaluate(({ session }, merge) => {
       const state = {
         base: '4'.repeat(40),
+        squashPolicy: 'default_off',
         uncertain: false,
         block: false,
         started: false,
@@ -59,7 +60,7 @@ test('GitLab direct merge reviews policy and actual tips, preserves stale messag
             path_with_namespace: 'group/subgroup/project',
             archived: false,
             merge_method: 'merge',
-            squash_option: 'default_off',
+            squash_option: state.squashPolicy,
             only_allow_merge_if_pipeline_succeeds: true,
             only_allow_merge_if_all_discussions_are_resolved: true,
           });
@@ -133,6 +134,24 @@ test('GitLab direct merge reviews policy and actual tips, preserves stale messag
     await dialog
       .getByRole('textbox', { name: 'Squash commit message', exact: true })
       .fill('Squash message');
+    const squashChoice = dialog.getByLabel('Squash commits', { exact: true });
+    const refresh = dialog.getByRole('button', { name: 'Refresh merge state', exact: true });
+    await refresh.click();
+    await expect(squashChoice).toBeEnabled();
+    await expect(squashChoice).toBeChecked();
+    for (const policy of ['never', 'always', 'default_off']) {
+      await app.evaluate((_, policy) => {
+        (
+          globalThis as typeof globalThis & { mergeAction: { squashPolicy: string } }
+        ).mergeAction.squashPolicy = policy;
+      }, policy);
+      await refresh.click();
+      await expect(dialog.getByRole('region', { name: 'GitLab merge state' })).toContainText(
+        policy,
+      );
+      await expect(squashChoice).toBeChecked({ checked: policy !== 'never' });
+      await expect(squashChoice).toBeEnabled({ enabled: policy === 'default_off' });
+    }
     await dialog.getByRole('button', { name: 'Review merge options', exact: true }).click();
     const review = dialog.getByRole('region', { name: 'Confirm GitLab merge', exact: true });
     await expect(review).toContainText('4'.repeat(40));
