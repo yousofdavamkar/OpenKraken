@@ -2,6 +2,12 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Switching back to a cached repository with 50,000 refs
+
+A Linux x64 Electron profile first saved 17,000 commits from the 50,000-distinct-target fixture and restarted. It opened single-ref Linux history, loaded 17,000 commits there, then switched back to the saved fixture. Four measured pairs alternated build order after a warm-up pair. Both builds waited for the outgoing cache write and checked the destination’s current graph fingerprint. The prototype also read the destination’s first cache page during the outgoing write and rechecked the file stamp afterward.
+
+The control painted in median 845.4 ms and the prototype in 849.8 ms. The prototype was faster in two pairs and slower in two. All 24 measured appends of 5,000 commits met 300 ms. Every measured opening exceeded 500 ms. The shipping implementation keeps the early read on initial process startup. [Individual timings](m8-opening-experiments.csv)
+
 ## Reading the cached first page during ref enumeration
 
 Each Linux x64 run opened the full Linux fixture with 50,000 distinct ref targets, persisted 17,000 commits, then restarted Electron. The timed launch displayed 2,000 commits and all 50,000 refs. Both builds used Git 2.53.0, the same renderer and retained OS caches. Five measured pairs alternated build order after a warm-up pair. The control read the first cache page after computing the graph fingerprint. The candidate read and validated that page during Git’s ref enumeration and checked the final fingerprint and file stamp before using it.

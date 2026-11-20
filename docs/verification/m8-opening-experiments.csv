@@ -622,3 +622,13 @@ prefetch-cache-prefix,distinct-restarted,5,candidate,764.2,368.2,518.1,269.0,219
 prefetch-cache-prefix,distinct-restarted,5,baseline,769.3,426.3,543.2,206.6,230.9,185.3,16.7,16.8,57.3,59.5,46.0,588.3,12.4,32.7,56.4,6.0,118.6
 prefetch-cache-prefix,distinct,1,final-fresh,808.5,469.0,610.1,232.9,203.8,238.7,16.7,16.7,69.0,56.6,70.1,644.3,12.6,21.6,48.2,5.9,110.1
 prefetch-cache-prefix,distinct,1,final-restart,639.1,325.2,443.7,247.8,226.6,189.8,16.7,16.7,69.0,77.9,47.7,472.7,10.9,18.1,41.7,6.9,117.8
+prefetch-during-outgoing-write,distinct-warm-switch,0,baseline,790.1,544.7,642.4,175.0,206.3,173.8,16.8,16.7,55.5,65.3,45.8,692.8,13.7,36.7,31.0,5.4,60.9
+prefetch-during-outgoing-write,distinct-warm-switch,0,candidate,809.6,570.9,677.2,163.8,204.6,178.8,16.7,16.8,43.0,67.8,55.0,722.0,13.0,31.8,28.7,5.7,53.2
+prefetch-during-outgoing-write,distinct-warm-switch,1,candidate,822.0,561.2,669.4,176.4,232.4,175.3,16.7,16.7,49.9,75.1,51.9,725.6,13.3,42.9,34.9,5.7,55.8
+prefetch-during-outgoing-write,distinct-warm-switch,1,baseline,933.5,618.6,751.2,158.1,170.7,193.4,16.7,16.8,48.0,55.1,70.2,811.3,15.6,44.5,36.0,6.2,80.0
+prefetch-during-outgoing-write,distinct-warm-switch,2,baseline,824.0,556.5,665.9,180.4,199.4,186.5,16.8,16.8,50.4,66.0,52.7,720.1,19.0,35.2,33.0,8.7,62.2
+prefetch-during-outgoing-write,distinct-warm-switch,2,candidate,847.1,590.0,698.5,178.4,208.9,181.2,16.8,16.8,46.3,71.4,61.1,755.5,14.3,42.7,32.6,8.2,50.8
+prefetch-during-outgoing-write,distinct-warm-switch,3,candidate,852.4,563.4,670.5,185.2,179.9,179.2,16.8,16.7,51.3,58.2,69.2,738.7,21.2,47.0,35.9,11.4,66.4
+prefetch-during-outgoing-write,distinct-warm-switch,3,baseline,866.7,593.5,707.6,200.4,205.9,172.3,16.8,16.7,55.5,63.9,58.3,772.1,25.6,38.9,31.0,7.0,56.6
+prefetch-during-outgoing-write,distinct-warm-switch,4,baseline,803.7,550.8,664.8,177.9,216.7,180.4,16.7,16.7,53.4,70.5,54.1,717.2,15.8,36.6,31.1,4.9,50.5
+prefetch-during-outgoing-write,distinct-warm-switch,4,candidate,866.9,578.1,693.2,184.0,218.6,192.3,16.8,16.8,50.7,61.5,60.6,765.9,23.1,49.6,34.5,7.7,58.8
