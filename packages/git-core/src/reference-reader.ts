@@ -272,12 +272,21 @@ export class ReferenceReader {
       const sample = parser.finish();
       const nested = sample.filter((ref) => ref.peeledType === 'tag');
       if (nested.length) await this.peelTags(cwd, signal, nested, true);
+      const finalTypes = ['commit', 'tree', 'blob'];
+      if (
+        sample.some((ref) =>
+          ref.objectType === 'tag'
+            ? !ref.peeled || !finalTypes.includes(ref.peeledType)
+            : !finalTypes.includes(ref.objectType),
+        )
+      )
+        return undefined;
       return new Map(sample.map((ref) => [ref.target, ref]));
     } catch (error) {
       if (
         signal.aborted ||
-        !(error instanceof GitError) ||
-        (error.code !== 'GIT_FAILED' && error.code !== 'OUTPUT_LIMIT')
+        (error instanceof GitError &&
+          !['GIT_FAILED', 'OUTPUT_LIMIT', 'INVALID_REFS'].includes(error.code))
       )
         throw error;
       return undefined;

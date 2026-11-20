@@ -912,6 +912,25 @@ describe('packed annotated aliases', () => {
     }
   });
 
+  test.each(['truncated', 'missing peel'])(
+    'discards a %s optional object sample',
+    async (damage) => {
+      const reader = new ReferenceReader(async (args, options) => {
+        if (!args.includes('--count=128')) return runGit(git.path, args, options);
+        if (damage === 'missing peel') {
+          return runGit(
+            git.path,
+            args.map((arg) => arg.replace('%(*objectname)', '').replace('%(*objecttype)', '')),
+            options,
+          );
+        }
+        await options.onStdout?.(Buffer.from('refs/heads/main'));
+        return { stdout: Buffer.alloc(0), stderr: '', exitCode: 0 };
+      });
+      expect(await reader.read(cwd, undefined, sample)).toEqual(await nativeRefs(cwd));
+    },
+  );
+
   test('a new annotated target outside the sample uses Git to resolve its blob', async () => {
     const blob = fixtureGit(cwd, ['hash-object', '-w', '--stdin'], 'release notes');
     const reader = new ReferenceReader(async (args, options) => {
