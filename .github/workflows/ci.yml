@@ -43,6 +43,12 @@ jobs:
           OPENKRAKEN_STATUS_BENCH_FIXTURE="$RUNNER_TEMP/openkraken-scale/fixture.json" \
             xvfb-run -a pnpm exec playwright test tests/e2e/status-benchmark.test.ts --repeat-each=3 --reporter=list \
             --output=test-results/performance/status > test-results/performance/status.log 2>&1
+      - name: Compare every synthetic history page with native Git
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.fixture.outcome == 'success' }}
+        run: |
+          OPENKRAKEN_TRAVERSAL_REPO="$RUNNER_TEMP/openkraken-scale/repository" GIT_NO_LAZY_FETCH=1 \
+            xvfb-run -a pnpm exec playwright test tests/e2e/history-traversal.test.ts --reporter=list \
+            --output=test-results/performance/synthetic-traversal > test-results/performance/synthetic-traversal.log 2>&1
       - name: Generate and verify 50,000-reference fixtures
         id: references
         if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
@@ -115,6 +121,12 @@ jobs:
           OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/linux-history.git" GIT_NO_LAZY_FETCH=1 \
             xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --workers=1 --reporter=list \
             --output=test-results/performance/linux-history > test-results/performance/linux-history.log 2>&1
+      - name: Compare every Linux history page with native Git
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.linux_history.outcome == 'success' }}
+        run: |
+          OPENKRAKEN_TRAVERSAL_REPO="$RUNNER_TEMP/linux-history.git" GIT_NO_LAZY_FETCH=1 \
+            xvfb-run -a pnpm exec playwright test tests/e2e/history-traversal.test.ts --reporter=list \
+            --output=test-results/performance/linux-traversal > test-results/performance/linux-traversal.log 2>&1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
