@@ -215,6 +215,20 @@ test('a pending rename survives switching between grouped and virtualized refere
     fixtureGit(repository, ['branch', 'threshold']);
     await expect(page.getByRole('heading', { name: 'References 100', exact: true })).toBeVisible();
     await expect(dialog).toHaveCount(0);
+
+    await threshold.click();
+    await draft.fill('obsolete-review');
+    const parent = fixtureGit(repository, ['rev-parse', 'HEAD^']);
+    fixtureGit(repository, ['update-ref', 'refs/heads/threshold', parent, tip]);
+    await expect(page.locator('[data-reference-name="refs/heads/threshold"]')).toHaveAttribute(
+      'title',
+      'refs/heads/threshold\n' + parent,
+    );
+    await dialog.getByRole('button', { name: 'Rename branch', exact: true }).click();
+    await expect(dialog.getByRole('alert')).toContainText('The branch changed');
+    await expect(draft).toHaveValue('obsolete-review');
+    expect(fixtureGit(repository, ['rev-parse', 'refs/heads/threshold'])).toBe(parent);
+    expect(fixtureGit(repository, ['branch', '--list', 'obsolete-review'])).toBe('');
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

@@ -632,6 +632,8 @@ async function executeGit(
       clearTimeout(watchStart);
       watcher = initialWatcher;
       await previous?.close();
+    } else if (watcher?.repo.id === snapshot.repository.id) {
+      watcher.observeRefSnapshot(snapshot.refs);
     }
     return {
       kind: 'snapshot',
