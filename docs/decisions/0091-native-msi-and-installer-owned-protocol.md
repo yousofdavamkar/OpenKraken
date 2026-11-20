@@ -2,7 +2,7 @@
 
 ## Decision
 
-Add a native Windows x64 MSI producer using the pinned electron-builder 26.18.0 target and its supported `msiProjectCreated` hook. It wraps the existing hardened platform bundle, disables executable editing and all builder signing, and compares the original and copied payload before and after generation. The existing explicit test-only/provided metadata and unsigned manifest policy remains in force. Creation refuses other hosts/architectures rather than treating a cross-built artifact as native acceptance.
+Add a native Windows x64 MSI producer using the pinned electron-builder 26.18.0 target and its supported `msiProjectCreated` hook. It wraps the existing hardened platform bundle, disables executable editing and all builder signing, and compares the original and copied payload before and after generation. Test and release metadata remain explicit. Providing a Windows signing identity enables the signed build path below. Creation refuses other hosts/architectures rather than treating a cross-built artifact as native acceptance.
 
 The MSI defaults to per-user installation, has no desktop shortcut or launch-after-finish action, and creates a Start menu entry. The project hook marks it as requiring no elevation and adds a launch condition refusing a machine-scope override. It preserves the builder's Windows Installer 5 per-user directory redirection. The hook parses XML with external resolution and DTDs disabled, checks the pinned schema and expected application/per-user structure, and refuses unexpected custom actions.
 
@@ -24,6 +24,14 @@ Before returning an artifact, the producer reads compiled MSI tables through Win
 The verifier uses `/a` with an explicit disposable `TARGETDIR` to extract an administrative image. This does not perform ordinary product installation or protocol registration. It checks native payload ownership/DACLs and refuses reparse points, locates the single application, compares every payload entry and digest, verifies fuses and launches it through packaged desktop smoke. Success removes the disposable extraction. Failure retains its files and log, including when a timed-out installer client leaves uncertain service activity; it does not recursively clean an uncertain active extraction.
 
 Native Windows CI builds a test-only MSI, rejects checksum/helper/version corruption and runs the extraction/desktop gate. Lifecycle acceptance—ordinary installation, upgrade, repair, uninstall, retained user data and actual OS URI dispatch—is still a separate required gate and is not established by extraction. Signing, SmartScreen/download reputation and release distribution also remain open.
+
+## Authenticode signing
+
+On native Windows x64, the bundle producer accepts a publisher certificate identified by the SHA-256 digest of its DER bytes. It selects the matching code-signing certificate with a private key from the current user's personal store. Windows SDK SignTool uses that certificate's store thumbprint for selection and SHA-256 for signing. The optional HTTPS timestamp service receives an RFC 3161 request with a SHA-256 digest. [Microsoft SignTool reference](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool) · [Microsoft timestamping guidance](https://learn.microsoft.com/en-us/windows/win32/seccrypto/time-stamping-authenticode-signatures)
+
+The packager signs the staged native askpass executable before assembling the ASAR. This seals the signed helper's size and digest in its archive record. After setting the Electron fuses it signs the application executable. The MSI producer verifies both signatures, the ASAR helper record and exact payload inventory before signing the final installer. It saves the signed bytes under a digest-qualified name before replacing the receipt.
+
+The verifier takes an independent publisher fingerprint, makes a private copy of the installer and checks its size, digest, embedded signature, Windows trust result and signer certificate before opening MSI tables or extracting. It verifies both executable signatures and the helper's ASAR record again before desktop smoke. A timestamp claim in the receipt requires a timestamp on all three signatures. Callers can require timestamps independently of the receipt. [Microsoft Authenticode verification](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-authenticodesignature?view=powershell-5.1)
 
 ## Evidence limits
 

@@ -2,6 +2,14 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest three runs. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Windows publisher signatures
+
+Windows x64 packaging can sign the native askpass helper before ASAR creation, the application executable after its fuses are set, and the MSI after WiX builds it. The release owner selects the certificate by its DER SHA-256 fingerprint and can request RFC 3161 timestamps. Verification authenticates the private MSI copy before extraction and checks the two executable signatures and ASAR helper digest before launch. [Publisher setup and verification commands](../../README.md) · [Signing policy](../decisions/0091-native-msi-and-installer-owned-protocol.md#authenticode-signing)
+
+On Linux x64, osslsigncode 2.13 signed the WiX beta fixture MSI and the Windows PE askpass helper with temporary certificates and a local timestamp authority. Both signatures and timestamps verified against the fixture root and expected leaf fingerprint. A different fingerprint failed on both files. Changing a byte in the helper failed digest verification. Packing the signed helper into an Electron ASAR preserved its recorded size, hash and valid signature after unpacking.
+
+PowerShell tests exercise the publisher and timestamp checks with supplied signature records. The disposable Windows CI step builds a fresh signed bundle and MSI, verifies the extracted desktop and tests rejection of a changed helper, a wrong signer, an unsigned MSI and a missing timestamp. Native SignTool, Windows trust, production credentials, timestamp service and SmartScreen acceptance still require release-host evidence.
+
 ## Windows beta installer ordering
 
 The pinned WiX compiler and linker built three small x64 MSI fixtures with the production project hook. Strict compilation caught a lowercase upgrade GUID. Commit `4cddb83` fixes its spelling and adds a PowerShell regression. The linked databases contained the expected 64-bit registry search, exact-version upgrade range and uninstallable beta component. Both installation sequences ran related-product detection at 25, registry search at 26 and launch conditions at 27.
