@@ -355,17 +355,19 @@ export class RepositoryService {
         const stop = new AbortController();
         const readSignal = signal ? AbortSignal.any([signal, stop.signal]) : stop.signal;
         const probeStop = new AbortController();
+        const preferLive = !refresh && this.preferLiveHistory(repository);
         let prefetch: Promise<HistoryCursor | undefined> | undefined;
         const refRead = this.referenceReader.read(
           repository.path,
           readSignal,
           packedRefs,
           (objects) => {
-            if (!refresh)
+            if (preferLive)
               prefetch = this.prefetchHistory(
                 repository,
                 view,
                 packedRefs,
+                preferLive,
                 AbortSignal.any([readSignal, probeStop.signal]),
                 objects,
               ).catch(() => undefined);
@@ -378,9 +380,12 @@ export class RepositoryService {
         const cacheReads = this.cacheFingerprintReads(repository, readSignal);
         // On startup there is no outgoing cache writer. Check the file while Git reads refs,
         // then compare its stamp and the snapshot fingerprint before adopting any commits.
+        const dataDir = this.dataDir;
         const earlyPrefix =
-          !refresh && !this.cache && cacheReads.length && this.dataDir
-            ? HistoryCache.prefetchPrefix(this.dataDir, repository.id, readSignal)
+          preferLive && !this.cache && cacheReads.length && dataDir
+            ? preferLive.then((live) =>
+                live ? undefined : HistoryCache.prefetchPrefix(dataDir, repository.id, readSignal),
+              )
             : undefined;
         const cacheFlush = this.cache?.flushBeforeSnapshot(readSignal);
         const graphRead = Promise.all([refRead, worktreeRead, Promise.all(cacheReads)]).then(
@@ -489,10 +494,26 @@ export class RepositoryService {
       ),
     ];
   }
+  // These filesystem hints only schedule work. The cache key and the ordered
+  // roots from Git still determine which history the service can publish.
+  private async preferLiveHistory(repository: Repository) {
+    const packed = await stat(join(repository.commonDir, 'packed-refs')).catch(() => undefined);
+    if (!packed || packed.size < 512 * 1024) return false;
+    if (!this.dataDir) return true;
+    const savedAt = await HistoryCache.prefixModifiedAt(this.dataDir, repository.id);
+    if (savedAt === undefined || packed.mtimeMs > savedAt) return true;
+    const paths = [join(repository.gitDir, 'HEAD')];
+    const head = repository.head;
+    if (head.kind === 'branch' && head.ref.startsWith('refs/heads/'))
+      paths.push(join(repository.commonDir, head.ref));
+    const heads = await Promise.all(paths.map((path) => stat(path).catch(() => undefined)));
+    return heads.some((info) => info && info.mtimeMs > savedAt);
+  }
   private async prefetchHistory(
     repository: Repository,
     view: GraphView,
     sample: PackedRefSample,
+    preferLive: Promise<boolean>,
     signal: AbortSignal,
     objects?: ReadonlyMap<string, Ref>,
   ) {
@@ -504,23 +525,7 @@ export class RepositoryService {
       process.env.GIT_GRAFT_FILE !== undefined
     )
       return;
-    // File size is only a scheduling hint. Git supplies every tentative root.
-    const packed = await stat(join(repository.commonDir, 'packed-refs')).catch(() => undefined);
-    if (!packed || packed.size < 512 * 1024) return;
-    if (await exists(join(repository.commonDir, 'info/grafts'))) return;
-    if (this.dataDir) {
-      const savedAt = await HistoryCache.prefixModifiedAt(this.dataDir, repository.id);
-      if (savedAt !== undefined && packed.mtimeMs <= savedAt) {
-        const paths = [join(repository.gitDir, 'HEAD')];
-        const head = repository.head;
-        if (head.kind === 'branch' && head.ref.startsWith('refs/heads/'))
-          paths.push(join(repository.commonDir, head.ref));
-        const heads = await Promise.all(paths.map((path) => stat(path).catch(() => undefined)));
-        // A newer ref may make the saved window stale. Only the canonical
-        // fingerprint and ordered live roots decide which history can be shown.
-        if (heads.every((info) => !info || info.mtimeMs <= savedAt)) return;
-      }
-    }
+    if (!(await preferLive) || (await exists(join(repository.commonDir, 'info/grafts')))) return;
     if (signal.aborted) return;
     const head = repository.head;
     const unfiltered = !view.soloRef && view.hiddenRefs.length === 0;

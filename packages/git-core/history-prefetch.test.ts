@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat, utimes } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
@@ -264,6 +264,41 @@ test.each(['loose branch', 'packed refs', 'detached HEAD'])(
     }
   },
 );
+
+test('rewriting packed refs without changing a root preserves an existing cache window', async () => {
+  const path = await clone('restamped');
+  const profile = { dataDir: join(root, 'restamped-profile') };
+  const open = async () => {
+    const service = new RepositoryService('git', profile);
+    try {
+      const repo = await service.open(path);
+      const snapshot = await service.snapshot(repo.id, undefined, false);
+      const tail = await service.page(repo.id, snapshot.cursor, snapshot.commits.length, 5000);
+      expect(tail.hasMore).toBe(false);
+      return { id: repo.id, commits: [...snapshot.commits, ...tail.commits] };
+    } finally {
+      await service.dispose();
+    }
+  };
+  const first = await open();
+  const cache = join(profile.dataDir, 'history', first.id);
+  const files = ['prefix.json', 'tail-0.json'].map((name) => join(cache, name));
+  const evidence = () =>
+    Promise.all(
+      files.map(async (path) => {
+        const { ino, mtimeNs } = await stat(path, { bigint: true });
+        return { ino, mtimeNs, bytes: await readFile(path) };
+      }),
+    );
+  const before = await evidence();
+  const newer = new Date(Date.now() + 2000);
+  await utimes(join(path, 'packed-refs'), newer, newer);
+  const next = await open();
+  expect(next.commits.map((c) => [c.oid, ...c.parents].join(' '))).toEqual(
+    fixtureGit(path, ['rev-list', '--date-order', '--parents', '--all']).split('\n'),
+  );
+  expect(await evidence()).toEqual(before);
+});
 
 test('a failed authoritative ref read closes the unpublished cursor', async () => {
   const path = await clone('failed');
