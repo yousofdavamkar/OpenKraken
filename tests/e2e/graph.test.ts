@@ -150,6 +150,49 @@ test('j and k move through graph rows and Shift follows ancestry', async () => {
   }
 });
 
+test('page keys follow the visible row count after resize and reach a short final page', async () => {
+  const { app, page, close } = await launch('linear', 2003);
+  try {
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    const selected = grid.getByRole('row', { selected: true });
+    const pageRows = () =>
+      grid.evaluate((element) =>
+        Math.floor(
+          element.clientHeight /
+            element.querySelector('[role=row]')!.getBoundingClientRect().height,
+        ),
+      );
+    await grid.press('Home');
+    const initial = await pageRows();
+    await grid.press('PageDown');
+    await expect(selected).toHaveAttribute('aria-rowindex', String(initial + 1));
+    await app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0]!;
+      const [width, height] = win.getContentSize();
+      win.setContentSize(width!, height! + 170);
+    });
+    await expect.poll(pageRows).not.toBe(initial);
+    const resized = await pageRows();
+    await grid.press('PageDown');
+    await expect(selected).toHaveAttribute('aria-rowindex', String(initial + resized + 1));
+    await grid.press('PageUp');
+    await expect(selected).toHaveAttribute('aria-rowindex', String(initial + 1));
+    // Prevent scrolling to End from prefetching the last page before the keypress.
+    await grid.evaluate((element) => {
+      Object.defineProperty(element, 'scrollTo', { configurable: true, value: () => {} });
+    });
+    await grid.press('End');
+    await expect(grid).not.toHaveAttribute('aria-activedescendant', /.+/);
+    await expect(page.getByTestId('commit-count')).toHaveText('2,000 commits · more available');
+    await grid.evaluate((element) => Reflect.deleteProperty(element, 'scrollTo'));
+    await grid.press('PageDown');
+    await expect(selected).toHaveAttribute('aria-rowindex', '2003');
+    await expect(grid).toHaveAttribute('aria-rowcount', '2003');
+  } finally {
+    await close();
+  }
+});
+
 test('deep keyboard focus and range selection follow commit IDs when working rows shift', async () => {
   const { page, repository, close } = await launch('linear', 2200);
   try {

@@ -274,6 +274,30 @@ test('a pending jump to unloaded history preserves a newer row selection', async
   expect(useRepository.getState().rows.at(-1)?.oid).toBe(target);
   expect(useRepository.getState().selection.focus).toBe(second.oid);
 });
+test.each([0, 2])(
+  'a viewport jump stops at the root with %i commits on the last page',
+  async (count) => {
+    const snapshot = fixture();
+    await open(snapshot);
+    const commits = ['b', 'c'].slice(0, count).map((digit) => ({
+      ...snapshot.commits[0]!,
+      oid: digit.repeat(40),
+      parents: [],
+    }));
+    request.mockResolvedValueOnce({
+      kind: 'page',
+      cursor: snapshot.cursor,
+      offset: 1,
+      commits,
+      hasMore: false,
+    });
+    await useRepository.getState().navigate(18);
+    const state = useRepository.getState();
+    expect(state.selection.focus).toBe(state.rows.at(-1)!.oid);
+    expect(state.selection.focusIndex).toBe(count);
+    expect(request).toHaveBeenCalledTimes(2);
+  },
+);
 test('the newest keyboard jump uses the page already in flight', async () => {
   const snapshot = fixture();
   await open(snapshot);

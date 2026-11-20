@@ -38,8 +38,8 @@ test('range, toggle and ancestry navigation preserve stable OID selection', () =
   expect(navigationTarget(rows, 3, 'ArrowDown', false)).toBe(3);
   expect(navigationTarget(rows, 1, 'Home', false)).toBe(0);
   expect(navigationTarget(rows, 1, 'End', false)).toBe(3);
-  expect(navigationTarget(rows, 1, 'H', true, 'merge', 'right')).toBe('right');
-  expect(navigationTarget(rows, 1, 'h', false, 'merge')).toBe('merge');
+  expect(navigationTarget(rows, 1, 'H', true, { head: 'merge', upstream: 'right' })).toBe('right');
+  expect(navigationTarget(rows, 1, 'h', false, { head: 'merge' })).toBe('merge');
 });
 test('deep selection uses known positions and recovers by OID after a refresh moves rows', () => {
   let reads = 0;
@@ -78,7 +78,7 @@ test('navigation at row 32,000 reads only the rows needed to locate its closest 
     },
   });
   expect(navigationTarget(observed, 31999, 'Home', false)).toBe(0);
-  expect(navigationTarget(observed, 31999, 'PageUp', false)).toBe(31979);
+  expect(navigationTarget(observed, 31999, 'PageUp', false, { pageRows: 15 })).toBe(31984);
   expect(reads).toEqual([]);
   expect(navigationTarget(observed, 31999, 'ArrowUp', true)).toBe(31998);
   expect(reads).toEqual(['31999', '31998']);

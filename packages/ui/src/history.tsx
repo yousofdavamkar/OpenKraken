@@ -175,26 +175,12 @@ export function History() {
     let navigationKey = event.key;
     if (navigationKey.toLowerCase() === 'j') navigationKey = 'ArrowDown';
     if (navigationKey.toLowerCase() === 'k') navigationKey = 'ArrowUp';
-    if (
-      navigationKey === 'ArrowDown' &&
-      !event.shiftKey &&
-      snapshot.hasMore &&
-      rows.length > 0 &&
-      selection.focus === rows.at(-1)!.oid
-    ) {
-      event.preventDefault();
-      void state.navigate(rows.length);
-      return;
-    }
     const refs = event.key.toLowerCase() === 'h' ? refNavigationTargets(snapshot, rows) : undefined;
-    const target = navigationTarget(
-      rows,
-      focused,
-      navigationKey,
-      event.shiftKey,
-      refs?.head,
-      refs?.upstream,
-    );
+    const target = navigationTarget(rows, focused, navigationKey, event.shiftKey, {
+      ...refs,
+      pageRows: Math.max(1, Math.floor(bounds.height / ROW_HEIGHT)),
+      hasMore: snapshot.hasMore,
+    });
     if (target !== undefined) {
       event.preventDefault();
       if ((target === focused || target === selection.focus) && focused >= 0)

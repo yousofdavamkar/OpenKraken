@@ -222,11 +222,10 @@ export function navigationTarget(
   focused: number,
   key: string,
   shift: boolean,
-  head?: string,
-  upstream?: string,
+  options: { pageRows?: number; hasMore?: boolean; head?: string; upstream?: string } = {},
 ): number | string | undefined {
   if (!rows.length) return;
-  if (key.toLowerCase() === 'h') return shift ? upstream : head;
+  if (key.toLowerCase() === 'h') return shift ? options.upstream : options.head;
   if (key === 'Home') return 0;
   if (key === 'End') return rows.length - 1;
   const index = Math.max(0, focused);
@@ -242,11 +241,13 @@ export function navigationTarget(
       : key === 'ArrowUp'
         ? -1
         : key === 'PageDown'
-          ? 20
+          ? (options.pageRows ?? 1)
           : key === 'PageUp'
-            ? -20
+            ? -(options.pageRows ?? 1)
             : 0;
-  return delta ? Math.max(0, Math.min(rows.length - 1, index + delta)) : undefined;
+  if (!delta) return;
+  const target = Math.max(0, index + delta);
+  return options.hasMore && focused >= 0 ? target : Math.min(rows.length - 1, target);
 }
 
 /** Excluded ref shortcuts must not page through an unrelated history looking for a missing tip. */

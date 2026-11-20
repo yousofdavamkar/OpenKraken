@@ -547,7 +547,10 @@ export const useRepository = create<State>()(
         sequence === navigationSequence
       ) {
         const { rows, busy, paging, snapshot: current } = get();
-        let position = typeof target === 'number' ? target : -1;
+        // A page-key jump can reach a final Git page shorter than the viewport.
+        let position = -1;
+        if (typeof target === 'number')
+          position = current?.hasMore ? target : Math.min(target, rows.length - 1);
         if (typeof target === 'string') {
           for (let i = checked; i < rows.length; i++) {
             if (rows[i]!.oid === target) {
@@ -578,7 +581,7 @@ export const useRepository = create<State>()(
           await get().loadMore();
         }
         const updated = get().rows;
-        if (updated.length === rows.length) return;
+        if (updated.length === rows.length && get().snapshot?.hasMore) return;
         // Appends retain earlier row objects. A working-state refresh can reproject them.
         checked = updated[rows.length - 1] === rows.at(-1) ? rows.length : 0;
       }
