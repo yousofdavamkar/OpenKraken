@@ -913,15 +913,20 @@ test.each([
   }
 });
 
-test.each(['cancel', 'expire'])(
+test.each(['cancel mid-read', 'cancel after hashing', 'expire after hashing'])(
   'can %s a recovered installer during verification',
   async (scenario) => {
     const root = await mkdtemp(join(tmpdir(), 'openkraken-recheck-'));
     const directory = join(root, 'updates');
     let clock = now;
+    const bytes = Buffer.alloc(256 * 1024, 42);
+    const metadata = release();
+    const artifact = metadata.artifacts[0]!;
+    artifact.size = bytes.length;
+    artifact.sha256 = createHash('sha256').update(bytes).digest('hex');
+    const manifest = signed(metadata);
     const send = vi.fn<typeof fetch>(
-      async (url) =>
-        new Response(String(url) === configuration.feed ? signed(release()) : 'fixture'),
+      async (url) => new Response(String(url) === configuration.feed ? manifest : bytes),
     );
     let updater = new Updates(directory, configuration, runtime, send, () => clock);
     let finish!: () => void;
@@ -935,30 +940,47 @@ test.each(['cancel', 'expire'])(
       updater = new Updates(directory, configuration, runtime, send, () => clock);
       await updater.check();
       let reached!: () => void;
-      const hashed = new Promise<void>((resolve) => {
+      const paused = new Promise<void>((resolve) => {
         reached = resolve;
       });
       const verify = transfer.verifyUpdateArtifact;
-      vi.spyOn(transfer, 'verifyUpdateArtifact').mockImplementationOnce(async (...args) => {
-        await verify(...args);
+      const pause = async () => {
         reached();
         await gate;
-      });
+      };
+      vi.spyOn(transfer, 'verifyUpdateArtifact').mockImplementationOnce(
+        async (body, artifact, signal, onChunk) => {
+          if (scenario === 'cancel mid-read') {
+            await verify(body, artifact, signal, async (chunk) => {
+              await onChunk?.(chunk);
+              await pause();
+            });
+          } else {
+            await verify(body, artifact, signal, onChunk);
+            await pause();
+          }
+        },
+      );
       const recovering = updater.download('AppImage');
-      await hashed;
-      expect(await updater.read()).toMatchObject({ phase: 'verifying', downloaded: 7 });
-      if (scenario === 'cancel') updater.cancel();
-      else clock = release().expiresAt + 1;
+      await paused;
+      const progress = await updater.read();
+      expect(progress.phase).toBe('verifying');
+      expect(progress.downloaded).toBeGreaterThan(0);
+      if (scenario === 'cancel mid-read') expect(progress.downloaded).toBeLessThan(bytes.length);
+      else expect(progress.downloaded).toBe(bytes.length);
+      const cancelled = scenario !== 'expire after hashing';
+      if (cancelled) updater.cancel();
+      else clock = metadata.expiresAt + 1;
       finish();
       const result = await recovering;
       expect(result).toMatchObject({
         phase: 'error',
-        error: scenario === 'cancel' ? 'cancelled' : 'invalid-release',
+        error: cancelled ? 'cancelled' : 'invalid-release',
         installId: null,
       });
       expect(result.saveId).toBeUndefined();
       expect(send).toHaveBeenCalledTimes(3);
-      if (scenario === 'cancel') {
+      if (cancelled) {
         expect((await updater.check()).phase).toBe('available');
         expect((await updater.download('AppImage')).phase).toBe('verified');
         expect(send).toHaveBeenCalledTimes(4);
