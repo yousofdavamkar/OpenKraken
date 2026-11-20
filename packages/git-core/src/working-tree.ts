@@ -7,6 +7,7 @@ import {
   rm,
   open,
   copyFile,
+  lstat,
   stat,
   readdir,
   utimes,
@@ -198,25 +199,23 @@ export class WorkingTree {
     const journal = await this.journal();
     const brief = (entry?: z.infer<typeof entrySchema>) =>
       entry ? { id: entry.id, label: entry.label } : undefined;
-    const fingerprint = this.repo.isBare
-      ? { head: await this.head(signal), signature: '' }
-      : await this.fingerprint();
+    const fingerprint = await this.operationFingerprint(signal);
     const details = this.repo.isBare
       ? {}
       : await this.commitInfo(fingerprint.head.oid, signal).catch((error: unknown) => ({
           commitWarning: error instanceof Error ? error.message : String(error),
         }));
     return {
-      operation: this.repo.isBare
-        ? await this.operationState(signal)
-        : await this.operationSnapshot(
-            await inspectOperation(this.repo.gitDir),
-            fingerprint,
-            signal,
-          ),
+      operation: await this.operationSnapshot(
+        await inspectOperation(this.repo.gitDir),
+        fingerprint,
+        signal,
+      ),
       status: parser.finish(),
       head: fingerprint.head,
-      revision: this.revision(fingerprint),
+      revision: this.revision(
+        this.repo.isBare ? { head: fingerprint.head, signature: '' } : fingerprint,
+      ),
       undo: brief(journal.undo.at(-1)),
       redo: brief(journal.redo.at(-1)),
       ...details,
@@ -225,11 +224,26 @@ export class WorkingTree {
   private revision(value: { head: Repository['head']; signature: string }) {
     return hash(JSON.stringify(value.head) + value.signature);
   }
-  private async fingerprint(indexFile?: string) {
+  private async operationFingerprint(signal?: AbortSignal, indexFile?: string) {
+    if (this.repo.isBare && !indexFile) {
+      try {
+        await lstat(join(this.repo.gitDir, 'index'));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        // Without an index, diff --cached would enumerate the entire HEAD tree as deleted.
+        return { head: await this.head(signal), signature: '' };
+      }
+    }
+    return this.fingerprint(indexFile, signal);
+  }
+  private async fingerprint(indexFile?: string, signal?: AbortSignal) {
     const [head, entries, diff] = await Promise.all([
-      this.head(),
-      this.run(['ls-files', '--stage', '-v', '-z'], { indexFile }),
-      this.run(['diff', '--cached', '--raw', '-z', '--no-ext-diff', '--no-renames'], { indexFile }),
+      this.head(signal),
+      this.run(['ls-files', '--stage', '-v', '-z'], { indexFile, signal }),
+      this.run(['diff', '--cached', '--raw', '-z', '--no-ext-diff', '--no-renames'], {
+        indexFile,
+        signal,
+      }),
     ]);
     return { head, signature: hash(Buffer.concat([entries.stdout, diff.stdout])) };
   }
@@ -415,7 +429,12 @@ export class WorkingTree {
   }
   async operationState(signal?: AbortSignal, indexFile?: string): Promise<OperationState> {
     const metadata = await inspectOperation(this.repo.gitDir);
-    return this.operationSnapshot(metadata, await this.fingerprint(indexFile), signal, indexFile);
+    return this.operationSnapshot(
+      metadata,
+      await this.operationFingerprint(signal, indexFile),
+      signal,
+      indexFile,
+    );
   }
   private async operationSnapshot(
     metadata: Awaited<ReturnType<typeof inspectOperation>>,

@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from 'vitest';
+import { afterAll, expect, test, vi } from 'vitest';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -6,6 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
 import { RepositoryService } from './src/repository.js';
 import { WorkingTree } from './src/working-tree.js';
+import * as runner from './src/runner.js';
 const root = await mkdtemp(join(tmpdir(), 'openkraken-working-'));
 afterAll(() => rm(root, { recursive: true, force: true }));
 async function setup(name: string) {
@@ -600,16 +601,36 @@ test('branch deletion checks mergedness and worktree use, with atomic guarded re
   ).rejects.toMatchObject({ code: 'STALE_REF' });
 });
 
-test('bare working-state operation tokens agree with a fresh operation inspection', async () => {
+test('bare state skips the tree diff until an index exists and still tracks staged changes', async () => {
   const { path } = await setup('bare-state-source');
   const bare = join(root, 'bare-state.git');
   fixtureGit(path, ['clone', '--bare', '.', bare]);
   const service = new RepositoryService('git');
+  const run = vi.spyOn(runner, 'runGit');
   try {
     const repository = await service.open(bare);
     const work = new WorkingTree('git', repository, join(root, 'bare-profile'));
-    expect((await work.state()).operation).toEqual(await work.operationState());
+    const initial = await work.state();
+    expect(initial.operation).toEqual(await work.operationState());
+    expect(run.mock.calls.some(([, args]) => args.includes('diff'))).toBe(false);
+    await expect(readFile(join(bare, 'index'))).rejects.toMatchObject({ code: 'ENOENT' });
+
+    fixtureGit(bare, ['read-tree', 'HEAD']);
+    const indexed = await work.state();
+    expect(indexed.operation).toEqual(await work.operationState());
+    expect(indexed.operation?.token).not.toBe(initial.operation?.token);
+    expect(indexed.revision).toBe(initial.revision);
+    fixtureGit(bare, ['read-tree', '--empty']);
+    expect((await readFile(join(bare, 'index'))).length).toBeGreaterThan(0);
+    const changed = await work.operationState();
+    expect(changed.token).not.toBe(indexed.operation?.token);
+    expect((await work.state()).operation).toEqual(changed);
+    await rm(join(bare, 'index'));
+    expect((await work.operationState()).token).toBe(initial.operation?.token);
+    fixtureGit(bare, ['update-ref', 'HEAD', 'HEAD~1']);
+    expect((await work.operationState()).token).not.toBe(initial.operation?.token);
   } finally {
+    run.mockRestore();
     await service.dispose();
   }
 });
