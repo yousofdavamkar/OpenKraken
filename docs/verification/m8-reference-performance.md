@@ -2,6 +2,19 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Restarting after a branch update on 50,000 refs
+
+On Linux x64, Electron saved 17,000 rows from a bare mirror of Linux with 50,000 refs. Advancing its checked-out branch by one commit left the ref count unchanged. A second profile saved the same four pages after the change. Each launch received a separate copy of one saved window with its timestamps preserved. Each pair opened the same repository with both builds in alternating order, displayed 2,000 commits, appended 5,000 and selected the last row using End. The visible tip and selected final row matched Git. A full Electron traversal using a copy of the older saved window matched Git on all 50,000 refs and 1,505,200 commit IDs and their ordered parents across 302 pages.
+
+| Saved window            | Median first paint, before → after | Median native snapshot, before → after | Median first append, before → after |
+| ----------------------- | ---------------------------------: | -------------------------------------: | ----------------------------------: |
+| Before the branch moved |               1,116.7 → 1,011.5 ms |                       732.6 → 608.5 ms |                    258.5 → 251.2 ms |
+| After the branch moved  |                 968.6 → 1,026.6 ms |                       562.0 → 591.8 ms |                    313.2 → 282.3 ms |
+
+The baseline was `832475a` and the candidate was `3fe9557`. Medians exclude one warm-up pair and include five measured pairs per profile. The changed-tip opening improved in all five pairs. The current-tip opening slowed in all five. An earlier build that only changed live-walk scheduling showed the same direction for both medians. [Individual paired measurements](m8-opening-experiments.csv)
+
+An independent run opened the original 1,505,199-commit fixture with three fresh profiles in 942.7, 992.6 and 959.9 ms. All missed the 500 ms budget. Seven of nine page appends met 300 ms. The two misses took 346.1 and 366.5 ms in the third profile, where graph scrolling also exceeded the 18.7 ms p95 budget at 33.4 ms. The first two profiles measured 16.8 ms p95 for graph scrolling.
+
 ## Large commit messages in the saved history window
 
 Two Linux x64 bare histories contained the same 80 consecutive commits with 256 KiB message bodies. On the 4,800-commit tip the large messages appeared within the first 2,000 rows. On the 9,600-commit tip they appeared in the next 5,000 rows. Fresh and restarted service runs matched every displayed commit ID and ordered parent with native Git, including all 80 messages. Four Electron launches opened the first page, appended through the root and selected the root with End. The first repository saved no cache pages. The second retained its 2,000-commit opening page.

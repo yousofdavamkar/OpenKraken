@@ -58,3 +58,9 @@ On an initial open with disk caching enabled, the service can read and validate 
 ## Oversized commit messages
 
 The writer accounts for each encoded commit before adding it to a batch. It stops when a prefix exceeds 8 MiB or a tail exceeds 18 MiB, including JSON delimiters, escaped text and the digest footer. An oversized page ends the contiguous window. The writer drops its retained commits from that offset, removes that page and every later file, and caps subsequent appends at the same offset. Queued flushes observe the reduced limit. Earlier pages can still seed a restarted walk, and the live Git cursor continues serving history through the root. [Measurements and restart verification](../verification/m8-reference-performance.md#large-commit-messages-in-the-saved-history-window)
+
+## Scheduling a restart after refs change
+
+For a packed-refs file of at least 512 KiB, compare its modification time and the times of HEAD and its loose local branch, when present, with the saved prefix. A newer ref file or an absent usable prefix favors starting a live walk during ref enumeration and defers reading the saved page. Git still supplies the ordered roots. The computed fingerprint, the commit schema and the page digest determine whether to use cached commits. A timestamp-only change can trigger speculation and still reuse the saved page.
+
+When the expected key is known, the reader probes the first 96 bytes of pages larger than 64 KiB. An exact writer-format header with a different key ends that read. Matching and unrecognized headers continue through full validation. On POSIX, cache files are opened nonblocking before checking the file type so an unexpected pipe cannot hold up the snapshot. [Restart measurements](../verification/m8-reference-performance.md#restarting-after-a-branch-update-on-50000-refs)

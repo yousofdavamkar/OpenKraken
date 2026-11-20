@@ -2,6 +2,12 @@
 
 M8 remains in progress. On Linux x64, the full Linux history with one ref passed the opening budget in all three fresh profiles. Fresh openings with 49,999 nested tag aliases passed three of six times across two runs, and all three restarted profiles passed. All six fresh and all three restarted profiles with distinct targets exceeded 500 ms. Native Windows, macOS and ARM64 acceptance, production release gates, and remaining [M6](m6-progress.md) and [M7](m7-progress.md) work are open.
 
+## Restarting after a branch update
+
+On Linux x64, the desktop reopened a 17,000-row saved window after its branch moved. All 50,000 refs and all 1,505,200 commit IDs with their ordered parents matched Git across 302 pages. In five paired openings, median first paint improved from 1,116.7 to 1,011.5 ms after the branch moved. When the saved window was already current, median first paint increased from 968.6 to 1,026.6 ms. The reader also recovers from an unexpected named pipe in place of a cache file on Linux.
+
+Three independent fresh openings on the original 50,000-distinct-target fixture missed the 500 ms budget. Seven of nine appends met 300 ms. [Desktop timings and measurements](m8-reference-performance.md#restarting-after-a-branch-update-on-50000-refs)
+
 ## Paging and restarting with large commit messages
 
 The history cache now stops encoding at the first oversized record and releases the part of the window that a restart cannot use. On a 17,000-commit cache-writer fixture with large messages, median retained heap growth after the last append fell from 82.28 MiB to 0.10 MiB. Ordinary prefixes and tails remained byte-compatible. Both fresh and restarted Electron profiles opened histories with large messages, paged to the root and selected it from the keyboard. Native verification compared all 4,800 and 9,600 commit IDs and their ordered parents with Git. [Measurements and fixtures](m8-reference-performance.md#large-commit-messages-in-the-saved-history-window)
