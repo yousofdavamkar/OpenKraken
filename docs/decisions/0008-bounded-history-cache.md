@@ -48,3 +48,7 @@ Each cache instance tracks the files it wrote and the pages its cursor accepted 
 ## Leaving a pending cache read
 
 A cancelled repository open releases its wait for the opening cache file and preserves the displayed cursor. A refresh, switch or service shutdown stops optional reads of later cache pages. The service still flushes any writes it owes. If the destination fails to open, the previous cursor can continue from Git. A late file open closes its descriptor, and a discarded page cannot append commits or invalidate the current history. Reads already in the operating system may settle after the request returns.
+
+## Restarting with a saved first page
+
+On an initial open with disk caching enabled, the service can read and validate the first cache page while Git enumerates refs and resolves the current graph. It starts this read only when there is no previous cache writer in the service. Before use it checks the cache path, the file’s current device, inode, size, modification and change times, and the fingerprint computed from this opening. A replaced file goes through the ordinary cache reader. A fingerprint mismatch or missing page falls back to the native history. Later pages still start loading only after the opening prefix is accepted. Cancelling the open abandons the pending read. [Restart measurements](../verification/m8-reference-performance.md#reading-the-cached-first-page-during-ref-enumeration)

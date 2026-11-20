@@ -608,3 +608,17 @@ serialized-ref-part,distinct-one-annotation,4,candidate,774.3,466.4,601.7,229.8,
 serialized-ref-part,distinct-one-annotation,4,baseline,732.1,414.2,546.5,227.9,200.7,183.9,16.8,16.8,56.5,52.8,43.4,591.8,21.0,24.3,31.7,6.9,101.7
 cancel-cache-read,distinct-one-annotation,1,fresh,708.2,382.4,518.0,212.4,196.9,181.2,16.8,16.8,54.8,52.6,43.0,550.2,12.2,20.0,43.4,6.5,108.1
 cancel-cache-read,distinct-one-annotation,1,restarted,698.0,382.7,490.3,217.4,235.7,173.7,16.8,16.7,66.2,57.3,40.6,527.7,11.3,26.1,47.9,8.9,113.5
+prefetch-cache-prefix,distinct-restarted,0,baseline,853.5,465.1,597.2,221.2,284.0,184.7,16.8,16.8,62.1,79.6,46.5,652.7,20.9,34.6,41.9,10.3,148.6
+prefetch-cache-prefix,distinct-restarted,0,candidate,766.5,383.6,525.9,321.0,241.9,199.0,16.7,16.8,97.0,70.8,50.9,577.8,22.2,29.7,53.8,6.6,128.3
+prefetch-cache-prefix,distinct-restarted,1,candidate,710.7,351.9,488.1,255.9,233.6,211.9,16.8,16.7,80.5,61.3,61.1,523.5,13.0,22.4,45.5,10.5,131.2
+prefetch-cache-prefix,distinct-restarted,1,baseline,815.5,461.9,594.0,215.5,288.0,199.5,16.7,16.7,62.7,77.3,65.3,637.4,14.8,28.6,44.9,7.4,125.8
+prefetch-cache-prefix,distinct-restarted,2,baseline,870.4,448.4,605.1,255.8,291.7,183.8,16.8,16.8,55.8,93.8,44.8,641.3,12.5,23.6,60.8,11.1,157.2
+prefetch-cache-prefix,distinct-restarted,2,candidate,734.6,379.6,517.2,246.1,232.1,201.5,16.7,16.8,84.8,61.7,49.4,556.9,13.1,26.6,52.3,5.7,119.7
+prefetch-cache-prefix,distinct-restarted,3,candidate,733.8,365.6,503.4,289.5,268.2,200.7,16.8,16.8,88.4,75.6,57.3,544.8,14.4,26.9,38.8,10.1,140.1
+prefetch-cache-prefix,distinct-restarted,3,baseline,917.5,520.6,665.3,195.8,193.1,182.9,16.8,16.7,57.3,48.0,55.9,699.6,13.7,20.6,43.2,11.3,163.4
+prefetch-cache-prefix,distinct-restarted,4,baseline,879.2,488.5,636.5,282.5,263.1,197.4,16.8,16.8,83.4,66.8,47.3,678.7,12.5,29.7,50.6,10.4,139.5
+prefetch-cache-prefix,distinct-restarted,4,candidate,720.3,379.9,513.7,305.3,281.5,216.2,16.8,16.8,71.9,87.6,52.9,549.9,11.6,24.6,41.6,6.2,122.6
+prefetch-cache-prefix,distinct-restarted,5,candidate,764.2,368.2,518.1,269.0,219.9,234.4,16.7,16.8,91.4,66.1,70.1,566.6,17.8,30.7,53.3,12.7,131.6
+prefetch-cache-prefix,distinct-restarted,5,baseline,769.3,426.3,543.2,206.6,230.9,185.3,16.7,16.8,57.3,59.5,46.0,588.3,12.4,32.7,56.4,6.0,118.6
+prefetch-cache-prefix,distinct,1,final-fresh,808.5,469.0,610.1,232.9,203.8,238.7,16.7,16.7,69.0,56.6,70.1,644.3,12.6,21.6,48.2,5.9,110.1
+prefetch-cache-prefix,distinct,1,final-restart,639.1,325.2,443.7,247.8,226.6,189.8,16.7,16.7,69.0,77.9,47.7,472.7,10.9,18.1,41.7,6.9,117.8

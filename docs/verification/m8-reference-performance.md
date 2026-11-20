@@ -2,6 +2,17 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Reading the cached first page during ref enumeration
+
+Each Linux x64 run opened the full Linux fixture with 50,000 distinct ref targets, persisted 17,000 commits, then restarted Electron. The timed launch displayed 2,000 commits and all 50,000 refs. Both builds used Git 2.53.0, the same renderer and retained OS caches. Five measured pairs alternated build order after a warm-up pair. The control read the first cache page after computing the graph fingerprint. The candidate read and validated that page during Git’s ref enumeration and checked the final fingerprint and file stamp before using it.
+
+| Median across five restarts |  Control | Early cache read |
+| --------------------------- | -------: | ---------------: |
+| Native snapshot             | 461.9 ms |         368.2 ms |
+| First Canvas paint          | 870.4 ms |         733.8 ms |
+
+First paint improved in all five measured pairs. Every opening exceeded 500 ms. Fourteen of the 15 measured candidate appends met 300 ms, with one taking 305.3 ms. All five candidate appends beyond the restored window took 202.6–258.6 ms. A 321.0 ms candidate append occurred in the warm-up pair. [Individual measurements, including warm-up](m8-opening-experiments.csv)
+
 ## Testing three ways to open 50,000 distinct refs
 
 The first fresh-profile control painted in 992.7 ms, with 681.5 ms in the native snapshot. Subsequent paired runs used the same 1,505,199-commit Linux fixture, 50,000 refs, Git 2.53.0 and populated OS caches on Linux x64. Each pair included a fresh profile for each build, and the order alternated. The measurements below preceded the cache cancellation fix. [Per-run timings](m8-opening-experiments.csv)
