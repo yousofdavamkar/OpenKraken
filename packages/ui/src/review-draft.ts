@@ -80,7 +80,7 @@ export function usePullDraft(scope: PullDraftScope, restore: (draft: PullDraft) 
         .then(pullResult),
   );
 }
-function useProviderDraft<T>(
+export function useProviderDraft<T>(
   restore: (draft: T) => void,
   read: () => Promise<{ draft: T | null; revision: string | null }>,
   save: (draft: T | null, revision: string | null) => Promise<{ revision: string | null }>,
