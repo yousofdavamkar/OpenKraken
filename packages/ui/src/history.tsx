@@ -184,15 +184,15 @@ export function History() {
     const refs = event.key.toLowerCase() === 'h' ? refNavigationTargets(snapshot, rows) : undefined;
     const target = navigationTarget(
       rows,
-      selection.focus,
+      focused,
       event.key,
       event.shiftKey,
       refs?.head,
       refs?.upstream,
     );
-    if (target) {
+    if (target !== undefined) {
       event.preventDefault();
-      if (target === selection.focus && focused >= 0)
+      if ((target === focused || target === selection.focus) && focused >= 0)
         virtual.scrollToIndex(focused, { align: 'auto' });
       void state.navigate(target);
     }

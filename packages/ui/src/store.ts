@@ -17,7 +17,7 @@ import {
 import { patchPassages } from '@openkraken/graph';
 import type { GraphRow, GraphPassage } from '@openkraken/graph';
 import { GraphClient } from './graph-client.js';
-import { projectCommits, sameWorkingRow, selectRow } from './history-model.js';
+import { projectCommits, sameWorkingRow, selectRow, singleSelection } from './history-model.js';
 import type { DisplayCommit, Selection } from './history-model.js';
 declare global {
   interface Window {
@@ -470,7 +470,9 @@ export const useRepository = create<State>()(
         const row =
           typeof target === 'number' ? rows[target] : rows.find((row) => row.oid === target);
         if (row) {
-          get().select(row.oid);
+          set((s) => {
+            s.selection = singleSelection(row.oid);
+          });
           return;
         }
         if (!current?.hasMore || busy) return;

@@ -31,14 +31,31 @@ test('range, toggle and ancestry navigation preserve stable OID selection', () =
   const toggled = selectRow(rows, initial, 'root', 'toggle');
   expect(toggled.selected).toEqual(['merge', 'root']);
   expect(selectRow(rows, toggled, 'merge', 'toggle').selected).toEqual(['root']);
-  expect(navigationTarget(rows, 'merge', 'ArrowDown', true)).toBe('left');
-  expect(navigationTarget(rows, 'root', 'ArrowUp', true)).toBe('right');
-  expect(navigationTarget(rows, 'merge', 'ArrowUp', false)).toBe('merge');
-  expect(navigationTarget(rows, 'root', 'ArrowDown', false)).toBe('root');
-  expect(navigationTarget(rows, 'left', 'Home', false)).toBe('merge');
-  expect(navigationTarget(rows, 'left', 'End', false)).toBe('root');
-  expect(navigationTarget(rows, 'left', 'H', true, 'merge', 'right')).toBe('right');
-  expect(navigationTarget(rows, 'left', 'h', false, 'merge')).toBe('merge');
+  expect(navigationTarget(rows, 0, 'ArrowDown', true)).toBe('left');
+  expect(navigationTarget(rows, 3, 'ArrowUp', true)).toBe(2);
+  expect(navigationTarget(rows, 0, 'ArrowUp', false)).toBe(0);
+  expect(navigationTarget(rows, 3, 'ArrowDown', false)).toBe(3);
+  expect(navigationTarget(rows, 1, 'Home', false)).toBe(0);
+  expect(navigationTarget(rows, 1, 'End', false)).toBe(3);
+  expect(navigationTarget(rows, 1, 'H', true, 'merge', 'right')).toBe('right');
+  expect(navigationTarget(rows, 1, 'h', false, 'merge')).toBe('merge');
+});
+test('navigation at row 32,000 reads only the rows needed to locate its closest child', () => {
+  const history = Array<DisplayCommit>(32000).fill(rows[0]!);
+  history[31998] = rows[2]!;
+  history[31999] = rows[3]!;
+  const reads: string[] = [];
+  const observed = new Proxy(history, {
+    get(target, key, receiver) {
+      if (typeof key === 'string' && /^\d+$/.test(key)) reads.push(key);
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  expect(navigationTarget(observed, 31999, 'Home', false)).toBe(0);
+  expect(navigationTarget(observed, 31999, 'PageUp', false)).toBe(31979);
+  expect(reads).toEqual([]);
+  expect(navigationTarget(observed, 31999, 'ArrowUp', true)).toBe(31998);
+  expect(reads).toEqual(['31999', '31998']);
 });
 test('synthetic rows are inserted only on the page containing HEAD, including unborn conflicts', () => {
   const snapshot = {

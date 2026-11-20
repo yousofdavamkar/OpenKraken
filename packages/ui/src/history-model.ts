@@ -186,27 +186,32 @@ export function selectRow(
         ? selection.selected.filter((id) => id !== oid)
         : [...selection.selected, oid],
     };
+  return singleSelection(oid);
+}
+
+export function singleSelection(oid: string): Selection {
   return { focus: oid, anchor: oid, selected: [oid] };
 }
+// Loaded positions stay numeric. A parent or ref tip can require another page.
 export function navigationTarget(
   rows: readonly DisplayCommit[],
-  focus: string | undefined,
+  focused: number,
   key: string,
   shift: boolean,
   head?: string,
   upstream?: string,
-): string | undefined {
+): number | string | undefined {
   if (!rows.length) return;
-  const index = Math.max(
-    0,
-    rows.findIndex((r) => r.oid === focus),
-  );
   if (key.toLowerCase() === 'h') return shift ? upstream : head;
-  if (key === 'Home') return rows[0]!.oid;
-  if (key === 'End') return rows.at(-1)!.oid;
+  if (key === 'Home') return 0;
+  if (key === 'End') return rows.length - 1;
+  const index = Math.max(0, focused);
   if (shift && key === 'ArrowDown') return rows[index]!.parents[0];
-  if (shift && key === 'ArrowUp')
-    return rows.slice(0, index).findLast((r) => r.parents.includes(rows[index]!.oid))?.oid;
+  if (shift && key === 'ArrowUp') {
+    const parent = rows[index]!.oid;
+    for (let i = index - 1; i >= 0; i--) if (rows[i]!.parents.includes(parent)) return i;
+    return;
+  }
   const delta =
     key === 'ArrowDown'
       ? 1
@@ -217,7 +222,7 @@ export function navigationTarget(
           : key === 'PageUp'
             ? -20
             : 0;
-  return delta ? rows[Math.max(0, Math.min(rows.length - 1, index + delta))]!.oid : undefined;
+  return delta ? Math.max(0, Math.min(rows.length - 1, index + delta)) : undefined;
 }
 
 /** Excluded ref shortcuts must not page through an unrelated history looking for a missing tip. */
@@ -228,11 +233,12 @@ export function refNavigationTargets(snapshot: Snapshot, rows: readonly { oid: s
     view.soloRef ? name === view.soloRef : !view.hiddenRefs.includes(name);
   const headRef =
     head.kind === 'branch' ? snapshot.refs.find((r) => r.name === head.ref) : undefined;
-  const upstream = snapshot.refs.find((r) => r.name === headRef?.upstream?.ref);
+  const upstreamRef = headRef?.upstream?.ref;
+  const upstream = upstreamRef ? snapshot.refs.find((r) => r.name === upstreamRef) : undefined;
   const loaded = (oid?: string) => !!oid && rows.some((r) => r.oid === oid);
   return {
     head:
-      loaded(head.oid) || (head.kind === 'branch' ? visible(head.ref) : !view.soloRef)
+      (head.kind === 'branch' ? visible(head.ref) : !view.soloRef) || loaded(head.oid)
         ? head.oid
         : undefined,
     upstream:
