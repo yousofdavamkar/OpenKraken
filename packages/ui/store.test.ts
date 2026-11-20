@@ -540,6 +540,7 @@ test('staging a displayed path updates status and keeps the graph and active sea
   expect(updated.layout).toBe(previous.layout);
   expect(updated.rows).toBe(previous.rows);
   expect(updated.matches).toBe(previous.matches);
+  useRepository.getState().setDetail(updated.rows[0]);
   const renamed = await refresh({
     ...snapshot.status,
     entries: [
@@ -547,6 +548,11 @@ test('staging a displayed path updates status and keeps the graph and active sea
     ],
   });
   expect(renamed.rows[0]?.body).toBe('other.txt');
+  expect(renamed.detail).toBe(renamed.rows[0]);
+  expect(renamed.layout).toBe(updated.layout);
+  expect(renamed.passages).toBe(updated.passages);
+  expect(renamed.selection).toBe(updated.selection);
+  expect(renamed.rows[1]).toBe(updated.rows[1]);
   expect(renamed.matches).toEqual([]);
   const conflicted = await refresh({
     ...snapshot.status,
@@ -554,6 +560,52 @@ test('staging a displayed path updates status and keeps the graph and active sea
   });
   expect(conflicted.rows[0]?.kind).toBe('conflict');
   expect(conflicted.matches).toEqual([`conflict:${snapshot.repository.id}`]);
+});
+
+test('a rename before HEAD is loaded becomes searchable when its page arrives', async () => {
+  const snapshot = fixture();
+  const head = 'b'.repeat(40);
+  snapshot.repository.head = { kind: 'branch', ref: 'refs/heads/main', oid: head };
+  const entry = {
+    path: 'old.txt',
+    pathBytes: Buffer.from('old.txt').toString('base64'),
+    kind: 'untracked' as const,
+    index: '?',
+    worktree: '?',
+    submodule: 'N...',
+  };
+  snapshot.status.entries.push(entry);
+  await open(snapshot);
+  await useRepository.getState().search('renamed');
+  const previous = useRepository.getState();
+  const renamed = {
+    ...entry,
+    path: 'renamed.txt',
+    pathBytes: Buffer.from('renamed.txt').toString('base64'),
+  };
+  request.mockResolvedValueOnce({
+    kind: 'workingState',
+    state: {
+      head: snapshot.repository.head,
+      revision: '0'.repeat(64),
+      status: { ...snapshot.status, entries: [renamed] },
+    },
+  });
+  await previous.refreshStatus();
+  const updated = useRepository.getState();
+  expect(updated.error).toBeUndefined();
+  expect(updated.rows).toBe(previous.rows);
+  expect(updated.snapshot?.status.entries).toEqual([renamed]);
+  expect(updated.matches).toEqual([]);
+  request.mockResolvedValueOnce({
+    kind: 'page',
+    cursor: snapshot.cursor,
+    offset: 1,
+    commits: [{ ...snapshot.commits[0]!, oid: head, parents: [] }],
+    hasMore: false,
+  });
+  await updated.loadMore();
+  expect(useRepository.getState().matches).toEqual([`wip:${snapshot.repository.id}`]);
 });
 
 test('status refresh preserves the append-only history cursor, loaded commits and selection', async () => {

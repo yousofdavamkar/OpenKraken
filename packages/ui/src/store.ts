@@ -17,7 +17,14 @@ import {
 import { passageBuckets, refreshPassageBuckets } from '@openkraken/graph';
 import type { GraphRow, GraphPassage } from '@openkraken/graph';
 import { GraphClient } from './graph-client.js';
-import { projectCommits, sameWorkingRow, selectRow, singleSelection } from './history-model.js';
+import {
+  projectCommits,
+  sameWorkingPaths,
+  workingRow,
+  workingRowKind,
+  selectRow,
+  singleSelection,
+} from './history-model.js';
 import type { DisplayCommit, Selection } from './history-model.js';
 declare global {
   interface Window {
@@ -111,22 +118,42 @@ export const useRepository = create<State>()(
           fullRefresh = true;
           return;
         }
-        // HEAD and the worktree revision were checked above. Staging a path can
-        // change its status without changing the synthetic row or its search text.
-        if (
-          (worktrees === snapshot.worktrees ||
-            JSON.stringify(worktrees) === JSON.stringify(snapshot.worktrees)) &&
-          sameWorkingRow(snapshot.status, result.state.status)
-        ) {
+        const next = { ...snapshot, status: result.state.status, worktrees };
+        const sameWorktrees =
+          worktrees === snapshot.worktrees ||
+          JSON.stringify(worktrees) === JSON.stringify(snapshot.worktrees);
+        const kind = workingRowKind(result.state.status);
+        if (sameWorktrees && kind === workingRowKind(snapshot.status)) {
+          // A different list of dirty paths changes search and detail text. The
+          // working node still has the same ID, parents and position.
+          const index =
+            kind && !sameWorkingPaths(snapshot.status, result.state.status)
+              ? previous.rows.findIndex((row) => row.kind === kind)
+              : -1;
+          const row = index >= 0 ? workingRow(next) : undefined;
+          if (row) {
+            const { oid, summary, body, author } = row;
+            const reply = await graph().request({
+              method: 'updateSearchDocument',
+              generation: snapshot.cursor,
+              document: { oid, summary, body, author },
+            });
+            if (reply.kind !== 'documentUpdated') throw new Error('Invalid graph response');
+          }
+          if (get().busy !== id || get().snapshot?.cursor !== snapshot.cursor) return;
           const statusChanged =
-            JSON.stringify(snapshot.status) !== JSON.stringify(result.state.status);
+            !!row || JSON.stringify(snapshot.status) !== JSON.stringify(result.state.status);
           set((s) => {
-            if (statusChanged) s.snapshot = { ...snapshot, status: result.state.status };
+            if (statusChanged) s.snapshot = next;
             s.workingState = result.state;
+            if (row) {
+              s.rows[index] = row;
+              if (s.detail?.oid === row.oid) s.detail = row;
+            }
           });
+          if (row && get().query) await updateLoadedMatches();
           return;
         }
-        const next = { ...snapshot, status: result.state.status, worktrees };
         const rows = projectCommits(next.commits, next, true);
         const layout = await graph().request({
           method: 'refresh',

@@ -20,13 +20,32 @@ export interface DisplayCommit extends Commit {
 const hasConflict = (status: Snapshot['status']) =>
   status.entries.some((entry) => entry.kind === 'conflict');
 
-export function sameWorkingRow(before: Snapshot['status'], after: Snapshot['status']) {
+export function sameWorkingPaths(before: Snapshot['status'], after: Snapshot['status']) {
   return (
     before.entries.length === after.entries.length &&
-    before.entries.every((entry, index) => entry.path === after.entries[index]!.path) &&
-    hasConflict(before) === hasConflict(after)
+    before.entries.every((entry, index) => entry.path === after.entries[index]!.path)
   );
 }
+export function workingRowKind(status: Snapshot['status']) {
+  return status.entries.length ? (hasConflict(status) ? 'conflict' : 'wip') : undefined;
+}
+
+export function workingRow(snapshot: Snapshot): DisplayCommit {
+  const conflict = hasConflict(snapshot.status);
+  return {
+    oid: `${conflict ? 'conflict' : 'wip'}:${snapshot.repository.id}`,
+    parents: snapshot.repository.head.oid ? [snapshot.repository.head.oid] : [],
+    author: { name: 'Working tree', email: '', time: 0, tzOffsetMin: 0 },
+    committer: { name: '', email: '', time: 0, tzOffsetMin: 0 },
+    summary: conflict
+      ? 'Resolve working-tree conflicts'
+      : `${snapshot.status.entries.length} uncommitted changes`,
+    body: snapshot.status.entries.map((e) => e.path).join('\n'),
+    isStash: false,
+    kind: conflict ? 'conflict' : 'wip',
+  };
+}
+
 export function projectCommits(
   commits: Commit[],
   snapshot: Snapshot,
@@ -34,7 +53,6 @@ export function projectCommits(
 ): DisplayCommit[] {
   const result: DisplayCommit[] = [];
   const dirty = snapshot.status.entries.length > 0;
-  const conflict = hasConflict(snapshot.status);
   const worktrees = new Map<string | undefined, DisplayCommit[]>();
   for (const entry of snapshot.worktrees?.entries ?? []) {
     if (entry.current || entry.bare) continue;
@@ -66,22 +84,10 @@ export function projectCommits(
     };
     worktrees.set(entry.head, [...(worktrees.get(entry.head) ?? []), row]);
   }
-  const synthetic = (): DisplayCommit => ({
-    oid: `${conflict ? 'conflict' : 'wip'}:${snapshot.repository.id}`,
-    parents: snapshot.repository.head.oid ? [snapshot.repository.head.oid] : [],
-    author: { name: 'Working tree', email: '', time: 0, tzOffsetMin: 0 },
-    committer: { name: '', email: '', time: 0, tzOffsetMin: 0 },
-    summary: conflict
-      ? 'Resolve working-tree conflicts'
-      : `${snapshot.status.entries.length} uncommitted changes`,
-    body: snapshot.status.entries.map((e) => e.path).join('\n'),
-    isStash: false,
-    kind: conflict ? 'conflict' : 'wip',
-  });
-  if (firstPage && !snapshot.repository.head.oid && dirty) result.push(synthetic());
+  if (firstPage && !snapshot.repository.head.oid && dirty) result.push(workingRow(snapshot));
   if (firstPage) result.push(...(worktrees.get(undefined) ?? []));
   for (const commit of commits) {
-    if (dirty && commit.oid === snapshot.repository.head.oid) result.push(synthetic());
+    if (dirty && commit.oid === snapshot.repository.head.oid) result.push(workingRow(snapshot));
     result.push(...(worktrees.get(commit.oid) ?? []));
     result.push({ ...commit, kind: 'commit' });
   }

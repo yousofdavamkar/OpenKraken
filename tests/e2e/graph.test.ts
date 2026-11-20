@@ -288,6 +288,8 @@ test('external staging preserves an active search without resending the loaded g
           const [message] = args;
           if (message.method === 'refresh' || message.method === 'reset')
             performance.mark('test-graph-reload', { detail: message.commits.length });
+          if (message.method === 'updateSearchDocument')
+            performance.mark('test-graph-document', { detail: message.document.body });
           return Reflect.apply(send, worker, args);
         },
       });
@@ -298,6 +300,17 @@ test('external staging preserves an active search without resending the loaded g
     ).toBeEnabled();
     await expect(matches).toBeVisible();
     await expect(page.getByTestId('commit-count')).toHaveText('7,000 commits · more available');
+    fixtureGit(repository, ['mv', 'stage-me.txt', 'replacement.txt']);
+    await expect(page.getByText('0 loaded matches', { exact: true })).toBeVisible();
+    await page.getByRole('textbox', { name: 'Search commits' }).fill('replacement');
+    await expect(matches).toBeVisible();
+    expect(
+      await page.evaluate(() =>
+        performance
+          .getEntriesByName('test-graph-document')
+          .some((entry) => (entry as PerformanceMark).detail.includes('replacement.txt')),
+      ),
+    ).toBe(true);
     expect(
       await page.evaluate(() =>
         performance
