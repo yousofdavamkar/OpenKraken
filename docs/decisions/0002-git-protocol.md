@@ -33,3 +33,7 @@ Git emits a line feed after a repository path on POSIX. Repository discovery rem
 ## Reading HEAD while opening a repository
 
 The opening metadata query asks `git rev-parse` for the Git directory, common directory, bare and shallow flags, and verified HEAD. A committed HEAD adds a full SHA-1 or SHA-256 ID after the flags. An unborn HEAD returns exit status 1 and the metadata fields. The independent symbolic-ref query distinguishes an unborn branch from a detached commit. It runs alongside the metadata and sparse-checkout setting reads. Paths containing a newline still use separate directory queries. Tests exercise both an unborn branch and a detached commit in such a checkout.
+
+## Nested annotated tags
+
+Git 2.38 can return an intermediate tag in the dereferenced fields of `for-each-ref`. The reference reader resolves those remaining tag IDs with one bounded `cat-file --batch-check` request. Each input uses the captured object ID and the recursive `^{}` suffix. The ref retains the outer tag ID for identity and uses the final object ID and type for badges, graph roots and search. Tags ending at a tree or blob stay visible in the reference list. [Git revision syntax](https://git-scm.com/docs/gitrevisions) and [batch object information](https://git-scm.com/docs/git-cat-file).

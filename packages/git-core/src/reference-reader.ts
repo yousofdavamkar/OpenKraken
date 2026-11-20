@@ -143,7 +143,35 @@ export class ReferenceReader {
       maxBytes: this.maxBytes,
       onStdout: (chunk) => parser.push(chunk),
     });
-    return parser.finish();
+    return this.peelNestedTags(cwd, signal, parser.finish());
+  }
+
+  private async peelNestedTags(cwd: string, signal: AbortSignal, refs: Ref[]) {
+    // Older for-each-ref versions peel a single layer. Resolve only the remaining tags.
+    const nested = refs.filter((ref) => ref.peeledType === 'tag');
+    if (!nested.length) return refs;
+    const ids = [...new Set(nested.map((ref) => ref.peeled!))];
+    const { stdout } = await this.run(
+      ['cat-file', '--buffer', '--batch-check=%(rest) %(objectname) %(objecttype)'],
+      {
+        cwd,
+        signal,
+        maxBytes: this.maxBytes,
+        stdin: ids.map((id) => id + '^{} ' + id + '\n').join(''),
+      },
+    );
+    const lines = stdout.toString('ascii').split('\n');
+    const resolved = new Map<string, { peeled: string; peeledType: string }>();
+    if (lines.pop() !== '' || lines.length !== ids.length)
+      throw new GitError('INVALID_REFS', 'Incomplete nested tag targets');
+    for (const [index, id] of ids.entries()) {
+      const match = /^(\S+) ([0-9a-f]+) (commit|tree|blob)$/.exec(lines[index]!);
+      if (!match || match[1] !== id || match[2]!.length !== id.length)
+        throw new GitError('INVALID_REFS', 'Invalid nested tag target');
+      resolved.set(id, { peeled: match[2]!, peeledType: match[3]! });
+    }
+    for (const ref of nested) Object.assign(ref, resolved.get(ref.peeled!)!);
+    return refs;
   }
 
   private async resolveRepeatedTypes(cwd: string, signal: AbortSignal, refs: Ref[]) {
@@ -352,6 +380,6 @@ export class ReferenceReader {
     ) {
       return this.all(cwd, signal);
     }
-    return refs;
+    return this.peelNestedTags(cwd, signal, refs);
   }
 }

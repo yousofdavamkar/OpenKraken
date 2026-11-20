@@ -277,6 +277,47 @@ test('hexadecimal ref names cannot impersonate or shadow a commit ID in history 
   expect(await lookup(tag.slice(0, 12))).toEqual([taggedCommit]);
 });
 
+test('graph roots and search follow nested tags to commits, trees and blobs', async () => {
+  const path = createFixture(join(root, 'nested-tags'), 'linear', 3);
+  const git = (...args: string[]) => fixtureGit(path, args);
+  const tree = git('rev-parse', 'HEAD^{tree}');
+  const commit = git('commit-tree', tree, '-m', 'Reachable only through the tag chain');
+  const blob = git('rev-parse', 'HEAD:tracked.txt');
+  for (const [name, oid] of [
+    ['commit', commit],
+    ['tree', tree],
+    ['blob', blob],
+  ] as const) {
+    git('tag', '-a', 'inner', '-m', 'Inner', oid);
+    git('-c', 'advice.nestedTag=false', 'tag', '-a', 'middle', '-m', 'Middle', 'inner');
+    git('-c', 'advice.nestedTag=false', 'tag', '-a', name + '-chain', '-m', 'Outer', 'middle');
+    git('tag', '-d', 'inner', 'middle');
+  }
+  const repo = await service.open(path);
+  const opened = await service.snapshot(repo.id);
+  expect(opened.commits.map((row) => row.oid)).toContain(commit);
+  for (const [type, peeled] of [
+    ['commit', commit],
+    ['tree', tree],
+    ['blob', blob],
+  ] as const) {
+    const name = 'refs/tags/' + type + '-chain';
+    expect(opened.refs.find((ref) => ref.name === name)).toMatchObject({
+      target: git('rev-parse', name),
+      objectType: 'tag',
+      peeled,
+      peeledType: type,
+    });
+    const solo = await service.snapshot(repo.id, undefined, true, {
+      hiddenRefs: [],
+      soloRef: name,
+    });
+    expect(solo.commits.map((row) => row.oid)).toEqual(type === 'commit' ? [commit] : []);
+    const search = await service.search(repo.id, solo.cursor, 'Reachable only');
+    expect(search.commits.map((row) => row.oid)).toEqual(type === 'commit' ? [commit] : []);
+  }
+});
+
 test('an ambiguous object prefix keeps literal search results and selects neither object', async () => {
   const path = createFixture(join(root, 'ambiguous-oid'), 'linear', 8);
   const tree = fixtureGit(path, ['mktree'], '');

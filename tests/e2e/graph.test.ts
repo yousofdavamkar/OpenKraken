@@ -700,6 +700,41 @@ for (const kind of fixtureKinds)
     }
   });
 
+test('nested release tags label and select history reachable only through the tag chain', async () => {
+  let oid = '';
+  const { page, close } = await launch('linear', 4, (path) => {
+    const tree = fixtureGit(path, ['rev-parse', 'HEAD^{tree}']);
+    oid = fixtureGit(path, ['commit-tree', tree, '-m', 'Archived release notes']);
+    fixtureGit(path, ['tag', '-a', 'inner', '-m', 'Inner', oid]);
+    fixtureGit(path, [
+      '-c',
+      'advice.nestedTag=false',
+      'tag',
+      '-a',
+      'release',
+      '-m',
+      'Release',
+      'inner',
+    ]);
+    fixtureGit(path, ['tag', '-d', 'inner']);
+  });
+  try {
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    const row = grid.locator(`[data-oid="${oid}"]`);
+    await expect(row).toContainText('Archived release notes');
+    await expect(row).toContainText('release');
+    await page.getByRole('button', { name: 'Solo refs/tags/release', exact: true }).click();
+    await expect(grid.getByRole('row')).toHaveCount(1);
+    await grid.press('Home');
+    await expect(row).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('textbox', { name: 'Search commits' }).fill(oid);
+    await page.getByRole('button', { name: 'Search all history' }).click();
+    await expect(page.getByLabel('All history results')).toContainText('Archived release notes');
+  } finally {
+    await close();
+  }
+});
+
 test('sidebar hide, solo and pin change graph roots and survive refresh', async () => {
   const { page, repository, close } = await launch('orphan');
   try {
