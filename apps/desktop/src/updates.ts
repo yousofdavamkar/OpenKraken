@@ -688,11 +688,15 @@ export class Updates {
     );
     if (!artifact) return this.read();
     return this.start('downloading', 10 * 60_000, async (signal) => {
-      try {
-        validateUpdateRelease(release, this.now());
-      } catch {
-        throw new UpdateFailure('invalid-release');
-      }
+      const validateSelection = () => {
+        signal.throwIfAborted();
+        try {
+          validateUpdateRelease(release, this.now());
+        } catch {
+          throw new UpdateFailure('invalid-release');
+        }
+      };
+      validateSelection();
       this.state.selected = artifact.format;
       this.state.downloaded = 0;
       await this.removeOwned('artifact.part', 2 * 1024 ** 3);
@@ -730,13 +734,8 @@ export class Updates {
             await file.close();
           }
         }
-        try {
-          validateUpdateRelease(release, this.now());
-        } catch {
-          throw new UpdateFailure('invalid-release');
-        }
         await this.checkStorage();
-        signal.throwIfAborted();
+        validateSelection();
         if (created) {
           await rename(this.file('artifact.part'), this.file('artifact.ready')).catch(() => {
             throw new UpdateFailure('storage');
@@ -744,6 +743,12 @@ export class Updates {
           created = false;
         }
         this.recoverableArtifact = true;
+        // A failed directory sync can leave a complete file for a checked retry.
+        await this.syncDirectory().catch(() => {
+          throw new UpdateFailure('storage');
+        });
+        await this.checkStorage();
+        validateSelection();
         this.state.phase = 'verified';
         this.state.installId =
           artifact.format === 'AppImage' && this.runtime.appImage ? randomUUID() : null;

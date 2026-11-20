@@ -3,6 +3,7 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import {
   mkdir,
   mkdtemp,
+  open,
   readdir,
   readFile,
   rename,
@@ -858,6 +859,72 @@ function signed(value: unknown, key = keys.privateKey) {
     ).toString('base64'),
   });
 }
+
+test.skipIf(process.platform === 'win32').each(['sync failure', 'expiry', 'cancellation'])(
+  'withholds update approval after %s while publishing the cached installer',
+  async (scenario) => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-update-promotion-'));
+    const directory = join(root, 'updates');
+    const send = vi.fn<typeof fetch>(
+      async (url) =>
+        new Response(String(url) === configuration.feed ? signed(release()) : 'fixture'),
+    );
+    let clock = now;
+    const updater = new Updates(directory, configuration, runtime, send, () => clock);
+    try {
+      await updater.check();
+      const handle = await open(directory, 'r');
+      const prototype: typeof handle = Object.getPrototypeOf(handle);
+      await handle.close();
+      const originalSync = prototype.sync;
+      let attempts = 0;
+      const sync = vi.spyOn(prototype, 'sync').mockImplementation(async function (
+        this: typeof handle,
+      ) {
+        if ((await this.stat()).isDirectory()) {
+          attempts++;
+          expect(await readFile(join(directory, 'artifact.ready'), 'utf8')).toBe('fixture');
+          if (scenario === 'expiry') clock = release().expiresAt + 1;
+          else if (scenario === 'cancellation') updater.cancel();
+          else throw new Error('Cannot sync update directory');
+        }
+        await originalSync.call(this);
+      });
+      try {
+        const state = await updater.download('AppImage');
+        expect(attempts).toBe(1);
+        expect(state).toMatchObject({
+          phase: 'error',
+          error:
+            scenario === 'expiry'
+              ? 'invalid-release'
+              : scenario === 'cancellation'
+                ? 'cancelled'
+                : 'storage',
+          installId: null,
+        });
+        expect(state.saveId).toBeUndefined();
+        if (scenario === 'sync failure') {
+          await updater.check();
+          expect((await updater.download('AppImage')).error).toBe('storage');
+          expect(attempts).toBe(2);
+        }
+      } finally {
+        sync.mockRestore();
+      }
+      if (scenario !== 'expiry') {
+        await updater.check();
+        expect((await updater.download('AppImage')).phase).toBe('verified');
+        expect(send.mock.calls.filter(([url]) => String(url) !== configuration.feed)).toHaveLength(
+          1,
+        );
+      }
+    } finally {
+      await updater.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test.each(['same release', 'check failed', 'new release', 'changed bytes', 'different format'])(
   'rechecks a verified installer in the running app with %s',
