@@ -81,6 +81,7 @@ try {
 
   const source = join(signed, 'manifest.json');
   const receipt = JSON.parse(await readFile(source, 'utf8'));
+  assert.ok(receipt.artifact.file.endsWith('-' + receipt.artifact.sha256 + '.rpm'));
   const packageFile = join(fixture, receipt.artifact.file);
   const manifest = join(fixture, 'manifest.json');
   await copyFile(join(signed, receipt.artifact.file), packageFile);
