@@ -126,7 +126,7 @@ export async function verifyDmg(source, manifest, identity) {
     console.log(
       'DMG payload, bundle metadata, signature and Electron fuses verified; image detached',
     );
-    const smoke = spawn(process.execPath, ['scripts/smoke-package.mjs'], {
+    const smoke = spawn(process.execPath, ['scripts/smoke-package.mjs', '--history'], {
       stdio: 'inherit',
       env: {
         ...process.env,

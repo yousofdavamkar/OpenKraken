@@ -171,7 +171,7 @@ async function verifyLinuxInstaller() {
     )
       throw new Error('Desktop launcher does not match the sandboxed application');
     console.log('Installer payload, launch entry and Electron fuses verified');
-    const smoke = spawn(process.execPath, ['scripts/smoke-package.mjs'], {
+    const smoke = spawn(process.execPath, ['scripts/smoke-package.mjs', '--history'], {
       stdio: 'inherit',
       env: {
         ...process.env,
