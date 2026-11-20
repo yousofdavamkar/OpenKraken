@@ -106,6 +106,42 @@ test('Canvas search dims without moving rows; keyboard, ancestry, multi-select a
     await close();
   }
 });
+test('deep keyboard focus and range selection follow commit IDs when working rows shift', async () => {
+  const { page, repository, close } = await launch('linear', 2200);
+  try {
+    await page.getByLabel('Refresh on focus', { exact: true }).uncheck();
+    await expect(page.getByText('Watching for changes', { exact: true })).toBeVisible();
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    await page.getByRole('button', { name: 'Load more commits', exact: true }).click();
+    await expect(grid).toHaveAttribute('aria-rowcount', '2200');
+    const [root, second, third] = fixtureGit(repository, ['rev-list', '--reverse', 'HEAD']).split(
+      '\n',
+    );
+    const selected = grid.getByRole('row', { selected: true });
+    await grid.press('End');
+    await expect(selected).toHaveAttribute('data-oid', root!);
+    const draft = join(repository, 'untracked.txt');
+    writeFileSync(draft, 'local change');
+    await expect(grid).toHaveAttribute('aria-rowcount', '2201');
+    await expect(selected).toHaveAttribute('aria-rowindex', '2201');
+    await grid.press('Enter');
+    const details = page.getByRole('region', { name: 'Commit details' });
+    await expect(details).toContainText(root!);
+    await page.getByRole('button', { name: 'Close details' }).click();
+    await grid.press('ArrowUp');
+    await expect(selected).toHaveAttribute('data-oid', second!);
+    rmSync(draft);
+    await expect(grid).toHaveAttribute('aria-rowcount', '2200');
+    await expect(selected).toHaveAttribute('aria-rowindex', '2199');
+    await grid.locator(`[data-oid="${third}"]`).click({ modifiers: ['Shift'] });
+    await expect(selected).toHaveCount(2);
+    await expect(grid.locator(`[data-oid="${second}"]`)).toHaveAttribute('aria-selected', 'true');
+    await expect(grid.locator(`[data-oid="${third}"]`)).toHaveAttribute('aria-selected', 'true');
+  } finally {
+    await close();
+  }
+});
+
 test('choosing the same search result reveals its virtualized row again', async () => {
   const { page, repository, close } = await launch('linear', 501);
   try {
