@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest three runs. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Snapshot publication on large reference sets
+
+In five paired full Linux benchmarks with 50,000 refs at HEAD, the updated renderer painted within 500 ms on all five openings. The preceding renderer met that budget three times. A separate series that only opened the graph still had one miss across six candidate openings. With 50,000 distinct targets, the candidate's median first paint was 705.5 ms and all three openings exceeded budget. All 27 appends across the shared, distinct and one-ref benchmarks met 300 ms. [Paired measurements and native query experiments](m8-reference-performance.md#preparing-the-snapshot-during-graph-layout)
+
+Three fresh profiles on the two-million-commit checkout painted in 292.9–307.2 ms. Its slowest 5,000-commit append took 239.8 ms. The packaged Linux x64 app retained all 17,000 ordered commit IDs and their parent lists across the first page and three appends on each 50,000-ref fixture. Both lists matched native Git. Typechecking, lint, 1,037 unit/native tests (14 skipped), 30 focused Electron tests and seven Git 2.38.0 reference/bridge checks passed. The unsigned test AppImage passed installer verification and launched through FUSE and extract-and-run.
+
 ## Paging through complete histories
 
 On Linux x64 the retained Git walk previously stopped at 1,147,000 commits of the pinned Linux history. The following page exceeded the runner's lifetime output limit. At `ad22690` the runner renews the stdout allowance when it delivers a page. A native regression forces a lower allowance and checks every commit and parent across one retained walk. Separate regressions exercise one oversized page and cumulative stderr.

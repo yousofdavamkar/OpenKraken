@@ -2,6 +2,25 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Preparing the snapshot during graph layout
+
+At `d1e8346`, the renderer freezes the validated repository snapshot and display rows while the graph worker lays out the first page. Both revisions used the same native Git service and Electron build. Each opening used a fresh profile on Linux x64 with Git 2.53.0 and retained OS caches. Build order alternated in each series.
+
+| Fixture and measurement                                              | Baseline | With preparation during layout |
+| -------------------------------------------------------------------- | -------: | -----------------------------: |
+| Shared target, median first paint across five full benchmarks        | 495.2 ms |                       493.6 ms |
+| Shared target, first paints below 500 ms                             |      3/5 |                            5/5 |
+| Shared target, median time from layout reply to store publication    |  29.7 ms |                         7.0 ms |
+| Distinct targets, median first paint across three full benchmarks    | 727.8 ms |                       705.5 ms |
+| Distinct targets, median time from layout reply to store publication |  21.1 ms |                         8.3 ms |
+| Single ref, first paint in one full benchmark                        | 343.6 ms |                       335.5 ms |
+
+All 27 candidate appends met 300 ms. The distinct-target candidate painted in 705.5, 894.6 and 700.6 ms. In a separate series of six opening-only pairs on the shared-target fixture, the median interval from receiving the snapshot to publication fell from 99.0 to 82.4 ms. Five of the six candidate first paints met 500 ms. The worker round-trip includes any overlapping renderer preparation. [Individual full-benchmark runs](m8-opening-experiments.csv)
+
+Two further experiments used the distinct-target fixture. Looking up object types in three parallel Git processes reduced the median time for an isolated enumeration and record comparison from 159.4 to 139.7 ms. Every field matched a direct enumeration in each run. In seven fresh-profile desktop pairs, that approach increased median native snapshot time from 375.1 to 445.9 ms and median first paint from 706.5 to 752.2 ms. In a second experiment, sending the staged refs to main as one JSON string took 502.3 ms to deliver the opening response, compared with 497.2 ms using the existing transfer, across six pairs. The shipped build uses the direct native enumeration and staged ref array.
+
+A separate instrumented development build recorded four openings with 50,000 distinct targets. The median interval from starting the reference read to having the refs, worktrees and cache inputs ready was 268.4 ms. Sending the staged ref array took a further 24.8 ms in the utility. From sending the completed snapshot to the renderer receiving its response took 84.7 ms. That final interval included main-process validation (14.1 ms median), response encoding (17.8 ms) and delivery after encoding (26.1 ms). These are wall-clock measurements from a diagnostic build.
+
 ## Starting history from a shared HEAD
 
 With Git 2.53.0, a traced Linux x64 opening of full Linux history painted in 342.5 ms with one ref and 672.3 ms with 50,000 distinct refs. On the distinct fixture, five native runs took a median 133.4 ms to enumerate ref names, IDs, object types and HEAD markers. Asking Git to omit object types took 35.0 ms. Looking up the missing types in a separate batch took another 99.1 ms. These native timings exclude parsing and IPC. The app continues to resolve every ref's type.
