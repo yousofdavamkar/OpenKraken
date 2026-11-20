@@ -162,7 +162,7 @@ test('large reference sidebar stays bounded and filtered actions survive scrolli
   }
 });
 
-test('a pending rename survives switching between grouped and virtualized references', async () => {
+function createThresholdFixture() {
   const root = mkdtempSync(join(tmpdir(), 'openkraken-ref-threshold-'));
   const repository = createFixture(join(root, 'repo'));
   const tip = fixtureGit(repository, ['rev-parse', 'HEAD']);
@@ -175,6 +175,11 @@ test('a pending rename survives switching between grouped and virtualized refere
       (_, index) => `create refs/tags/fixture-${index} ${tip}\n`,
     ).join(''),
   );
+  return { root, repository, tip };
+}
+
+test('a pending rename survives switching between grouped and virtualized references', async () => {
+  const { root, repository, tip } = createThresholdFixture();
   const app = await electron.launch({
     args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
   });
@@ -229,6 +234,46 @@ test('a pending rename survives switching between grouped and virtualized refere
     await expect(draft).toHaveValue('obsolete-review');
     expect(fixtureGit(repository, ['rev-parse', 'refs/heads/threshold'])).toBe(parent);
     expect(fixtureGit(repository, ['branch', '--list', 'obsolete-review'])).toBe('');
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a reference filter retains keyboard focus and its query across the size threshold', async () => {
+  const { root, repository } = createThresholdFixture();
+  fixtureGit(repository, ['branch', 'threshold']);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, repository);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    const filter = page.getByRole('textbox', { name: 'Filter references', exact: true });
+    await filter.fill('threshold');
+    fixtureGit(repository, ['branch', '-D', 'threshold']);
+    await expect(page.getByRole('heading', { name: 'References 99', exact: true })).toBeVisible();
+    await expect(filter).toBeFocused();
+    await expect(filter).toHaveValue('threshold');
+    await expect(page.locator('.refs').getByRole('status')).toHaveText('0 matching references');
+    fixtureGit(repository, ['branch', 'threshold']);
+    await expect(page.getByRole('heading', { name: 'References 100', exact: true })).toBeVisible();
+    await expect(filter).toBeFocused();
+    await expect(
+      page.getByRole('button', { name: 'Rename branch threshold', exact: true }),
+    ).toBeVisible();
+    const other = createFixture(join(root, 'other'));
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, other);
+    await page.getByRole('button', { name: 'Open repository', exact: true }).click();
+    await expect(
+      page.getByRole('button', { name: 'Rename branch main', exact: true }),
+    ).toBeVisible();
+    await expect(filter).toHaveCount(0);
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

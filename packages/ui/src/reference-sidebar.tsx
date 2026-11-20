@@ -51,11 +51,13 @@ function VirtualReferences({
   snapshot,
   busy,
   reviewedName,
+  onFilterFocus,
   onReview,
 }: {
   snapshot: Snapshot;
   busy: boolean;
   reviewedName?: string;
+  onFilterFocus: () => void;
   onReview: ReviewHandler;
 }) {
   const [query, setQuery] = useState('');
@@ -155,6 +157,7 @@ function VirtualReferences({
         Filter references
         <input
           value={query}
+          onFocus={onFilterFocus}
           maxLength={1000}
           onChange={(event) => {
             setQuery(event.target.value);
@@ -226,7 +229,9 @@ function RepositorySidebar({ snapshot, busy }: { snapshot: Snapshot; busy: boole
     }
     setReview(undefined);
   }
-  const large = snapshot.refs.length >= 100;
+  // Once the user enters the filter, keep it available across ref refreshes.
+  const [filterUsed, setFilterUsed] = useState(false);
+  const large = snapshot.refs.length >= 100 || filterUsed;
   return (
     <aside ref={aside} className={`refs${large ? ' virtualized-refs' : ''}`}>
       <h2>
@@ -254,6 +259,7 @@ function RepositorySidebar({ snapshot, busy }: { snapshot: Snapshot; busy: boole
           snapshot={snapshot}
           busy={busy}
           reviewedName={review?.reference.name}
+          onFilterFocus={() => setFilterUsed(true)}
           onReview={setReview}
         />
       ) : (
