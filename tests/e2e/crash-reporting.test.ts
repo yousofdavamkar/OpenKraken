@@ -283,52 +283,80 @@ for (const failure of [
     },
   );
 
-test('a delayed theme read lets the document load before the desktop acknowledges startup', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'openkraken-startup-theme-'));
-  let app: Awaited<ReturnType<typeof electron.launch>> | undefined;
-  try {
-    await writeFile(
-      join(root, 'package.json'),
-      JSON.stringify({ name: 'openkraken', version: '0.1.0', main: 'delay.cjs' }),
-    );
-    await writeFile(
-      join(root, 'delay.cjs'),
-      `
+for (const busy of [false, true])
+  test(
+    busy
+      ? 'the first startup acknowledgement survives a full request queue'
+      : 'a delayed theme read lets the document load before the desktop acknowledges startup',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'openkraken-startup-theme-'));
+      let app: Awaited<ReturnType<typeof electron.launch>> | undefined;
+      try {
+        await writeFile(
+          join(root, 'package.json'),
+          JSON.stringify({ name: 'openkraken', version: '0.1.0', main: 'delay.cjs' }),
+        );
+        await writeFile(
+          join(root, 'delay.cjs'),
+          `
       const { ipcMain, dialog } = require('electron');
       const handle = ipcMain.handle.bind(ipcMain);
+      globalThis.pickers = [];
+      dialog.showOpenDialog = () => new Promise(resolve => globalThis.pickers.push(resolve));
       dialog.showErrorBox = (title) => require('node:fs').writeFileSync(require('node:path').join(__dirname, 'error-title'), title);
       ipcMain.handle = (channel, handler) => handle(channel, async (event, request, ...args) => {
         if (request.method === 'appearancePreferences' && !globalThis.resumeAppearance)
           await new Promise(resolve => { globalThis.resumeAppearance = resolve; });
-        if (request.method === 'updatesStarted') globalThis.startupAcknowledged = true;
-        return handler(event, request, ...args);
+        const result = await handler(event, request, ...args);
+        if (request.method === 'updatesStarted') globalThis.startupAcknowledged = result.kind;
+        return result;
       });
       require(${JSON.stringify(resolve('apps/desktop/dist/main.cjs'))});
     `,
-    );
-    app = await electron.launch({ args: [root, `--user-data-dir=${join(root, 'profile')}`] });
-    const page = await app.firstWindow();
-    await page.waitForLoadState('load');
-    await expect
-      .poll(() => app!.evaluate(() => typeof Reflect.get(globalThis, 'resumeAppearance')))
-      .toBe('function');
-    expect(await page.locator('#root > *').count()).toBe(0);
-    expect(
-      await app.evaluate(() => Reflect.get(globalThis, 'startupAcknowledged')),
-    ).toBeUndefined();
-    await app.evaluate(() => Reflect.get(globalThis, 'resumeAppearance')());
-    await expect(
-      page.getByRole('button', { name: 'Open a repository', exact: true }),
-    ).toBeVisible();
-    await expect
-      .poll(() => app!.evaluate(() => Reflect.get(globalThis, 'startupAcknowledged')))
-      .toBe(true);
-    await expect(readFile(join(root, 'error-title'))).rejects.toMatchObject({ code: 'ENOENT' });
-  } finally {
-    await app?.close();
-    await rm(root, { recursive: true, force: true });
-  }
-});
+        );
+        app = await electron.launch({ args: [root, `--user-data-dir=${join(root, 'profile')}`] });
+        const page = await app.firstWindow();
+        await page.waitForLoadState('load');
+        await expect
+          .poll(() => app!.evaluate(() => typeof Reflect.get(globalThis, 'resumeAppearance')))
+          .toBe('function');
+        expect(await page.locator('#root > *').count()).toBe(0);
+        expect(
+          await app.evaluate(() => Reflect.get(globalThis, 'startupAcknowledged')),
+        ).toBeUndefined();
+        if (busy) {
+          await page.evaluate(() => {
+            for (let i = 0; i < 8; i++)
+              void window.openkraken.request({ id: crypto.randomUUID(), method: 'open' });
+          });
+          await expect
+            .poll(() => app!.evaluate(() => Reflect.get(globalThis, 'pickers').length))
+            .toBe(8);
+        }
+        await app.evaluate(() => Reflect.get(globalThis, 'resumeAppearance')());
+        await expect(
+          page.getByRole('button', { name: 'Open a repository', exact: true }),
+        ).toBeVisible();
+        await expect
+          .poll(() => app!.evaluate(() => Reflect.get(globalThis, 'startupAcknowledged')))
+          .toBe('updates');
+        if (busy) {
+          const repeated = await page.evaluate(() =>
+            window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesStarted' }),
+          );
+          expect(repeated).toMatchObject({ kind: 'error', code: 'BUSY' });
+          await app.evaluate(() => {
+            for (const done of Reflect.get(globalThis, 'pickers'))
+              done({ canceled: true, filePaths: [] });
+          });
+        }
+        await expect(readFile(join(root, 'error-title'))).rejects.toMatchObject({ code: 'ENOENT' });
+      } finally {
+        await app?.close();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 
 test('quitting during the first document load exits normally', async () => {
   const root = await mkdtemp(join(tmpdir(), 'openkraken-quit-loading-'));

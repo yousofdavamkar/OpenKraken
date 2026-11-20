@@ -1643,6 +1643,7 @@ export function startDesktop(
         providerRequests.delete(request.id);
       }
     };
+    let firstMountPending = true;
     const handleRequest = async (request: DesktopRequest): Promise<ServiceResult> => {
       if (
         updateHandoff &&
@@ -1677,8 +1678,11 @@ export function startDesktop(
         return executeRequest(request);
       if (inFlight.has(request.id))
         return { kind: 'error', code: 'DUPLICATE_REQUEST', message: 'Request is already running' };
-      if (inFlight.size >= 8)
+      // A mounted desktop must be able to acknowledge startup even if every ordinary slot is busy.
+      const firstMount = firstMountPending && request.method === 'updatesStarted';
+      if (inFlight.size >= 8 && !firstMount)
         return { kind: 'error', code: 'BUSY', message: 'Too many pending operations' };
+      if (firstMount) firstMountPending = false;
       inFlight.add(request.id);
       try {
         return await activity!.track(request, () => executeRequest(request));
