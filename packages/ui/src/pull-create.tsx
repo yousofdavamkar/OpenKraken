@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { ProviderDraftEncryptionUnavailable, usePullDraft } from './review-draft.js';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import {
   providerCreatePullSchema,
+  type PullDraft,
   type ProviderPullSource,
   type ProviderPullRevision,
   type ProviderPullSummary,
@@ -20,14 +22,14 @@ type Templates = {
   templates: { path: string; label: string; size?: number }[];
   limited: boolean;
 };
-function Composer({
+export function PullCreationDialog({
   target,
   close,
   created,
 }: {
   target: Target;
   close: () => void;
-  created: () => void;
+  created?: () => void;
 }) {
   const gitlab = target.provider === 'gitlab';
   const noun = gitlab ? 'merge' : 'pull';
@@ -35,14 +37,22 @@ function Composer({
   const prefix = gitlab ? '!' : '#';
   const dialog = useRef<HTMLDialogElement>(null);
   const requests = useRef(new Set<string>());
-  const [owner, setOwner] = useState(target.repository.owner),
-    [repo, setRepo] = useState(target.repository.name);
-  const [head, setHead] = useState(''),
-    [base, setBase] = useState('');
-  const [title, setTitle] = useState(''),
-    [body, setBody] = useState('');
-  const [draft, setDraft] = useState(false),
-    [maintainerCanModify, setMaintainerCanModify] = useState(false);
+  const cancelled = useRef(false);
+  const protectedSubmission = useRef(false);
+  const [fields, setFields] = useState<Omit<PullDraft, 'uncertain'>>({
+    owner: target.repository.owner,
+    repo: target.repository.name,
+    head: '',
+    base: '',
+    title: '',
+    body: '',
+    draft: false,
+    maintainerCanModify: false,
+  });
+  const { owner, repo, head, base, title, body, draft, maintainerCanModify } = fields;
+  const [recovered, setRecovered] = useState(false);
+  const [unprotected, setUnprotected] = useState(false);
+  const [closeFailed, setCloseFailed] = useState(false);
   const [dirty, setDirty] = useState(false),
     [discard, setDiscard] = useState(false);
   const [revision, setRevision] = useState<ProviderPullRevision | ProviderMergeCreationPreview>();
@@ -59,6 +69,31 @@ function Composer({
   const [templateAttempt, setTemplateAttempt] = useState(0),
     [templatePath, setTemplatePath] = useState('');
   const [templateBody, setTemplateBody] = useState<string>();
+  const baseEdited = useRef(false);
+  const storage = usePullDraft(
+    { accountId: target.accountId, repository: target.repository },
+    ({ uncertain, ...saved }) => {
+      baseEdited.current = true;
+      setFields(saved);
+      setRecovered(true);
+      setDirty(true);
+      setUncertain(uncertain);
+      protectedSubmission.current = uncertain;
+    },
+  );
+  const edit = (patch: Partial<typeof fields>) => {
+    const next = { ...fields, ...patch };
+    if (patch.base !== undefined) baseEdited.current = true;
+    setFields(next);
+    setDirty(true);
+    storage.change({ ...next, uncertain: false });
+  };
+  const applyDefaultBase = useEffectEvent((branch: string | null) => {
+    if (!branch || base || baseEdited.current) return;
+    const next = { ...fields, base: branch };
+    setFields(next);
+    if (dirty) storage.change({ ...next, uncertain: false });
+  });
   const perform = async (request: BridgeRequest) => {
     requests.current.add(request.id);
     try {
@@ -71,10 +106,15 @@ function Composer({
     dialog.current?.showModal();
     const pending = requests.current;
     return () => {
+      cancelled.current = true;
       for (const id of pending) void window.openkraken.cancel(id);
     };
   }, []);
   useEffect(() => {
+    if (!storage.ready || (recovered && templateAttempt === 0)) {
+      setLoadingTemplates(false);
+      return;
+    }
     const id = crypto.randomUUID();
     const pending = requests.current;
     pending.add(id);
@@ -103,7 +143,7 @@ function Composer({
                   size: item.size,
                 }));
           setTemplates({ ...response.templates, templates: entries });
-          setBase((current) => current || response.templates.defaultBranch || '');
+          applyDefaultBase(response.templates.defaultBranch);
         } else if (response.kind === 'error') setTemplateError(response.message);
       })
       .catch(() => {
@@ -118,18 +158,20 @@ function Composer({
       alive = false;
       void window.openkraken.cancel(id);
     };
-  }, [target.accountId, target.repository, templateAttempt, gitlab]);
+  }, [target.accountId, target.repository, templateAttempt, gitlab, storage.ready, recovered]);
   const source = { repository: target.repository, source: { owner, name: repo }, head, base };
   const valid = providerCreatePullSchema
     .omit({ revision: true })
     .safeParse({ ...source, title, body, draft, maintainerCanModify }).success;
-  const locked = busy || !!revision || !!result || uncertain;
+  const locked = busy || !!revision || !!result || !storage.ready;
   const leave = () => {
-    if (busy) return;
+    if (busy || !storage.ready) return;
     if (dirty && !result) setDiscard(true);
     else close();
   };
   const prepare = async () => {
+    if (busy || !storage.ready) return;
+    setUnprotected(false);
     setBusy(true);
     setError('');
     try {
@@ -154,10 +196,40 @@ function Composer({
     }
   };
   const submit = async () => {
-    if (!revision) return;
+    if (!revision || busy || !storage.ready) return;
+    cancelled.current = false;
     setBusy(true);
     setError('');
     try {
+      protectedSubmission.current = false;
+      try {
+        await storage.write({ ...fields, uncertain: true });
+        protectedSubmission.current = true;
+      } catch (error) {
+        if (!cancelled.current && !(error instanceof ProviderDraftEncryptionUnavailable)) {
+          setUnprotected(false);
+          setRevision(undefined);
+          setError(
+            'The saved draft could not be verified. Copy your changes and reopen creation to review the current draft.',
+          );
+          return;
+        }
+        if (!unprotected && !cancelled.current) {
+          setUnprotected(true);
+          setError(
+            'The submission could not be recorded locally. Copy your draft before submitting without crash recovery.',
+          );
+          return;
+        }
+      }
+      setUnprotected(false);
+      if (cancelled.current) {
+        if (protectedSubmission.current)
+          await storage.write({ ...fields, uncertain: false }).catch(() => {});
+        setRevision(undefined);
+        setError('Creation cancelled before submission.');
+        return;
+      }
       const response = await perform({
         id: crypto.randomUUID(),
         accountId: target.accountId,
@@ -178,12 +250,24 @@ function Composer({
         setResult(
           response.kind === 'providerMergeCreated' ? response.mergeRequest : response.pullRequest,
         );
-        created();
+        created?.();
+        await storage
+          .write(null)
+          .catch(() =>
+            setError(
+              'The provider confirmed creation. The local recovery copy could not be cleared.',
+            ),
+          );
       } else if (response.kind === 'error') {
         setError(response.message);
-        setUncertain(response.code === 'PROVIDER_WRITE_UNCERTAIN');
+        const unknown = response.code === 'PROVIDER_WRITE_UNCERTAIN';
+        setUncertain(unknown);
+        if (!unknown && protectedSubmission.current)
+          await storage.write({ ...fields, uncertain: false }).catch(() => {});
         setRevision(undefined);
       } else if (response.kind === 'cancelled') {
+        if (protectedSubmission.current)
+          await storage.write({ ...fields, uncertain: false }).catch(() => {});
         setError('Creation cancelled before submission.');
         setRevision(undefined);
       } else throw new Error('Unknown creation result');
@@ -193,6 +277,39 @@ function Composer({
       );
       setUncertain(true);
       setRevision(undefined);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const closeDraft = async (keep: boolean) => {
+    if (busy || !storage.ready) return;
+    setBusy(true);
+    setError('');
+    try {
+      await storage.write(keep ? { ...fields, uncertain } : null);
+      close();
+    } catch {
+      setCloseFailed(true);
+      setError(
+        'The local draft could not be saved or discarded. Copy your changes before closing.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const reviewAgain = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      if (protectedSubmission.current) await storage.write({ ...fields, uncertain: false });
+      protectedSubmission.current = false;
+      setUncertain(false);
+      setChecked(false);
+      setDirty(true);
+    } catch {
+      setError(
+        'The submission marker could not be cleared. Reopen the saved copy before reviewing again.',
+      );
     } finally {
       setBusy(false);
     }
@@ -275,44 +392,44 @@ function Composer({
           <label>
             Source owner
             <input
+              readOnly={uncertain}
               value={owner}
               maxLength={gitlab ? 2200 : 100}
               onChange={(event) => {
-                setOwner(event.target.value);
-                setDirty(true);
+                edit({ owner: event.target.value });
               }}
             />
           </label>
           <label>
             Source repository
             <input
+              readOnly={uncertain}
               value={repo}
               maxLength={100}
               onChange={(event) => {
-                setRepo(event.target.value);
-                setDirty(true);
+                edit({ repo: event.target.value });
               }}
             />
           </label>
           <label>
             Source branch
             <input
+              readOnly={uncertain}
               value={head}
               maxLength={1024}
               onChange={(event) => {
-                setHead(event.target.value);
-                setDirty(true);
+                edit({ head: event.target.value });
               }}
             />
           </label>
           <label>
             Target branch
             <input
+              readOnly={uncertain}
               value={base}
               maxLength={1024}
               onChange={(event) => {
-                setBase(event.target.value);
-                setDirty(true);
+                edit({ base: event.target.value });
               }}
             />
           </label>
@@ -320,11 +437,11 @@ function Composer({
         <label>
           {abbreviation} title
           <input
+            readOnly={uncertain}
             value={title}
             maxLength={256}
             onChange={(event) => {
-              setTitle(event.target.value);
-              setDirty(true);
+              edit({ title: event.target.value });
             }}
           />
         </label>
@@ -333,20 +450,20 @@ function Composer({
           <textarea
             rows={7}
             maxLength={65536}
+            readOnly={uncertain}
             value={body}
             onChange={(event) => {
-              setBody(event.target.value);
-              setDirty(true);
+              edit({ body: event.target.value });
             }}
           />
         </label>
         <label>
           <input
             type="checkbox"
+            disabled={uncertain}
             checked={draft}
             onChange={(event) => {
-              setDraft(event.target.checked);
-              setDirty(true);
+              edit({ draft: event.target.checked });
             }}
           />
           Create as draft
@@ -354,10 +471,10 @@ function Composer({
         <label>
           <input
             type="checkbox"
+            disabled={uncertain}
             checked={maintainerCanModify}
             onChange={(event) => {
-              setMaintainerCanModify(event.target.checked);
-              setDirty(true);
+              edit({ maintainerCanModify: event.target.checked });
             }}
           />
           Allow maintainers to edit the source branch
@@ -365,6 +482,11 @@ function Composer({
       </fieldset>
       {!result && !uncertain && !revision && (
         <section aria-label={gitlab ? 'Merge-request templates' : 'Pull-request templates'}>
+          {recovered && !templates && !loadingTemplates && !templateError && (
+            <button disabled={busy} onClick={() => setTemplateAttempt((n) => n + 1)}>
+              Load templates
+            </button>
+          )}
           {loadingTemplates && <p role="status">Loading templates…</p>}
           {templateError && (
             <p role="alert">
@@ -431,8 +553,7 @@ function Composer({
               <button
                 disabled={busy}
                 onClick={() => {
-                  setBody(templateBody);
-                  setDirty(true);
+                  edit({ body: templateBody });
                   setTemplateBody(undefined);
                 }}
               >
@@ -465,6 +586,7 @@ function Composer({
           </p>
         </section>
       )}
+      {storage.status && <p aria-live="polite">{storage.status}</p>}
       {error && <p role="alert">{error}</p>}
       {result && (
         <p role="status">
@@ -476,6 +598,9 @@ function Composer({
       )}
       {uncertain && (
         <section aria-label={`Check ${abbreviation} creation result`}>
+          {recovered && !checked && (
+            <p>The provider may already have created this {noun} request.</p>
+          )}
           <button disabled={busy} onClick={() => void checkExisting()}>
             Check existing {noun} requests
           </button>
@@ -500,14 +625,7 @@ function Composer({
                   Check next page
                 </button>
               )}
-              <button
-                disabled={busy}
-                onClick={() => {
-                  setUncertain(false);
-                  setChecked(false);
-                  setError('');
-                }}
-              >
+              <button disabled={busy} onClick={() => void reviewAgain()}>
                 I checked; return to draft
               </button>
             </>
@@ -516,20 +634,31 @@ function Composer({
       )}
       {discard ? (
         <section aria-label={`Discard ${abbreviation} draft`}>
-          <p>Discard this unsent {noun}-request draft?</p>
-          <button onClick={() => setDiscard(false)}>Keep editing</button>
-          <button className="danger" onClick={close}>
+          <p>Save this {noun}-request draft locally or discard it?</p>
+          <button disabled={busy} onClick={() => setDiscard(false)}>
+            Keep editing
+          </button>
+          <button disabled={busy} onClick={() => void closeDraft(true)}>
+            Save and close
+          </button>
+          <button disabled={busy} className="danger" onClick={() => void closeDraft(false)}>
             Discard draft
           </button>
+          {closeFailed && (
+            <button disabled={busy} onClick={close}>
+              Close without saving
+            </button>
+          )}
         </section>
       ) : (
         <div className="dialog-actions">
-          <button disabled={busy} onClick={leave}>
+          <button disabled={busy || !storage.ready} onClick={leave}>
             Close creation
           </button>
           {busy && (
             <button
               onClick={() => {
+                cancelled.current = true;
                 for (const id of requests.current) void window.openkraken.cancel(id);
               }}
             >
@@ -544,11 +673,13 @@ function Composer({
                   Edit draft
                 </button>
                 <button disabled={busy} onClick={() => void submit()}>
-                  Create confirmed {abbreviation}
+                  {unprotected
+                    ? 'Submit without crash recovery'
+                    : `Create confirmed ${abbreviation}`}
                 </button>
               </>
             ) : (
-              <button disabled={busy || !valid} onClick={() => void prepare()}>
+              <button disabled={busy || !valid || !storage.ready} onClick={() => void prepare()}>
                 Preview {abbreviation}
               </button>
             ))}
@@ -564,7 +695,14 @@ export function CreatePullRequest({ target, created }: { target: Target; created
       <button onClick={() => setOpened(true)}>
         New {target.provider === 'gitlab' ? 'merge' : 'pull'} request
       </button>
-      {opened && <Composer target={target} created={created} close={() => setOpened(false)} />}
+      {opened && (
+        <PullCreationDialog
+          key={JSON.stringify([target.accountId, target.repository])}
+          target={target}
+          created={created}
+          close={() => setOpened(false)}
+        />
+      )}
     </>
   );
 }

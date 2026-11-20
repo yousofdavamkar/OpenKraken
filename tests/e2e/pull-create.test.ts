@@ -179,7 +179,11 @@ test('PR creation previews templates and branch tips, preserves stale drafts and
     await expect(composer.getByLabel('PR title')).toHaveValue('Create fixture PR');
     await composer.getByRole('button', { name: 'Close creation' }).click();
     await expect(composer.getByRole('region', { name: 'Discard PR draft' })).toBeVisible();
-    await composer.getByRole('button', { name: 'Keep editing' }).click();
+    await composer.getByRole('button', { name: 'Save and close' }).click();
+    await expect(composer).toHaveCount(0);
+    await browser.getByRole('button', { name: 'New pull request' }).click();
+    await expect(composer.getByText('Recovered local draft')).toBeVisible();
+    await expect(composer.getByLabel('PR title')).toHaveValue('Create fixture PR');
     await composer.getByRole('button', { name: 'Preview PR', exact: true }).click();
     await expect(composer.getByRole('region', { name: 'Confirm PR creation' })).toContainText(
       '5'.repeat(40),
@@ -197,6 +201,20 @@ test('PR creation previews templates and branch tips, preserves stale drafts and
         maintainer_can_modify: false,
       },
     ]);
+    expect(
+      await page.evaluate(async () => {
+        const accounts = await window.openkraken.request({
+          id: crypto.randomUUID(),
+          method: 'providerAccounts',
+        });
+        if (accounts.kind !== 'providerAccounts') throw Error('Missing account');
+        return window.openkraken.request({
+          id: crypto.randomUUID(),
+          method: 'pullDraftList',
+          scope: { accountId: accounts.state.accounts[0]!.id },
+        });
+      }),
+    ).toMatchObject({ kind: 'pullDraftList', entries: [], unreadable: false });
     await page.screenshot({ path: 'test-results/provider-pr-created.png' });
     await composer.getByRole('button', { name: 'Close creation' }).click();
     await expect(

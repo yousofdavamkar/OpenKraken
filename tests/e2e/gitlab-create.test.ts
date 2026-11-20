@@ -172,6 +172,20 @@ test('GitLab creation previews native templates, binds fork tips, preserves stal
         remove_source_branch: false,
       },
     ]);
+    expect(
+      await page.evaluate(async () => {
+        const accounts = await window.openkraken.request({
+          id: crypto.randomUUID(),
+          method: 'providerAccounts',
+        });
+        if (accounts.kind !== 'providerAccounts') throw Error('Missing account');
+        return window.openkraken.request({
+          id: crypto.randomUUID(),
+          method: 'pullDraftList',
+          scope: { accountId: accounts.state.accounts[0]!.id },
+        });
+      }),
+    ).toMatchObject({ kind: 'pullDraftList', entries: [], unreadable: false });
     await dialog.getByRole('button', { name: 'Close creation', exact: true }).click();
     await page.getByRole('button', { name: 'New merge request', exact: true }).click();
     await dialog.getByLabel('Source owner', { exact: true }).fill('contributor/subgroup');

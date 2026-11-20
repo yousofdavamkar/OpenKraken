@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import type {
+  PullDraft,
+  PullDraftScope,
   IssueDraft,
   IssueDraftScope,
   Result,
@@ -37,10 +39,10 @@ function reviewResult(res: Result) {
     throw new Error(res.kind === 'error' ? res.message : 'Draft access was not confirmed.');
   return res;
 }
-export class IssueDraftEncryptionUnavailable extends Error {}
+export class ProviderDraftEncryptionUnavailable extends Error {}
 function issueResult(res: Result) {
   if (res.kind === 'error' && res.code === 'DRAFT_ENCRYPTION_UNAVAILABLE')
-    throw new IssueDraftEncryptionUnavailable(res.message);
+    throw new ProviderDraftEncryptionUnavailable(res.message);
   if (res.kind !== 'issueDraft')
     throw new Error(res.kind === 'error' ? res.message : 'Draft access was not confirmed.');
   return res;
@@ -56,6 +58,26 @@ export function useIssueDraft(scope: IssueDraftScope, restore: (draft: IssueDraf
       window.openkraken
         .request({ id: crypto.randomUUID(), method: 'issueDraftSave', scope, draft, revision })
         .then(issueResult),
+  );
+}
+function pullResult(res: Result) {
+  if (res.kind === 'error' && res.code === 'DRAFT_ENCRYPTION_UNAVAILABLE')
+    throw new ProviderDraftEncryptionUnavailable(res.message);
+  if (res.kind !== 'pullDraft')
+    throw new Error(res.kind === 'error' ? res.message : 'Draft access was not confirmed.');
+  return res;
+}
+export function usePullDraft(scope: PullDraftScope, restore: (draft: PullDraft) => void) {
+  return useProviderDraft<PullDraft>(
+    restore,
+    () =>
+      window.openkraken
+        .request({ id: crypto.randomUUID(), method: 'pullDraftRead', scope })
+        .then(pullResult),
+    (draft, revision) =>
+      window.openkraken
+        .request({ id: crypto.randomUUID(), method: 'pullDraftSave', scope, draft, revision })
+        .then(pullResult),
   );
 }
 function useProviderDraft<T>(

@@ -1,4 +1,4 @@
-import { IssueDraftEncryptionUnavailable, useIssueDraft } from './review-draft.js';
+import { ProviderDraftEncryptionUnavailable, useIssueDraft } from './review-draft.js';
 import { useEffect, useRef, useState } from 'react';
 import {
   providerWriteIssueSchema,
@@ -212,7 +212,7 @@ export function IssueActionDialog({
         await storage.write({ ...fields, uncertain: true });
         protectedSubmission.current = true;
       } catch (error) {
-        if (!cancelled.current && !(error instanceof IssueDraftEncryptionUnavailable)) {
+        if (!cancelled.current && !(error instanceof ProviderDraftEncryptionUnavailable)) {
           setUnprotected(false);
           setPrepared(undefined);
           setDirty(true);
