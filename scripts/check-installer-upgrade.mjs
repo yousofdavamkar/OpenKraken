@@ -16,21 +16,22 @@ assert.ok(
   'Upgrade fixtures require native Linux deb/rpm or Windows x64 msi',
 );
 const root = resolve('.');
-await mkdir(join(root, 'release'), { recursive: true });
-const fixture = await mkdtemp(join(root, 'release/installer-upgrade-'));
 const source = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
-const beta = process.argv[3] === '--beta';
+const [flag, betaOffset = '1', ...extra] = process.argv.slice(3);
+const beta = flag === '--beta';
 assert.ok(
-  process.argv.length <= 4 || (process.argv.length === 5 && beta && target !== 'msi'),
-  'Use --beta with Linux package upgrade fixtures',
+  (flag === undefined || beta) && /^[1-9][0-9]{0,9}$/.test(betaOffset) && extra.length === 0,
+  'Expected target [--beta [positive revision offset]]',
 );
 const [base, prerelease] = releaseVersionSchema.parse(source.version).split('-');
 const [major, minor] = base.split('.');
 const stable = prerelease ? base : `${major}.${Number(minor) + 1}.0`;
 const version = beta
-  ? `${stable}-beta.${prerelease ? BigInt(prerelease.slice(5)) + 1n : 1}`
+  ? `${stable}-beta.${BigInt(prerelease?.slice(5) ?? 0) + BigInt(betaOffset)}`
   : stable;
 if (target === 'msi') msiVersion(version);
+await mkdir(join(root, 'release'), { recursive: true });
+const fixture = await mkdtemp(join(root, 'release/installer-upgrade-'));
 await writeFile(join(fixture, 'package.json'), JSON.stringify({ ...source, version }));
 // Simulate leftovers from interrupted developer builds and Electron tests.
 for (const directory of ['', 'helpers', 'shell-integration', 'node_modules']) {
@@ -121,10 +122,8 @@ try {
   const pointer = JSON.stringify({ fixture, target, version, manifestPath }, null, 2) + '\n';
   // Keep the last-built pointer for local callers; CI consumes per-format
   // pointers so building an RPM cannot replace the Debian upgrade fixture.
-  await writeFile(
-    join(root, `release/installer-upgrade-${target}${beta ? '-beta' : ''}.json`),
-    pointer,
-  );
+  const suffix = !beta ? '' : betaOffset === '1' ? '-beta' : `-beta-${betaOffset}`;
+  await writeFile(join(root, `release/installer-upgrade-${target}${suffix}.json`), pointer);
   await writeFile(join(root, 'release/installer-upgrade.json'), pointer);
   console.log(`Verified upgrade fixture version ${version}: ${manifestPath}`);
 } catch (error) {

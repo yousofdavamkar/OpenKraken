@@ -46,6 +46,9 @@ const presenceFields = [
 export function assertEmptyMsiState(state) {
   if (
     !state ||
+    !state.betaRevisions ||
+    Object.getPrototypeOf(state.betaRevisions) !== Object.prototype ||
+    Object.keys(state.betaRevisions).length !== 0 ||
     !Array.isArray(state.products) ||
     state.products.length !== 0 ||
     presenceFields.some((key) => state[key] !== false) ||
@@ -86,8 +89,14 @@ export function assertInstalledMsiState(state, initial, identity) {
   const product = state.products[0];
   assert.equal(product.productCode?.toUpperCase(), identity.productCode.toUpperCase());
   assert.equal(product.state, 5, 'MSI product must be installed locally');
+  const [core, revision] = identity.version.split('-beta.');
+  assert.deepEqual(
+    state.betaRevisions,
+    revision === undefined ? {} : { [core]: revision },
+    'Installed beta revision differs',
+  );
   assert.ok(
-    [identity.version, msiVersion(identity.version)].includes(product.version),
+    [core, msiVersion(identity.version)].includes(product.version),
     'Installed MSI version differs',
   );
   const executable = win32.join(initial.installDirectory, 'openkraken.exe');
@@ -119,6 +128,7 @@ export function assertInstalledMsiState(state, initial, identity) {
 
 export function assertRemovedMsiState(state, initial) {
   assertFixturePaths(state, initial);
+  assert.deepEqual(state.betaRevisions, {}, 'An MSI beta revision remains');
   assert.deepEqual(state.products, [], 'An installed or advertised MSI product remains');
   assert.equal(state.applicationExists, false, 'MSI application directory remains');
   assert.equal(state.shortcutExists, false, 'MSI shortcut remains');
@@ -134,7 +144,10 @@ export function assertRemovedMsiState(state, initial) {
 export function assertMsiUpgradePair(current, replacement) {
   const first = msiVersion(current.version).split('.').map(Number);
   const next = msiVersion(replacement.version).split('.').map(Number);
-  const difference = next.map((part, index) => part - first[index]).find((part) => part !== 0) ?? 0;
+  const revision = (version) => Number(version.split('-beta.')[1] ?? 2147483648);
+  const difference =
+    next.map((part, index) => part - first[index]).find((part) => part !== 0) ??
+    revision(replacement.version) - revision(current.version);
   if (
     difference <= 0 ||
     !guid.test(current.productCode) ||

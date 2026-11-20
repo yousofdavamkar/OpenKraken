@@ -309,16 +309,21 @@ jobs:
           pnpm smoke:installer release/installers/win32-x64/test/msi/manifest.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - if: runner.os == 'Windows'
-        name: MSI install, repair, version upgrade, URI dispatch and removal
-        timeout-minutes: 20
+        name: MSI install, repair, beta upgrades, stable promotion, downgrade rejection and removal
+        timeout-minutes: 40
         env:
           OPENKRAKEN_DISPOSABLE_INSTALL_TEST: '1'
         run: |
+          node scripts/check-installer-upgrade.mjs msi --beta
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-installer-upgrade.mjs msi --beta 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/check-installer-upgrade.mjs msi
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $upgradeManifest = node -p 'require("./release/installer-upgrade-msi.json").manifestPath'
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node scripts/check-msi-lifecycle.mjs release/installers/win32-x64/test/msi/manifest.json "$upgradeManifest"
+          $beta = (Get-Content -Raw release/installer-upgrade-msi-beta.json | ConvertFrom-Json).manifestPath
+          $nextBeta = (Get-Content -Raw release/installer-upgrade-msi-beta-2.json | ConvertFrom-Json).manifestPath
+          $stable = (Get-Content -Raw release/installer-upgrade-msi.json | ConvertFrom-Json).manifestPath
+          node scripts/check-msi-lifecycle.mjs release/installers/win32-x64/test/msi/manifest.json "$beta" "$nextBeta" "$stable"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - if: runner.os == 'Linux'
         name: Build unsigned Linux test installers

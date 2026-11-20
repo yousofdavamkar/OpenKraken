@@ -48,8 +48,22 @@ try {
             }
         } finally { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($target) }
     }
+    $betaRevisions = @{}
+    $betaKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\OpenKraken\Installer\Beta')
+    if ($null -ne $betaKey) {
+        try {
+            foreach ($core in $betaKey.GetSubKeyNames()) {
+                $marker = $betaKey.OpenSubKey($core)
+                try {
+                    $value = $marker.GetValue('Sequence')
+                    if ($null -ne $value) { $betaRevisions[$core] = $value }
+                } finally { $marker.Dispose() }
+            }
+        } finally { $betaKey.Dispose() }
+    }
     $protocol = (& (Join-Path $PSScriptRoot 'read-windows-protocol.ps1')) | ConvertFrom-Json
     @{
+        betaRevisions = $betaRevisions
         products = @($products.ToArray())
         installDirectory = $installDirectory
         profileDirectory = $profileDirectory
