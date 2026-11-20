@@ -2,6 +2,21 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Resolving annotated objects before enumerating refs
+
+On the 50,000-ref nested-tag fixture, the first 128 native rows contain both direct targets. Git resolves their object types and peeled commits before enumerating every name and its current tracking fields. The full enumeration checks coverage by object ID. A second change lets history start from the commits in the same sample. For a repository with distinct targets and just one annotation, a bounded packed-ref scan identifies candidate names. Git resolves the names before its authoritative direct read. [Reader behavior and fallbacks](../decisions/0098-direct-first-reference-enumeration.md#sampling-annotated-objects-before-reading-all-ref-names)
+
+Five measured pairs per comparison alternated builds on Linux x64 with Git 2.53.0. Each fresh profile opened the full Linux fixture, verified the 50,000-ref heading and appended from 2,000 to 17,000 commits. OS caches were populated. Pair zero was a warm-up. The table reports medians.
+
+| Change                                        | Fixture                          | First paint before | First paint after | Snapshot before | Snapshot after |
+| --------------------------------------------- | -------------------------------- | -----------------: | ----------------: | --------------: | -------------: |
+| Resolve the repeated objects first            | Nested tag aliases               |           576.3 ms |          504.8 ms |        270.4 ms |       199.7 ms |
+| Share the object sample with the opening walk | Nested tag aliases               |           501.7 ms |          493.8 ms |        197.9 ms |       188.2 ms |
+| Resolve sparse annotated names first          | Distinct targets, one annotation |           841.0 ms |          697.5 ms |        459.5 ms |       387.9 ms |
+| Same builds, ordinary refs only               | Distinct targets                 |           691.0 ms |          679.6 ms |        370.9 ms |       376.3 ms |
+
+Four of five candidate openings in the shared-sample comparison met 500 ms. The fifth took 511.9 ms. Two appends in the earlier comparison took 903.4 and 823.4 ms in one profile. All 15 appends in the subsequent shared-sample comparison took at most 230.3 ms. The cause of the two earlier delays is unconfirmed. All measured distinct-target openings exceeded 500 ms. [Per-run timings, including warm-ups](m8-opening-experiments.csv)
+
 ## Opening 50,000 distinct refs with one annotated tag
 
 The mixed fixture replaces the lightweight tag `benchmark-10000` with an annotation of the same commit in a shared-object mirror. It retains 50,000 refs and 1,505,199 reachable commits. Git 2.38.0 and 2.53.0 matched all application ref records and the first 17,000 ordered commit IDs and parent lists. SHA-256 for the displayed history prefix was `539be6736e0fe82c65494612f950a6f55601967a237c6c4875777895a1f50965`. Both versions also matched the prefix on the nested-annotation fixture. On a separate 950-commit DAG, substituting peeled commit IDs for tag object IDs preserved the native date-order and parent stream for 120 root lists on each Git version.
