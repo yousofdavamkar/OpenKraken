@@ -1,7 +1,10 @@
 import { afterAll, expect, test, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { constants } from 'node:fs';
+import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
 import type { Snapshot } from '@openkraken/ipc-contract';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
@@ -12,6 +15,33 @@ import { HistoryCursor } from './src/history.js';
 import * as runner from './src/runner.js';
 const root = await mkdtemp(join(tmpdir(), 'openkraken-history-cache-'));
 afterAll(() => rm(root, { recursive: true, force: true }));
+test.skipIf(process.platform === 'win32')(
+  'a named pipe cannot stall a saved history read',
+  async () => {
+    const directory = join(root, 'pipe-profile');
+    const id = 'a'.repeat(64);
+    const cachePath = join(directory, 'history', id);
+    await mkdir(cachePath, { recursive: true });
+    const path = join(cachePath, 'prefix.json');
+    execFileSync('mkfifo', [path]);
+    const reading = new HistoryCache(directory, id, 'unused').load();
+    const timeout = new AbortController();
+    try {
+      expect(
+        await Promise.race([reading, delay(2000, 'waiting', { signal: timeout.signal })]),
+      ).toBeUndefined();
+    } finally {
+      timeout.abort();
+      // Release a blocked reader if this assertion ever regresses.
+      const peer = await open(path, constants.O_RDWR | constants.O_NONBLOCK);
+      try {
+        await reading;
+      } finally {
+        await peer.close();
+      }
+    }
+  },
+);
 test.each([0, 1, 1023, 1024, 1025, 2048, 50000])(
   'preserves the persisted format-2 key for %i ordered roots',
   (count) => {

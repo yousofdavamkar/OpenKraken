@@ -115,7 +115,7 @@ export class HistoryCache {
     key?: string,
   ) {
     try {
-      const file = await open(path, 'r');
+      const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
       let stamp: string, content: string;
       try {
         if (signal?.aborted) return;
