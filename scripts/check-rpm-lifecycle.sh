@@ -83,7 +83,11 @@ for upgrade in "${upgrades[@]}"; do
 done
 
 dnf "${dnf_options[@]}" remove openkraken
-! rpm -q openkraken
+registered_packages=$(rpm -qa --queryformat '%{NAME}\n')
+if grep -Fxq openkraken <<< "$registered_packages"; then
+  echo 'OpenKraken remains in the package database after removal' >&2
+  exit 1
+fi
 for path in /usr/bin/openkraken /opt/OpenKraken /usr/share/applications/openkraken.desktop /usr/share/icons/hicolor/512x512/apps/openkraken.png /etc/apparmor.d/openkraken; do
   if [[ -e $path || -L $path ]]; then
     printf 'Installation path survived removal: %s\n' "$path" >&2

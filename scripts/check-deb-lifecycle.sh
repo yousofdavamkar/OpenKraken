@@ -115,6 +115,10 @@ for path in "${integration_paths[@]}"; do
 done
 test "$(cat /home/fixture/.config/OpenKraken/draft.txt)" = keep-this-draft
 apt-get purge -y openkraken
-! dpkg-query -W openkraken
+registered_packages=$(dpkg-query -W -f='${Package}\n')
+if grep -Fxq openkraken <<< "$registered_packages"; then
+  echo 'OpenKraken remains in the package database after purge' >&2
+  exit 1
+fi
 test "$(cat /home/fixture/.config/OpenKraken/draft.txt)" = keep-this-draft
 echo 'Debian install, replacement guards, reinstall, version upgrade, removal, purge and user-data retention passed'
