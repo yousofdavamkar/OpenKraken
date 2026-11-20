@@ -2,6 +2,10 @@
 
 M8 remains in progress. On Linux x64, full Linux history with one ref and with 49,999 aliases on the first row met the 500 ms opening and 300 ms paging budgets in the latest fresh-profile runs. Fresh-profile runs with 50,000 distinct ref targets or 49,999 aliases of a nested annotated tag exceeded the opening budget. Native Windows/macOS and ARM64 acceptance, the production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Commit badges on large histories
+
+The graph now resolves groups of target IDs as their commit rows appear. On the 50,000-distinct-target fixture, median renderer heap after first paint fell by 2.54 MiB across five paired openings, and median time from store publication to paint fell from 117.5 to 102.7 ms. An Electron test with over 10,000 refs verified the complete badge dialog after a ref deletion and the annotated root badge after paging. The separate three-profile acceptance run painted the one-ref Linux fixture in 337.2–359.3 ms. Distinct targets took 750.0–811.9 ms and nested tag aliases took 716.8–770.9 ms. All 27 appends took 169.4–279.4 ms. [Measurements and fixture details](m8-reference-performance.md#commit-badge-lookups-by-object-id-prefix)
+
 ## Packed-ref memory and history verification
 
 The sparse-annotation scan now reuses a 256 KiB buffer. On Linux history with 50,000 distinct ref targets and one annotation, array-buffer growth during sampling fell from 3,672,382 to 262,304 bytes. On the final build, three fresh profiles painted in 699.2–923.0 ms on that fixture and 741.6–1,282.2 ms on the nested-tag fixture. All 18 appends met 300 ms. On both fixtures the desktop matched native Git’s ordered IDs and parent lists through all 302 pages. The distinct targets reached 1,505,199 commits, and the nested tag added one independent commit. [Memory and desktop measurements](m8-reference-performance.md#memory-used-to-locate-sparse-annotated-tags)

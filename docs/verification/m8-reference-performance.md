@@ -2,6 +2,21 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Commit badge lookups by object ID prefix
+
+On Linux x64, five pairs of fresh Electron profiles compared eager indexing with resolving groups of target IDs as their commit rows mounted. Each pair alternated renderer build order after a warm-up pair. Both builds used the same Git utility and fixture, displayed 2,000 commits and 50,000 matching refs, and matched on the first ten mounted rows’ commit IDs, badge labels and tooltips. A renderer GC after the paint measurement preceded the heap sample and the first 5,000-commit append.
+
+| Median across five pairs         | 50,000 distinct targets, eager → deferred | Nested tag aliases, eager → deferred |
+| -------------------------------- | ----------------------------------------: | -----------------------------------: |
+| Renderer heap after GC           |             28,894,072 → 26,227,452 bytes |        21,331,576 → 21,440,712 bytes |
+| Store publication to first paint |                          117.5 → 102.7 ms |                       88.4 → 89.3 ms |
+| Full first paint                 |                          781.4 → 740.7 ms |                     802.2 → 784.0 ms |
+| First page append                |                          252.9 → 250.2 ms |                     255.7 → 246.7 ms |
+
+The distinct-target fixture retained 2.54 MiB less renderer heap at the median. Both fixtures still exceeded the 500 ms first-paint budget in every measured pair. [All samples including warm-up](m8-commit-badge-index-samples.csv) · [Lookup and ordering rules](../decisions/0113-visible-commit-badges-and-reference-row-heights.md#looking-up-badges-on-large-sets-of-distinct-commits)
+
+The separate three-profile acceptance run painted the one-ref Linux fixture in 337.2–359.3 ms. Distinct targets took 750.0–811.9 ms and nested tag aliases took 716.8–770.9 ms. All 27 appends took 169.4–279.4 ms.
+
 ## Memory used to locate sparse annotated tags
 
 On the Linux history fixture with 50,000 distinct ref targets and one annotation, the packed-ref file occupied 3,410,078 bytes. Reading it to locate sparse annotated tags previously grew Node's array-buffer usage by 3,672,382 bytes. Reusing the 256 KiB prefix buffer reduced growth to 262,304 bytes. On a separate 7,800,100-byte packed-ref input with a Unicode tag near the end, growth fell from 7,996,724–8,062,404 bytes to 262,304 bytes. Each measurement used a fresh Node process, forced GC before the read and compared buffer usage immediately afterward. All three runs per build and input recovered the same tag.
