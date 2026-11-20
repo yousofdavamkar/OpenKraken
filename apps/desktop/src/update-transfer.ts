@@ -1,6 +1,18 @@
 import { createHash } from 'node:crypto';
+import { constants } from 'node:fs';
+import { open } from 'node:fs/promises';
 import type { UpdateState } from '@openkraken/ipc-contract';
 import type { UpdateArtifact } from './update-protocol.js';
+
+export async function syncDirectory(path: string) {
+  if (process.platform === 'win32') return;
+  const file = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try {
+    await file.sync();
+  } finally {
+    await file.close();
+  }
+}
 
 export class UpdateFailure extends Error {
   readonly code: NonNullable<UpdateState['error']>;

@@ -34,6 +34,7 @@ import {
 import {
   readUpdateEnvelope,
   requestUpdateFile,
+  syncDirectory,
   UpdateFailure,
   verifyUpdateArtifact,
 } from './update-transfer.js';
@@ -132,6 +133,11 @@ async function exportInstaller(
       await rmdir(staging).catch(() => {});
     }
   }
+  // The rename has published the complete installer even if the volume cannot confirm it.
+  return syncDirectory(parent).then(
+    () => true,
+    () => false,
+  );
 }
 
 /** Main-owned updater. No renderer-provided URL, path, key or executable is accepted. */
@@ -211,15 +217,6 @@ export class Updates {
     const identity = `${info.dev}:${info.ino}`;
     if (initial) this.directoryIdentity = identity;
     else if (identity !== this.directoryIdentity) throw new UpdateFailure('storage');
-  }
-  private async syncDirectory() {
-    if (process.platform === 'win32') return;
-    const directory = await open(this.directory, 'r');
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
-    }
   }
   private safeFile(info: Stats, limit: number) {
     return (
@@ -326,7 +323,7 @@ export class Updates {
         if ((await this.readSource('automatic-checks.json')) !== this.automaticSource)
           throw new Error('Automatic update settings changed');
         await unlink(this.file('automatic-checks.json'));
-        await this.syncDirectory();
+        await syncDirectory(this.directory);
         this.automaticSource = null;
       } else {
         this.automatic = saved;
@@ -410,7 +407,7 @@ export class Updates {
         throw new Error('Automatic update settings changed');
       await this.checkDirectory();
       await rename(this.file('automatic-checks.tmp'), this.file('automatic-checks.json'));
-      await this.syncDirectory();
+      await syncDirectory(this.directory);
       this.automaticSource = raw;
       this.automatic = next;
     } catch {
@@ -507,7 +504,7 @@ export class Updates {
       this.source = raw;
       this.watermark = next;
       // Persist the rename before offering an eligible release on POSIX.
-      await this.syncDirectory();
+      await syncDirectory(this.directory);
     } catch {
       this.failedStorage = true;
       throw new UpdateFailure('storage');
@@ -744,7 +741,7 @@ export class Updates {
         }
         this.recoverableArtifact = true;
         // A failed directory sync can leave a complete file for a checked retry.
-        await this.syncDirectory().catch(() => {
+        await syncDirectory(this.directory).catch(() => {
           throw new UpdateFailure('storage');
         });
         await this.checkStorage();
@@ -805,12 +802,24 @@ export class Updates {
         if (original.size !== artifact.size) throw new UpdateFailure('integrity');
         const input = await this.openCachedArtifact(original);
         try {
-          await exportInstaller(input, artifact, path, this.directory, signal, async () => {
-            await this.checkStorage();
-            validate();
-          });
-          this.state.phase = 'saved';
-          delete this.state.saveId;
+          const confirmed = await exportInstaller(
+            input,
+            artifact,
+            path,
+            this.directory,
+            signal,
+            async () => {
+              await this.checkStorage();
+              validate();
+            },
+          );
+          if (confirmed) {
+            this.state.phase = 'saved';
+            delete this.state.saveId;
+          } else {
+            this.state.phase = 'verified';
+            this.state.error = 'save-unconfirmed';
+          }
         } catch (error) {
           if (error instanceof UpdateFailure) throw error;
           throw new UpdateFailure('save');

@@ -86,6 +86,60 @@ test.each([
   }
 });
 
+test.skipIf(process.platform === 'win32').each([false, true])(
+  'keeps a verified installer available when the saved directory sync fails (late cancel %s)',
+  async (cancel) => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-save-confirmation-'));
+    const destination = join(root, 'OpenKraken.AppImage');
+    const send = vi.fn<typeof fetch>(
+      async (url) =>
+        new Response(String(url) === configuration.feed ? signed(release()) : 'fixture'),
+    );
+    const updater = new Updates(join(root, 'cache'), configuration, runtime, send);
+    try {
+      await updater.check();
+      const { saveId } = await updater.download('AppImage');
+      await writeFile(destination, 'old file');
+      const handle = await open(root, 'r');
+      const parent = await handle.stat();
+      const prototype: typeof handle = Object.getPrototypeOf(handle);
+      await handle.close();
+      const originalSync = prototype.sync;
+      let published = false;
+      const sync = vi.spyOn(prototype, 'sync').mockImplementation(async function (
+        this: typeof handle,
+      ) {
+        const info = await this.stat();
+        if (info.dev === parent.dev && info.ino === parent.ino) {
+          published = (await readFile(destination, 'utf8')) === 'fixture';
+          if (cancel) updater.cancel();
+          throw new Error('Directory sync failed');
+        }
+        await originalSync.call(this);
+      });
+      try {
+        expect(await updater.save(saveId!, async () => destination)).toMatchObject({
+          phase: 'verified',
+          error: 'save-unconfirmed',
+          saveId,
+        });
+        expect(published).toBe(true);
+      } finally {
+        sync.mockRestore();
+      }
+      expect(await readFile(destination, 'utf8')).toBe('fixture');
+      expect(await updater.save(saveId!, async () => destination)).toMatchObject({
+        phase: 'saved',
+        error: null,
+      });
+      expect(send).toHaveBeenCalledTimes(2);
+    } finally {
+      await updater.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
 test.each([
   'changed bytes',
   'expired release',

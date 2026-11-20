@@ -63,6 +63,7 @@ export const updatesStateSchema = z.strictObject({
       'installation',
       'unchanged-image',
       'save',
+      'save-unconfirmed',
     ])
     .nullable(),
 });
