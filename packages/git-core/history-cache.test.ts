@@ -512,3 +512,24 @@ test('history metadata retains small cache keys and hashes every byte of larger 
   }
   expect(await historyMetadataFingerprint(path, AbortSignal.abort())).toBeUndefined();
 });
+
+test('a changed graft beyond the first metadata chunk invalidates the saved graph', async () => {
+  const path = createFixture(join(root, 'large-grafts'), 'linear', 32);
+  const dataDir = join(root, 'large-graft-profile');
+  const boundaries = [4, 8].map((depth) => fixtureGit(path, ['rev-parse', 'HEAD~' + depth]));
+  const comments = '# original history\n'.repeat(4096);
+  for (const [index, boundary] of boundaries.entries()) {
+    await writeFile(join(path, '.git', 'info', 'grafts'), comments + boundary + '\n');
+    const native = fixtureGit(path, ['rev-list', '--parents', '--date-order', '--all']).split('\n');
+    expect(native).toHaveLength(index === 0 ? 5 : 9);
+    const service = new RepositoryService('git', { dataDir });
+    try {
+      const graph = await service.snapshot((await service.open(path)).id);
+      expect(graph.commits.map((commit) => [commit.oid, ...commit.parents].join(' '))).toEqual(
+        native,
+      );
+    } finally {
+      await service.dispose();
+    }
+  }
+});
