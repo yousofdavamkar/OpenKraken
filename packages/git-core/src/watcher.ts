@@ -365,7 +365,10 @@ export class RepositoryWatcher {
     this.emit([]);
   }
   private async startNative() {
-    await this.check();
+    const hasBaseline = !!(this.initialBaseline || this.baseline);
+    // A primed snapshot can be compared after subscription. Still check if binding stalls.
+    if (hasBaseline) this.schedule(120);
+    else await this.check();
     if (this.closed) return;
     try {
       const subscribe = this.options.subscribe ?? (await import('@parcel/watcher')).subscribe;
@@ -424,15 +427,20 @@ export class RepositoryWatcher {
         this.probe = undefined;
         await rm(path, { force: true });
       }
-      if (!working) {
+      if (working) {
+        this.mode = 'native';
+        this.emit([]);
+      } else {
         this.fallback();
-        return;
       }
-      this.mode = 'native';
-      this.emit([]);
-      await this.check(); // Close the snapshot-to-subscribe race.
     } catch {
       if (!this.closed) this.fallback();
+    }
+    if (!this.closed && (hasBaseline || this.mode === 'native')) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+      await this.checking;
+      await this.check(); // Compare after binding, even if a slow binding already triggered a read.
     }
   }
   private fallback() {

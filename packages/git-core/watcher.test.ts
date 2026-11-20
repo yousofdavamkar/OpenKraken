@@ -77,6 +77,57 @@ test('watcher priming shares snapshot reads and detects a staged blob change wit
   }
 });
 
+test.each(['immediate', 'delayed'])(
+  'a primed watcher detects changes across %s subscription failure',
+  async (timing) => {
+    const path = createFixture(join(root, 'subscribe-' + timing));
+    const service = new RepositoryService('git');
+    const repo = await service.open(path);
+    const events: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let readsAtSubscribe: number | undefined;
+    const run = vi.spyOn(runner, 'runGit');
+    const fingerprints = () =>
+      run.mock.calls.filter(
+        ([, args]) =>
+          args[0] === 'for-each-ref' &&
+          args.includes('--format=%(refname)%00%(objectname)%00%(upstream)%00%(upstream:track)'),
+      ).length;
+    const watch = new RepositoryWatcher('git', repo, (event) => events.push(...event.domains), {
+      subscribe: async () => {
+        readsAtSubscribe = fingerprints();
+        if (timing === 'delayed') await gate;
+        throw new Error('Native subscription unavailable');
+      },
+    });
+    try {
+      await watch.primeObservedSnapshot(() => service.observeInitialSnapshot(repo.id));
+      fixtureGit(path, ['branch', 'created-after-snapshot']);
+      const starting = watch.start();
+      if (timing === 'delayed') {
+        await expect.poll(() => events, { timeout: 3000 }).toContain('refs');
+        fixtureGit(path, ['tag', 'changed-during-startup']);
+      }
+      release();
+      await starting;
+      expect(readsAtSubscribe).toBe(0);
+      expect(watch.mode).toBe('polling');
+      expect(events.filter((domain) => domain === 'refs')).toHaveLength(
+        timing === 'delayed' ? 2 : 1,
+      );
+      expect(fingerprints()).toBe(timing === 'delayed' ? 2 : 1);
+    } finally {
+      release();
+      await watch.close();
+      run.mockRestore();
+      await service.dispose();
+    }
+  },
+);
+
 test('large Unicode reference baselines distinguish tag-only updates from branch movement', async () => {
   const path = createFixture(join(root, 'large-observed-refs'));
   const head = fixtureGit(path, ['rev-parse', 'HEAD']);
