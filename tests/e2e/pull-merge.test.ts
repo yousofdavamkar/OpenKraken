@@ -113,6 +113,9 @@ test('PR merge rechecks tips and methods, confirms once, and checks an uncertain
     await expect(merge.getByRole('combobox', { name: 'Merge method' })).toHaveValue('merge');
     await expect(merge.getByRole('option')).toHaveCount(2);
     await merge.getByRole('combobox', { name: 'Merge method' }).selectOption('squash');
+    await merge.getByRole('button', { name: 'Close merge' }).click();
+    await merge.getByRole('button', { name: 'Keep editing' }).click();
+    await expect(merge.getByRole('combobox', { name: 'Merge method' })).toHaveValue('squash');
     await merge.getByLabel('Use provider default commit message').uncheck();
     await merge
       .getByRole('textbox', { name: 'Merge commit title', exact: true })
@@ -164,7 +167,7 @@ test('PR merge rechecks tips and methods, confirms once, and checks an uncertain
     await expect(merge).not.toContainText('fixture-pat');
     expect(await writes()).toHaveLength(1);
     await merge.getByRole('button', { name: 'Close merge' }).click();
-    await expect(merge.getByRole('region', { name: 'Discard merge message' })).toBeVisible();
+    await expect(merge.getByRole('region', { name: 'Discard merge draft' })).toBeVisible();
     await merge.getByRole('button', { name: 'Keep editing' }).click();
     await app.evaluate(() => {
       (globalThis as typeof globalThis & { mergeFixture: { mode: string } }).mergeFixture.mode =

@@ -237,8 +237,10 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
                 value={method}
                 onChange={(event) => {
                   const value = event.target.value;
-                  if (value === 'merge' || value === 'squash' || value === 'rebase')
+                  if (value === 'merge' || value === 'squash' || value === 'rebase') {
                     setMethod(value);
+                    setDirty(true);
+                  }
                 }}
               >
                 {preview?.methods.map((value) => (
@@ -351,10 +353,10 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
         </section>
       )}
       {discard ? (
-        <section aria-label="Discard merge message">
-          <p>Discard the unsent custom merge message?</p>
+        <section aria-label="Discard merge draft">
+          <p>Discard your unsent merge options and message?</p>
           <button onClick={() => setDiscard(false)}>Keep editing</button>
-          <button onClick={() => close(changed)}>Discard message</button>
+          <button onClick={() => close(changed)}>Discard draft</button>
         </section>
       ) : (
         <div className="dialog-actions">
