@@ -118,7 +118,19 @@ export class ReferenceReader {
     const active = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
     try {
       const omitUpstreams = sample.manyBranches && (await this.noConfiguredUpstreams(cwd, active));
-      const refs = await this.readStable(cwd, active, sample.repeatedTargets, omitUpstreams);
+      const sampled =
+        sample.repeatedTargets &&
+        sample.hasPeeledTags &&
+        process.env.GIT_REPLACE_REF_BASE === undefined
+          ? await this.sampleTagObjects(cwd, active)
+          : undefined;
+      const refs = await this.readStable(
+        cwd,
+        active,
+        sample.repeatedTargets,
+        omitUpstreams,
+        sampled,
+      );
       if (omitUpstreams && !(await this.noConfiguredUpstreams(cwd, active)))
         return await this.readStable(cwd, active, sample.repeatedTargets);
       return refs;
@@ -167,10 +179,20 @@ export class ReferenceReader {
     return refs;
   }
 
-  private async peelTags(cwd: string, signal: AbortSignal, tags: Ref[]) {
+  private async peelTags(
+    cwd: string,
+    signal: AbortSignal,
+    tags: Ref[],
+    ignoreReplacements = false,
+  ) {
     const ids = [...new Set(tags.map((ref) => ref.peeled ?? ref.target))];
     const { stdout } = await this.run(
-      ['cat-file', '--buffer', '--batch-check=%(rest) %(objectname) %(objecttype)'],
+      [
+        ...(ignoreReplacements ? ['--no-replace-objects'] : []),
+        'cat-file',
+        '--buffer',
+        '--batch-check=%(rest) %(objectname) %(objecttype)',
+      ],
       {
         cwd,
         signal,
@@ -189,6 +211,34 @@ export class ReferenceReader {
       resolved.set(id, { peeled: match[2]!, peeledType: match[3]! });
     }
     for (const ref of tags) Object.assign(ref, resolved.get(ref.peeled ?? ref.target)!);
+  }
+
+  private async sampleTagObjects(cwd: string, signal: AbortSignal) {
+    const parser = new RefsParser();
+    const format = REF_FORMAT.replace('%(upstream)', '').replace('%(upstream:track)', '');
+    try {
+      await this.run(
+        ['--no-replace-objects', 'for-each-ref', '--count=128', '--format=' + format],
+        {
+          cwd,
+          signal,
+          maxBytes: this.maxBytes,
+          onStdout: (chunk) => parser.push(chunk),
+        },
+      );
+      const sample = parser.finish();
+      const nested = sample.filter((ref) => ref.peeledType === 'tag');
+      if (nested.length) await this.peelTags(cwd, signal, nested, true);
+      return new Map(sample.map((ref) => [ref.target, ref]));
+    } catch (error) {
+      if (
+        signal.aborted ||
+        !(error instanceof GitError) ||
+        (error.code !== 'GIT_FAILED' && error.code !== 'OUTPUT_LIMIT')
+      )
+        throw error;
+      return undefined;
+    }
   }
 
   private async resolveRepeatedTypes(cwd: string, signal: AbortSignal, refs: Ref[]) {
@@ -236,6 +286,7 @@ export class ReferenceReader {
     signal: AbortSignal,
     grouped = false,
     omitUpstreams = false,
+    sampled?: ReadonlyMap<string, Ref>,
   ): Promise<Ref[]> {
     const parser = new RefsParser('direct');
     // Independently valid chunks start and end on UTF-8 code point boundaries.
@@ -274,6 +325,25 @@ export class ReferenceReader {
       onStderr: account,
     });
     let refs = parser.finish();
+    checkUtf8();
+    // All mutable fields come from this final enumeration. Only immutable object
+    // metadata may be filled from the earlier replacement-free Git sample.
+    if (
+      sampled &&
+      validUtf8 &&
+      refs.every((ref) => !ref.name.startsWith('refs/replace/') && sampled.has(ref.target))
+    ) {
+      for (const ref of refs) {
+        const object = sampled.get(ref.target)!;
+        ref.objectType = object.objectType;
+        ref.peeledType = object.peeledType;
+        if (object.peeled) ref.peeled = object.peeled;
+        bytes += object.objectType.length + object.peeledType.length + (object.peeled?.length ?? 0);
+      }
+      if (bytes > this.maxBytes)
+        throw new GitError('OUTPUT_LIMIT', 'Git output exceeded the safety limit');
+      return refs;
+    }
     if (grouped) {
       if (!(await this.resolveRepeatedTypes(cwd, signal, refs)))
         return this.readStable(cwd, signal);
@@ -283,7 +353,6 @@ export class ReferenceReader {
         throw new GitError('OUTPUT_LIMIT', 'Git output exceeded the safety limit');
     }
     if (!refs.some((ref) => ref.objectType === 'tag')) return refs;
-    checkUtf8();
     if (!validUtf8) return this.all(cwd, signal);
     const expected = refs;
     const unchanged = async () => {

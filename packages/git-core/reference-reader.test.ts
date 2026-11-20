@@ -870,3 +870,98 @@ test('a failed tracking configuration check keeps the authoritative tracking fie
     ahead: 1,
   });
 });
+
+describe('packed annotated aliases', () => {
+  const cwd = join(root, 'sampled-annotations');
+  const shallow = join(cwd, '.git', 'shallow');
+  let sample: Awaited<ReturnType<typeof samplePackedRefs>>;
+  beforeAll(async () => {
+    createFixture(cwd, 'linear', 2);
+    const tag = fixtureGit(cwd, ['rev-parse', 'annotated']);
+    fixtureGit(
+      cwd,
+      ['update-ref', '--stdin'],
+      Array.from({ length: 7000 }, (_, i) => `create refs/tags/alias-${i} ${tag}\n`).join(''),
+    );
+    fixtureGit(cwd, ['pack-refs', '--all']);
+    sample = await samplePackedRefs(join(cwd, '.git'));
+  });
+
+  test('one full enumeration observes ref and tracking changes after Git resolves the sampled objects', async () => {
+    const head = fixtureGit(cwd, ['rev-parse', 'HEAD']);
+    const calls: string[][] = [];
+    const reader = new ReferenceReader(async (args, options) => {
+      calls.push(args);
+      const result = await runGit(git.path, args, options);
+      if (args.includes('--count=128')) {
+        writeFileSync(shallow, head + '\n');
+        fixtureGit(cwd, ['update-ref', 'refs/tags/new-alias', 'annotated']);
+      }
+      return result;
+    });
+    try {
+      const result = await reader.read(cwd, undefined, sample);
+      expect(result).toEqual(await nativeRefs(cwd));
+      expect(result.find((ref) => ref.isHead)?.upstream).toMatchObject({ ahead: 1, behind: 1 });
+      expect(result.find((ref) => ref.name === 'refs/tags/new-alias')?.peeled).toBe(head);
+      expect(calls.filter((args) => args.includes('for-each-ref'))).toHaveLength(2);
+      expect(calls[0]).toContain('--count=128');
+    } finally {
+      rmSync(shallow, { force: true });
+      fixtureGit(cwd, ['update-ref', '-d', 'refs/tags/new-alias']);
+    }
+  });
+
+  test('a new annotated target outside the sample uses Git to resolve its blob', async () => {
+    const blob = fixtureGit(cwd, ['hash-object', '-w', '--stdin'], 'release notes');
+    const reader = new ReferenceReader(async (args, options) => {
+      const result = await runGit(git.path, args, options);
+      if (args.includes('--count=128'))
+        fixtureGit(cwd, ['tag', '-a', 'new-blob', '-m', 'Notes', blob]);
+      return result;
+    });
+    try {
+      const refs = await reader.read(cwd, undefined, sample);
+      expect(refs).toEqual(await nativeRefs(cwd));
+      expect(refs.find((ref) => ref.name === 'refs/tags/new-blob')).toMatchObject({
+        peeled: blob,
+        peeledType: 'blob',
+      });
+    } finally {
+      fixtureGit(cwd, ['update-ref', '-d', 'refs/tags/new-blob']);
+    }
+  });
+
+  test('a replacement ref selecting a sampled commit still requires the replacement-aware read', async () => {
+    const head = fixtureGit(cwd, ['rev-parse', 'HEAD']);
+    const calls: string[][] = [];
+    const reader = new ReferenceReader(async (args, options) => {
+      calls.push(args);
+      const result = await runGit(git.path, args, options);
+      if (args.includes('--count=128')) fixtureGit(cwd, ['replace', head, 'HEAD~1']);
+      return result;
+    });
+    try {
+      expect(await reader.read(cwd, undefined, sample)).toEqual(await nativeRefs(cwd));
+      expect(
+        calls.some((args) => args.includes('--format=' + new RefsParser('direct').gitFormat)),
+      ).toBe(true);
+    } finally {
+      fixtureGit(cwd, ['replace', '-d', head]);
+    }
+  });
+
+  test('counts reconstructed object fields against the output limit', async () => {
+    const { stdout } = await runGit(
+      git.path,
+      ['for-each-ref', '--format=' + new RefsParser('direct').gitFormat],
+      { cwd },
+    );
+    const reader = new ReferenceReader((args, options) => runGit(git.path, args, options), {
+      maxBytes: stdout.length,
+    });
+    await expect(reader.read(cwd, undefined, sample)).rejects.toMatchObject({
+      code: 'OUTPUT_LIMIT',
+    });
+  });
+});
