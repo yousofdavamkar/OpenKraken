@@ -1,4 +1,5 @@
 import { _electron as electron, expect, test } from '@playwright/test';
+import { warmHistoryProfile } from '../history-profile.js';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
@@ -34,10 +35,15 @@ test('every desktop history page matches native Git through the final commit', a
   const cwd = resolve(fixture!);
   const expected = await nativeHistory(cwd);
   const profile = mkdtempSync(join(tmpdir(), 'openkraken-traversal-'));
-  const app = await electron.launch({
-    args: [resolve('apps/desktop'), `--user-data-dir=${profile}`],
-  });
+  let app;
   try {
+    const persistedCommits =
+      process.env.OPENKRAKEN_BENCH_WARM === '1'
+        ? await warmHistoryProfile(profile, cwd)
+        : undefined;
+    app = await electron.launch({
+      args: [resolve('apps/desktop'), `--user-data-dir=${profile}`],
+    });
     const page = await app.firstWindow();
     await page.getByRole('button', { name: 'Open a repository', exact: true }).waitFor();
     await app.evaluate(({ dialog }, path) => {
@@ -92,9 +98,9 @@ test('every desktop history page matches native Git through the final commit', a
     }
     const digest = hash.digest('hex');
     expect({ count, digest }).toEqual(expected);
-    console.log(JSON.stringify({ count, pages, digest }));
+    console.log(JSON.stringify({ count, pages, digest, persistedCommits }));
   } finally {
-    await app.close();
+    await app?.close();
     rmSync(profile, { recursive: true, force: true });
   }
 });

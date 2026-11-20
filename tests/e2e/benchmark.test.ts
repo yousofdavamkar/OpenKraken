@@ -1,16 +1,9 @@
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test';
+import { loadHistory, warmHistoryProfile } from '../history-profile.js';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { RepositoryPreferences } from '../../packages/git-core/src/preferences.js';
-import {
-  existsSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus, release, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -29,43 +22,6 @@ async function scrollP95(element: HTMLElement | SVGElement) {
   }
   const frames = samples.slice(2).sort((a, b) => a - b);
   return frames[Math.floor(frames.length * 0.95)]!;
-}
-
-async function loadHistory(app: ElectronApplication, path: string) {
-  const page = await app.firstWindow();
-  await app.evaluate(({ dialog }, folder) => {
-    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
-  }, path);
-  await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
-  const count = page.getByTestId('commit-count');
-  await expect(count).toHaveText('2,000 commits · more available', { timeout: 60000 });
-  for (const loaded of [7000, 12000, 17000]) {
-    await page.getByRole('button', { name: 'Load more commits', exact: true }).click();
-    await expect(count).toHaveText(`${loaded.toLocaleString('en-US')} commits · more available`);
-  }
-}
-
-// The warm-up opens one repository in an otherwise empty profile.
-function persistedWindowSize(profile: string) {
-  const history = join(profile, 'history');
-  expect(existsSync(history), 'Warm-up persisted a history window').toBe(true);
-  const directories = readdirSync(history);
-  expect(directories).toHaveLength(1);
-  let offset = 0;
-  let key: string | undefined;
-  for (const name of ['prefix.json', 'tail-0.json', 'tail-1.json', 'tail-2.json']) {
-    const file = join(history, directories[0]!, name);
-    const page = JSON.parse(readFileSync(file, 'utf8'));
-    if (offset === 0) {
-      expect(page.key, name).toMatch(/^[0-9a-f]{64}$/);
-      key = page.key;
-    } else expect(page.key, name).toBe(key);
-    expect(page.offset, name).toBe(offset);
-    expect(Array.isArray(page.commits), name).toBe(true);
-    expect(page.commits, name).toHaveLength(offset === 0 ? 2000 : 5000);
-    offset += page.commits.length;
-  }
-  return offset;
 }
 
 // Opt-in benchmark: no Git writes. The observer creates/removes its private self-test probe.
@@ -101,15 +57,8 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       const id = createHash('sha256').update(realpathSync(path)).digest('hex');
       await new RepositoryPreferences(profile).save(id, { hiddenRefs: hiddenTags, soloRef });
     }
+    const persistedCommits = warm ? await warmHistoryProfile(profile, path) : undefined;
     app = await electron.launch({ args });
-    let persistedCommits: number | undefined;
-    if (warm) {
-      await loadHistory(app, path);
-      await app.close();
-      app = undefined;
-      persistedCommits = persistedWindowSize(profile);
-      app = await electron.launch({ args });
-    }
     const fromRepository = process.env.OPENKRAKEN_BENCH_FROM_REPO;
     if (fromRepository) {
       const source = realpathSync(fromRepository);

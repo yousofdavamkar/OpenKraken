@@ -2,6 +2,14 @@
 
 The Linux x64 synthetic scale gates pass after removing a duplicate index fingerprint from working-state reads. **M8 remains incomplete:** the separate 50,000-ref first-paint gate still fails, and cross-platform/release acceptance remains open. All measurements below are retained in [m8-scale-performance.json](m8-scale-performance.json).
 
+## Comparing a restarted graph with native Git
+
+Set `OPENKRAKEN_BENCH_WARM=1` when running the traversal against a scale fixture. The first Electron process loads 17,000 commits and quits. The test checks that the profile contains four contiguous pages under the expected repository ID and that they share a cache key. A second process then compares every displayed commit ID and ordered parent list with native Git through the last page. The JSON result includes the number of commits persisted before restart. The annotated-ref CI job exercises this mode with the one-annotation fixture.
+
+```sh
+OPENKRAKEN_BENCH_WARM=1 bash scripts/run-scale-test.sh traversal "$fixture/repository.git" test-results/restarted-traversal
+```
+
 ## Native desktop CI gates
 
 The scale job now runs separately on Ubuntu x64, Ubuntu ARM64, macOS and Windows. Each runner opens the synthetic checkout, the three synthetic 50,000-ref distributions, full Linux history and full Linux history with 50,000 distinct ref targets. Each opening gate uses three fresh profiles and checks the initial 2,000 commits, displayed reference count, three appends and scrolling. The full Linux fixtures also include one annotated tag among 50,000 distinct targets and 49,999 aliases of a three-level annotation pointing to an independent root. Each runner compares every page of the full Linux fixtures and the synthetic checkout with native Git. Job artifacts use the runner label so a failed measurement can be inspected independently.
