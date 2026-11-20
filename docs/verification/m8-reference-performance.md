@@ -2,6 +2,25 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Starting history from a shared HEAD
+
+With Git 2.53.0, a traced Linux x64 opening of full Linux history painted in 342.5 ms with one ref and 672.3 ms with 50,000 distinct refs. On the distinct fixture, five native runs took a median 133.4 ms to enumerate ref names, IDs, object types and HEAD markers. Asking Git to omit object types took 35.0 ms. Looking up the missing types in a separate batch took another 99.1 ms. These native timings exclude parsing and IPC. The app continues to resolve every ref's type.
+
+On the 50,000-ref fixture where every ref pointed to HEAD, the old opening path also asked Git to print all 50,000 tentative roots. The new path starts its optional walk from the opened HEAD when the sampled packed refs agree. It still checks every root before accepting that walk. The native regressions compare every displayed ID and parent on both initial and appended pages when an independent tip exists outside the sample. [Cursor adoption rules](../decisions/0122-overlap-reference-and-history-reads.md#packed-refs-sharing-the-opened-head)
+
+Both builds used the same renderer and Git 2.53.0 on Linux x64, with fresh application profiles and retained OS caches. Six opening-only pairs followed one warm-up pair. Five more pairs used the full paging benchmark. Build order alternated within each series.
+
+| Shared-target fixture                     | Baseline | With sampled HEAD |
+| ----------------------------------------- | -------: | ----------------: |
+| Median native snapshot, opening-only      | 211.7 ms |          184.9 ms |
+| Median first paint, opening-only          | 522.5 ms |          496.8 ms |
+| First paints below 500 ms, opening-only   |      0/6 |               5/6 |
+| Median first paint, full benchmark        | 536.0 ms |          489.7 ms |
+| First paints below 500 ms, full benchmark |      0/5 |               3/5 |
+| 5,000-commit appends below 300 ms         |    15/15 |             14/15 |
+
+The third candidate run recorded a 713.4 ms append and 33.3 ms p95 graph frame interval. That append spent 419.8 ms in the service phase, 192.3 ms in the worker phase and 101.3 ms in publication. The next two candidate runs met both paging and scroll budgets. The cause of the outlier is undetermined. A final one-ref opening painted in 336.7 ms, and the distinct-target fixture took 734.4 ms. All six of their appends met 300 ms. [Individual runs](m8-opening-experiments.csv)
+
 ## Upstream fields on 50,000 local branches
 
 On Linux x64 with Git 2.53.0, a traced opening of the full-history fixture took 842 ms. The initial reference enumeration occupied 318 ms, and 135 ms elapsed between publication and paint. In six native comparisons on the fixture without configured upstreams, the median enumeration took 207 ms with both upstream fields, 177 ms with the upstream name alone and 147 ms with both fields empty. The product checks Git configuration before and after using the shorter format. [Query selection and compatibility](../decisions/0098-direct-first-reference-enumeration.md#packed-local-branches-without-tracking-configuration)

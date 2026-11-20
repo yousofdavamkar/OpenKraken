@@ -1,6 +1,14 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The latest run missed first paint on full Linux history and on both 50,000-ref repositories. The two-million-commit checkout met the target this time after exceeding it on the preceding run. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met the first-paint budget in the latest run. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+
+## Opening history with 50,000 refs sharing HEAD
+
+On Linux x64, the packaged app opened full Linux history with 50,000 refs pointing to HEAD and with 50,000 distinct targets. On each repository, all 17,000 ordered commit IDs and their parent lists matched native Git across the first page and three appends. Separate regressions cover a loose tip and a later packed tip outside the initial sample.
+
+At `fe825d2`, median first paint on the shared-target fixture fell from 536.0 to 489.7 ms across five paired full benchmarks. Three of five candidate openings met 500 ms. Fourteen of fifteen appends met 300 ms. The slowest took 713.4 ms. Full Linux history with one ref painted in 336.7 ms and the distinct-target fixture in 734.4 ms. [Measurements and native traces](m8-reference-performance.md#starting-history-from-a-shared-head)
+
+The two-million-commit checkout painted in 383.8 ms, and all three appends met 300 ms. Its ten watcher-warm clean and dirty reads took 178.6–213.4 ms. An external edit appeared in 858.4 ms. The Linux x64 build passed typechecking, lint, 1,028 unit/native tests (14 skipped), 34 focused desktop tests, package fuse checks and packaged smoke. Git 2.38.0 passed 68 focused native tests (12 skipped) and all 55 minimum-version desktop checks. The standard 2,000-commit fixture painted in 280.6 ms with Git 2.53.0 and 258.8 ms with Git 2.38.0.
 
 ## Protected merge messages and interrupted submissions
 
