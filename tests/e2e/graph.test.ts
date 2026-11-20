@@ -671,6 +671,24 @@ test('the upstream shortcut follows three native pages to the root commit', asyn
     await close();
   }
 });
+test('the upstream shortcut pages to the commit behind an annotated tracking ref', async () => {
+  const { page, repository, close } = await launch('linear', 2003, (repo) => {
+    const root = fixtureGit(repo, ['rev-list', '--max-parents=0', 'HEAD']);
+    fixtureGit(repo, ['tag', '-a', 'upstream-release', '-m', 'Upstream release', root]);
+    fixtureGit(repo, ['config', 'branch.main.remote', '.']);
+    fixtureGit(repo, ['config', 'branch.main.merge', 'refs/tags/upstream-release']);
+  });
+  try {
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    await expect(page.getByTestId('commit-count')).toHaveText('2,000 commits · more available');
+    await grid.press('Shift+H');
+    const root = fixtureGit(repository, ['rev-parse', 'upstream-release^{commit}']);
+    await expect(grid.getByRole('row', { selected: true })).toHaveAttribute('data-oid', root);
+    await expect(page.getByTestId('commit-count')).toHaveText('2,003 commits');
+  } finally {
+    await close();
+  }
+});
 test('5000-commit pages append without changing previous lanes; unloaded search and bounded scrolling', async ({
   browserName: _browserName,
 }, testInfo) => {

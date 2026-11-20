@@ -259,6 +259,9 @@ export function refNavigationTargets(snapshot: Snapshot, rows: readonly { oid: s
     head.kind === 'branch' ? snapshot.refs.find((r) => r.name === head.ref) : undefined;
   const upstreamRef = headRef?.upstream?.ref;
   const upstream = upstreamRef ? snapshot.refs.find((r) => r.name === upstreamRef) : undefined;
+  let upstreamCommit: string | undefined;
+  if (upstream?.objectType === 'commit') upstreamCommit = upstream.target;
+  else if (upstream?.peeledType === 'commit') upstreamCommit = upstream.peeled;
   const loaded = (oid?: string) => !!oid && rows.some((r) => r.oid === oid);
   return {
     head:
@@ -266,6 +269,6 @@ export function refNavigationTargets(snapshot: Snapshot, rows: readonly { oid: s
         ? head.oid
         : undefined,
     upstream:
-      upstream && (visible(upstream.name) || loaded(upstream.target)) ? upstream.target : undefined,
+      upstream && (visible(upstream.name) || loaded(upstreamCommit)) ? upstreamCommit : undefined,
   };
 }

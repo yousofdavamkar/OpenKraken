@@ -130,13 +130,13 @@ test('local and remote badges sharing a name and target combine; tags stay separ
   ]);
 });
 
-test('HEAD and upstream shortcuts do not scan excluded histories, but still select loaded shared commits', () => {
+test('HEAD and upstream shortcuts follow visible or loaded commits, including peeled tracking tips', () => {
   const snapshot = {
     view: { hiddenRefs: ['refs/heads/main'] },
     repository: { head: { kind: 'branch', ref: 'refs/heads/main', oid: 'head' } },
     refs: [
       { name: 'refs/heads/main', target: 'head', upstream: { ref: 'refs/remotes/origin/main' } },
-      { name: 'refs/remotes/origin/main', target: 'remote' },
+      { name: 'refs/remotes/origin/main', target: 'remote', objectType: 'commit' },
     ],
   } as Snapshot;
   expect(refNavigationTargets(snapshot, [])).toEqual({ head: undefined, upstream: 'remote' });
@@ -146,6 +146,23 @@ test('HEAD and upstream shortcuts do not scan excluded histories, but still sele
     head: 'head',
     upstream: 'remote',
   });
+
+  const tracking = snapshot.refs[1]!;
+  tracking.objectType = 'tag';
+  tracking.peeled = 'base';
+  tracking.peeledType = 'commit';
+  snapshot.view = { hiddenRefs: [] };
+  expect(refNavigationTargets(snapshot, []).upstream).toBe('base');
+  snapshot.view.hiddenRefs = [tracking.name];
+  expect(refNavigationTargets(snapshot, []).upstream).toBeUndefined();
+  expect(refNavigationTargets(snapshot, [{ oid: 'base' }]).upstream).toBe('base');
+  snapshot.view.hiddenRefs = [];
+  tracking.peeledType = 'tree';
+  expect(refNavigationTargets(snapshot, []).upstream).toBeUndefined();
+  tracking.objectType = 'blob';
+  tracking.peeledType = '';
+  delete tracking.peeled;
+  expect(refNavigationTargets(snapshot, []).upstream).toBeUndefined();
 });
 
 test(
