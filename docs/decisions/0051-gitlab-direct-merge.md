@@ -20,6 +20,8 @@ Removal defaults off and requires an explicit selection. The snapshot records bo
 
 ## Results and recovery
 
+The desktop saves edited merge options and both message fields locally. After an interrupted submission, the recovered draft offers a status check. [Merge draft recovery](0130-provider-merge-drafts.md)
+
 Only HTTP 200 with a validated, merged acknowledgment is completion. Validate global/local/project identity, source and target branches, reviewed source SHA, selected squash mode and merged timestamp. A still-open or scheduled response, foreign identity, malformed body or ambiguous transport failure is uncertain. Fast-forward or other responses may omit result commit hashes; these remain unavailable rather than being inferred. Known provider rejection statuses are distinct from uncertain outcomes, and writes are never automatically repeated.
 
 The desktop freezes reviewed choices and messages, retains them after stale/error/cancelled attempts, and offers keep/discard when leaving unsent edits. Uncertainty permits only read-only merge-request inspection before an explicit return to review. Inspection works even if the source branch was removed. Observed state is not proof of which request caused it. Closing after success or uncertainty refreshes the parent list. Closed-request buttons are disabled without unmounting an existing dialog during a background state change.
