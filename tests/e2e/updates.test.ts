@@ -105,9 +105,9 @@ async function fileDigest(path: string) {
 }
 
 test('signed update UI checks, downloads, cancels and rejects tampering through real HTTPS', async () => {
-  // Includes the real startup delay, background notice polling and two consent restarts.
+  // Both artifact sizes exercise seven Electron launches, automatic checks and feed migration.
+  test.setTimeout(180000);
   const manifestPath = process.env.OPENKRAKEN_UPDATE_TEST_MANIFEST;
-  test.setTimeout(manifestPath ? 180000 : 90000);
   const { format, filename, version, size, sha256, path } = await updatePackage(manifestPath);
   const channel = version.includes('-beta.') ? 'beta' : 'stable';
   let feedPath = `/${channel}/release.json`;
