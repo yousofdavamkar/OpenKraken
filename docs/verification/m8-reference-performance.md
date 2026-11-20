@@ -2,6 +2,21 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Opening 50,000 distinct refs with one annotated tag
+
+The mixed fixture replaces the lightweight tag `benchmark-10000` with an annotation of the same commit in a shared-object mirror. It retains 50,000 refs and 1,505,199 reachable commits. Git 2.38.0 and 2.53.0 matched all application ref records and the first 17,000 ordered commit IDs and parent lists. SHA-256 for the displayed history prefix was `539be6736e0fe82c65494612f950a6f55601967a237c6c4875777895a1f50965`. Both versions also matched the prefix on the nested-annotation fixture. On a separate 950-commit DAG, substituting peeled commit IDs for tag object IDs preserved the native date-order and parent stream for 120 root lists on each Git version.
+
+Each row shows the median of five alternating fresh-profile pairs after a warm-up pair on Linux x64, Git 2.53.0, with populated OS caches. Each run opened 2,000 commits and appended three pages to reach 17,000.
+
+| Change                                             | Fixture          | First paint before | First paint after | Snapshot before | Snapshot after |
+| -------------------------------------------------- | ---------------- | -----------------: | ----------------: | --------------: | -------------: |
+| Verify tracking fields after peeling               | Nested aliases   |           604.1 ms |          570.0 ms |        297.4 ms |       271.4 ms |
+| Verify tracking fields after peeling               | One annotation   |         1,089.3 ms |        1,045.3 ms |        766.3 ms |       733.1 ms |
+| Same builds, ordinary refs only                    | Distinct targets |           707.7 ms |          754.6 ms |        382.0 ms |       403.2 ms |
+| Reuse the walk after checking ordered peeled roots | One annotation   |         1,032.5 ms |          877.9 ms |        716.4 ms |       538.1 ms |
+
+The ordinary-refs run used one direct enumeration in both builds. A prototype that reread object types to hash both complete streams raised median first paint from 1,102.8 to 1,247.2 ms on the mixed fixture. Comparing text fields on the grouped alias path raised the median from 569.7 to 598.3 ms. The shipped reader hashes grouped streams and compares direct fields for distinct targets. All 60 measured candidate appends in the table took less than 269 ms. Every candidate first paint exceeded 500 ms. [Individual runs, including warm-ups and discarded variants](m8-opening-experiments.csv) · [Reference recheck](../decisions/0098-direct-first-reference-enumeration.md#rechecking-tracking-counts-after-tag-reads) · [Ordered history roots](../decisions/0122-overlap-reference-and-history-reads.md#validating-walks-started-from-tag-objects)
+
 ## Nested annotated tags on full Linux history
 
 A shared-object bare clone of the one-ref Linux fixture retained its original branch at `46fec1c3029b552ec63b2d01af9d43a386f043ea`. The fixture added a parentless commit and a three-level annotated tag chain pointing to it. After the intermediate tag names were removed, 49,999 packed tag names pointed to the outer annotation. Native Git counted 50,000 refs and 1,505,200 reachable commits. The earlier 50,000-distinct-target fixture has a different distribution and remains a separate gate.
