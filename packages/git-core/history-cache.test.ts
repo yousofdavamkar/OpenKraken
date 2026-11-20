@@ -273,6 +273,43 @@ test('damaged records miss safely; cache quotas and invalidation do not affect r
   await last.flush();
   expect(await last.load()).toBeUndefined();
 });
+test.each(['changed commit', 'extra commit'])(
+  'cached tail with %s is rejected while the opening page is displayed',
+  async (difference) => {
+    const path = createFixture(join(root, 'cached-' + difference), 'linear', 7009);
+    const service = new RepositoryService('git');
+    const snapshot = await service.snapshot((await service.open(path)).id);
+    const firstTail = await service.page(snapshot.repository.id, snapshot.cursor, 2000, 5000);
+    const lastTail = await service.page(snapshot.repository.id, snapshot.cursor, 7000, 5000);
+    await service.dispose();
+    const commits = structuredClone(lastTail.commits);
+    const changed = { ...commits.at(-1)!, oid: 'f'.repeat(40) };
+    if (difference === 'extra commit') commits.push(changed);
+    else commits[commits.length - 1] = changed;
+    let invalidate!: () => void;
+    const invalidated = new Promise<void>((resolve) => {
+      invalidate = resolve;
+    });
+    const cursor = new HistoryCursor('git', path, [snapshot.repository.head.oid!], [], {
+      commits: snapshot.commits,
+      hasMore: true,
+      continuation: async (append) => {
+        append(firstTail);
+        append({ commits, hasMore: false });
+      },
+      invalidate,
+    });
+    try {
+      const first = await cursor.page(0, 2000);
+      expect(first.commits).toHaveLength(2000);
+      await invalidated;
+      await expect(cursor.page(2000, 1)).rejects.toMatchObject({ code: 'STALE_CACHE' });
+    } finally {
+      await cursor.close();
+    }
+  },
+);
+
 test('a divergent seeded prefix rejects continuation and invalidates the cache', async () => {
   const path = createFixture(join(root, 'mismatch'), 'linear', 20),
     service = new RepositoryService('git');

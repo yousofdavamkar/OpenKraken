@@ -59,6 +59,12 @@ export class HistoryCursor {
       this.buffer = [...seed.commits];
       this.bufferedBytes = seed.commits.reduce((n, c) => n + this.size(c), 0);
     }
+    const staleCache = (message: string) => {
+      const error = new GitError('STALE_CACHE', message);
+      this.error = error;
+      seed?.invalidate();
+      return error;
+    };
     let validated = 0;
     const cacheReady = seed
       ?.continuation?.((tail) => {
@@ -96,8 +102,7 @@ export class HistoryCursor {
           record.isStash !== expected.isStash ||
           record.parents.join(' ') !== expected.parents.join(' ')
         ) {
-          seed?.invalidate();
-          throw new GitError('STALE_CACHE', 'History cache changed; refresh to restart');
+          throw staleCache('History cache changed; refresh to restart');
         }
         return false;
       });
@@ -130,7 +135,12 @@ export class HistoryCursor {
                 await cacheReady;
                 parser.push(chunk);
                 this.changed?.();
-                if (this.buffer.length >= this.demand && !this.controller.signal.aborted)
+                // Replaying cached records checks their topology without growing the buffer.
+                if (
+                  validated >= this.cached.length &&
+                  this.buffer.length >= this.demand &&
+                  !this.controller.signal.aborted
+                )
                   await new Promise<void>((resolve) => {
                     this.resume = resolve;
                   });
@@ -141,13 +151,8 @@ export class HistoryCursor {
     )
       .then(() => {
         parser.finish();
-        if (validated < this.cached.length) {
-          seed?.invalidate();
-          throw new GitError(
-            'STALE_CACHE',
-            'History cache is longer than Git history; refresh to restart',
-          );
-        }
+        if (validated < this.cached.length)
+          throw staleCache('History cache is longer than Git history; refresh to restart');
         this.done = true;
       })
       .catch((error) => {
