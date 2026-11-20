@@ -121,7 +121,7 @@ jobs:
       - name: Compare every page of the 50,000-reference Linux fixture with native Git
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.linux_distinct.outcome == 'success' }}
         run: bash scripts/run-scale-test.sh traversal "$RUNNER_TEMP/linux-refs-distinct/repository.git" test-results/performance/linux-refs-distinct-traversal
-      - name: Check opening and full traversal with sparse annotations and nested tag aliases
+      - name: Check fresh and restarted openings and full traversal with annotated refs
         if: ${{ !cancelled() && steps.linux_history.outcome == 'success' }}
         run: |
           failed=0
@@ -139,6 +139,8 @@ jobs:
             for suite in graph traversal; do
               OPENKRAKEN_BENCH_ALIAS_REF="$alias_ref" bash scripts/run-scale-test.sh "$suite" "$fixture/repository.git" "$output-$suite" || failed=1
             done
+            OPENKRAKEN_BENCH_ALIAS_REF="$alias_ref" OPENKRAKEN_BENCH_WARM=1 \
+              bash scripts/run-scale-test.sh graph "$fixture/repository.git" "$output-restarted" || failed=1
           done
           exit "$failed"
       - uses: actions/upload-artifact@v4

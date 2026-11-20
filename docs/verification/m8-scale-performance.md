@@ -15,6 +15,8 @@ Local Linux x64 verification used Git 2.53.0, fresh profiles and retained OS cac
 
 The one-ref gate passed. All three distinct-target runs failed the 500 ms first-paint assertion and retained their phase timings. The 302-page traversal matched every ordered ID and parent list across 1,505,199 commits. Across three status runs on the 100,000-file checkout, all 30 clean and dirty reads met 300 ms (174.0–223.3 ms). External edits appeared in 855.2–868.2 ms. The workflow passed actionlint locally. Hosted runner execution and native measurements on ARM64, macOS and Windows remain open. [Per-run graph timings](m8-opening-experiments.csv)
 
+On the two annotated-ref fixtures, CI also restarts the app after loading 17,000 commits and runs the graph gate in three profiles. Before each timed reopen, the harness reads the saved prefix and three tails from the closed app's profile. It verifies their cache key, contiguous offsets and page lengths and records the total in `cache.persistedCommits`. The OS file cache remains populated. A missing or short window fails setup before the first-paint timer starts. [Graph results](m8-progress.md#fresh-profile-graph-opening-with-annotated-refs)
+
 ## Fixture and measurement boundaries
 
 The disposable fixture has **2,000,000 reachable commits, 100,000 tracked files, 1,999 genuine merges and two branch tips**, with a complete checkout and native commit graph. HEAD is `606403fd8ea711764e0ca26ada7fc10bbbde974a`. HEAD alone reaches 1,999,999 commits; the final topic tip supplies the remaining commit and is included in the app's history roots. The graph harness records the HEAD-only count in `commits` and the count from `git rev-list --count --all` in `commitsFromAllRefs`. It collects both after the timed interactions.
