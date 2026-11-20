@@ -2,6 +2,16 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## AppImage startup beyond one minute
+
+At `acce4aa`, the native helper continues observing an unconfirmed replacement every two seconds after the first minute. It restores the verified predecessor after the launcher and ordinary descendants exit, or finishes when startup confirms. The helper holds the original transaction directory open from readiness through recovery. Replacing that directory after arming or after launch ends the old handoff. Both directory-swap regressions reproduced restoration from a different transaction before the fix.
+
+The stable FUSE fixture held replacement startup for 61 seconds, verified both image digests while it was alive, then released it to exit. The exact predecessor restarted, displayed its restoration notice and retained the signed release sequence. The beta extract-and-run fixture resumed startup after the same delay and confirmed the replacement. Separate packaged runs interrupted the parent before and after rename and recovered the expected version. These fixtures used temporary signing keys and loopback HTTPS. [Startup behavior](../decisions/0086-appimage-startup-exit-recovery.md#slow-or-stalled-replacement-startup)
+
+The Linux suite passed 1,010 tests with 14 skipped. Both update Electron tests and all four shutdown tests passed. Typechecking, lint, production build, Go vet, Linux packaging, fuse verification and packaged smoke passed. Helpers cross-compiled for Linux arm64, macOS arm64 and Windows amd64. Native runtime acceptance for those platforms remains open. An initial concurrent fixture build failed in Electron Packager’s shared temporary directory. Giving each fixture its own packaging temporary root resolved the collision. Evidence is in `/tmp/openkraken-late-final-*.log`.
+
+A running unconfirmed replacement retains its helper and backup until confirmation or exit. Helper death, detached processes, incompatible profile migrations and interruptions during recovery remain outside this acceptance.
+
 ## Graph reply recovery and incremental history-cache writes
 
 The renderer rejects an append that loses a complete row, even when its remaining node and edge records decode. The Electron regression kept the displayed 2,000 commits, recovered paging through Refresh and found an appended commit by ID. All 19 graph Electron tests passed, including six Canvas image comparisons. [Graph worker behavior](../decisions/0006-compact-graph-passages.md#failed-worker-dispatch-and-unreadable-replies)
