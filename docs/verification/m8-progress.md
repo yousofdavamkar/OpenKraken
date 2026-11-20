@@ -2,6 +2,12 @@
 
 M8 remains in progress. On Linux x64, the full Linux history with one ref passed the opening budget in all three fresh profiles. Fresh openings with 49,999 nested tag aliases passed three of six times across two runs, and all three restarted profiles passed. All six fresh and all three restarted profiles with distinct targets exceeded 500 ms. Native Windows, macOS and ARM64 acceptance, production release gates, and remaining [M6](m6-progress.md) and [M7](m7-progress.md) work are open.
 
+## Paging and restarting with large commit messages
+
+The history cache now stops encoding at the first oversized record and releases the part of the window that a restart cannot use. On a 17,000-commit cache-writer fixture with large messages, median retained heap growth after the last append fell from 82.28 MiB to 0.10 MiB. Ordinary prefixes and tails remained byte-compatible. Both fresh and restarted Electron profiles opened histories with large messages, paged to the root and selected it from the keyboard. Native verification compared all 4,800 and 9,600 commit IDs and their ordered parents with Git. [Measurements and fixtures](m8-reference-performance.md#large-commit-messages-in-the-saved-history-window)
+
+On the 50,000-distinct-target fixture, two changes to ref enumeration increased median first paint in paired tests. Both experiments were set aside. The final build painted in 740.4–869.4 ms and all nine appends met the 300 ms budget. The full Linux x64 unit and native suite passed 1,203 tests with ten skips. All 31 graph and history-cache Electron tests passed, including six Canvas goldens. [Opening experiments](m8-reference-performance.md#ref-fields-and-concurrent-git-probes)
+
 ## macOS beta release identity
 
 On Linux x64, Electron Packager 20.3.0 produced Intel and Apple silicon metadata fixtures from the checksum-verified Electron 45.2.1 archives. With the previous options the app and four helper plists contained `0.2.0-beta.1` in both native version fields. Setting just the numeric short version also changed the embedded application version to `0.2.0`. The corrected packaging hook preserved the following values on both architectures.

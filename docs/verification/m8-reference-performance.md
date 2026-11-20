@@ -2,6 +2,25 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Large commit messages in the saved history window
+
+Two Linux x64 bare histories contained the same 80 consecutive commits with 256 KiB message bodies. On the 4,800-commit tip the large messages appeared within the first 2,000 rows. On the 9,600-commit tip they appeared in the next 5,000 rows. Fresh and restarted service runs matched every displayed commit ID and ordered parent with native Git, including all 80 messages. Four Electron launches opened the first page, appended through the root and selected the root with End. The first repository saved no cache pages. The second retained its 2,000-commit opening page.
+
+A separate cache-writer experiment used fresh Node processes, a warm-up pair and five measured pairs with alternating build order. With 100 records sharing a 600 KiB body, the previous writer encoded the full batch before discovering that it exceeded 8 MiB. Stopping at the first record that exceeded the remaining budget reduced median flush time from 212.0 to 21.5 ms and peak resident memory growth from 118.6 to 8.5 MiB. An ordinary 2,000-commit prefix took 13.2 and 14.4 ms respectively and produced identical file bytes.
+
+In three fresh Node processes per build, four successive pages supplied 17,000 distinct 4.5 KiB bodies. Each process flushed after every page and forced GC before sampling retained JS heap. After the final page, median heap growth fell from 82.28 MiB to 0.10 MiB when the writer released the unreachable records. On ordinary 17,000-commit windows with Unicode and escaped characters, all four file digests matched across all six runs. [Cache behavior](../decisions/0008-bounded-history-cache.md#oversized-commit-messages)
+
+## Ref fields and concurrent Git probes
+
+A baseline opening of the 50,000-distinct-target Linux fixture painted in 855.7 ms. Two experiments used five alternating pairs after warm-up with fresh Electron profiles and populated OS caches. Each run displayed 2,000 commits and 50,000 refs, checked the same first ten mounted IDs and badge labels, and appended 5,000 commits.
+
+| Experiment                                                 | Median first paint, before → after | Median native snapshot, before → after |
+| ---------------------------------------------------------- | ---------------------------------: | -------------------------------------: |
+| Omit two empty fields when Git confirms no tracking config |                   721.7 → 746.9 ms |                       410.1 → 424.9 ms |
+| Read tracking config while resolving sampled tag objects   |                   741.8 → 814.5 ms |                       435.7 → 425.4 ms |
+
+The shipping reader retains the six-field direct format and resolves sampled objects before checking tracking configuration. The independent final gate painted in 762.6, 869.4 and 740.4 ms against the 500 ms budget. All nine 5,000-commit appends met 300 ms, taking 199.4–257.9 ms. [Paired measurements](m8-opening-experiments.csv)
+
 ## Hashing ordered history roots
 
 The Git service hashes roots in batches of 1,024 and shares the ordered root array with the history cursor. Six pairs of fresh Node processes followed a warm-up pair on Linux x64. Each process loaded the roots, ran GC, and measured elapsed time and memory growth through producing the cache key and cursor inputs. The 50,000-root input came from the full Linux fixture. The 250,000-root input added synthetic IDs. All paired digests matched.
