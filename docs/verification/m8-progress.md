@@ -2,6 +2,16 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest three runs. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Navigating deep history on Linux x64
+
+Keyboard navigation, pointer selection and range selection reuse row positions after checking the commit ID. The regression at row 32,000 traverses zero preceding commit IDs when positions match and still finds the correct endpoints after a working row shifts the history. On a 560-pixel Canvas viewport that straddled two partial rows, the painter inspected 21 row kinds. Its fill colors matched the original set-based painter for every visible node.
+
+At clean application commit `6a62fed`, three fresh-profile openings of the full 1,505,199-commit Linux history with one ref painted in 330.0–368.4 ms. With 50,000 distinct targets, first paint took 712.1, 818.9 and 742.3 ms. The 500 ms gate remains open. All 18 appends of 5,000 commits took 160.8–231.3 ms, and graph scrolling measured 16.7–16.8 ms p95. Two experimental opening paths took longer in paired desktop runs. [Reference experiments](m8-reference-performance.md#commit-type-and-renderer-scheduling-experiments) · [Individual timings](m8-opening-experiments.csv)
+
+The packaged Linux app drew the graph, appended two pages, searched the repository, navigated among deep rows and opened their details. The first test run encountered an X11 `BadWindow` during native picker discovery after the graph checks passed. The smoke now retries the window lookup. One run with an injected transient X11 error and a second with the real driver both passed through native folder selection and terminal input.
+
+The full unit/native suite passed 1,063 tests with nine platform skips. All 30 graph and worktree Electron tests passed, including the six Canvas goldens. An additional regression added and removed a working-tree row above a selection at the end of a 2,200-commit repository. Enter opened the intended commit after the insertion, and Shift-click selected the intended range after removal. It passed twice with Git 2.53.0 and again with Git 2.38.0. The minimum-Git three-page upstream jump, typecheck, lint, production build and Linux x64 package fuse verification also passed.
+
 ## macOS release signing and notarization
 
 The native DMG builder now accepts a Developer ID Application certificate fingerprint and an optional Apple notarization keychain profile. The verifier requires an independent fingerprint for signed images and can require a validated stapled ticket before mounting. Concurrent builds keep each signed image available under its own digest. Linux tests exercised receipt validation, concurrent saves and the command sequence with simulated Apple responses. A real signed and notarized image, a quarantined download and native acceptance still require a macOS release host and publisher credentials. [Release commands](../../README.md) · [DMG signing decision](../decisions/0089-native-dmg-payload-and-copy-install.md#developer-id-signing)

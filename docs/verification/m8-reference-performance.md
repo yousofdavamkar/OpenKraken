@@ -2,6 +2,12 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Commit type and renderer scheduling experiments
+
+On full Linux history with 50,000 distinct targets, a diagnostic utility ran a name and tracking read alongside `git --no-replace-objects rev-list --no-walk=unsorted --all`. It accepted commit types only for targets that appeared in the latter output and used the full native query if any target was unresolved or the repository used replacement refs. In a separate mixed-object repository, Git's no-walk command returned the commit ID and omitted the direct IDs of the annotated tag, tree and blob. Across six alternating fresh-profile pairs after warm-up on the large fixture, median native snapshot time rose from 374.9 to 399.7 ms and first paint rose from 713.5 to 737.5 ms.
+
+A second diagnostic build dispatched graph layout before expanding compact reference records. Across six more alternating pairs on the same fixture, median time from receiving the snapshot to first paint rose from 184.4 to 199.0 ms. Median end-to-end first paint was 723.8 ms with the original renderer and 747.1 ms with early dispatch. Both comparisons opened all 2,000 commits and showed all 50,000 references. The shipping implementation retains its existing read and layout order. [Individual measurements](m8-opening-experiments.csv)
+
 ## Streaming object-type lookup
 
 On the pinned full Linux fixture with 50,000 distinct targets, a native probe piped the ref name, target and tracking fields from `for-each-ref` into `cat-file --batch-check`. The second command looked up the type of each object and returned the other fields using `%(rest)`. Across eight alternating pairs after warm-up, the median command time with empty upstream fields fell from 163.9 to 140.4 ms. With both upstream fields requested, it fell from 216.3 to 169.8 ms. The direct and piped commands returned byte-identical output in all runs on this fixture.
