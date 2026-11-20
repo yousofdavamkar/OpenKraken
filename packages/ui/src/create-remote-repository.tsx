@@ -16,7 +16,8 @@ export function CreateRemoteRepository({
   const [description, setDescription] = useState('');
   const [isPrivate, setPrivate] = useState(true);
   const [readme, setReadme] = useState(false);
-  const [pending, setPending] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'create' | 'inspect'>();
+  const pending = pendingAction !== undefined;
   const [receipt, setReceipt] = useState<{ repository: ProviderRepository; inspected: boolean }>();
   const [uncertain, setUncertain] = useState(false);
   const [error, setError] = useState('');
@@ -30,12 +31,12 @@ export function CreateRemoteRepository({
     [],
   );
   const validName = providerRepositoryNameSchema.safeParse(name).success;
-  async function submit() {
-    if (active.current || !validName || disabled) return;
-    const inspect = uncertain;
+  async function submit(action: 'create' | 'inspect') {
+    const inspect = action === 'inspect';
+    if (active.current || !validName || disabled || (uncertain && !inspect)) return;
     const id = crypto.randomUUID();
     active.current = id;
-    setPending(true);
+    setPendingAction(action);
     setError('');
     try {
       const result = await window.openkraken.request(
@@ -78,7 +79,7 @@ export function CreateRemoteRepository({
     } finally {
       if (active.current === id) {
         active.current = undefined;
-        setPending(false);
+        setPendingAction(undefined);
       }
     }
   }
@@ -115,7 +116,7 @@ export function CreateRemoteRepository({
           aria-label="Create personal repository"
           onSubmit={(event) => {
             event.preventDefault();
-            void submit();
+            void submit(uncertain ? 'inspect' : 'create');
           }}
         >
           <fieldset disabled={disabled || pending || uncertain}>
@@ -164,9 +165,14 @@ export function CreateRemoteRepository({
               Initialize with a README
             </label>
             {!uncertain && (
-              <button type="submit" disabled={!validName}>
-                Create {isPrivate ? 'private' : 'public'} repository
-              </button>
+              <>
+                <button type="submit" disabled={!validName}>
+                  Create {isPrivate ? 'private' : 'public'} repository
+                </button>
+                <button type="button" disabled={!validName} onClick={() => void submit('inspect')}>
+                  Check existing repository
+                </button>
+              </>
             )}
           </fieldset>
           {uncertain && (
@@ -187,7 +193,9 @@ export function CreateRemoteRepository({
             </>
           )}
           {pending && (
-            <p role="status">{uncertain ? 'Checking repository…' : 'Creating repository…'}</p>
+            <p role="status">
+              {pendingAction === 'inspect' ? 'Checking repository…' : 'Creating repository…'}
+            </p>
           )}
           {error && <p role="alert">{error}</p>}
         </form>

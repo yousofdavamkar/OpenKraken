@@ -95,14 +95,18 @@ for (const provider of ['github', 'gitlab'] as const) {
           );
           await check.press('Enter');
           await expect(form.getByRole('alert')).toBeVisible();
-          await check.click();
+          if (github) {
+            await dialog.getByRole('button', { name: 'Close accounts' }).click();
+            await page.getByRole('button', { name: 'Provider accounts', exact: true }).click();
+            await dialog.getByText('Create repository', { exact: true }).click();
+            await form.getByLabel('Repository name').fill('demo');
+            await form.getByRole('button', { name: 'Check existing repository' }).click();
+          } else await check.click();
         }
         await expect(
-          dialog
-            .getByRole('status')
-            .filter({
-              hasText: lost ? 'Found sam/demo. Visibility: public.' : 'Created sam/demo.',
-            }),
+          dialog.getByRole('status').filter({
+            hasText: lost ? 'Found sam/demo. Visibility: public.' : 'Created sam/demo.',
+          }),
         ).toBeVisible();
         await expect(dialog.getByLabel('Clone URL')).toHaveValue(origin + '/sam/demo.git');
         await dialog.getByRole('button', { name: 'Close accounts', exact: true }).click();
