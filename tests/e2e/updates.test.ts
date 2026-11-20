@@ -1,7 +1,8 @@
 import { _electron as electron, expect, test } from '@playwright/test';
 import { build } from 'esbuild';
 import type { UpdateConfiguration } from '../../apps/desktop/src/update-protocol.js';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
@@ -431,6 +432,25 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     ).toBeChecked();
     await dialog.getByRole('button', { name: 'Check for updates' }).click();
     await expect(dialog.getByRole('status')).toHaveText(`Version ${version} is available.`);
+
+    const configFile = join(root, 'feed-config.json');
+    await writeFile(configFile, JSON.stringify(nextConfig));
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      [resolve('scripts/verify-update-feed.mjs'), configFile, output],
+      { env },
+    );
+    expect(JSON.parse(stdout)).toMatchObject({
+      channel,
+      version,
+      sequence,
+      artifacts: [{ name: filename, format, size, sha256 }],
+    });
+    const receiptPath = test.info().outputPath('verified-feed.json');
+    await writeFile(receiptPath, stdout);
+    await test
+      .info()
+      .attach('verified-feed.json', { path: receiptPath, contentType: 'application/json' });
   } finally {
     await app?.close();
     server?.closeAllConnections();
