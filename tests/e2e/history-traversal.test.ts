@@ -1,9 +1,9 @@
 import { _electron as electron, expect, test } from '@playwright/test';
-import { warmHistoryProfile } from '../history-profile.js';
+import { loadHistory, warmHistoryProfile } from '../history-profile.js';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Result } from '../../packages/ipc-contract/src/index.js';
@@ -32,7 +32,10 @@ test('every desktop history page matches native Git through the final commit', a
     'Set OPENKRAKEN_TRAVERSAL_REPO to a scale fixture for native history comparison',
   );
   test.setTimeout(10 * 60 * 1000);
-  const cwd = resolve(fixture!);
+  const cwd = realpathSync(fixture!);
+  const source = process.env.OPENKRAKEN_BENCH_FROM_REPO;
+  const switchedFrom = source ? realpathSync(source) : undefined;
+  expect(switchedFrom).not.toBe(cwd);
   const expected = await nativeHistory(cwd);
   const profile = mkdtempSync(join(tmpdir(), 'openkraken-traversal-'));
   let app;
@@ -45,7 +48,8 @@ test('every desktop history page matches native Git through the final commit', a
       args: [resolve('apps/desktop'), `--user-data-dir=${profile}`],
     });
     const page = await app.firstWindow();
-    await page.getByRole('button', { name: 'Open a repository', exact: true }).waitFor();
+    if (switchedFrom) await loadHistory(app, switchedFrom);
+    else await page.getByRole('button', { name: 'Open a repository', exact: true }).waitFor();
     await app.evaluate(({ dialog }, path) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
     }, cwd);
@@ -55,6 +59,7 @@ test('every desktop history page matches native Git through the final commit', a
       const { repository, cursor, commits, hasMore } = opened.snapshot;
       return {
         repoId: repository.id,
+        path: repository.path,
         cursor,
         count: commits.length,
         hasMore,
@@ -62,6 +67,7 @@ test('every desktop history page matches native Git through the final commit', a
       };
     });
 
+    expect(realpathSync(first.path)).toBe(cwd);
     const hash = createHash('sha256').update(first.lines);
     const { repoId, cursor } = first;
     let { count, hasMore } = first;
@@ -98,7 +104,7 @@ test('every desktop history page matches native Git through the final commit', a
     }
     const digest = hash.digest('hex');
     expect({ count, digest }).toEqual(expected);
-    console.log(JSON.stringify({ count, pages, digest, persistedCommits }));
+    console.log(JSON.stringify({ count, pages, digest, persistedCommits, switchedFrom }));
   } finally {
     await app?.close();
     rmSync(profile, { recursive: true, force: true });

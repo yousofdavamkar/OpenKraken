@@ -12,6 +12,8 @@ Set `OPENKRAKEN_BENCH_WARM=1` when running the traversal against a scale fixture
 OPENKRAKEN_BENCH_WARM=1 bash scripts/run-scale-test.sh traversal "$fixture/repository.git" test-results/restarted-traversal
 ```
 
+To check a repository switch as well, set `OPENKRAKEN_BENCH_FROM_REPO` to a different fixture with at least 17,001 commits. The test opens that source, loads 17,000 commits there, then opens the destination through the desktop bridge. It checks the canonical destination path before comparing every page with Git. With `OPENKRAKEN_BENCH_WARM=1`, the destination already has a saved 17,000-commit window.
+
 ## Native desktop CI gates
 
 The scale job now runs separately on Ubuntu x64, Ubuntu ARM64, macOS and Windows. Each runner opens the synthetic checkout, the three synthetic 50,000-ref distributions, full Linux history and full Linux history with 50,000 distinct ref targets. Each opening gate uses three fresh profiles and checks the initial 2,000 commits, displayed reference count, three appends and scrolling. The full Linux fixtures also include one annotated tag among 50,000 distinct targets and 49,999 aliases of a three-level annotation pointing to an independent root. Each runner compares every page of the full Linux fixtures and the synthetic checkout with native Git. Job artifacts use the runner label so a failed measurement can be inspected independently.
