@@ -2,6 +2,22 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Retained memory in a 50,000-ref sidebar
+
+The sidebar now indexes runs of adjacent references of the same kind. Five measured pairs compared the range index with the four-row arrays on Linux x64, using Git 2.53.0 and the 1,505,199-commit Linux fixture with 50,000 distinct ref targets and one annotation. Each experiment used a warm-up pair (pair zero), alternated build order and retained OS caches.
+
+| Median across five pairs                          |  Four-row arrays |   Section ranges |
+| ------------------------------------------------- | ---------------: | ---------------: |
+| Renderer heap after first paint and forced GC     | 29,435,408 bytes | 27,860,012 bytes |
+| Isolated grouping heap increase after forced GC   |  1,808,296 bytes |     87,632 bytes |
+| Isolated grouping time                            |          4.54 ms |          1.59 ms |
+| First paint after replaying the snapshot response |         838.0 ms |         776.0 ms |
+| First paint including repository opening          |         873.8 ms |         934.7 ms |
+
+The post-GC renderer heap fell in each pair. The isolated Node test built the grouping index on frozen records from native Git and verified the displayed order of all 50,000 names by SHA-256. The replay timed the app with a fresh profile after the test main process captured a real opening response, then checked the renderer asset and the visible commit and ref counts. Replay improved in four pairs. Full opening improved in two pairs and exceeded 500 ms in all five. The change is retained for the memory reduction. All 15 measured appends of 5,000 commits on the range build met 300 ms. [Heap, isolated grouping and replay samples](m8-reference-range-samples.csv)
+
+Two preliminary builds used offsets into copied per-kind arrays. That alone moved median full paint from 787.7 to 784.7 ms. Preparing commit badge data during worker layout on top of that build moved median paint from 840.2 to 848.0 ms. Each comparison used five pairs after a warm-up. The release uses the range index and initializes badge data on demand. [Full opening, paging and scrolling measurements](m8-opening-experiments.csv)
+
 ## Switching back to a cached repository with 50,000 refs
 
 A Linux x64 Electron profile first saved 17,000 commits from the 50,000-distinct-target fixture and restarted. It opened single-ref Linux history, loaded 17,000 commits there, then switched back to the saved fixture. Four measured pairs alternated build order after a warm-up pair. Both builds waited for the outgoing cache write and checked the destination’s current graph fingerprint. The prototype also read the destination’s first cache page during the outgoing write and rechecked the file stamp afterward.
