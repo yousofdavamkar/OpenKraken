@@ -145,7 +145,7 @@ test('Appearance switches the rendered theme and Canvas colors without moving gr
         ...canvas.getContext('2d')!.getImageData(14 * devicePixelRatio, 14 * devicePixelRatio, 1, 1)
           .data,
       ]);
-    expect(await nodeColor()).toEqual([121, 223, 195, 255]);
+    expect(await nodeColor()).toEqual([31, 182, 214, 255]);
     await page.getByRole('button', { name: 'Appearance', exact: true }).click();
     const settings = page.getByRole('dialog', { name: 'Appearance', exact: true });
     await settings.getByLabel('Color theme').selectOption('light');
@@ -169,8 +169,8 @@ test('Appearance switches the rendered theme and Canvas colors without moving gr
     await settings.getByRole('button', { name: 'Apply', exact: true }).click();
     await expect
       .poll(() => page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor))
-      .toBe('rgb(16, 21, 30)');
-    await expect.poll(nodeColor).toEqual([121, 223, 195, 255]);
+      .toBe('rgb(27, 30, 36)');
+    await expect.poll(nodeColor).toEqual([31, 182, 214, 255]);
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

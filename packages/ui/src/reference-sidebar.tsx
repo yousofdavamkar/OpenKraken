@@ -203,6 +203,7 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
 
 export function ReferenceSidebar() {
   const { snapshot, busy: active, syncing, setView } = useRepository();
+  const [collapsed, setCollapsed] = useState<ReadonlySet<Ref['kind']>>(new Set());
   if (!snapshot) return null;
   const busy = !!active && !syncing;
   const large = snapshot.refs.length >= 100;
@@ -232,15 +233,33 @@ export function ReferenceSidebar() {
           const refs = snapshot.refs.filter((ref) => ref.kind === kind);
           return refs.length ? (
             <section key={kind}>
-              <h3>{title}</h3>
-              {refs.map((reference) => (
-                <ReferenceRow
-                  key={reference.name}
-                  reference={reference}
-                  snapshot={snapshot}
-                  busy={busy}
-                />
-              ))}
+              <h3 className="ref-section-heading">
+                <button
+                  type="button"
+                  aria-expanded={!collapsed.has(kind)}
+                  aria-controls={`ref-section-${kind}`}
+                  onClick={() =>
+                    setCollapsed((current) => {
+                      const next = new Set(current);
+                      if (!next.delete(kind)) next.add(kind);
+                      return next;
+                    })
+                  }
+                >
+                  {title}
+                  <span className="ref-section-count">{refs.length}</span>
+                </button>
+              </h3>
+              <div id={`ref-section-${kind}`} hidden={collapsed.has(kind)}>
+                {refs.map((reference) => (
+                  <ReferenceRow
+                    key={reference.name}
+                    reference={reference}
+                    snapshot={snapshot}
+                    busy={busy}
+                  />
+                ))}
+              </div>
             </section>
           ) : null;
         })

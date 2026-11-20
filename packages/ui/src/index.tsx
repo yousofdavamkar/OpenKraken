@@ -98,16 +98,27 @@ function App() {
   }
   const open = () => void chooseFolder('open', document.activeElement);
   const head = snapshot?.repository.head;
+  const repositoryName = snapshot?.repository.path.split(/[\\/]/).filter(Boolean).at(-1);
   return (
     <div className="app">
-      <header>
-        <div className="brand">
+      <header className="titlebar">
+        <div className="brand" title="OpenKraken">
           <span className="brand-icon" aria-hidden="true">
             ◈
-          </span>{' '}
-          OpenKraken <span className="edition">LOCAL GIT CLIENT</span>
+          </span>
+          <span className="brand-name">OpenKraken</span>
         </div>
-        <div className="toolbar">
+        <nav className="repo-tabs" aria-label="Repository tabs">
+          {snapshot ? (
+            <span className="repo-tab active" title={snapshot.repository.path}>
+              <span className="repo-tab-icon" aria-hidden="true" />
+              {repositoryName}
+            </span>
+          ) : (
+            <span className="repo-tab active">New Tab</span>
+          )}
+        </nav>
+        <div className="titlebar-tools">
           <RepositoryLinkControl />
           <CommandControls />
           <Appearance />
@@ -116,23 +127,36 @@ function App() {
           <DiagnosticsControl />
           <UpdatesControl />
           <AvatarSettings />
-          <CommandButton command="repository.clone" disabled={!!busy} onClick={openClone}>
-            Clone
-          </CommandButton>
           <ProviderAccountsControl />
-          <PullRequests />
-          <Issues />
-          <NewReferences />
-          <ManageRemotes />
+        </div>
+      </header>
+      <div className="toolbar" role="toolbar" aria-label="Repository actions">
+        <div className="toolbar-context">
+          <div className="toolbar-picker">
+            <small>repository</small>
+            {snapshot ? (
+              <h1 title={snapshot.repository.path}>{repositoryName}</h1>
+            ) : (
+              <strong>No repository</strong>
+            )}
+          </div>
+          {snapshot && (
+            <div className="toolbar-picker">
+              <small>branch</small>
+              <strong className="head" data-testid="head">
+                {head?.kind === 'branch'
+                  ? head.ref.replace('refs/heads/', '')
+                  : `Detached · ${head?.oid.slice(0, 8)}`}
+                {!head?.oid && ' · unborn'}
+              </strong>
+            </div>
+          )}
+        </div>
+        <div className="toolbar-primary">
           <Pull />
-          <Integration />
-          <InteractiveRebaseControl />
-          <Reset />
           <Push />
+          <NewReferences />
           <Stashes />
-          <WorktreesControl key={`worktrees:${snapshot?.repository.id}`} />
-          <SubmodulesControl key={`submodules:${snapshot?.repository.id}`} />
-          <LfsControl key={`lfs:${snapshot?.repository.id}`} />
           <CommandButton
             command="repository.terminal"
             disabled={!snapshot}
@@ -148,6 +172,22 @@ function App() {
             }}
           >
             Terminal
+          </CommandButton>
+          <span className="toolbar-separator" aria-hidden="true" />
+          <Integration />
+          <InteractiveRebaseControl />
+          <Reset />
+          <span className="toolbar-separator" aria-hidden="true" />
+          <PullRequests />
+          <Issues />
+        </div>
+        <div className="toolbar-secondary">
+          <ManageRemotes />
+          <WorktreesControl key={`worktrees:${snapshot?.repository.id}`} />
+          <SubmodulesControl key={`submodules:${snapshot?.repository.id}`} />
+          <LfsControl key={`lfs:${snapshot?.repository.id}`} />
+          <CommandButton command="repository.clone" disabled={!!busy} onClick={openClone}>
+            Clone
           </CommandButton>
           <CommandButton command="repository.open" onClick={open} disabled={!!busy}>
             Open repository
@@ -176,7 +216,7 @@ function App() {
           )}
           {(busy || paging || searching) && <button onClick={() => void cancel()}>Cancel</button>}
         </div>
-      </header>
+      </div>
       {clone && <CloneDialog close={() => setClone(false)} />}
       <GitProgress />
       <Authentication />
@@ -221,18 +261,6 @@ function App() {
       )}
       {snapshot ? (
         <>
-          <div className="repo-heading">
-            <div>
-              <h1>{snapshot.repository.path.split(/[\\/]/).filter(Boolean).at(-1)}</h1>
-              <p title={snapshot.repository.path}>{snapshot.repository.path}</p>
-            </div>
-            <span className="head" data-testid="head">
-              {head?.kind === 'branch'
-                ? head.ref.replace('refs/heads/', '')
-                : `Detached · ${head?.oid.slice(0, 8)}`}
-              {!head?.oid && ' · unborn'}
-            </span>
-          </div>
           <RepositorySync />
           <main>
             <ReferenceSidebar />
