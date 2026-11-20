@@ -2,6 +2,18 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Testing three ways to open 50,000 distinct refs
+
+The first fresh-profile control painted in 992.7 ms, with 681.5 ms in the native snapshot. Subsequent paired runs used the same 1,505,199-commit Linux fixture, 50,000 refs, Git 2.53.0 and populated OS caches on Linux x64. Each pair included a fresh profile for each build, and the order alternated. The measurements below preceded the cache cancellation fix. [Per-run timings](m8-opening-experiments.csv)
+
+| Experiment                                                                            | Pairs | Median first paint, control → prototype | Median snapshot, control → prototype |
+| ------------------------------------------------------------------------------------- | ----: | --------------------------------------: | -----------------------------------: |
+| Resolve direct commit types separately while reading ref names and tracking fields    |     4 |                        711.7 → 749.6 ms |                     397.7 → 431.5 ms |
+| Compare equally sized root lists by position after peeling annotations                |     5 |                        704.9 → 749.2 ms |                     401.2 → 410.0 ms |
+| Send the compact ref list to main as one JSON string and validate its decoded records |     4 |                        713.5 → 721.4 ms |                     404.9 → 395.4 ms |
+
+In a separate native probe, omitting object types reduced the Git ref query from 139–143 ms to 36–40 ms in three of four trials. In the desktop experiment, a second Git process had to recover those types and the utility had to associate them with the authoritative records. All four resulting openings took longer. The equal-length comparison also took longer end to end in each pair. The JSON transfer improved first paint in one of four pairs. The shipping app retains the original reader, root comparison and transfer. All 78 paired page appends took at most 235.2 ms.
+
 ## Resolving annotated objects before enumerating refs
 
 On the 50,000-ref nested-tag fixture, the first 128 native rows contain both direct targets. Git resolves their object types and peeled commits before enumerating every name and its current tracking fields. The full enumeration checks coverage by object ID. A second change lets history start from the commits in the same sample. For a repository with distinct targets and just one annotation, a bounded packed-ref scan identifies candidate names. Git resolves the names before its authoritative direct read. [Reader behavior and fallbacks](../decisions/0098-direct-first-reference-enumeration.md#sampling-annotated-objects-before-reading-all-ref-names)
