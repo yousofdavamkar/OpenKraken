@@ -40,7 +40,7 @@ import type {
 } from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { HistoryParser, StatusParser, HISTORY_FORMAT } from './parsers.js';
-import { hasRepeatedPackedTargets, ReferenceReader } from './reference-reader.js';
+import { samplePackedRefs, ReferenceReader } from './reference-reader.js';
 import { HistoryCache } from './history-cache.js';
 import { RepositoryPreferences } from './preferences.js';
 import { HistoryCursor } from './history.js';
@@ -345,14 +345,14 @@ export class RepositoryService {
     return this.queue(known.commonDir).run(
       false,
       async () => {
-        const [view, grouped] = await Promise.all([
+        const [view, packedRefs] = await Promise.all([
           requestedView ?? this.preferences.load(id),
-          hasRepeatedPackedTargets(known.commonDir),
+          samplePackedRefs(known.commonDir),
         ]);
         const repository = refresh ? await this.open(known.path, signal) : known;
         const stop = new AbortController();
         const readSignal = signal ? AbortSignal.any([signal, stop.signal]) : stop.signal;
-        const refRead = this.referenceReader.read(repository.path, readSignal, grouped);
+        const refRead = this.referenceReader.read(repository.path, readSignal, packedRefs);
         const worktreeRead = exists(join(repository.commonDir, 'worktrees')).then((present) =>
           present ? this.worktreeManager(id).manager.list(readSignal) : undefined,
         );
@@ -365,7 +365,7 @@ export class RepositoryService {
           : this.prefetchHistory(
               repository,
               view,
-              grouped,
+              packedRefs.repeatedTargets,
               AbortSignal.any([readSignal, probeStop.signal]),
             ).catch(() => undefined);
         const graphRead = Promise.all([refRead, worktreeRead, Promise.all(cacheReads)]).then(

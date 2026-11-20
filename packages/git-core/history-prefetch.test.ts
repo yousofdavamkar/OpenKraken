@@ -22,11 +22,10 @@ beforeAll(() => {
 });
 afterAll(() => rm(root, { recursive: true, force: true }));
 
-// Both authoritative formats read tracking state and the worktree's HEAD marker.
+// Every direct or complete snapshot format includes the worktree's HEAD marker,
+// even when Git has already confirmed the tracking fields are empty.
 function readsSnapshotRefs(args: string[]) {
-  return (
-    args[0] === 'for-each-ref' && args.some((arg) => arg.includes('%(upstream:track)%00%(HEAD)'))
-  );
+  return args[0] === 'for-each-ref' && args.some((arg) => arg.endsWith('%00%(HEAD)%00'));
 }
 
 function gate() {

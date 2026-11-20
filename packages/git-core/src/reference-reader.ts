@@ -12,36 +12,44 @@ const KEY_FORMAT = '%(refname)%00%(objectname)%00%(upstream)%00%(HEAD)%00';
 const MAX_BYTES = 32 * 1024 * 1024;
 const PARALLEL_THRESHOLD = 10000;
 
-function repeatedTargets(sample: Buffer, length: number) {
+interface PackedRefSample {
+  repeatedTargets: boolean;
+  manyBranches: boolean;
+}
+const ordinaryRefs: PackedRefSample = { repeatedTargets: false, manyBranches: false };
+function sampleTargets(sample: Buffer, length: number): PackedRefSample {
   const targets = new Set<string>();
-  let rows = 0;
+  let rows = 0,
+    branches = 0;
   for (const match of sample
     .toString('latin1', 0, length)
-    .matchAll(/^([0-9a-f]{40}|[0-9a-f]{64}) refs\//gm)) {
+    .matchAll(/^([0-9a-f]{40}|[0-9a-f]{64}) refs\/(heads\/)?/gm)) {
     targets.add(match[1]!);
     rows++;
+    if (match[2]) branches++;
   }
-  return rows >= 32 && targets.size * 4 <= rows;
+  return { repeatedTargets: rows >= 32 && targets.size * 4 <= rows, manyBranches: branches >= 32 };
 }
 
 // This bounded sample selects a Git query. Only Git supplies the actual refs and types.
-export async function hasRepeatedPackedTargets(commonDir: string) {
-  if (process.env.GIT_REPLACE_REF_BASE !== undefined) return false;
+export async function samplePackedRefs(commonDir: string) {
+  if (process.env.GIT_REPLACE_REF_BASE !== undefined) return ordinaryRefs;
   const flags = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW;
   const file = await open(join(commonDir, 'packed-refs'), flags).catch(() => undefined);
-  if (!file) return false;
+  if (!file) return ordinaryRefs;
   try {
     const info = await file.stat();
-    if (!info.isFile() || info.size < 512 * 1024) return false;
+    if (!info.isFile() || info.size < 512 * 1024) return ordinaryRefs;
     // Contiguous aliases usually fit in one small read. A larger prefix
     // also detects targets that recur hundreds of names apart in Git order.
     const sample = Buffer.allocUnsafe(256 * 1024);
     const { bytesRead } = await file.read(sample, 0, 8192, 0);
-    if (repeatedTargets(sample, bytesRead)) return true;
+    const prefix = sampleTargets(sample, bytesRead);
+    if (prefix.repeatedTargets) return prefix;
     const more = await file.read(sample, bytesRead, sample.length - bytesRead, bytesRead);
-    return repeatedTargets(sample, bytesRead + more.bytesRead);
+    return sampleTargets(sample, bytesRead + more.bytesRead);
   } catch {
-    return false;
+    return ordinaryRefs;
   } finally {
     await file.close();
   }
@@ -84,19 +92,41 @@ export class ReferenceReader {
       throw new Error('Invalid output limit');
   }
 
-  async read(cwd: string, signal?: AbortSignal, grouped = false): Promise<Ref[]> {
+  async read(cwd: string, signal?: AbortSignal, sample = ordinaryRefs): Promise<Ref[]> {
     const deadline = new AbortController();
     const timer = setTimeout(() => deadline.abort(), 30000);
     timer.unref();
     const active = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
     try {
-      return await this.readStable(cwd, active, grouped);
+      const omitUpstreams = sample.manyBranches && (await this.noConfiguredUpstreams(cwd, active));
+      const refs = await this.readStable(cwd, active, sample.repeatedTargets, omitUpstreams);
+      if (omitUpstreams && !(await this.noConfiguredUpstreams(cwd, active)))
+        return await this.readStable(cwd, active, sample.repeatedTargets);
+      return refs;
     } catch (error) {
       if (deadline.signal.aborted && !signal?.aborted)
         throw new GitError('TIMEOUT', 'Reference enumeration timed out');
       throw error;
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  private async noConfiguredUpstreams(cwd: string, signal: AbortSignal) {
+    try {
+      const result = await this.run(
+        ['config', '--includes', '--name-only', '--get-regexp', '^branch\\..*\\.merge$'],
+        {
+          cwd,
+          signal,
+          allowedExitCodes: [0, 1],
+          maxBytes: this.maxBytes,
+        },
+      );
+      return result.exitCode === 1 && !result.stdout.length && !result.stderr;
+    } catch (error) {
+      if (signal.aborted) throw error;
+      return false;
     }
   }
 
@@ -151,7 +181,12 @@ export class ReferenceReader {
     return true;
   }
 
-  private async readStable(cwd: string, signal: AbortSignal, grouped = false): Promise<Ref[]> {
+  private async readStable(
+    cwd: string,
+    signal: AbortSignal,
+    grouped = false,
+    omitUpstreams = false,
+  ): Promise<Ref[]> {
     const parser = new RefsParser('direct');
     // Independently valid chunks start and end on UTF-8 code point boundaries.
     // A split character needs streaming validation from that chunk onward.
@@ -172,7 +207,8 @@ export class ReferenceReader {
       if (bytes > this.maxBytes)
         throw new GitError('OUTPUT_LIMIT', 'Git output exceeded the safety limit');
     };
-    const format = grouped ? parser.gitFormat.replace('%(objecttype)', '') : parser.gitFormat;
+    let format = grouped ? parser.gitFormat.replace('%(objecttype)', '') : parser.gitFormat;
+    if (omitUpstreams) format = format.replace('%(upstream)', '').replace('%(upstream:track)', '');
     await this.run(['for-each-ref', `--format=${format}`], {
       cwd,
       signal,
