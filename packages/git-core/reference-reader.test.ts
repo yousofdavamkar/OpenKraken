@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
@@ -673,6 +673,46 @@ describe('repeated targets in a packed SHA-256 repository', () => {
     }
   });
 
+  test.each(['direct', 'grouped', 'aliases'] as const)(
+    'a shallow boundary change during %s tag reads refreshes upstream counts',
+    async (kind) => {
+      const shallow = join(commonDir, 'shallow');
+      const head = fixtureGit(cwd, ['rev-parse', 'HEAD']);
+      const aliases =
+        kind === 'aliases'
+          ? Array.from({ length: 160 }, (_, i) => 'refs/tags/shallow-alias-' + i)
+          : [];
+      if (aliases.length)
+        fixtureGit(
+          cwd,
+          ['update-ref', '--stdin'],
+          aliases.map((name) => 'create ' + name + ' ' + tagged + '\n').join(''),
+        );
+      let changed = false;
+      const reader = new ReferenceReader(async (args, options) => {
+        if (!changed && (args.includes('--') || args.some((arg) => arg.includes('%(rest)')))) {
+          changed = true;
+          writeFileSync(shallow, head + '\n');
+        }
+        return runGit(git.path, args, options);
+      });
+      try {
+        const refs = await reader.read(cwd, undefined, kind === 'direct' ? undefined : sample);
+        expect(changed).toBe(true);
+        const expected = (await nativeRefs(cwd)).find((ref) => ref.isHead);
+        expect(expected?.upstream).toMatchObject({ ahead: 1, behind: 1 });
+        expect(refs.find((ref) => ref.isHead)).toEqual(expected);
+      } finally {
+        rmSync(shallow, { force: true });
+        if (aliases.length)
+          fixtureGit(
+            cwd,
+            ['update-ref', '--stdin'],
+            aliases.map((name) => 'delete ' + name + '\n').join(''),
+          );
+      }
+    },
+  );
   test('reads per-worktree HEAD and upstream through the shared packed store', async () => {
     const linked = join(root, 'linked-grouped');
     fixtureGit(cwd, ['worktree', 'add', '-b', 'linked', linked, 'peer']);

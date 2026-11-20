@@ -1,5 +1,6 @@
 import type { Ref } from '@openkraken/ipc-contract';
 import { constants } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isUtf8 } from 'node:buffer';
@@ -7,8 +8,6 @@ import { RefsParser, REF_FORMAT } from './parsers.js';
 import { GitError, type RunOptions, type runGit } from './runner.js';
 
 type Run = (args: string[], options: RunOptions) => ReturnType<typeof runGit>;
-type Key = [name: string, target: string, upstream: string, head: string];
-const KEY_FORMAT = '%(refname)%00%(objectname)%00%(upstream)%00%(HEAD)%00';
 const MAX_BYTES = 32 * 1024 * 1024;
 const PARALLEL_THRESHOLD = 10000;
 
@@ -61,28 +60,42 @@ export async function samplePackedRefs(commonDir: string) {
   }
 }
 
-function keys(data: Buffer): Key[] {
-  const lines = data.toString('utf8').split('\n');
-  if (lines.pop() !== '') throw new GitError('INVALID_REFS', 'Truncated reference identity');
-  return lines.map((line) => {
-    const fields = line.split('\0');
-    if (
-      fields.length !== 5 ||
-      fields.pop() !== '' ||
-      !fields[0]!.startsWith('refs/') ||
-      !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(fields[1]!)
-    )
-      throw new GitError('INVALID_REFS', 'Malformed reference identity');
-    return fields as Key;
-  });
-}
-function matches(ref: Ref, [name, target, upstream, head]: Key) {
+function sameDirectFields(ref: Ref, original: Ref) {
   return (
-    ref.name === name &&
-    ref.target === target &&
-    ref.isHead === (head === '*') &&
-    (ref.upstream?.ref ?? '') === upstream
+    ref === original ||
+    (ref.name === original.name &&
+      ref.target === original.target &&
+      ref.objectType === original.objectType &&
+      ref.isHead === original.isHead &&
+      ref.upstream?.ref === original.upstream?.ref &&
+      ref.upstream?.ahead === original.upstream?.ahead &&
+      ref.upstream?.behind === original.upstream?.behind &&
+      ref.upstream?.gone === original.upstream?.gone)
   );
+}
+
+// Git emits these English tracking fields under the runner's C locale.
+function trackingField(upstream: Ref['upstream']) {
+  if (!upstream) return '';
+  if (upstream.gone) return '[gone]';
+  const counts = [];
+  if (upstream.ahead) counts.push('ahead ' + upstream.ahead);
+  if (upstream.behind) counts.push('behind ' + upstream.behind);
+  return counts.length ? '[' + counts.join(', ') + ']' : '';
+}
+
+function sameRefStream(output: Buffer, refs: Ref[]) {
+  if (!isUtf8(output)) return false;
+  const text = output.toString('utf8');
+  let offset = 0;
+  for (const ref of refs) {
+    const upstream = ref.upstream?.ref ?? '';
+    const head = ref.isHead ? '*' : ' ';
+    const fields = `${ref.name}\0${ref.target}\0\0${upstream}\0${trackingField(ref.upstream)}\0${head}\0\n`;
+    if (!text.startsWith(fields, offset)) return false;
+    offset += fields.length;
+  }
+  return offset === text.length;
 }
 
 /** Complete records, bounded parallel native reads, and a single-read compatibility path. */
@@ -178,15 +191,6 @@ export class ReferenceReader {
     for (const ref of tags) Object.assign(ref, resolved.get(ref.peeled ?? ref.target)!);
   }
 
-  private async identities(cwd: string, signal: AbortSignal) {
-    const { stdout } = await this.run(['for-each-ref', `--format=${KEY_FORMAT}`], {
-      cwd,
-      signal,
-      maxBytes: this.maxBytes,
-    });
-    return isUtf8(stdout) ? keys(stdout) : undefined;
-  }
-
   private async resolveRepeatedTypes(cwd: string, signal: AbortSignal, refs: Ref[]) {
     const targets = new Set<string>();
     for (const ref of refs) {
@@ -255,12 +259,15 @@ export class ReferenceReader {
     };
     let format = grouped ? parser.gitFormat.replace('%(objecttype)', '') : parser.gitFormat;
     if (omitUpstreams) format = format.replace('%(upstream)', '').replace('%(upstream:track)', '');
-    await this.run(['for-each-ref', `--format=${format}`], {
+    const args = ['for-each-ref', `--format=${format}`];
+    const original = grouped ? createHash('sha256') : undefined;
+    await this.run(args, {
       cwd,
       signal,
       maxBytes: this.maxBytes,
       onStdout: (chunk) => {
         account(chunk);
+        original?.update(chunk);
         checkUtf8(chunk);
         parser.push(chunk);
       },
@@ -278,6 +285,26 @@ export class ReferenceReader {
     if (!refs.some((ref) => ref.objectType === 'tag')) return refs;
     checkUtf8();
     if (!validUtf8) return this.all(cwd, signal);
+    const expected = refs;
+    const unchanged = async () => {
+      if (!original) {
+        const { stdout } = await this.run(
+          ['for-each-ref', '--format=' + format.replace('%(objecttype)', '')],
+          { cwd, signal, maxBytes: this.maxBytes },
+        );
+        return sameRefStream(stdout, expected);
+      }
+      const observed = createHash('sha256');
+      await this.run(args, {
+        cwd,
+        signal,
+        maxBytes: this.maxBytes,
+        onStdout: (chunk) => {
+          observed.update(chunk);
+        },
+      });
+      return observed.digest().equals(original.digest());
+    };
     const tags = refs.filter((ref) => ref.objectType === 'tag');
     if (
       grouped &&
@@ -289,23 +316,14 @@ export class ReferenceReader {
       for (const tag of tags) bytes += tag.peeled!.length + tag.peeledType.length;
       if (bytes > this.maxBytes)
         throw new GitError('OUTPUT_LIMIT', 'Git output exceeded the safety limit');
-      const observed = await this.identities(cwd, signal);
-      if (observed?.length === refs.length && refs.every((ref, i) => matches(ref, observed[i]!)))
-        return refs;
-      return this.all(cwd, signal);
+      return (await unchanged()) ? refs : this.all(cwd, signal);
     }
-    const expected: Key[] = refs.map((ref) => [
-      ref.name,
-      ref.target,
-      ref.upstream?.ref ?? '',
-      ref.isHead ? '*' : ' ',
-    ]);
     const cancelled = new AbortController();
     const groupSignal = AbortSignal.any([signal, cancelled.signal]);
     const readPages = async (format: string): Promise<Ref[]> => {
       const count = Math.ceil(expected.length / 3);
       const starts = [0, count, count * 2];
-      const markers = starts.map((start) => (start ? expected[start - 1]![0] : ''));
+      const markers = starts.map((start) => (start ? expected[start - 1]!.name : ''));
       if (markers.some((marker) => Buffer.byteLength(marker) > 4096)) return this.all(cwd, signal);
       const jobs = starts.map(async (start, index) => {
         const parser = new RefsParser();
@@ -389,18 +407,14 @@ export class ReferenceReader {
       }
       refs = refs.map((ref) => details.get(ref.name) ?? ref);
     }
-    const observed = await this.identities(cwd, signal);
-    // New/deleted/moved refs or changed HEAD/upstream state invalidate page
-    // boundaries. Retry once with the original complete native command.
+    // Check page boundaries and the direct fields of detail rows before peeling them.
     if (
-      !observed ||
-      observed.length !== expected.length ||
-      observed.some((key, index) => key.some((field, at) => field !== expected[index]?.[at])) ||
       refs.length !== expected.length ||
-      refs.some((ref, index) => !matches(ref, expected[index]!))
+      refs.some((ref, index) => !sameDirectFields(ref, expected[index]!))
     ) {
       return this.all(cwd, signal);
     }
-    return this.peelNestedTags(cwd, signal, refs);
+    await this.peelNestedTags(cwd, signal, refs);
+    return (await unchanged()) ? refs : this.all(cwd, signal);
   }
 }

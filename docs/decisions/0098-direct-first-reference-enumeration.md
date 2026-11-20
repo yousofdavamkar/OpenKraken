@@ -35,3 +35,9 @@ Only an empty result with exit status 1 and empty stderr selects the shorter dir
 ### Repeated annotated tag objects
 
 When the grouped read finds over 128 annotated refs and at most one distinct tag object per four annotations, peel their captured object IDs in one native batch. This avoids asking Git to resolve the same tag chain for every name. Check the returned ID, final type and object-ID width, charge the reconstructed fields against the existing byte limit and repeat the ref identity check before publication. A moved or deleted alias takes the full enumeration path. The distinct-target limit, deadline and cancellation signal still apply.
+
+## Rechecking tracking counts after tag reads
+
+A change to a shallow boundary can change ahead and behind counts while all ref names, object IDs, upstream names and HEAD markers stay the same. Before publishing a multi-command tag read, compare the original ordered direct fields with a final Git read, including tracking counts and the gone indicator. A mismatch selects a complete native enumeration. The recheck runs after Git has resolved any nested annotations.
+
+For grouped targets, both enumerations use the same native format with an empty object-type field. Compare streaming SHA-256 digests of those bytes. For ungrouped targets, keep the first read's type metadata and ask Git to omit types from the verification command. Compare its UTF-8 records against the original refs in order. The existing configuration check still verifies that any omitted upstream fields were appropriate. Paged or selective tag details must also match the direct fields of their original rows.
