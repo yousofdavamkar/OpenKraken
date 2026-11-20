@@ -113,7 +113,9 @@ test('accepts an older archive without the PowerShell script and requires the ex
     const modern = join(root, 'modern');
     await mkdir(modern);
     await writeFile(join(source, name), 'Write-Output 1');
-    await createPackageWithOptions(source, join(modern, 'app.asar'), { unpackDir: 'dist/shell-integration' });
+    await createPackageWithOptions(source, join(modern, 'app.asar'), {
+      unpackDir: 'dist/shell-integration',
+    });
     const script = join(modern, 'app.asar.unpacked', name);
     expect(await verifyAsarUnpackedFile(modern, name, { allowMissing: true })).toBe(true);
     await writeFile(script, 'Write-Output 2');
