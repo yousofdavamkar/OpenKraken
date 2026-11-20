@@ -1,6 +1,16 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of the latest two fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+
+## Linux desktop regression and large-repository checks
+
+The Linux x64 Electron suite passed 261 tests, including Gitea HTTPS/SSH, Git LFS, native shells, crash reporting, signed update checks and six Canvas image comparisons. The two opt-in scale tests ran separately. The standard 2,000-commit fixture painted in 257.1 ms. After the keyboard change, all 26 focused graph, reference and watcher tests passed. On 32,000 loaded rows, median synchronous End/Home dispatch took 0.10 ms in each of three runs. [Keyboard measurements](m8-reference-performance.md#keyboard-navigation-with-32000-loaded-commits)
+
+On the 100,000-file checkout, streaming Git's index listing reduced the median clean status read from 249.3 to 228.8 ms and the median dirty read from 260.7 to 214.6 ms. Twenty-nine of 30 new reads met the 300 ms gate. The slowest took 314.1 ms. [Status measurements](m8-reference-performance.md#working-state-fingerprint-on-100000-files)
+
+At `bb411a7`, two fresh-profile runs with 50,000 refs on full Linux history painted in 1,208.3 and 777.0 ms. The two-million-commit checkout painted in 1,141.6 and 401.0 ms. Three of the four exceeded 500 ms. All twelve 5,000-commit appends met 300 ms (122.5–235.5 ms), and scroll frame intervals were 16.7–16.8 ms p95. The OS caches stayed populated.
+
+The final build passed typechecking, lint, 1,019 unit/native tests (14 skipped), 24 focused working-tree Electron cases, Linux x64 package fuse verification and packaged smoke. All 58 focused native cases also passed with Git 2.38.0. The verified package uses React 19.3.1 and TypeScript 7.0.2 for the build.
 
 ## Startup failures before the first window finishes loading
 
@@ -10,7 +20,11 @@ With a local HTTPS receiver, Linux Electron sent one fixed-category summary for 
 
 At `0b3c693`, stable FUSE and beta extract-and-run fixtures each installed a signed replacement whose initial HTML file was absent. Both recorded the startup error, relaunched the predecessor, verified its digest and signed release sequence, and displayed and dismissed the rollback notice. The fixtures used temporary keys and loopback HTTPS. The full Linux unit/native suite passed 1,017 tests with 14 skipped. Typecheck, build, lint, packaged fuse verification and packaged smoke passed. [AppImage recovery](../decisions/0086-appimage-startup-exit-recovery.md#replacement-with-a-missing-desktop-document)
 
-A separate damaged-bundle probe kept the entry HTML and removed its referenced JavaScript file from a disposable build. Chromium completed the document load, the preload bridge was present, and the React root was still empty three seconds later. The process remained alive. This case is open.
+The damaged-bundle probe originally left an empty window running. At `4b717c2`, a missing entry module, an exception during its evaluation and a missing React mount point each produced exit status 1 after dismissal. All three profiles reopened. For each failure the local HTTPS receiver got one fixed-category report after opt-in and zero on fresh or revoked profiles. With a delayed theme read the healthy app waited, displayed the welcome screen and acknowledged startup after the theme read finished. Stable FUSE and beta extract-and-run rollback fixtures each restored the verified predecessor after a replacement lost its JavaScript entry asset. [Packaged recovery](../decisions/0086-appimage-startup-exit-recovery.md#replacement-with-a-missing-renderer-module)
+
+## Merge drafts while the dialog is open
+
+GitLab preserves an edited squash choice across a refresh, applies mandatory project policy and restores the choice if it becomes optional again. GitHub and GitHub Enterprise now ask before closing a draft whose only change was the merge method. Both edited workflows passed Linux Electron tests with simulated providers. Recovery of merge messages after process death remains open. [GitHub](../decisions/0035-provider-pull-merge.md) · [GitLab](../decisions/0051-gitlab-direct-merge.md)
 
 ## Repository opening, watcher startup and graph paging
 
