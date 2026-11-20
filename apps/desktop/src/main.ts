@@ -324,6 +324,10 @@ function validateSender(event: IpcMainInvokeEvent) {
   )
     throw new Error('Untrusted IPC sender');
 }
+function rendererFailure(reason: string) {
+  diagnostics?.failure('renderer', reason);
+  void crashReports?.capture('renderer', reason);
+}
 function createWindow() {
   window = new BrowserWindow({
     width: 1280,
@@ -369,11 +373,11 @@ function createWindow() {
     providers?.gitlabCancel();
   };
   window.webContents.on('render-process-gone', cancelProviderSignIn);
+  window.webContents.on('preload-error', () => rendererFailure('unhandled-exception'));
   window.webContents.on('render-process-gone', (_event, details) => {
     nativeDrafts?.detach(false);
     void workingFileDrafts?.close(undefined, false);
-    diagnostics?.failure('renderer', details.reason);
-    void crashReports?.capture('renderer', details.reason);
+    rendererFailure(details.reason);
   });
   window.webContents.on('did-start-navigation', (details) => {
     if (details.isMainFrame) cancelProviderSignIn();
@@ -769,8 +773,7 @@ else {
           return { kind: 'commandContext' };
         }
         if (request.method === 'rendererFailure') {
-          diagnostics?.failure('renderer', request.reason);
-          void crashReports?.capture('renderer', request.reason);
+          rendererFailure(request.reason);
           return { kind: 'rendererFailure' };
         }
         if (request.method === 'crashReporting' || request.method === 'crashReportingSave') {

@@ -57,6 +57,17 @@ for (const failure of [
     trigger:
       "require('electron').app.emit('child-process-gone', {}, { type: 'GPU', name: 'PRIVATE device', reason: 'crashed' });",
   },
+  {
+    name: 'a sandboxed preload exception',
+    component: 'renderer',
+    reason: 'unhandled-exception',
+    trigger: `require('electron').app.whenReady().then(() => {
+      require('electron').session.defaultSession.registerPreloadScript({
+        type: 'frame',
+        filePath: require('node:path').join(__dirname, 'PRIVATE-preload.cjs'),
+      });
+    });`,
+  },
 ]) {
   reportingTest(
     `${failure.name} during startup follows consent from the previous session`,
@@ -64,7 +75,8 @@ for (const failure of [
       const { root, received, launch } = receiver;
       const descriptor = join(root, 'app/package.json');
       const metadata = JSON.parse(await readFile(descriptor, 'utf8'));
-      // Deliver the event on the next tick, before the consent read can complete.
+      if (failure.component === 'renderer')
+        await writeFile(join(root, 'app/PRIVATE-preload.cjs'), "throw Error('PRIVATE exception');");
       await writeFile(
         join(root, 'app/startup-failure.cjs'),
         [
