@@ -1,6 +1,16 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of the latest two fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout took 1,122 ms on its latest fresh-profile run. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+
+## Commit search and request creation on Linux x64
+
+Commit search previously transferred focus to the graph when Enter arrived during Japanese text composition. The packaged build at `835cc35` used Chromium's composition input to enter `検索`. Focus remained in search when the input method received Enter. After the text was committed, pressing Enter selected the matching `検索対象` commit. The Electron regression also checks Escape during composition and a key held across the focus change. [Commit search keyboard behavior](../decisions/0004-m1-history-and-interaction.md#keyboard-input-during-commit-search)
+
+The first broad desktop run passed 260 cases and failed one GitLab creation case. The form showed an empty target branch. In an isolated reproduction, GitLab returned `main`, then an edit to the source owner arrived before React displayed the default. That edit saved the older empty target. The composer now applies user edits and provider defaults to the most recent fields. Three forced-overlap runs recovered the expected draft after process death. A separate test checked that a deliberately cleared target branch stayed empty on disk after the provider returned its default. [Request creation draft behavior](../decisions/0129-pull-creation-drafts.md)
+
+With Git 2.53.0, the final build passed 1,021 unit/native tests (14 skipped) and 263 desktop tests. The two opt-in benchmarks ran separately. With Git 2.38.0, it passed 1,009 unit/native tests (26 skipped) and all 55 desktop cases in the minimum-version acceptance suite. Typecheck, lint, package fuse verification and packaged smoke passed.
+
+The standard 2,000-commit fixture painted in 224.7 ms with Git 2.53 and 299.1 ms with Git 2.38. Fresh profiles on Git 2.53 painted in 850.4 ms with 50,000 distinct refs, 519.4 ms with 50,000 shared-target refs and 1,122.0 ms on the two-million-commit, 100,000-file checkout. All nine 5,000-commit appends met 300 ms (117.6–232.1 ms), and graph frame intervals were 16.7–16.8 ms p95. All ten watcher-warm clean and dirty status reads met 300 ms (179.4–217.4 ms). The external edit became visible in 857.7 ms. These Linux x64 runs used fresh profiles and retained OS caches. [Individual opening and paging samples](m8-opening-experiments.csv)
 
 ## Linux x64 reference enumeration
 
