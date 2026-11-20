@@ -25,10 +25,10 @@ const projectXml = `<?xml version="1.0"?><Wix xmlns="http://wixtoolset.org/schem
     <Feature><ComponentGroupRef Id="ProductComponents"/></Feature>
     <ComponentGroup Id="ProductComponents" Directory="APPLICATIONFOLDER"><Component><File Id="mainExecutable" Name="openkraken.exe"/></Component></ComponentGroup>
   </Product></Wix>`;
-async function projectFixture(xml = projectXml) {
+async function projectFixture(xml = projectXml, filename = 'project.wxs') {
   const directory = await mkdtemp(join(tmpdir(), 'openkraken-msi-project-'));
   directories.push(directory);
-  const project = join(directory, 'project.wxs');
+  const project = join(directory, filename);
   await writeFile(project, xml);
   return project;
 }
@@ -393,3 +393,47 @@ test('MSI verification binds signed receipts to an independent publisher pin and
     expect(() => verifyMsiReceipt(receipt, pin, false)).toThrow('independently supplied');
   expect(() => verifyMsiReceipt(signed, publisher, true)).toThrow('timestamped MSI receipt');
 });
+
+test.skipIf(!powershell)(
+  'Authenticode policy requires a valid embedded signature, pinned certificate and requested timestamp',
+  async () => {
+    // Supply signature records at the OS boundary. Hosted Windows exercises the certificate store and signed files.
+    const path = await projectFixture(
+      `
+    param([string]$Verifier)
+    $ErrorActionPreference = 'Stop'
+    $certificate = [pscustomobject]@{RawData = [byte[]](1, 2, 3)}
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try { $pin = [BitConverter]::ToString($hash.ComputeHash($certificate.RawData)).Replace('-', '') }
+    finally { $hash.Dispose() }
+    function Get-AuthenticodeSignature([string]$LiteralPath) { return $record }
+    $record = [pscustomobject]@{ Status='Valid'; SignatureType='Authenticode'; SignerCertificate=$certificate; TimeStamperCertificate=$null }
+    & $Verifier -Path fixture.exe -Fingerprint $pin
+    function Check-Rejection([string]$Fingerprint, [string]$Message, [switch]$Timestamp) {
+        try { & $Verifier -Path fixture.exe -Fingerprint $Fingerprint -RequireTimestamp:$Timestamp }
+        catch { if ($_.Exception.Message.Contains($Message)) { return }; throw }
+        throw 'Expected signature rejection'
+    }
+    Check-Rejection $pin 'Missing Authenticode timestamp' -Timestamp
+    $record.TimeStamperCertificate = $certificate
+    & $Verifier -Path fixture.exe -Fingerprint $pin -RequireTimestamp
+    Check-Rejection ('00' * 32) 'selected publisher'
+    $record.SignatureType = 'Catalog'
+    Check-Rejection $pin 'selected publisher'
+    $record.SignatureType = 'Authenticode'
+    $record.Status = 'HashMismatch'
+    Check-Rejection $pin 'selected publisher'
+  `,
+      'check-signature.ps1',
+    );
+    await run(powershell, [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      path,
+      resolve('scripts/windows-authenticode.ps1'),
+    ]);
+  },
+);
