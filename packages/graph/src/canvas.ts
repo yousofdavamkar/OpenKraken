@@ -52,7 +52,7 @@ export function paintGraph(
     dpr: number;
     matches?: ReadonlySet<string>;
     selected?: ReadonlySet<string>;
-    synthetic?: ReadonlySet<string>;
+    synthetic?: ReadonlySet<string> | ((rowIndex: number) => boolean);
     passages?: readonly (readonly GraphPassage[])[];
     colors?: readonly string[];
     background?: string;
@@ -131,7 +131,11 @@ export function paintGraph(
       0,
       Math.PI * 2,
     );
-    ctx.fillStyle = options.synthetic?.has(row.oid)
+    const synthetic =
+      typeof options.synthetic === 'function'
+        ? options.synthetic(i)
+        : options.synthetic?.has(row.oid);
+    ctx.fillStyle = synthetic
       ? (options.background ?? '#10151e')
       : colors[row.colorIndex % colors.length]!;
     ctx.strokeStyle = colors[row.colorIndex % colors.length]!;

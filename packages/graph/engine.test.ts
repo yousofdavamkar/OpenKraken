@@ -95,7 +95,26 @@ test('canvas work and pixel buffer are bounded by viewport, including DPR and pa
       nodes++;
     },
   } as unknown as CanvasRenderingContext2D;
-  paintGraph(context, rows, { width: 120, height: 560, scrollTop: 2807, dpr: 2 });
+  const inspected: number[] = [];
+  const hollow = 108;
+  const fills: (string | CanvasGradient | CanvasPattern)[] = [];
+  context.fill = () => {
+    fills.push(context.fillStyle);
+  };
+  const viewport = { width: 120, height: 560, scrollTop: 2807, dpr: 2 };
+  paintGraph(context, rows, {
+    ...viewport,
+    synthetic: (index) => {
+      inspected.push(index);
+      return index === hollow;
+    },
+  });
+  expect(inspected).toEqual(Array.from({ length: 21 }, (_, i) => 100 + i));
+  expect(fills[8]).toBe('#10151e');
+  const expected = fills.splice(0);
+  nodes = 0;
+  paintGraph(context, rows, { ...viewport, synthetic: new Set([rows[hollow]!.oid]) });
+  expect(fills).toEqual(expected);
   expect(nodes).toBe(21);
   expect(context.canvas).toMatchObject({ width: 240, height: 1120 });
 });

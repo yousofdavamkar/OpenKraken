@@ -80,10 +80,6 @@ export function History() {
   useVisibleAvatars(virtual.getVirtualItems().map((item) => rows[item.index]!.author.email));
   const selected = useMemo(() => new Set(selection.selected), [selection.selected]);
   const matching = useMemo(() => (matches ? new Set(matches) : undefined), [matches]);
-  const synthetic = useMemo(
-    () => new Set(rows.filter((r) => r.kind !== 'commit').map((r) => r.oid)),
-    [rows],
-  );
   const commitRefs = useMemo(
     () => (snapshot ? refsByTarget(snapshot.refs, snapshot.view) : undefined),
     [snapshot?.refs, snapshot?.view],
@@ -108,7 +104,7 @@ export function History() {
       dpr: devicePixelRatio,
       matches: matching,
       selected,
-      synthetic,
+      synthetic: (index) => rows[index]!.kind !== 'commit',
       passages,
       colors: graphColors,
       background: theme.colors.background,
@@ -120,7 +116,7 @@ export function History() {
     scroll,
     matching,
     selected,
-    synthetic,
+    rows,
     passages,
     graphColors,
     theme.colors.background,
