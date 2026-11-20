@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
+import type { CSSProperties, KeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { passageBuckets } from '@openkraken/graph';
 import { paintGraph, ROW_HEIGHT, LANE_WIDTH, GRAPH_PADDING } from '@openkraken/graph/canvas';
@@ -321,6 +321,9 @@ export function History() {
           >
             {virtual.getVirtualItems().map((item) => {
               const commit = rows[item.index]!;
+              const rowRefs = commitRefs?.get(commit.oid) ?? noRefs;
+              const lane = layout[item.index];
+              const connected = !!lane && (rowRefs.length > 0 || commit.isStash);
               return (
                 <div
                   id={`commit-row-${item.index}`}
@@ -331,10 +334,15 @@ export function History() {
                   aria-rowindex={item.index + 1}
                   data-oid={commit.oid}
                   data-column={layout[item.index]?.column}
-                  style={{
-                    transform: `translateY(${item.start}px)`,
-                    gridTemplateColumns: columns,
-                  }}
+                  style={
+                    {
+                      transform: `translateY(${item.start}px)`,
+                      gridTemplateColumns: columns,
+                      '--lane': lane
+                        ? graphColors[lane.colorIndex % graphColors.length]
+                        : undefined,
+                    } as CSSProperties
+                  }
                   onClick={(event) => {
                     state.select(
                       commit.oid,
@@ -350,7 +358,7 @@ export function History() {
                 >
                   <span role="gridcell" className="commit-refs">
                     <CommitBadges
-                      refs={commitRefs?.get(commit.oid) ?? noRefs}
+                      refs={rowRefs}
                       oid={commit.oid}
                       open={(opener) => {
                         if (snapshot)
@@ -364,6 +372,16 @@ export function History() {
                     {commit.isStash && <b className="badge">stash</b>}
                   </span>
                   <span role="gridcell" className="graph-description">
+                    {connected && (
+                      <span
+                        className="ref-connector"
+                        aria-hidden="true"
+                        style={{
+                          left: REFS_WIDTH - 6,
+                          width: 6 + GRAPH_PADDING + lane.column * LANE_WIDTH,
+                        }}
+                      />
+                    )}
                     <span className="sr-only">
                       {commit.kind !== 'commit'
                         ? commit.kind

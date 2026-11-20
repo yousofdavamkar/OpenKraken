@@ -28,7 +28,7 @@ test('system theme changes recolor an open editor without losing its draft or un
     const editor = page.getByRole('dialog', { name: 'Working file editor' });
     const text = editor.getByRole('textbox', { name: 'Working file text' });
     await text.fill('after = 2\n');
-    await expect(editor.locator('.cm-editor')).toHaveCSS('background-color', 'rgb(18, 27, 39)');
+    await expect(editor.locator('.cm-editor')).toHaveCSS('background-color', 'rgb(23, 25, 30)');
     await page.emulateMedia({ colorScheme: 'light' });
     await expect(editor.locator('.cm-editor')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
     await expect(text).toContainText('after = 2');

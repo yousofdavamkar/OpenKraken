@@ -18,6 +18,7 @@ export function RefControls({ reference }: { reference: Ref }) {
       <button
         disabled={!!busy}
         aria-label={`Hide ${reference.name}`}
+        title={hidden ? 'Show' : 'Hide'}
         aria-pressed={hidden}
         onClick={() =>
           change({
@@ -35,6 +36,7 @@ export function RefControls({ reference }: { reference: Ref }) {
       <button
         disabled={!!busy}
         aria-label={`Solo ${reference.name}`}
+        title="Solo"
         aria-pressed={solo}
         onClick={() =>
           change(
@@ -54,6 +56,7 @@ export function RefControls({ reference }: { reference: Ref }) {
         <button
           disabled={!!busy}
           aria-label={`Pin ${reference.name}`}
+          title="Pin"
           aria-pressed={pinned}
           onClick={() =>
             change({

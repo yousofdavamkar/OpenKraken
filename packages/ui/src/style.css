@@ -2353,36 +2353,6 @@ aside.refs section {
 .refs .ref-label small {
   font-size: 10px;
 }
-.refs .ref-controls,
-.refs .ref > :not(.ref-label) {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  opacity: 0.45;
-  transition: opacity 80ms;
-}
-.refs .ref:hover > :not(.ref-label),
-.refs .ref:focus-within > :not(.ref-label),
-.refs .ref.current > :not(.ref-label) {
-  opacity: 1;
-}
-.refs .ref button {
-  padding: 1px 6px;
-  font-size: 10px;
-  line-height: 15px;
-  border: none;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--muted);
-}
-.refs .ref button:hover:not(:disabled) {
-  background: var(--controlHover);
-  color: var(--text);
-}
-.refs .ref button[aria-pressed='true'] {
-  background: var(--selectedBackground);
-  color: var(--text);
-}
 .reference-filter {
   padding: 8px 10px;
 }
@@ -2791,4 +2761,193 @@ aside.refs h3.ref-section-heading::before {
 }
 .commit-refs .commit-ref-overflow {
   flex: 0 0 auto;
+}
+
+/* Reference row actions: icon buttons revealed on hover or keyboard focus. */
+.refs .ref-label {
+  padding-right: 2px;
+}
+.refs .ref-actions {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0 2px;
+  border-radius: 4px;
+  background: var(--rowHover);
+  opacity: 0;
+  transition: opacity 80ms;
+}
+.refs .ref.current .ref-actions {
+  background: var(--currentRefBackground);
+}
+.refs .ref:hover .ref-actions,
+.refs .ref:focus-within .ref-actions {
+  opacity: 1;
+}
+.refs .ref-actions .ref-controls {
+  display: flex;
+  gap: 1px;
+  margin: 0;
+}
+.refs .ref-actions button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0;
+}
+.refs .ref-actions button::before {
+  content: '';
+  width: 13px;
+  height: 13px;
+  background: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
+.refs .ref-actions button:hover:not(:disabled) {
+  background: var(--controlHover);
+  color: var(--text);
+}
+.refs .ref-actions button[aria-pressed='true'] {
+  color: var(--accent);
+}
+.refs .ref-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+/* A failed action shows its message inline under the row. */
+.refs .ref-actions:has(> .error) {
+  position: static;
+  transform: none;
+  flex-wrap: wrap;
+  flex: 1 0 100%;
+  opacity: 1;
+  background: none;
+}
+.refs .ref-actions > .error {
+  flex: 1 0 100%;
+  margin: 2px 0 0;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+.ref-actions [aria-label^='Hide '] {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
+}
+.ref-actions [aria-label^='Hide '][aria-pressed='true'] {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3 3.7M6.6 6.6A17 17 0 0 0 2 12s4 7 10 7a9.8 9.8 0 0 0 5.4-1.6'/%3E%3C/svg%3E");
+}
+.ref-actions [aria-label^='Solo '] {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8'/%3E%3Ccircle cx='12' cy='12' r='3' fill='black'/%3E%3C/svg%3E");
+}
+.ref-actions [aria-label^='Pin '] {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 3h6l-1 6 4 4H6l4-4zM12 13v8'/%3E%3C/svg%3E");
+}
+.ref-actions [aria-label^='Switch to '] {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5 9-10'/%3E%3C/svg%3E");
+}
+.ref-actions [aria-label^='Rename branch '] {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20h4L19 9l-4-4L4 16zM14 6l4 4'/%3E%3C/svg%3E");
+}
+.ref-actions [aria-label^='Set upstream '] {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19V9M8 13l4-4 4 4M5 5h14'/%3E%3C/svg%3E");
+}
+.ref-actions [aria-label^='Delete branch '],
+.ref-actions [aria-label^='Delete tag '] {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13'/%3E%3C/svg%3E");
+}
+
+/* Line from a commit's reference badges to its graph node, in the lane color. */
+.ref-connector {
+  position: absolute;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--lane, var(--border));
+  opacity: 0.85;
+  pointer-events: none;
+}
+.commit-row.dimmed .ref-connector {
+  opacity: 0.4;
+}
+.commit-refs b.badge:first-of-type {
+  border-color: var(--lane, transparent);
+}
+.refs .ref:hover .ref-label small,
+.refs .ref:focus-within .ref-label small {
+  visibility: hidden;
+}
+
+/* Repository tabs. */
+.repo-tabs {
+  gap: 2px;
+  padding-left: 4px;
+}
+.repo-tab {
+  padding: 0 4px 0 0;
+  gap: 0;
+}
+.repo-tab:not(.active):hover {
+  background: var(--control);
+  color: var(--text);
+}
+.repo-tab:only-child,
+.repo-tab:has(+ .repo-tab-new):first-child:not(:has(.repo-tab-close)) {
+  padding-right: 14px;
+}
+.repo-tab-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  min-width: 0;
+  padding: 0 8px 0 14px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repo-tab-select:hover,
+.repo-tab-select:disabled {
+  background: transparent;
+  opacity: 1;
+  cursor: pointer;
+}
+.repo-tab:not(.active) .repo-tab-icon {
+  background: var(--muted);
+}
+.repo-tab-close,
+.repo-tab-new {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+}
+.repo-tab-close:hover,
+.repo-tab-new:hover:not(:disabled) {
+  background: var(--controlHover);
+  color: var(--text);
+}
+.repo-tab-new {
+  align-self: center;
+  margin-left: 4px;
+  font-size: 17px;
 }

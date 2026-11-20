@@ -1946,6 +1946,14 @@ export const requestSchema = z.discriminatedUnion('method', [
     .strict(),
   ...historyRequests,
   z.object({ id: requestId, method: z.literal('open') }).strict(),
+  // Reopens a repository this session already opened; the main process owns its path.
+  z
+    .object({
+      id: requestId,
+      method: z.literal('reopenRepository'),
+      repoId: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict(),
   z
     .object({ id: requestId, method: z.literal('init'), branch: z.string().min(1).max(200) })
     .strict(),
@@ -2458,6 +2466,7 @@ const snapshotMethods = [
   'openSubmodule',
   'openWorktree',
   'repositoryLinkOpen',
+  'reopenRepository',
   'refresh',
 ] as const;
 export function validateResponseFormat(format: unknown, method: string): void {

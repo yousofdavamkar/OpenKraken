@@ -37,6 +37,7 @@ import { Pull } from './pull.js';
 import { ManageRemotes } from './remotes.js';
 import { ReferenceDropActions } from './reference-drop.js';
 import { ReferenceSidebar } from './reference-sidebar.js';
+import { RepositoryTabs } from './repository-tabs.js';
 import { useRepository } from './store.js';
 import './style.css';
 function App() {
@@ -108,16 +109,7 @@ function App() {
           </span>
           <span className="brand-name">OpenKraken</span>
         </div>
-        <nav className="repo-tabs" aria-label="Repository tabs">
-          {snapshot ? (
-            <span className="repo-tab active" title={snapshot.repository.path}>
-              <span className="repo-tab-icon" aria-hidden="true" />
-              {repositoryName}
-            </span>
-          ) : (
-            <span className="repo-tab active">New Tab</span>
-          )}
-        </nav>
+        <RepositoryTabs busy={!!busy} openNew={open} />
         <div className="titlebar-tools">
           <RepositoryLinkControl />
           <CommandControls />

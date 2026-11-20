@@ -124,6 +124,7 @@ function nativeEditorDrafts() {
 }
 let workingFileDrafts: WorkingFileDrafts | undefined;
 const draftRepositories = new Map<string, Repository>();
+const openedRepositories = new Map<string, string>();
 let activeAppearance: AppearancePreferences = {
   revision: 0,
   mode: 'dark',
@@ -1442,6 +1443,11 @@ else {
           const path = repositoryLinks.accept(request.linkId);
           return await callService({ id: request.id, method: 'open', path });
         }
+        if (request.method === 'reopenRepository') {
+          const path = openedRepositories.get(request.repoId);
+          if (!path) throw new Error('This repository tab is no longer available.');
+          return await callService({ id: request.id, method: 'open', path });
+        }
         let path: string | undefined;
         if (
           request.method === 'open' ||
@@ -1660,6 +1666,11 @@ else {
           draftRepositories.set(result.snapshot.repository.id, result.snapshot.repository);
           if (draftRepositories.size > 128)
             draftRepositories.delete(draftRepositories.keys().next().value!);
+          // Repository tabs may reopen only folders this session already opened.
+          openedRepositories.delete(result.snapshot.repository.id);
+          openedRepositories.set(result.snapshot.repository.id, result.snapshot.repository.path);
+          if (openedRepositories.size > 64)
+            openedRepositories.delete(openedRepositories.keys().next().value!);
         }
         // Serialize after validation and before both renderer IPC and isolated-world copying.
         if (format === 'history-page' && result.kind === 'page') return encodeHistoryPage(result);

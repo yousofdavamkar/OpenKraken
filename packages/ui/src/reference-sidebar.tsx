@@ -13,7 +13,14 @@ const groups = [
   ['stash', 'Stashes'],
   ['other', 'Other refs'],
 ] as const;
-type ReferenceBlock = { refs: Ref[]; title?: string; firstPosition: number };
+type ReferenceBlock = {
+  kind: Ref['kind'];
+  refs: Ref[];
+  title?: string;
+  total: number;
+  firstPosition: number;
+};
+type Collapse = { collapsed: ReadonlySet<Ref['kind']>; toggle: (kind: Ref['kind']) => void };
 const refsPerBlock = 4;
 const headingHeightEstimate = 48;
 
@@ -46,17 +53,52 @@ function ReferenceRow({
           </small>
         )}
       </div>
-      <RefControls reference={reference} />
-      <ReferenceActions reference={reference} />
+      <div className="ref-actions">
+        <RefControls reference={reference} />
+        <ReferenceActions reference={reference} />
+      </div>
     </div>
   );
 }
 
-function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boolean }) {
+function SectionHeading({
+  kind,
+  title,
+  count,
+  collapse,
+}: {
+  kind: Ref['kind'];
+  title: string;
+  count: number;
+  collapse: Collapse;
+}) {
+  return (
+    <h3 className="ref-section-heading">
+      <button
+        type="button"
+        aria-expanded={!collapse.collapsed.has(kind)}
+        onClick={() => collapse.toggle(kind)}
+      >
+        {title}
+        <span className="ref-section-count">{count.toLocaleString()}</span>
+      </button>
+    </h3>
+  );
+}
+
+function VirtualReferences({
+  snapshot,
+  busy,
+  collapse,
+}: {
+  snapshot: Snapshot;
+  busy: boolean;
+  collapse: Collapse;
+}) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState<string>();
   const scroll = useRef<HTMLDivElement>(null);
-  const { blocks, count } = useMemo(() => {
+  const { blocks, count, listed } = useMemo(() => {
     const search = query.trim().toLocaleLowerCase();
     const buckets = new Map<Ref['kind'], Ref[]>(groups.map(([kind]) => [kind, []]));
     for (const ref of snapshot.refs) {
@@ -64,23 +106,40 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
         buckets.get(ref.kind)!.push(ref);
     }
     const blocks: ReferenceBlock[] = [];
-    let count = 0;
+    let count = 0,
+      listed = 0;
     for (const [kind, title] of groups) {
       const matches = buckets.get(kind)!;
+      count += matches.length;
+      if (!matches.length) continue;
+      if (collapse.collapsed.has(kind)) {
+        // A collapsed section keeps its heading so it can be expanded again.
+        blocks.push({ kind, refs: [], title, total: matches.length, firstPosition: listed + 1 });
+        continue;
+      }
       for (let start = 0; start < matches.length; start += refsPerBlock) {
         const refs = matches.slice(start, start + refsPerBlock);
-        blocks.push({ refs, title: start === 0 ? title : undefined, firstPosition: count + 1 });
-        count += refs.length;
+        blocks.push({
+          kind,
+          refs,
+          title: start === 0 ? title : undefined,
+          total: matches.length,
+          firstPosition: listed + 1,
+        });
+        listed += refs.length;
       }
     }
-    return { blocks, count };
-  }, [snapshot.refs, query]);
+    return { blocks, count, listed };
+  }, [snapshot.refs, query, collapse.collapsed]);
   const focusedBlock = useMemo(
     () =>
       focused ? blocks.findIndex((block) => block.refs.some((ref) => ref.name === focused)) : -1,
     [blocks, focused],
   );
-  const getItemKey = useCallback((index: number) => blocks[index]!.refs[0]!.name, [blocks]);
+  const getItemKey = useCallback(
+    (index: number) => blocks[index]!.refs[0]?.name ?? `section:${blocks[index]!.kind}`,
+    [blocks],
+  );
   const estimatedHeights = useRef(new Map<Ref['kind'], number>());
   const virtual = useVirtualizer({
     count: blocks.length,
@@ -90,7 +149,7 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
       const block = blocks[index]!;
       return (
         (block.title ? headingHeightEstimate : 0) +
-        block.refs.length * (estimatedHeights.current.get(block.refs[0]!.kind) ?? 120)
+        block.refs.length * (estimatedHeights.current.get(block.kind) ?? 120)
       );
     },
     measureElement: (element, entry, instance) => {
@@ -98,7 +157,7 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
       const block = blocks[instance.indexFromElement(element)];
       if (block && height > 0) {
         const refHeight = (height - (block.title ? headingHeightEstimate : 0)) / block.refs.length;
-        if (refHeight > 0) estimatedHeights.current.set(block.refs[0]!.kind, refHeight);
+        if (block.refs.length && refHeight > 0) estimatedHeights.current.set(block.kind, refHeight);
       }
       return height;
     },
@@ -130,7 +189,12 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
     if (block.title)
       cells.push(
         <div key={block.title} style={{ gridRow: track++ }}>
-          <h3>{block.title}</h3>
+          <SectionHeading
+            kind={block.kind}
+            title={block.title}
+            count={block.total}
+            collapse={collapse}
+          />
         </div>,
       );
     for (const [index, reference] of block.refs.entries()) {
@@ -140,7 +204,7 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
           style={{ gridRow: track++ }}
           role="listitem"
           aria-posinset={block.firstPosition + index}
-          aria-setsize={count}
+          aria-setsize={listed}
         >
           <ReferenceRow reference={reference} snapshot={snapshot} busy={busy} />
         </div>,
@@ -204,6 +268,15 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
 export function ReferenceSidebar() {
   const { snapshot, busy: active, syncing, setView } = useRepository();
   const [collapsed, setCollapsed] = useState<ReadonlySet<Ref['kind']>>(new Set());
+  const collapse: Collapse = {
+    collapsed,
+    toggle: (kind) =>
+      setCollapsed((current) => {
+        const next = new Set(current);
+        if (!next.delete(kind)) next.add(kind);
+        return next;
+      }),
+  };
   if (!snapshot) return null;
   const busy = !!active && !syncing;
   const large = snapshot.refs.length >= 100;
@@ -227,30 +300,19 @@ export function ReferenceSidebar() {
         </div>
       )}
       {large ? (
-        <VirtualReferences key={snapshot.repository.id} snapshot={snapshot} busy={busy} />
+        <VirtualReferences
+          key={snapshot.repository.id}
+          snapshot={snapshot}
+          busy={busy}
+          collapse={collapse}
+        />
       ) : (
         groups.map(([kind, title]) => {
           const refs = snapshot.refs.filter((ref) => ref.kind === kind);
           return refs.length ? (
             <section key={kind}>
-              <h3 className="ref-section-heading">
-                <button
-                  type="button"
-                  aria-expanded={!collapsed.has(kind)}
-                  aria-controls={`ref-section-${kind}`}
-                  onClick={() =>
-                    setCollapsed((current) => {
-                      const next = new Set(current);
-                      if (!next.delete(kind)) next.add(kind);
-                      return next;
-                    })
-                  }
-                >
-                  {title}
-                  <span className="ref-section-count">{refs.length}</span>
-                </button>
-              </h3>
-              <div id={`ref-section-${kind}`} hidden={collapsed.has(kind)}>
+              <SectionHeading kind={kind} title={title} count={refs.length} collapse={collapse} />
+              <div hidden={collapsed.has(kind)}>
                 {refs.map((reference) => (
                   <ReferenceRow
                     key={reference.name}
