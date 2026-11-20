@@ -62,6 +62,8 @@ async function checkPackagedReferenceList(page, repository) {
   );
   await expect(page.getByRole('heading', { name: 'References 99', exact: true })).toBeVisible();
   await expect(draft).toBeFocused();
+  await expect(filter).toHaveValue('  RANGE-CHECK  ');
+  await expect(page.locator('.refs').getByRole('status')).toHaveText('4 matching references');
   fixtureGit(
     repository,
     ['update-ref', '--stdin'],
@@ -73,6 +75,7 @@ async function checkPackagedReferenceList(page, repository) {
   await expect(draft).toHaveValue('keep-my-draft');
   await draft.press('Escape');
   await expect(rename).toBeFocused();
+  await expect(filter).toHaveValue('  RANGE-CHECK  ');
   console.log(
     'Packaged sidebar preserved filtered positions, the rename draft and keyboard focus after external Git changes.',
   );
