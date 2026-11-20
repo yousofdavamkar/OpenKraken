@@ -2,6 +2,14 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest run. The shared-HEAD 50,000-ref fixture meets the opening budget intermittently. The distinct-target and nested annotated-tag fixtures still exceed it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Ordered history and graph shortcuts on Linux
+
+The desktop compared all 1,505,199 commits and their ordered parents with native Git 2.53.0 on a bare Linux fixture with 50,000 distinct refs and one annotated tag. All 302 pages used the initial cursor and returned the expected offsets, including the final partial page. Both streams produced SHA-256 `eaab85397038b87b505b45e66e7e53b612d3a56a395ad1d5a1a386d7ece5e14f`. Reusing a walk after confirming the order of its peeled roots reduced median first paint on this fixture from 1,032.5 to 877.9 ms. The 500 ms opening budget remains open. [Benchmark data and methodology](m8-reference-performance.md#opening-50000-distinct-refs-with-one-annotated-tag)
+
+A shallow-boundary change during tag enumeration could leave a tracked branch showing zero commits behind when Git reported one. The reader now checks tracking counts after resolving annotated refs. Two separate renderer regressions covered failed cancellation after editing a search or replacing a repository. These failures formerly triggered an unhandled rejection. The earlier request's result and cancellation failure now stay out of the active view. Explicit cancellation can still report errors and retry.
+
+The graph accepts j and k for row navigation and Shift+J and Shift+K for ancestry. Electron tests used the merge fixture, text input and a 2,003-commit repository to verify the shortcuts and a single-key transition across the first page boundary. [Graph keyboard behavior](../decisions/0004-m1-history-and-interaction.md)
+
 ## Cancelling, retrying and paging during full-history search
 
 On Linux x64, a controlled Git scan delayed by 65 seconds reproduced the previous desktop timeout at 30.5 seconds. The updated desktop returned the expected commit in 65.3 seconds. Each message or author scan now has a 120-second deadline. The service drains both scans if either fails. The main process allows 210 seconds for the full search, including queueing and object lookup. [Search and cancellation](../decisions/0004-m1-history-and-interaction.md)

@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 import type { Result } from '../../packages/ipc-contract/src/index.js';
 
 async function nativeHistory(cwd: string) {
-  // The scale fixtures use direct commit refs, an attached HEAD and no stash overlays.
+  // The scale fixtures have an attached HEAD, no stash overlays and no additional worktree roots. Git resolves annotated refs when enumerating all reachable commits.
   const git = spawn('git', ['rev-list', '--date-order', '--parents', '--all'], {
     cwd,
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -26,7 +26,10 @@ async function nativeHistory(cwd: string) {
 
 test('every desktop history page matches native Git through the final commit', async () => {
   const fixture = process.env.OPENKRAKEN_TRAVERSAL_REPO;
-  test.skip(!fixture, 'Set OPENKRAKEN_TRAVERSAL_REPO to a scale fixture with direct commit refs');
+  test.skip(
+    !fixture,
+    'Set OPENKRAKEN_TRAVERSAL_REPO to a scale fixture for native history comparison',
+  );
   test.setTimeout(10 * 60 * 1000);
   const cwd = resolve(fixture!);
   const expected = await nativeHistory(cwd);
