@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest three runs. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## macOS release signing and notarization
+
+The native DMG builder now accepts a Developer ID Application certificate fingerprint and an optional Apple notarization keychain profile. The verifier requires an independent fingerprint for signed images and can require a validated stapled ticket before mounting. Concurrent builds keep each signed image available under its own digest. Linux tests exercised receipt validation, concurrent saves and the command sequence with simulated Apple responses. A real signed and notarized image, a quarantined download and native acceptance still require a macOS release host and publisher credentials. [Release commands](../../README.md) · [DMG signing decision](../decisions/0089-native-dmg-payload-and-copy-install.md#developer-id-signing)
+
+The Linux x64 unit/native run passed 1,061 tests with nine platform skips. A subsequent focused run including the concurrent-save regression passed 20 tests with five macOS-only skips. The production build, typecheck and lint passed. The existing Linux DEB passed extraction and launch verification. The existing Linux app bundle also passed a separate Canvas, two-page append, repository-search and keyboard smoke run.
+
 ## Cross-platform performance gates
 
 CI now measures the same scale fixtures independently on Linux x64, Linux ARM64, macOS and Windows, including 50,000 distinct targets over full Linux history. On Linux x64 the new distinct-target gate failed all three first paints (710.8–741.1 ms). Its nine appends passed, and 302 pages matched native Git through the final commit. The other platforms still require native execution. [Scale gates and measured results](m8-scale-performance.md#native-desktop-ci-gates)

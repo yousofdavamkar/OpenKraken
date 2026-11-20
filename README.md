@@ -68,7 +68,16 @@ To sign an RPM, add `--rpm-key /path/to/publisher.asc` to the RPM build command.
 OPENKRAKEN_XDOTOOL=xdotool xvfb-run -a pnpm smoke:installer release/installers/linux-x64/test-signed/rpm/manifest.json --rpm-key /path/to/publisher.asc
 ```
 
-On native macOS, run `pnpm package`, then `pnpm installer --test-metadata --target dmg`. Verify with `pnpm smoke:installer release/installers/darwin-arm64/test/dmg/manifest.json` (substitute `darwin-x64` on Intel). The verifier checks the mounted bundle, copies it to a disposable directory, detaches the image, and launches the copy. It leaves `/Applications` untouched. If attachment or detachment fails, it retains and reports the temporary directory; detach any remaining volume before removing that directory. Ad-hoc signature verification is required, but Developer ID signing, notarization, Gatekeeper and native runtime acceptance are still pending. See [ADR 0089](docs/decisions/0089-native-dmg-payload-and-copy-install.md).
+On native macOS, run `pnpm package`, then `pnpm installer --test-metadata --target dmg`. Verify with `pnpm smoke:installer release/installers/darwin-arm64/test/dmg/manifest.json` (substitute `darwin-x64` on Intel). The verifier checks the mounted bundle, copies it to a disposable directory, detaches the image, and launches the copy. It leaves `/Applications` untouched. If attachment or detachment fails, it retains and reports the temporary directory; detach any remaining volume before removing that directory. The default build verifies the ad-hoc app signature. See [ADR 0089](docs/decisions/0089-native-dmg-payload-and-copy-install.md).
+
+For a signed DMG, install the release owner's Developer ID Application identity in the build user's macOS keychain. Supply its 40-hex-digit SHA-1 certificate fingerprint in `MAC_IDENTITY`. The verifier needs the fingerprint from an independent trusted source. It checks the signed disk image before mounting and checks the app again after copying. Substitute `darwin-x64` for an Intel build.
+
+```sh
+pnpm installer --target dmg --metadata release-metadata.json --mac-identity "$MAC_IDENTITY"
+pnpm smoke:installer release/installers/darwin-arm64/signed/dmg/manifest.json --mac-identity "$MAC_IDENTITY"
+```
+
+To submit the signed image to Apple, add `--notary-profile "$NOTARY_PROFILE"` to the build command. Use a keychain profile configured with `xcrun notarytool store-credentials`. The builder waits for acceptance, staples and validates the ticket, then computes the final digest. Verify the receipt under `notarized/dmg` with both `--mac-identity "$MAC_IDENTITY"` and `--require-notarization`. Test metadata places these receipts under `test-signed/dmg` or `test-notarized/dmg`. Native acceptance with release credentials remains open. [macOS signing decision](docs/decisions/0089-native-dmg-payload-and-copy-install.md#developer-id-signing)
 
 Windows bundle packaging checks native ownership and access lists in addition to fuses. It rejects reparse points and payloads writable by principals other than the current user, Local System or Administrators; it does not rewrite permissions. Use a restricted build directory. Windows access checks and three native fixtures are configured in CI but still await native execution evidence. See [ADR 0090](docs/decisions/0090-windows-payload-access-control.md).
 
