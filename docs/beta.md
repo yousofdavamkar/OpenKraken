@@ -32,7 +32,7 @@ node /path/to/openkraken/scripts/sign-update.mjs descriptor.json private-key.pem
   ' receipt.json > SHA256SUMS
 ```
 
-Publish the immutable, versioned installers before the signed manifest. In the invitation, give participants the candidate version, architecture, HTTPS artifact URL, feedback contact and the **one-line SHA256SUMS from the signing machine**. Deliver that line through an independently authenticated release-owner channel the participant already trusts. [Installer instructions](../README.md) · [Feed and signing procedure](decisions/0082-signed-update-release-protocol.md)
+Publish the immutable, versioned installers before the signed manifest. Before sending invitations, run `node scripts/verify-update-feed.mjs beta-config.json release.json` with the configuration used to build the candidate and the signed envelope from the signing machine. Retain the successful JSON receipt with the beta record. In the invitation, give participants the candidate version, architecture, HTTPS artifact URL, feedback contact and the **one-line SHA256SUMS from the signing machine**. Deliver that line through an independently authenticated release-owner channel the participant already trusts. [Installer instructions](../README.md) · [Feed and signing procedure](decisions/0082-signed-update-release-protocol.md)
 
 ## Validate a Windows beta installer
 

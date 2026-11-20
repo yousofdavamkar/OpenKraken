@@ -41,6 +41,34 @@ On a POSIX signing machine, run these commands once from a private location outs
 
 At package build time, set `OPENKRAKEN_UPDATE_CONFIG` to JSON with that public key and the actual HTTPS manifest URL. For example, replace both values in `{"feed":"https://updates.example.org/stable/release.json","publicKey":"<base64 public key>"}`. On the signing machine, use the offline publisher above with the same private PEM. Publish the immutable artifact files first, then the signed manifest, so every file it references is already available in the same directory. The host must serve the files directly without redirects.
 
+## Serving and checking a release
+
+For a self-hosted feed, point a hostname you control at the HTTPS server and allow inbound traffic on ports 80 and 443. This example Caddyfile selects Let's Encrypt for TLS certificates and serves versioned installers beside the manifest. Replace the example hostname with the one in the build configuration. Give Caddy persistent storage for its certificate state. [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https) · [TLS configuration](https://caddyserver.com/docs/caddyfile/directives/tls)
+
+```caddyfile
+updates.example.org {
+    tls {
+        issuer acme {
+            dir https://acme-v02.api.letsencrypt.org/directory
+        }
+    }
+    root * /srv/openkraken-updates
+    @manifest path /stable/release.json /beta/release.json
+    header @manifest Cache-Control "no-cache"
+    file_server
+}
+```
+
+Put only the public distribution files in the web root. For a feed ending in `/beta/release.json`, place the signed installer filenames under `/srv/openkraken-updates/beta/`. After all those files are in place, publish the signed envelope at `beta/release.json` with a same-filesystem rename so a concurrent reader receives a complete manifest. Keep earlier versioned URLs available for downloads already in progress. The release signing key stays on the signing machine.
+
+From the checkout with dependencies installed, run this check with the public configuration embedded in the build and a copy of the signed envelope from the release owner.
+
+```sh
+node scripts/verify-update-feed.mjs build-config.json signed-release.json
+```
+
+The check authenticates the approved candidate, fetches the configured HTTPS manifest and requires the same authenticated payload. It streams every listed platform and architecture through the desktop's size and digest checks, then verifies the manifest again. Exit code zero and the JSON receipt identify the feed, release sequence, version and artifact inventory checked during that run. A feed change during the check requires verification against the newly approved candidate.
+
 ## Moving a feed or rotating a release key
 
 A publisher can include `migrateFrom: { feed, publicKey }` in the new build's `OPENKRAKEN_UPDATE_CONFIG`. The top-level feed and public key are the new values. Both pairs use the same HTTPS and Ed25519 validation. The build's stable or beta channel applies to both. A release served over the network has no authority to name a predecessor.
