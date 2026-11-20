@@ -17,6 +17,14 @@ The distinct-target fixture retained 2.54 MiB less renderer heap at the median. 
 
 The separate three-profile acceptance run painted the one-ref Linux fixture in 337.2–359.3 ms. Distinct targets took 750.0–811.9 ms and nested tag aliases took 716.8–770.9 ms. All 27 appends took 169.4–279.4 ms.
 
+### First-row annotated tag aliases in the packaged app
+
+The nested-tag repository used for the paired badge-index measurements places the independent tagged commit below the first page. Regenerating the fixture from full Linux history with the current CI generator places that commit first. In the Linux x64 package, its badge opened a dialog reporting 49,999 refs. Filtering found the first, middle and last names from native Git. On the freshly generated distinct-target fixture, the package matched Git on all 207 mounted-row badge checks across seven scroll positions after loading 17,000 commits.
+
+The acceptance benchmark on the regenerated nested-tag fixture exercised the first-row alias dialog in all three fresh profiles. First paints were 560.3, 503.5 and 511.3 ms. The regenerated distinct-target fixture took 838.2, 745.1 and 734.4 ms. All 18 appends met 300 ms, ranging from 175.2 to 263.5 ms. Both fixtures exceeded 500 ms in each run.
+
+A separate CSS experiment isolated layout in the reference list and history scroll containers. Across five paired openings of each regenerated fixture, Canvas pixel hashes and sampled row and viewport bounds matched. Median first paint changed from 502.6 to 491.6 ms with first-row aliases and from 739.0 to 730.6 ms with distinct targets. In the independent acceptance runs all three alias openings still exceeded 500 ms, and one third-page append took 848.9 ms. That append spent 503.3 ms waiting for the service, 249.3 ms in the worker phase and 96.3 ms in publication. The release retains the existing scroll CSS.
+
 ## Memory used to locate sparse annotated tags
 
 On the Linux history fixture with 50,000 distinct ref targets and one annotation, the packed-ref file occupied 3,410,078 bytes. Reading it to locate sparse annotated tags previously grew Node's array-buffer usage by 3,672,382 bytes. Reusing the 256 KiB prefix buffer reduced growth to 262,304 bytes. On a separate 7,800,100-byte packed-ref input with a Unicode tag near the end, growth fell from 7,996,724–8,062,404 bytes to 262,304 bytes. Each measurement used a fresh Node process, forced GC before the read and compared buffer usage immediately afterward. All three runs per build and input recovered the same tag.
