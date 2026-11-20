@@ -42,6 +42,8 @@ When keyboard navigation targets the already focused commit, bring its row back 
 
 Start the candidate worker while the repository request is pending. A same-repository refresh uses the existing worker and its lane checkpoints. During a switch, keep the displayed worker until the candidate has returned its first layout. Close the candidate if opening, layout or cancellation ends the request before publication. A worker load failure is retained so the first layout request can report the error immediately.
 
+Once the renderer sends the page to the graph worker, it freezes the validated snapshot and display rows and collects the IDs used to restore selection. The worker has its own structured clone. The current snapshot, layout and selection stay visible together until the worker returns a valid layout for the pending request.
+
 If the displayed worker reports a fatal error, the next repository refresh builds a fresh worker from the returned snapshot. The renderer retains the query and selection for the same checkout and reconstructs the search index and lane checkpoints. The desktop regression terminates the worker during a search, reports its error, refreshes and reads the next native page.
 
 A timed-out layout request also retires the worker. The worker may already have advanced its generation or append offset when the renderer loses the reply. Refresh then rebuilds the graph from the native snapshot. A timed-out search can discard its late matches and accept the next query on the same worker.

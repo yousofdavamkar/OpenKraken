@@ -230,7 +230,7 @@ export const useRepository = create<State>()(
           const existing =
             sameRepository && !previous.paging && !client?.failed ? client : undefined;
           const target = existing ?? (candidate ??= new GraphClient());
-          const layout = await target.request({
+          const pendingLayout = target.request({
             ...(existing
               ? ({ method: 'refresh', baseGeneration: previous.snapshot!.cursor } as const)
               : ({ method: 'reset' } as const)),
@@ -239,6 +239,11 @@ export const useRepository = create<State>()(
             commits: rows,
             pinnedOid: result.snapshot.pinnedOid,
           });
+          // The graph worker owns a clone. Prepare immutable store data while it lays out the page.
+          freeze(result.snapshot, true);
+          freeze(rows, true);
+          const available = new Set(rows.map((row) => row.oid));
+          const layout = await pendingLayout;
           if (layout.kind !== 'layout') throw new Error('Invalid graph response');
           if (get().busy !== request.id) return;
           performance.mark('repository-layout-response');
@@ -288,7 +293,6 @@ export const useRepository = create<State>()(
             s.searching = undefined;
             s.paging = undefined;
             s.detail = undefined;
-            const available = new Set(rows.map((r) => r.oid));
             const focus =
               sameRepository && s.selection.focus && available.has(s.selection.focus)
                 ? s.selection.focus

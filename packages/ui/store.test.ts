@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, expect, test, vi } from 'vitest';
 import { GraphEngine } from '../graph/src/engine.js';
-import type { GraphRequest } from '../graph/src/engine.js';
+import type { GraphDocument, GraphRequest } from '../graph/src/engine.js';
 import { encodeHistoryPage, encodeSnapshotBodies } from '@openkraken/ipc-contract';
 import type { Result, Snapshot } from '@openkraken/ipc-contract';
 const workers = vi.hoisted(() => ({ start: vi.fn(), close: vi.fn(), layout: vi.fn() }));
@@ -16,7 +16,7 @@ vi.mock('./src/graph-client.js', () => ({
     }
     async request(request: GraphRequest) {
       if (this.failed) throw new Error('Graph worker failed');
-      if (request.method === 'reset') workers.layout();
+      if (request.method === 'reset') await workers.layout(request.commits);
       return this.engine.handle({ ...request, id: 1 });
     }
   },
@@ -56,9 +56,9 @@ function fixture(cursor = crypto.randomUUID()): Snapshot {
     elapsedMs: 0,
   };
 }
-function deferred() {
-  let resolve!: (result: Result) => void;
-  const promise = new Promise<Result>((done) => {
+function deferred<T = Result>() {
+  let resolve!: (result: T) => void;
+  const promise = new Promise<T>((done) => {
     resolve = done;
   });
   return { promise, resolve };
@@ -120,6 +120,38 @@ test.each(['snapshot', 'layout'] as const)(
     expect(useRepository.getState().matches).toEqual([first.commits[0]!.oid]);
   },
 );
+
+test('a repository switch prepares its new rows while the displayed graph waits for layout', async () => {
+  const first = fixture();
+  await open(first);
+  const previous = useRepository.getState();
+  const next = fixture();
+  next.commits[0] = { ...next.commits[0]!, oid: 'f'.repeat(40), summary: 'Replacement' };
+  const dispatched = deferred<GraphDocument[]>();
+  const finish = deferred<void>();
+  workers.layout.mockImplementationOnce((rows: GraphDocument[]) => {
+    dispatched.resolve(rows);
+    return finish.promise;
+  });
+  const opening = open(next);
+  const rows = await dispatched.promise;
+  try {
+    expect(Object.isFrozen(rows)).toBe(true);
+    expect(Object.isFrozen(rows[0]!.parents)).toBe(true);
+    expect(useRepository.getState().snapshot).toBe(previous.snapshot);
+    expect(useRepository.getState().layout).toBe(previous.layout);
+    expect(useRepository.getState().selection).toBe(previous.selection);
+  } finally {
+    finish.resolve();
+    await opening;
+  }
+  const state = useRepository.getState();
+  expect(state.rows).toBe(rows);
+  expect(state.snapshot?.cursor).toBe(next.cursor);
+  expect(state.layout[0]?.oid).toBe(next.commits[0]!.oid);
+  await state.search('Replacement');
+  expect(useRepository.getState().matches).toEqual([next.commits[0]!.oid]);
+});
 
 test('refresh replaces a failed graph worker and restores the active query and selection', async () => {
   const first = fixture();
