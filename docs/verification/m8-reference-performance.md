@@ -2,6 +2,12 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Reading tentative history roots from packed refs
+
+On the pinned full Linux fixture with 50,000 distinct targets, a scratch service read the 3.4 MB packed-refs file directly to start a speculative history walk. The complete native enumeration still decided whether the ordered roots matched before the walk could be used. After one warm-up pair, five alternating fresh-profile pairs measured median first paint of 699.4 ms with the existing Git query and 722.0 ms with the file read. The corresponding native snapshot medians were 381.3 and 387.5 ms. The shipped service retains the Git query.
+
+Three subsequent full benchmarks of the shipped code at `2c44546` painted in 699.2, 686.8 and 696.5 ms. All exceeded 500 ms. All nine 5,000-commit appends took 152.4–259.7 ms. Graph scroll p95 was 16.7–16.8 ms. These Linux x64 runs used Git 2.53.0, fresh application profiles and retained OS caches. [Individual runs](m8-opening-experiments.csv)
+
 ## Preparing the snapshot during graph layout
 
 At `d1e8346`, the renderer freezes the validated repository snapshot and display rows while the graph worker lays out the first page. Both revisions used the same native Git service and Electron build. Each opening used a fresh profile on Linux x64 with Git 2.53.0 and retained OS caches. Build order alternated in each series.

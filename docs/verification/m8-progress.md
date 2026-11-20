@@ -2,6 +2,16 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest three runs. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Packaged graph and installer acceptance
+
+On Linux x64, the packaged desktop at `2c44546` opened a 7,003-commit repository through the consent dialog. Its first ten commit IDs matched native Git. Those rows kept their IDs, lanes and positions across a full 5,000-commit append and the three-commit final page. Repository search opened the root before it was loaded. After the append, Enter selected it from loaded search, and Home and Enter opened HEAD. The same checks passed through both the FUSE and extract-and-run launches of the unsigned test AppImage. The virtualized grid now reports an unknown total while more history is available. A separate linked-checkout test reported 2,201 rows for 2,200 commits and one worktree. [Packaged graph check](../../scripts/check-packaged-history.mjs)
+
+With Git 2.38.0 and LFS 3.8.1, 1,025 unit/native tests passed and 26 were skipped. All 56 selected desktop tests passed on X11, including all six Canvas goldens. The standard fixture painted 2,000 commits in 220.1 ms and appended 5,000 in 141.8 ms. An earlier run that inherited the host Wayland session missed the search shortcut focus assertion. Both the shortcut and keyboard paging passed three consecutive times under explicitly selected X11. Build, typechecking and lint passed.
+
+Debian 13 and Fedora 43 x64 disposable containers installed and reinstalled the existing 0.1.0 test packages, upgraded through 0.2.0-beta.1 to 0.2.0 and removed them while retaining a user draft. Both lifecycle scripts now fail on a residual registration or a failed database query. A simulated container exit of 23 propagated through Debian CI logging. All three Gitea HTTPS/SSH tests passed and wrote their own report. The earlier desktop JSON and graph screenshot retained their SHA-256 digests.
+
+The minimum-Git CI matrix and the packaged graph check now include macOS ARM64 and Windows x64. Locally, PowerShell validated the published Windows ZIP checksum, extracted the expected executable and rejected a damaged ZIP and an existing fixture directory. Native macOS, Windows and Linux ARM64 execution still requires those runners. [Minimum Git compatibility decision](../decisions/0096-minimum-git-runtime-acceptance.md)
+
 ## Snapshot publication on large reference sets
 
 In five paired full Linux benchmarks with 50,000 refs at HEAD, the updated renderer painted within 500 ms on all five openings. The preceding renderer met that budget three times. A separate series that only opened the graph still had one miss across six candidate openings. With 50,000 distinct targets, the candidate's median first paint was 705.5 ms and all three openings exceeded budget. All 27 appends across the shared, distinct and one-ref benchmarks met 300 ms. [Paired measurements and native query experiments](m8-reference-performance.md#preparing-the-snapshot-during-graph-layout)
