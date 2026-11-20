@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test } from '@playwright/test';
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -9,13 +9,11 @@ import type { Result } from '../../packages/ipc-contract/src/index.js';
 
 async function nativeHistory(cwd: string) {
   // Both scale fixtures have branch tips only, with HEAD attached to the main branch.
-  const roots = execFileSync('git', ['for-each-ref', '--format=%(objectname)'], { cwd });
-  const git = spawn('git', ['rev-list', '--date-order', '--parents', '--stdin'], {
+  const git = spawn('git', ['rev-list', '--date-order', '--parents', '--all'], {
     cwd,
-    stdio: ['pipe', 'pipe', 'inherit'],
+    stdio: ['ignore', 'pipe', 'inherit'],
   });
   const done = once(git, 'close');
-  git.stdin.end(roots);
   const hash = createHash('sha256');
   let count = 0;
   for await (const chunk of git.stdout) {
