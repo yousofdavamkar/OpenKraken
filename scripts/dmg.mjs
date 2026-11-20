@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { copyFile, stat, lstat, mkdir, mkdtemp, readlink, rm, symlink } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
-import { signDiskImage, verifyMacSignature } from './mac-signing.mjs';
+import { signDiskImage, verifyMacSignature, verifyNotaryTicket } from './mac-signing.mjs';
 import { promisify } from 'node:util';
 import {
   comparePayload,
@@ -98,6 +98,7 @@ export async function verifyDmg(source, manifest, identity) {
     )
       throw new Error('Installer checksum or size mismatch');
     if (identity) await verifyMacSignature(artifact, identity, 'org.openkraken.desktop.dmg');
+    if (manifest.notarySubmissionId) await verifyNotaryTicket(artifact);
     await mkdir(mountpoint);
     await mkdir(installed);
     // If attach fails after mounting, preserve the directory for inspection.

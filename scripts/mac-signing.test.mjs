@@ -4,7 +4,12 @@ const { execFile, sign } = vi.hoisted(() => ({ execFile: vi.fn(), sign: vi.fn() 
 vi.mock('node:child_process', () => ({ execFile }));
 vi.mock('@electron/osx-sign', () => ({ sign }));
 
-import { signMacBundle, signDiskImage } from './mac-signing.mjs';
+import {
+  notarizeDiskImage,
+  signMacBundle,
+  signDiskImage,
+  verifyDmgReceipt,
+} from './mac-signing.mjs';
 
 const fingerprint = 'AB'.repeat(20);
 beforeEach(() => {
@@ -68,4 +73,76 @@ test('a timestamped image must pass the pinned Apple requirement before signing 
     callback(args.includes('--verify') ? new Error('certificate mismatch') : null, ''),
   );
   await expect(signDiskImage(path, fingerprint)).rejects.toThrow('certificate mismatch');
+});
+
+const id = '451195da-66b4-46c6-93de-5a68c960027d';
+const image = '/build/OpenKraken.dmg';
+function notaryTools(status, failure) {
+  execFile.mockImplementation((_bin, args, _options, callback) => {
+    if (args.includes(failure)) return callback(new Error('Apple tool failed'));
+    callback(null, { stdout: JSON.stringify({ status, id }) });
+  });
+}
+
+test('notarization waits for acceptance and checks the signed, stapled image', async () => {
+  notaryTools('Accepted');
+  await expect(notarizeDiskImage(image, 'Release Account', fingerprint)).resolves.toBe(id);
+  const calls = execFile.mock.calls.map(([bin, args]) => [bin, ...args]);
+  expect(calls).toEqual([
+    [
+      '/usr/bin/xcrun',
+      'notarytool',
+      'submit',
+      image,
+      '--keychain-profile',
+      'Release Account',
+      '--wait',
+      '--output-format',
+      'json',
+    ],
+    ['/usr/bin/xcrun', 'stapler', 'staple', image],
+    ['/usr/bin/codesign', '--verify', '--strict', expect.stringContaining(fingerprint), image],
+    ['/usr/bin/xcrun', 'stapler', 'validate', image],
+    [
+      '/usr/sbin/spctl',
+      '--assess',
+      '--type',
+      'open',
+      '--context',
+      'context:primary-signature',
+      image,
+    ],
+  ]);
+});
+
+test.each(['Invalid', 'In Progress', 'Rejected'])(
+  'a %s submission never reaches stapling',
+  async (status) => {
+    notaryTools(status);
+    await expect(notarizeDiskImage(image, 'Release', fingerprint)).rejects.toThrow(id);
+    expect(execFile).toHaveBeenCalledTimes(1);
+  },
+);
+
+test.each(['submit', 'staple', '--verify', 'validate', '--assess'])(
+  'a failed %s cannot produce a notarization receipt',
+  async (step) => {
+    notaryTools('Accepted', step);
+    await expect(notarizeDiskImage(image, 'Release', fingerprint)).rejects.toThrow(
+      'Apple tool failed',
+    );
+    expect(execFile.mock.calls.at(-1)[1]).toContain(step);
+  },
+);
+
+test('an independently required notarization cannot be removed from the receipt', () => {
+  const signed = { signed: true, signingFingerprint: fingerprint };
+  verifyDmgReceipt({ ...signed, notarySubmissionId: id }, fingerprint, true);
+  expect(() => verifyDmgReceipt(signed, fingerprint, true)).toThrow('notarized DMG');
+  expect(() => verifyDmgReceipt({ ...signed, notarySubmissionId: '' }, fingerprint)).toThrow(
+    'notarized DMG',
+  );
+  expect(() => verifyDmgReceipt({ signed: false, notarySubmissionId: id }, undefined)).toThrow(
+    'notarized DMG',
+  );
 });

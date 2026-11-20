@@ -23,7 +23,11 @@ process.umask(0o022);
 // SHA-256 detects corruption; this adjacent manifest is not a release signature.
 const { positionals, values } = parseArgs({
   allowPositionals: true,
-  options: { 'mac-identity': { type: 'string' }, 'rpm-key': { type: 'string' } },
+  options: {
+    'require-notarization': { type: 'boolean' },
+    'mac-identity': { type: 'string' },
+    'rpm-key': { type: 'string' },
+  },
 });
 if (positionals.length !== 1) throw new Error('Provide one installer manifest');
 const rpmKey = values['rpm-key'];
@@ -46,7 +50,9 @@ if (
 )
   throw new Error('Expected a native platform installer manifest');
 const identity = macIdentity(manifest.target, values['mac-identity']);
-if (manifest.target === 'dmg') verifyDmgReceipt(manifest, identity);
+if (values['require-notarization'] && manifest.target !== 'dmg')
+  throw new Error('--require-notarization requires a DMG');
+if (manifest.target === 'dmg') verifyDmgReceipt(manifest, identity, values['require-notarization']);
 if (rpmKey !== undefined && (!rpmKey || manifest.target !== 'rpm'))
   throw new Error('--rpm-key requires an RPM target and a public certificate file');
 if (

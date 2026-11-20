@@ -1,4 +1,4 @@
-import { macIdentity, signMacBundle } from './mac-signing.mjs';
+import { macIdentity, notarizeDiskImage, signMacBundle } from './mac-signing.mjs';
 import { authenticateRpm } from './rpm-signature.mjs';
 import { verifyLinuxPackage } from './linux-package.mjs';
 import { build, Platform, Arch } from 'electron-builder';
@@ -23,12 +23,19 @@ const { values } = parseArgs({
     target: { type: 'string', default: { darwin: 'dmg', win32: 'msi' }[process.platform] ?? 'deb' },
     'test-metadata': { type: 'boolean', default: false },
     metadata: { type: 'string' },
+    'notary-profile': { type: 'string' },
     'mac-identity': { type: 'string' },
     'rpm-key': { type: 'string' },
   },
 });
 const target = values.target;
 const identity = macIdentity(target, values['mac-identity']);
+const notaryProfile = values['notary-profile'];
+if (
+  notaryProfile !== undefined &&
+  (!identity || !notaryProfile.trim() || notaryProfile.startsWith('-'))
+)
+  throw new Error('--notary-profile requires a keychain profile name and a DMG --mac-identity');
 const rpmKey = values['rpm-key'];
 if (rpmKey !== undefined && (!rpmKey || target !== 'rpm'))
   throw new Error('--rpm-key requires an RPM target and a public certificate file');
@@ -82,11 +89,16 @@ const executableName = target === 'msi' ? 'openkraken.exe' : 'openkraken';
 await verifyFuses(target === 'dmg' ? source : join(source, executableName));
 const { version } = JSON.parse(await readFile('package.json', 'utf8'));
 if (target === 'dmg') await verifyMacBundle(source, version);
-const signed = Boolean(identity || rpmKey);
+const signingMode = notaryProfile ? 'notarized' : identity || rpmKey ? 'signed' : 'unsigned';
+const outputMode = testMetadata
+  ? signingMode === 'unsigned'
+    ? 'test'
+    : 'test-' + signingMode
+  : signingMode;
 const output = join(
   root,
   `release/installers/${process.platform}-${process.arch}`,
-  testMetadata ? (signed ? 'test-signed' : 'test') : signed ? 'signed' : 'unsigned',
+  outputMode,
   target,
 );
 await mkdir(output, { recursive: true });
@@ -213,6 +225,9 @@ try {
   if (artifacts.length !== 1 || !artifacts[0].endsWith(`.${target}`))
     throw new Error('Expected exactly one installer artifact');
   const artifact = artifacts[0];
+  const notarySubmissionId = notaryProfile
+    ? await notarizeDiskImage(artifact, notaryProfile, identity)
+    : undefined;
   const signer = rpmKey
     ? await authenticateRpm(artifact, resolve(rpmKey), work, { sign: true })
     : identity;
@@ -231,6 +246,7 @@ try {
     metadata,
     signed: !!signer,
     ...(signer && { signingFingerprint: signer }),
+    ...(notarySubmissionId && { notarySubmissionId }),
     source: buildSource,
     nativePackageVersion,
     artifact: {
@@ -246,7 +262,7 @@ try {
     `${signer ? 'Signed' : 'Unsigned'} ${testMetadata ? 'TEST-ONLY ' : ''}installer: ${join(output, basename(artifact))}`,
   );
   console.log(
-    `Verify and smoke-test with: node scripts/verify-installer.mjs ${join(output, 'manifest.json')}${identity ? ' --mac-identity <trusted-fingerprint>' : rpmKey ? ' --rpm-key <trusted-certificate-file>' : ''}`,
+    `Verify and smoke-test with: node scripts/verify-installer.mjs ${join(output, 'manifest.json')}${identity ? ' --mac-identity <trusted-fingerprint>' : rpmKey ? ' --rpm-key <trusted-certificate-file>' : ''}${notarySubmissionId ? ' --require-notarization' : ''}`,
   );
 } finally {
   await rm(work, { recursive: true, force: true });

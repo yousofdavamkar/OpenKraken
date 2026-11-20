@@ -13,9 +13,19 @@ export function macIdentity(target, value) {
   return value.toUpperCase();
 }
 
-export function verifyDmgReceipt(manifest, identity) {
+const submissionId = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
+
+export function verifyDmgReceipt(manifest, identity, requireNotarization = false) {
   if (manifest.signed !== Boolean(identity) || manifest.signingFingerprint !== identity)
     throw new Error('DMG signing receipt differs from the independently supplied --mac-identity');
+  if (requireNotarization || manifest.notarySubmissionId !== undefined) {
+    if (
+      !identity ||
+      typeof manifest.notarySubmissionId !== 'string' ||
+      !submissionId.test(manifest.notarySubmissionId)
+    )
+      throw new Error('Expected a notarized DMG receipt and a trusted --mac-identity');
+  }
 }
 
 // osx-sign also discovers binary data files such as app.asar and Chromium packs.
@@ -85,4 +95,41 @@ export async function signDiskImage(path, identity) {
     { timeout: 180_000 },
   );
   await verifyMacSignature(path, identity, identifier);
+}
+
+export async function verifyNotaryTicket(path) {
+  await run('/usr/bin/xcrun', ['stapler', 'validate', path], { timeout: 180_000 });
+  await run(
+    '/usr/sbin/spctl',
+    ['--assess', '--type', 'open', '--context', 'context:primary-signature', path],
+    { timeout: 180_000 },
+  );
+}
+
+export async function notarizeDiskImage(path, profile, identity) {
+  const { stdout } = await run(
+    '/usr/bin/xcrun',
+    [
+      'notarytool',
+      'submit',
+      path,
+      '--keychain-profile',
+      profile,
+      '--wait',
+      '--output-format',
+      'json',
+    ],
+    { encoding: 'utf8' },
+  );
+  const { status, id } = JSON.parse(stdout);
+  if (typeof id !== 'string' || !submissionId.test(id))
+    throw new Error('Apple returned an invalid notarization submission ID');
+  if (status !== 'Accepted')
+    throw new Error(
+      `Notarization ${id} returned ${status}. Read the submission log with xcrun notarytool log.`,
+    );
+  await run('/usr/bin/xcrun', ['stapler', 'staple', path], { timeout: 180_000 });
+  await verifyMacSignature(path, identity, 'org.openkraken.desktop.dmg');
+  await verifyNotaryTicket(path);
+  return id;
 }
