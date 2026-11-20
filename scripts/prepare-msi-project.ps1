@@ -64,7 +64,7 @@ if ($PSBoundParameters.ContainsKey('BetaSequence')) {
     $version = $product.GetAttribute('Version')
     if ($version -notmatch '^([0-9]+\.[0-9]+\.[0-9]+)\.0$') { throw 'Expected numeric MSI product version' }
     $key = 'Software\OpenKraken\Installer\Beta\' + $Matches[1]
-    $upgradeCode = [guid]::Parse($product.GetAttribute('UpgradeCode')).ToString('D')
+    $upgradeCode = [guid]::Parse($product.GetAttribute('UpgradeCode')).ToString('D').ToUpperInvariant()
     function Add-Wix($parent, $tag, [hashtable]$attrs) {
         $element = $document.CreateElement($tag, $namespace)
         foreach ($attr in $attrs.Keys) { $element.SetAttribute($attr, $attrs[$attr]) }

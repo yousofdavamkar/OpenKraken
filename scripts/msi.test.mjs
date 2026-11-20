@@ -277,6 +277,7 @@ test.skipIf(!powershell)(
     await prepare(project, '-BetaSequence', '10');
     const xml = await readFile(project, 'utf8');
     expect(xml.match(/Software\\OpenKraken\\Installer\\Beta\\0\.1\.0/g)).toHaveLength(2);
+    expect(xml).toContain('<Upgrade Id="8B1BEDFC-AAA5-5EFE-9437-351F2D7682D7">');
     expect(xml).toContain('OnlyDetect="yes"');
     expect(xml).toContain('Minimum="0.1.0.0"');
     expect(xml).toContain('Maximum="0.1.0.0"');
