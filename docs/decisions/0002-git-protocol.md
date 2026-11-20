@@ -23,3 +23,7 @@ The retained graph walk uses `rev-list --date-order --parents --no-abbrev-commit
 ## Repository paths in native output
 
 Git emits a line feed after a repository path on POSIX. Repository discovery removes that one delimiter, preserving a carriage return in the directory name. Windows accepts CRLF output for both the individual and combined metadata queries. The POSIX regression opens two adjacent repositories distinguished by a final carriage return and checks the selected root, repository ID and first commit.
+
+## Reading HEAD while opening a repository
+
+The opening metadata query asks `git rev-parse` for the Git directory, common directory, bare and shallow flags, and verified HEAD. A committed HEAD adds a full SHA-1 or SHA-256 ID after the flags. An unborn HEAD returns exit status 1 and the metadata fields. The independent symbolic-ref query distinguishes an unborn branch from a detached commit. It runs alongside the metadata and sparse-checkout setting reads. Paths containing a newline still use separate directory queries. Tests exercise both an unborn branch and a detached commit in such a checkout.

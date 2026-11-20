@@ -2,6 +2,14 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Repository opening, watcher startup and graph paging
+
+On Linux x64, the ordinary bare-repository working-state read fell from a median 324.4 ms to 12.6 ms across seven pairs. The app skips a whole-tree diff when there is no index, avoids a duplicate watcher ref scan on prompt subscription, and reads verified HEAD alongside repository metadata. On full Linux history with 50,000 distinct ref targets, the combined changes made the first append faster in all three benchmark pairs. First paint took longer in all three, and six of nine appends met the paging budget. In three subsequent fresh profiles, the same 50,000-ref repository painted in 805.1–900.2 ms against the 500 ms target. Eight of nine appends met 300 ms. [Measurements and individual runs](m8-reference-performance.md#opening-a-bare-repository-with-50000-distinct-refs)
+
+In the Linux x64 package at `d88934f`, the tester accepted a repository link and paged from 2,000 to 17,000 commits. All ordered IDs and parent lists from the four persisted pages matched native Git. The package passed fuse verification and smoke checks covering native folder selection, terminal input, repository links and renderer isolation. The build and full lint passed. On the minimum supported Git 2.38.0, all 76 focused native tests passed.
+
+The full Linux unit/native suite passed 1,017 tests with 14 skipped on rerun. In the first run, a simulated provider identity request failed in the cooldown-isolation test. The individual suite and 200 repetitions of that case passed. The cause remains undetermined. All 33 targeted Electron tests passed, including the six Canvas goldens, search, keyboard navigation, paging, watcher startup and worktrees. A subsequent first-push case opened an empty bare repository, pushed its first commit from a local checkout and observed the exact commit and branch in the graph without refreshing. All five watcher startup cases passed twice at `d417830`.
+
 ## Pull and merge request creation after restart
 
 The GitHub, GitHub Enterprise and GitLab creation dialogs now recover their saved fields from **Provider accounts → Saved creation drafts** while offline. If the process stopped during submission, the user can inspect existing requests and choose whether to review the draft again. [Creation draft recovery](../decisions/0129-pull-creation-drafts.md)

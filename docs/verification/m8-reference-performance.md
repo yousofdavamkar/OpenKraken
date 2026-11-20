@@ -2,6 +2,24 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Opening a bare repository with 50,000 distinct refs
+
+On the 1,505,199-commit Linux fixture, a Git process trace captured a 517 ms cached diff against the entire HEAD tree despite the absence of an index. A separate trace showed two full watcher ref scans during startup. The updated app skips the diff when the bare index is absent, coalesces the initial ref checks when subscription completes promptly, and resolves HEAD while reading repository metadata. A trace of the resulting opening recorded one watcher scan and zero cached diffs.
+
+| Isolated comparison                                | Measured pairs | Median before | Median after |
+| -------------------------------------------------- | -------------: | ------------: | -----------: |
+| Working state in the bare repository               |              7 |      324.4 ms |      12.6 ms |
+| Repository metadata in the bare repository         |             12 |       61.8 ms |      43.6 ms |
+| Repository metadata in a working checkout          |             12 |       87.1 ms |      55.5 ms |
+| Desktop first paint with the watcher change alone  |              6 |      869.8 ms |     809.0 ms |
+| Desktop first paint with the metadata change alone |              6 |      911.6 ms |     895.2 ms |
+
+The opening-only desktop runs alternated build order after one warm-up pair, used a fresh profile each time and checked the first 2,000 commits and the sidebar count. The watcher change improved four of six pairs and the metadata change improved five of six. In the separate paging benchmark, the bare-index change alone improved the first append in all three pairs. All nine appends on that build met 300 ms.
+
+The full benchmark compared all three changes at `d88934f` with `39a186d`. First paints increased in every pair, from 1,600.9, 850.1 and 869.5 ms to 2,212.7, 1,017.5 and 1,035.5 ms. The first 5,000-commit append improved in every pair, from 584.2, 357.0 and 323.9 ms to 471.0, 250.4 and 262.9 ms. Six of nine appends met 300 ms. The single-ref control painted in 857.2 ms and all three appends met budget. These runs shared the host with other development processes and retained the OS cache. Every first paint exceeded the 500 ms gate. [Individual opening and paging samples](m8-opening-experiments.csv)
+
+After the suites finished, three further fresh-profile runs on each fixture measured the final app. The two-million-commit, 100,000-file checkout painted in 1,146.5, 470.9 and 383.6 ms. All nine appends met 300 ms. The 50,000-distinct-ref fixture painted in 805.1, 900.2 and 805.4 ms. Eight of its nine appends met budget, with one at 356.2 ms. Both fixtures scrolled at 16.7–16.8 ms p95. All 17,000 persisted commit IDs and parent lists also matched native Git in a separate packaged run on the distinct-ref fixture. [Final control samples](m8-opening-experiments.csv)
+
 ## Extending a persisted window from 12,000 to 17,000 commits
 
 A Linux x64 replay used the first 17,000 commits of the full Linux fixture. Their order and parents matched native Git. Each run flushed the first 12,000 records, appended the final 5,000 and timed that second flush. The reopen variant created a new cache instance and accepted the persisted pages before the timed append. Each variant ran six measured pairs in alternating build order after one warm-up pair. Every final cache file matched the previous writer byte for byte. [Individual timings and bytes replaced](m8-history-cache-append-samples.csv)
