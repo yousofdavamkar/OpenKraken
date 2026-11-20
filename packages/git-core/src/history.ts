@@ -122,7 +122,7 @@ export class HistoryCursor {
               stdin: starts.join('\n') + '\n',
               signal: this.controller.signal,
               timeoutMs: 0,
-              maxBytes: 1024 * 1024 * 1024,
+              stdoutPages: { offset: () => this.offset, maxBytes: 1024 * 1024 * 1024 },
               onStdout: async (chunk) => {
                 await cacheReady;
                 parser.push(chunk);

@@ -236,3 +236,36 @@ test.skipIf(process.platform === 'win32')(
     expect(snapshot.commits[0]?.oid).not.toBe(fixtureGit(sibling, ['rev-parse', 'HEAD']));
   },
 );
+
+test('a single streamed page and retained stderr each respect their output limit', async () => {
+  const write = (stream: 'stdout' | 'stderr') => [
+    '-e',
+    `process.${stream}.write(Buffer.alloc(2 * 1024 * 1024))`,
+  ];
+  const limit = 512 * 1024;
+  const fixedPage = { offset: () => 0, maxBytes: limit };
+  await expect(
+    runProcess(process.execPath, write('stdout'), {
+      stdoutPages: fixedPage,
+      onStdout: () => {},
+    }),
+  ).rejects.toMatchObject({ code: 'OUTPUT_LIMIT' });
+  let offset = 0;
+  await expect(
+    runProcess(process.execPath, write('stderr'), {
+      maxBytes: limit,
+      stdoutPages: { offset: () => offset, maxBytes: limit },
+      onStdout: () => {},
+      onStderr: () => {
+        offset++;
+      },
+    }),
+  ).rejects.toMatchObject({ code: 'OUTPUT_LIMIT' });
+  expect(offset).toBeGreaterThan(1);
+  await expect(
+    runProcess(process.execPath, write('stdout'), {
+      maxBytes: limit,
+      stdoutPages: { offset: () => ++offset, maxBytes: limit * 8 },
+    }),
+  ).rejects.toMatchObject({ code: 'OUTPUT_LIMIT' });
+});

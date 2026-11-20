@@ -21,6 +21,8 @@ export interface RunOptions {
   stdin?: string | Buffer;
   readOnly?: boolean;
   maxBytes?: number;
+  /** Streamed stdout only. Advance the offset after delivering a page to its consumer. */
+  stdoutPages?: { offset: () => number; maxBytes: number };
   timeoutMs?: number;
   onStderr?: (chunk: Buffer) => void;
   onStdout?: (chunk: Buffer) => void | Promise<void>;
@@ -29,7 +31,7 @@ export interface RunOptions {
   /** Trusted service-owned alternate index; never sourced from renderer or shell env. */
   indexFile?: string;
 }
-/** No shell. Bounded total output even when streaming; wait for close before releasing locks. */
+/** No shell. Bound output and wait for close before releasing locks. */
 export function runProcess(
   executable: string,
   args: string[],
@@ -68,6 +70,9 @@ export function runProcess(
     );
     const stdout: Buffer[] = [],
       stderr: Buffer[] = [];
+    const pages = options.onStdout && options.stdoutPages;
+    let pageOffset = 0;
+    let pageBytes = 0;
     let bytes = 0,
       failure: Error | undefined;
     let escalation: ReturnType<typeof setTimeout> | undefined;
@@ -104,12 +109,21 @@ export function runProcess(
           );
     const consume = (chunk: Buffer, isOut: boolean) => {
       if (failure) return;
-      bytes += chunk.length;
-      if (bytes > (options.maxBytes ?? 32 * 1024 * 1024)) {
-        stop(new GitError('OUTPUT_LIMIT', 'Git output exceeded the safety limit'));
-        return;
-      }
       try {
+        if (pages && isOut) {
+          const offset = pages.offset();
+          if (offset !== pageOffset) {
+            pageOffset = offset;
+            pageBytes = 0;
+          }
+          pageBytes += chunk.length;
+          if (pageBytes > pages.maxBytes)
+            throw new GitError('OUTPUT_LIMIT', 'Git output exceeded the page limit');
+        } else {
+          bytes += chunk.length;
+          if (bytes > (options.maxBytes ?? 32 * 1024 * 1024))
+            throw new GitError('OUTPUT_LIMIT', 'Git output exceeded the safety limit');
+        }
         if (!isOut && options.onStderr) options.onStderr(chunk);
         if (isOut && options.onStdout) return options.onStdout(chunk);
         else (isOut ? stdout : stderr).push(chunk);

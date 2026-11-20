@@ -366,3 +366,44 @@ test('stash filters remove overlay nodes and detached HEAD remains an independen
   });
   expect(detached.commits[0]?.oid).toBe(repo.head.oid);
 });
+
+test('completed pages release their stdout budget during a retained native walk', async () => {
+  const path = createFixture(join(root, 'long-stream'), 'linear', 14000);
+  const oid = fixtureGit(path, ['rev-parse', 'HEAD']);
+  const expected = fixtureGit(path, ['rev-list', '--date-order', '--parents', oid]).split('\n');
+  const maxBytes = 2 * 1024 * 1024;
+  const native = runner.runGit;
+  let walks = 0;
+  let bytes = 0;
+  const calls = vi.spyOn(runner, 'runGit').mockImplementation((git, args, options) => {
+    if (args[0] !== 'rev-list') return native(git, args, options);
+    walks++;
+    return native(git, args, {
+      ...options,
+      maxBytes,
+      stdoutPages: options?.stdoutPages && { ...options.stdoutPages, maxBytes },
+      onStdout(chunk) {
+        bytes += chunk.length;
+        return options!.onStdout!(chunk);
+      },
+    });
+  });
+  const cursor = new HistoryCursor('git', path, [oid]);
+  try {
+    let offset = 0;
+    for (;;) {
+      const page = await cursor.page(offset, offset === 0 ? 2000 : 5000);
+      const records = page.commits.map((commit) => [commit.oid, ...commit.parents].join(' '));
+      expect(records).toEqual(expected.slice(offset, offset + records.length));
+      offset += records.length;
+      if (!page.hasMore) break;
+      expect(records.length).toBeGreaterThan(0);
+    }
+    expect(offset).toBe(expected.length);
+    expect(bytes).toBeGreaterThan(maxBytes);
+    expect(walks).toBe(1);
+  } finally {
+    await cursor.close();
+    calls.mockRestore();
+  }
+});
