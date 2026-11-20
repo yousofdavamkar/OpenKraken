@@ -2,6 +2,14 @@
 
 M8 remains in progress. On Linux x64, the full Linux history with one ref passed the opening budget in all three fresh profiles. Fresh openings with 49,999 nested tag aliases passed three of six times across two runs, and all three restarted profiles passed. All six fresh and all three restarted profiles with distinct targets exceeded 500 ms. Native Windows, macOS and ARM64 acceptance, production release gates, and remaining [M6](m6-progress.md) and [M7](m7-progress.md) work are open.
 
+## Signing a release from installer build receipts
+
+The release signer checks the exact version, platform, format, filename, size and digest from each build receipt against the release descriptor, the supported installer formats and the installer bytes. A local HTTPS feed served three Linux x64 test packages for version `0.1.0`. Feed verification checked the DEB (115,440,864 bytes), RPM (99,010,373 bytes) and AppImage (133,212,664 bytes) and recorded the public key fingerprint, signed payload digest and validity period. [Release protocol](../decisions/0082-signed-update-release-protocol.md)
+
+Three Electron runs exercised cancellation, restart recovery, saving and feed verification with a stable AppImage, a stable RPM and a `0.2.0-beta.1` DEB. The saved installers matched the build receipts, and the saved AppImage ran. The desktop suite used temporary keys and loopback HTTPS. The Linux x64 unit and native suite passed 1,198 tests with nine skips. Typechecking, lint, build and workflow validation passed.
+
+The beta guide now covers first-download checksum verification on macOS and Windows. Its shell and PowerShell commands accepted fixture files with matching digests and rejected changed bytes on Linux. Native DMG and MSI acceptance, production signing and participant feedback remain open. [Beta guide](../beta.md)
+
 ## Reusing saved history after an upgrade
 
 The Git service now hashes the ordered history roots in batches while preserving the format-2 key. On 50,000 roots, median key construction time fell from 13.8 to 8.9 ms and resident memory growth fell from 4.81 to 0.75 MiB. On both large-ref fixtures, the new build reused all four files written by the previous build, loaded the first live page, and matched Git through 302 pages on restart. Moving a root after the first batch invalidated the cache with the root count unchanged. [Measurements and compatibility checks](m8-reference-performance.md#hashing-ordered-history-roots)
