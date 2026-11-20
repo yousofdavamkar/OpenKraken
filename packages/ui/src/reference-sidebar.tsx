@@ -4,17 +4,9 @@ import type { Ref, Snapshot } from '@openkraken/ipc-contract';
 import { RefControls } from './ref-controls.js';
 import { ReferenceActions } from './references.js';
 import { referenceDragProps } from './reference-drop.js';
+import { blockStart, blockLength, groupReferences, referenceGroups } from './reference-list.js';
 import { useRepository } from './store.js';
 
-const groups = [
-  ['local', 'Branches'],
-  ['remote', 'Remotes'],
-  ['tag', 'Tags'],
-  ['stash', 'Stashes'],
-  ['other', 'Other refs'],
-] as const;
-type ReferenceBlock = { refs: Ref[]; title?: string; firstPosition: number };
-const refsPerBlock = 4;
 const headingHeightEstimate = 48;
 
 function ReferenceRow({
@@ -56,49 +48,32 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState<string>();
   const scroll = useRef<HTMLDivElement>(null);
-  const { blocks, count } = useMemo(() => {
-    const search = query.trim().toLocaleLowerCase();
-    const buckets = new Map<Ref['kind'], Ref[]>(groups.map(([kind]) => [kind, []]));
-    for (const ref of snapshot.refs) {
-      if (!search || ref.name.toLocaleLowerCase().includes(search))
-        buckets.get(ref.kind)!.push(ref);
-    }
-    const blocks: ReferenceBlock[] = [];
-    let count = 0;
-    for (const [kind, title] of groups) {
-      const matches = buckets.get(kind)!;
-      for (let start = 0; start < matches.length; start += refsPerBlock) {
-        const refs = matches.slice(start, start + refsPerBlock);
-        blocks.push({ refs, title: start === 0 ? title : undefined, firstPosition: count + 1 });
-        count += refs.length;
-      }
-    }
-    return { blocks, count };
-  }, [snapshot.refs, query]);
-  const focusedBlock = useMemo(
-    () =>
-      focused ? blocks.findIndex((block) => block.refs.some((ref) => ref.name === focused)) : -1,
-    [blocks, focused],
+  const list = useMemo(() => groupReferences(snapshot.refs, query), [snapshot.refs, query]);
+  const focusedBlock = useMemo(() => (focused ? list.focusedBlock(focused) : -1), [list, focused]);
+  const getItemKey = useCallback(
+    (index: number) => list.refs[blockStart(list.section(index)!, index)]!.name,
+    [list],
   );
-  const getItemKey = useCallback((index: number) => blocks[index]!.refs[0]!.name, [blocks]);
   const estimatedHeights = useRef(new Map<Ref['kind'], number>());
   const virtual = useVirtualizer({
-    count: blocks.length,
+    count: list.blocks,
     getScrollElement: () => scroll.current,
     getItemKey,
     estimateSize: (index) => {
-      const block = blocks[index]!;
+      const section = list.section(index)!;
       return (
-        (block.title ? headingHeightEstimate : 0) +
-        block.refs.length * (estimatedHeights.current.get(block.refs[0]!.kind) ?? 120)
+        (index === section.firstBlock && section.title ? headingHeightEstimate : 0) +
+        blockLength(section, index) * (estimatedHeights.current.get(section.kind) ?? 120)
       );
     },
     measureElement: (element, entry, instance) => {
       const height = measureElement(element, entry, instance);
-      const block = blocks[instance.indexFromElement(element)];
-      if (block && height > 0) {
-        const refHeight = (height - (block.title ? headingHeightEstimate : 0)) / block.refs.length;
-        if (refHeight > 0) estimatedHeights.current.set(block.refs[0]!.kind, refHeight);
+      const index = instance.indexFromElement(element);
+      const section = list.section(index);
+      if (section && height > 0) {
+        const heading = index === section.firstBlock && section.title ? headingHeightEstimate : 0;
+        const refHeight = (height - heading) / blockLength(section, index);
+        if (refHeight > 0) estimatedHeights.current.set(section.kind, refHeight);
       }
       return height;
     },
@@ -126,21 +101,24 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
       );
     }
     const firstTrack = track;
-    const block = blocks[item.index]!;
-    if (block.title)
+    const section = list.section(item.index)!;
+    const start = blockStart(section, item.index);
+    const end = start + blockLength(section, item.index);
+    if (item.index === section.firstBlock && section.title)
       cells.push(
-        <div key={block.title} style={{ gridRow: track++ }}>
-          <h3>{block.title}</h3>
+        <div key={section.title} style={{ gridRow: track++ }}>
+          <h3>{section.title}</h3>
         </div>,
       );
-    for (const [index, reference] of block.refs.entries()) {
+    for (let index = start; index < end; index++) {
+      const reference = list.refs[index]!;
       cells.push(
         <div
           key={reference.name}
           style={{ gridRow: track++ }}
           role="listitem"
-          aria-posinset={block.firstPosition + index}
-          aria-setsize={count}
+          aria-posinset={section.firstPosition + index - section.from}
+          aria-setsize={list.count}
         >
           <ReferenceRow reference={reference} snapshot={snapshot} busy={busy} />
         </div>,
@@ -171,7 +149,7 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
         />
       </label>
       <p className="reference-match-count" role="status">
-        {count.toLocaleString()} matching references
+        {list.count.toLocaleString()} matching references
       </p>
       <div
         className="reference-scroll"
@@ -228,7 +206,7 @@ export function ReferenceSidebar() {
       {large ? (
         <VirtualReferences key={snapshot.repository.id} snapshot={snapshot} busy={busy} />
       ) : (
-        groups.map(([kind, title]) => {
+        referenceGroups.map(([kind, title]) => {
           const refs = snapshot.refs.filter((ref) => ref.kind === kind);
           return refs.length ? (
             <section key={kind}>

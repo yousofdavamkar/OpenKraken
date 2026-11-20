@@ -16,6 +16,16 @@ test('large reference sidebar stays bounded and filtered actions survive scrolli
       .join('\n') + '\n',
   );
   fixtureGit(repository, ['branch', 'Ångström']);
+  const mixed = [
+    'refs/heads/zz-group-edge',
+    'refs/remotes/upstream/group-edge',
+    ...Array.from({ length: 5 }, (_, index) => 'refs/tags/group-edge-' + index),
+  ];
+  fixtureGit(
+    repository,
+    ['update-ref', '--stdin'],
+    mixed.map((name) => `create ${name} ${commits[0]}`).join('\n') + '\n',
+  );
   const refCount = fixtureGit(repository, ['for-each-ref', '--format=.']).split('\n').length;
   const app = await electron.launch({
     args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
@@ -81,6 +91,19 @@ test('large reference sidebar stays bounded and filtered actions survive scrolli
     await expect(sidebar.getByRole('status')).toHaveText(
       `${refCount.toLocaleString()} matching references`,
     );
+    await filter.fill('group-edge');
+    await expect(sidebar.getByRole('status')).toHaveText('7 matching references');
+    const refList = sidebar.getByRole('list', { name: 'Reference list' });
+    // The tag section starts after two one-row sections and ends in a partial block.
+    await refList.evaluate((list) => list.scrollTo(0, list.scrollHeight));
+    const lastTag = sidebar
+      .getByRole('listitem')
+      .filter({ has: page.locator('[data-reference-name="refs/tags/group-edge-4"]') });
+    await expect(lastTag).toHaveAttribute('aria-posinset', '7');
+    await expect(lastTag).toHaveAttribute('aria-setsize', '7');
+    await refList.evaluate((list) => list.scrollTo(0, 0));
+    await expect(sidebar.getByRole('heading', { name: 'Branches', exact: true })).toBeVisible();
+    await expect(sidebar.getByRole('listitem').first()).toHaveAttribute('aria-posinset', '1');
     await filter.fill('  ÅNGSTRÖM  ');
     await expect(
       sidebar.getByRole('button', { name: 'Rename branch Ångström', exact: true }),
