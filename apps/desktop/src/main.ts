@@ -1705,7 +1705,11 @@ export function startDesktop(
         const request = requestSchema.parse(raw);
         validateResponseFormat(format, request.method);
         const result = await diagnostics!.track(request, () => handleRequest(request));
-        if (result.kind === 'snapshot' || result.kind === 'compactSnapshot') {
+        if (
+          result.kind === 'snapshot' ||
+          result.kind === 'compactSnapshot' ||
+          result.kind === 'tagAliasSnapshot'
+        ) {
           terminalRepository = result.snapshot.repository;
           draftRepositories.delete(result.snapshot.repository.id);
           draftRepositories.set(result.snapshot.repository.id, result.snapshot.repository);
@@ -1715,7 +1719,10 @@ export function startDesktop(
         // Serialize after validation and before both renderer IPC and isolated-world copying.
         if (format === 'history-page' && result.kind === 'page') return encodeHistoryPage(result);
         if (format === 'snapshot-bodies') return encodeSnapshotBodies(result);
-        if (format === 'snapshot-transfer') return JSON.stringify(result);
+        if (format === 'snapshot-transfer')
+          return JSON.stringify(
+            result.kind === 'tagAliasSnapshot' ? expandGitServiceResult(result) : result,
+          );
         if (format === 'snapshot-json') return serializeLegacySnapshot(result);
         const expanded = expandGitServiceResult(result);
         return format === 'json' ? JSON.stringify(expanded) : expanded;

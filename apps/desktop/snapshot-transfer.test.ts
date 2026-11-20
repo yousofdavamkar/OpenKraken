@@ -2,6 +2,10 @@ import { expect, test } from 'vitest';
 import { SnapshotTransfer } from './src/snapshot-transfer.js';
 import {
   encodeAliasedTagRefs,
+  decodeSnapshotBodies,
+  encodeSnapshotBodies,
+  expandGitServiceResult,
+  serializeLegacySnapshot,
   requestSchema,
   serviceRequestSchema,
   snapshotPartSchema,
@@ -62,7 +66,7 @@ test('main returns one validated snapshot for the matching request and opening',
   expect(result.snapshot.cursor).toBe(id);
 });
 
-test('main reconstructs consecutive annotated aliases and preserves exceptional refs in order', () => {
+test('validated annotated aliases survive the renderer bridge and expand in their original order', () => {
   const source: Ref[] = Array.from({ length: 10000 }, (_, i) => ({
     ...tag,
     kind: 'tag',
@@ -92,9 +96,16 @@ test('main reconstructs consecutive annotated aliases and preserves exceptional 
   const message = { ...first, snapshotPart: 'tagAliases', refs: rows };
   transfer.receive(message);
   const result = transfer.receive(last);
-  expect(result?.kind).toBe('snapshot');
-  if (result?.kind !== 'snapshot') throw Error('Missing snapshot');
-  expect(result.snapshot.refs).toStrictEqual(source);
+  if (!result) throw Error('Missing snapshot');
+  const split = encodeSnapshotBodies(result);
+  if (typeof split === 'string') throw Error('Missing commit bodies');
+  expect(JSON.parse(split.metadata).snapshot.refs).toStrictEqual(rows);
+  const decoded = expandGitServiceResult(decodeSnapshotBodies(split), { freezeCompactRefs: true });
+  if (decoded.kind !== 'snapshot') throw Error('Missing decoded snapshot');
+  expect(decoded.snapshot.refs).toStrictEqual(source);
+  expect(Object.isFrozen(decoded.snapshot.refs[1])).toBe(true);
+  expect(expandGitServiceResult(result)).toEqual(decoded);
+  expect(JSON.parse(serializeLegacySnapshot(result))).toEqual(decoded);
 });
 
 test('tag aliases require a matching opener and share the transfer identity and duplicate checks', () => {

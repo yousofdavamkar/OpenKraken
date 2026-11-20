@@ -2403,18 +2403,18 @@ function plainAnnotatedTag(ref: Ref) {
   );
 }
 const aliasedTagRefsSchema = z.array(z.unknown()).transform((rows, ctx) => {
-  let previous: Ref | undefined;
-  const refs: Ref[] = [];
+  let acceptsAlias = false;
+  const refs: (Ref | string)[] = [];
   for (const [index, row] of rows.entries()) {
     if (typeof row === 'string') {
-      if (previous && row.startsWith(tagPrefix) && row.length > tagPrefix.length) {
-        refs.push({ ...previous, name: row, shortName: row.slice(tagPrefix.length) });
+      if (acceptsAlias && row.startsWith(tagPrefix) && row.length > tagPrefix.length) {
+        refs.push(row);
         continue;
       }
     } else {
       const full = refSchema.safeParse(row);
       if (full.success) {
-        previous = plainAnnotatedTag(full.data) ? full.data : undefined;
+        acceptsAlias = plainAnnotatedTag(full.data);
         refs.push(full.data);
         continue;
       }
@@ -2512,7 +2512,13 @@ export type Snapshot = z.infer<typeof snapshotSchema>;
 export type Request = z.infer<typeof requestSchema>;
 export type ServiceRequest = z.infer<typeof serviceRequestSchema>;
 export type Result = z.infer<typeof resultSchema>;
-export type ServiceResult = z.infer<typeof serviceResponseSchema>['result'];
+// Only a validated, completed staged opening can produce a tag-alias snapshot.
+export type ServiceResult =
+  | z.infer<typeof serviceResponseSchema>['result']
+  | {
+      kind: 'tagAliasSnapshot';
+      snapshot: Omit<Snapshot, 'refs'> & { refs: (Ref | string)[] };
+    };
 export {
   encodeHistoryPage,
   decodeHistoryPage,

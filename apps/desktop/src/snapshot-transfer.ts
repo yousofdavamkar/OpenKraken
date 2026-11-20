@@ -33,10 +33,8 @@ export class SnapshotTransfer {
       part.data.snapshotPart === 'complete' &&
       references?.refs.length === part.data.refCount
     ) {
-      if (references.snapshotPart === 'tagAliases')
-        return { kind: 'snapshot', snapshot: { ...part.data.snapshot, refs: references.refs } };
       return {
-        kind: 'compactSnapshot',
+        kind: references.snapshotPart === 'tagAliases' ? 'tagAliasSnapshot' : 'compactSnapshot',
         snapshot: { ...part.data.snapshot, refs: references.refs },
       };
     }

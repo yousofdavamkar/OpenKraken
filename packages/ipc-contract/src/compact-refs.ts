@@ -66,6 +66,19 @@ export function expandGitServiceResult(
   result: ServiceResult,
   options: { freezeCompactRefs?: boolean } = {},
 ): Result {
+  if (result.kind === 'tagAliasSnapshot') {
+    let previous: Ref | undefined;
+    const refs = result.snapshot.refs.map((row) => {
+      if (typeof row !== 'string') {
+        previous = row;
+        return row;
+      }
+      if (!previous) throw new Error('Missing annotated tag');
+      const ref = { ...previous, name: row, shortName: row.slice(prefixes.tag.length) };
+      return options.freezeCompactRefs ? Object.freeze(ref) : ref;
+    });
+    return { kind: 'snapshot', snapshot: { ...result.snapshot, refs } };
+  }
   if (result.kind !== 'compactSnapshot') return result;
   const refs = mapCompactRefs(result.snapshot.refs, (name, target) => {
     const ref = expandRef(name, target);
@@ -77,6 +90,7 @@ export function expandGitServiceResult(
 
 /** Preserve the self-contained rows returned by the original snapshot-json API. */
 export function serializeLegacySnapshot(result: ServiceResult): string {
+  if (result.kind === 'tagAliasSnapshot') return JSON.stringify(expandGitServiceResult(result));
   if (
     result.kind !== 'compactSnapshot' ||
     !result.snapshot.refs.some((row) => typeof row === 'string' && row.startsWith('refs/'))

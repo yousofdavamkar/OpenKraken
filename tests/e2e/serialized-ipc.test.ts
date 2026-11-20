@@ -236,25 +236,26 @@ test('large Git snapshots round-trip their ordered reference records through all
   }
 });
 
-test('large annotated alias runs preserve ordinary reference records on the renderer bridge', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'openkraken-annotation-ipc-'));
-  const repository = createFixture(join(root, 'repo'), 'linear', 3);
-  const target = fixtureGit(repository, ['rev-parse', 'refs/tags/annotated']);
-  const peeled = fixtureGit(repository, ['rev-parse', 'refs/tags/annotated^{}']);
-  const names = Array.from(
-    { length: 10000 },
-    (_, i) => 'refs/tags/版本-' + String(i).padStart(5, '0'),
-  );
-  fixtureGit(
-    repository,
-    ['update-ref', '--stdin'],
-    names.map((name) => `create ${name} ${target}\n`).join(''),
-  );
-  fixtureGit(repository, ['pack-refs', '--all']);
-  const entry = join(root, 'observe-transfer.cjs');
-  writeFileSync(
-    entry,
-    `
+for (const format of ['snapshot-transfer', 'snapshot-bodies'] as const) {
+  test(`large annotated alias runs retain every tag field through ${format}`, async () => {
+    const root = mkdtempSync(join(tmpdir(), 'openkraken-annotation-ipc-'));
+    const repository = createFixture(join(root, 'repo'), 'linear', 3);
+    const target = fixtureGit(repository, ['rev-parse', 'refs/tags/annotated']);
+    const peeled = fixtureGit(repository, ['rev-parse', 'refs/tags/annotated^{}']);
+    const names = Array.from(
+      { length: 10000 },
+      (_, i) => 'refs/tags/版本-' + String(i).padStart(5, '0'),
+    );
+    fixtureGit(
+      repository,
+      ['update-ref', '--stdin'],
+      names.map((name) => `create ${name} ${target}\n`).join(''),
+    );
+    fixtureGit(repository, ['pack-refs', '--all']);
+    const entry = join(root, 'observe-transfer.cjs');
+    writeFileSync(
+      entry,
+      `
     const { utilityProcess } = require('electron');
     const fork = utilityProcess.fork.bind(utilityProcess);
     utilityProcess.fork = (...args) => {
@@ -270,41 +271,55 @@ test('large annotated alias runs preserve ordinary reference records on the rend
     };
     require(${JSON.stringify(resolve('apps/desktop/dist/main.cjs'))});
   `,
-  );
-  const app = await electron.launch({ args: [entry, `--user-data-dir=${join(root, 'profile')}`] });
-  try {
-    const page = await app.firstWindow();
-    await app.evaluate(({ dialog }, path) => {
-      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
-    }, repository);
-    const raw = await page.evaluate(() =>
-      window.openkraken.request({ id: crypto.randomUUID(), method: 'open' }, 'snapshot-transfer'),
     );
-    const result: ServiceResult = JSON.parse(raw);
-    if (result.kind !== 'snapshot') throw Error('Expected ordinary snapshot');
-    const aliases = result.snapshot.refs.filter((ref) => ref.name.startsWith('refs/tags/版本-'));
-    expect(aliases.map((ref) => ref.name)).toEqual(names);
-    expect(
-      aliases.every(
-        (ref) =>
-          ref.shortName === ref.name.slice(10) &&
-          ref.target === target &&
-          ref.peeled === peeled &&
-          ref.kind === 'tag' &&
-          ref.peeledType === 'commit' &&
-          ref.objectType === 'tag' &&
-          !ref.upstream &&
-          !ref.isHead,
-      ),
-    ).toBe(true);
-    expect(
-      await app.evaluate(() => Reflect.get(globalThis, 'annotationAliases')),
-    ).toBeGreaterThanOrEqual(9999);
-  } finally {
-    await app.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+    const app = await electron.launch({
+      args: [entry, `--user-data-dir=${join(root, 'profile')}`],
+    });
+    try {
+      const page = await app.firstWindow();
+      await app.evaluate(({ dialog }, path) => {
+        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+      }, repository);
+      const payload = await page.evaluate((format) => {
+        const request = { id: crypto.randomUUID(), method: 'open' as const };
+        return format === 'snapshot-transfer'
+          ? window.openkraken.request(request, 'snapshot-transfer')
+          : window.openkraken.request(request, 'snapshot-bodies');
+      }, format);
+      const wire = decodeSnapshotBodies(payload);
+      if (format === 'snapshot-bodies') {
+        expect(wire.kind).toBe('tagAliasSnapshot');
+        if (wire.kind !== 'tagAliasSnapshot') throw Error('Missing compact annotated tags');
+        expect(
+          wire.snapshot.refs.filter((row) => typeof row === 'string').length,
+        ).toBeGreaterThanOrEqual(9999);
+      } else expect(wire.kind).toBe('snapshot');
+      const result = expandGitServiceResult(wire);
+      if (result.kind !== 'snapshot') throw Error('Expected ordinary snapshot');
+      const aliases = result.snapshot.refs.filter((ref) => ref.name.startsWith('refs/tags/版本-'));
+      expect(aliases.map((ref) => ref.name)).toEqual(names);
+      expect(
+        aliases.every(
+          (ref) =>
+            ref.shortName === ref.name.slice(10) &&
+            ref.target === target &&
+            ref.peeled === peeled &&
+            ref.kind === 'tag' &&
+            ref.peeledType === 'commit' &&
+            ref.objectType === 'tag' &&
+            !ref.upstream &&
+            !ref.isHead,
+        ),
+      ).toBe(true);
+      expect(
+        await app.evaluate(() => Reflect.get(globalThis, 'annotationAliases')),
+      ).toBeGreaterThanOrEqual(9999);
+    } finally {
+      await app.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
 
 for (const interruption of ['early cancel', 'late cancel', 'stop utility'] as const) {
   test(`a staged opening waits for the native outcome and can reuse the request ID (${interruption})`, async () => {

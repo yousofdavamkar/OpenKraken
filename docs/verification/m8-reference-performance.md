@@ -18,6 +18,12 @@ The table gives medians from alternating fresh-profile Electron runs on Linux x6
 
 Staging the aliases reduced median time from the open request to receipt in the renderer from 806.5 to 658.8 ms. All 15 appends with the staged transfer took 182.0–226.8 ms. Graph frame intervals were at most 16.8 ms p95. Every first paint in the table exceeded 500 ms. [Per-run timings](m8-opening-experiments.csv)
 
+### Keeping validated tag aliases compact through the renderer bridge
+
+Five alternating pairs followed one warm-up pair (pair 0) on the same 50,000-ref annotated fixture. Each Linux x64 Electron run used a fresh profile, Git 2.53.0 and populated OS caches. Each opened 2,000 commits, checked the displayed ref count and appended to 17,000 commits. Median first paint fell from 893.0 to 709.5 ms. Median time to receive the opening response fell from 656.3 to 525.8 ms. Parsing the renderer metadata took 10.6 ms at the median, down from 47.5 ms. Reconstructing the tag aliases in the renderer took 6.5 ms at the median.
+
+All five candidate openings exceeded 500 ms (688.0–817.1 ms). All 15 candidate page appends took less than 300 ms (186.0–272.2 ms). This comparison measured opening and paging only. The existing distinct-target fixture uses a different ref format. [Per-run measurements](m8-opening-experiments.csv) · [Transfer format](../decisions/0116-validated-snapshot-references.md#consecutive-names-for-annotated-tags)
+
 ## Raw Git dates in the history stream
 
 On full Linux history, Git returned 21,207,090 bytes for 17,000 commits using the original author and committer dates. With raw dates it returned 20,527,090 bytes. All parsed fields matched on Git 2.53.0 and 2.38.0. The raw format also reads an epoch-zero commit whose negative timezone caused the original Git command to abort. [Format and compatibility](../decisions/0002-git-protocol.md#raw-author-and-committer-dates)

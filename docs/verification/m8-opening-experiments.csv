@@ -363,3 +363,15 @@ annotated-alias-final,single,3,candidate,339.3,107.7,216.7,217,208.7,160.6,16.8,
 annotated-alias-final,legacy-annotated,1,candidate,924.3,454.3,701.4,196.7,207,171.7,16.7,16.8,59.9,60.9,46.9,745.8,44.4,0,54.8,8.9,114.8
 annotated-alias-final,legacy-annotated,2,candidate,933.6,433.7,703,180.9,194.3,186.1,16.7,16.7,52.1,56.9,43.1,750.4,47.3,0.1,51.4,6.8,125
 annotated-alias-final,legacy-annotated,3,candidate,914.8,448.6,687.2,196.9,188.9,170.9,16.8,16.8,55.8,58.7,45.7,734.7,47.3,0.1,58.7,6.4,115
+renderer-tag-aliases,linux-nested-annotations,0,previous,1261.7,684.8,978.2,314.4,330.6,275.6,,,,,,,65.8,0.2,,,
+renderer-tag-aliases,linux-nested-annotations,0,candidate,703.4,409.6,526.9,240.4,200.3,183.9,,,,,,,8.3,5.6,,,
+renderer-tag-aliases,linux-nested-annotations,1,candidate,688,410.5,519.7,265.8,186,186.9,,,,,,,9,5.5,,,
+renderer-tag-aliases,linux-nested-annotations,1,previous,869.3,381.0,635.9,200.8,211.4,200.9,,,,,,,47,0.1,,,
+renderer-tag-aliases,linux-nested-annotations,2,previous,931.3,380.6,694.6,224,200.2,194.9,,,,,,,75.6,0.3,,,
+renderer-tag-aliases,linux-nested-annotations,2,candidate,709.5,415.2,525.8,264.6,216.4,260.7,,,,,,,10.6,8.7,,,
+renderer-tag-aliases,linux-nested-annotations,3,candidate,730.6,440.8,551.2,223.6,186.5,190,,,,,,,11.1,6,,,
+renderer-tag-aliases,linux-nested-annotations,3,previous,885.8,388.9,656.3,174.8,203.9,195.9,,,,,,,50,0.2,,,
+renderer-tag-aliases,linux-nested-annotations,4,previous,893,418.5,656.2,201.2,209,195.3,,,,,,,43.6,0,,,
+renderer-tag-aliases,linux-nested-annotations,4,candidate,707.6,413.7,522.6,222.5,201.4,222.2,,,,,,,14.1,8.9,,,
+renderer-tag-aliases,linux-nested-annotations,5,candidate,817.1,476.4,605.7,272.2,200.3,249.2,,,,,,,9.5,6.5,,,
+renderer-tag-aliases,linux-nested-annotations,5,previous,911.1,401.9,667.1,182.3,248.8,205.6,,,,,,,47.5,0.1,,,
