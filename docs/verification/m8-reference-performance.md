@@ -6,6 +6,8 @@ The sidebar now mounts a bounded set of reference controls on large repositories
 
 The mixed fixture replaces the lightweight tag `benchmark-10000` with an annotation of the same commit in a shared-object mirror. It retains 50,000 refs and 1,505,199 reachable commits. Git 2.38.0 and 2.53.0 matched all application ref records and the first 17,000 ordered commit IDs and parent lists. SHA-256 for the displayed history prefix was `539be6736e0fe82c65494612f950a6f55601967a237c6c4875777895a1f50965`. Both versions also matched the prefix on the nested-annotation fixture. On a separate 950-commit DAG, substituting peeled commit IDs for tag object IDs preserved the native date-order and parent stream for 120 root lists on each Git version.
 
+Recreate this distribution from a full Linux repository with `node scripts/create-reference-performance-fixture.mjs SOURCE NEW_DIRECTORY one-annotation`. It writes the annotation in the new bare repository and records its full name and peeled commit in `fixture.json`. The source supplies the existing Git objects.
+
 Each row shows the median of five alternating fresh-profile pairs after a warm-up pair on Linux x64, Git 2.53.0, with populated OS caches. Each run opened 2,000 commits and appended three pages to reach 17,000.
 
 | Change                                             | Fixture          | First paint before | First paint after | Snapshot before | Snapshot after |

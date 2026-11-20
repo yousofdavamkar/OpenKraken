@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { createPerformanceFixture, performanceGit as git } from './create-performance-fixture.mjs';
 import { createReferenceFixture } from './create-reference-performance-fixture.mjs';
 
-test('both reference distributions use the specified commits and preserve the source', async () => {
+test('reference distributions use the specified commits and preserve the source', async () => {
   const root = await mkdtemp(join(tmpdir(), 'openkraken-ref-scale-'));
   try {
     const { repository: source, head } = await createPerformanceFixture(join(root, 'source'), {
@@ -13,7 +13,7 @@ test('both reference distributions use the specified commits and preserve the so
       files: 2,
     });
     const before = git(source, ['show-ref']);
-    for (const mode of ['shared', 'distinct']) {
+    for (const mode of ['shared', 'distinct', 'one-annotation']) {
       const destination = join(root, mode);
       const result = await createReferenceFixture(source, destination, mode, 20);
       expect(JSON.parse(await readFile(join(destination, 'fixture.json'), 'utf8'))).toEqual(result);
@@ -26,6 +26,18 @@ test('both reference distributions use the specified commits and preserve the so
       expect(git(result.repository, ['rev-parse', 'refs/tags/benchmark-00018'])).toBe(
         git(source, ['rev-parse', mode === 'shared' ? 'HEAD' : 'HEAD~19']),
       );
+      if (mode === 'one-annotation') {
+        const fields = git(result.repository, [
+          'for-each-ref',
+          '--format=%(refname) %(objecttype) %(*objectname)',
+        ]);
+        const annotations = fields.split('\n').filter((line) => line.includes(' tag '));
+        const peeled = git(source, ['rev-parse', 'HEAD~5']);
+        expect(annotations).toEqual([`refs/tags/benchmark-00004 tag ${peeled}`]);
+        expect(git(result.repository, ['rev-list', '--date-order', '--parents', '--all'])).toBe(
+          git(source, ['rev-list', '--date-order', '--parents', 'HEAD']),
+        );
+      }
       await expect(createReferenceFixture(source, destination, mode, 20)).rejects.toMatchObject({
         code: 'EEXIST',
       });
