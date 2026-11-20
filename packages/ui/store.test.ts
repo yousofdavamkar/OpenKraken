@@ -193,6 +193,32 @@ test('deep range selection preserves the loaded page and ignores a missing targe
   select('missing', 'range');
   expect(useRepository.getState()).toBe(state);
 });
+test('a keyboard jump checks each appended page without revisiting earlier commit IDs', async () => {
+  const snapshot = fixture();
+  await open(snapshot);
+  const first = useRepository.getState().rows[0]!;
+  const readOid = vi.fn(() => first.oid);
+  const observed = Object.freeze({
+    ...first,
+    get oid() {
+      return readOid();
+    },
+  });
+  useRepository.setState({ rows: [observed] });
+  for (const [index, digit] of ['b', 'c', 'd'].entries()) {
+    request.mockResolvedValueOnce({
+      kind: 'page',
+      cursor: snapshot.cursor,
+      offset: index + 1,
+      commits: [{ ...snapshot.commits[0]!, oid: digit.repeat(40), parents: [] }],
+      hasMore: digit !== 'd',
+    });
+  }
+  readOid.mockClear();
+  await useRepository.getState().navigate('d'.repeat(40));
+  expect(useRepository.getState().selection.focus).toBe('d'.repeat(40));
+  expect(readOid).toHaveBeenCalledTimes(1);
+});
 test('a pending jump to unloaded history preserves a newer row selection', async () => {
   const snapshot = fixture();
   const second = { ...snapshot.commits[0]!, oid: 'b'.repeat(40), parents: ['c'.repeat(40)] };

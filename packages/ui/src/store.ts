@@ -461,17 +461,27 @@ export const useRepository = create<State>()(
       const sequence = ++navigationSequence;
       const { snapshot, selection } = get();
       const cursor = snapshot?.cursor;
+      let checked = 0;
       while (
         get().snapshot?.cursor === cursor &&
         get().selection === selection &&
         sequence === navigationSequence
       ) {
         const { rows, busy, paging, snapshot: current } = get();
-        const row =
-          typeof target === 'number' ? rows[target] : rows.find((row) => row.oid === target);
+        let row: DisplayCommit | undefined;
+        if (typeof target === 'number') row = rows[target];
+        else {
+          for (let i = checked; i < rows.length; i++) {
+            if (rows[i]!.oid === target) {
+              row = rows[i];
+              break;
+            }
+          }
+        }
         if (row) {
+          const nextSelection = singleSelection(row.oid);
           set((s) => {
-            s.selection = singleSelection(row.oid);
+            s.selection = nextSelection;
           });
           return;
         }
@@ -488,7 +498,10 @@ export const useRepository = create<State>()(
         } else {
           await get().loadMore();
         }
-        if (get().rows.length === rows.length) return;
+        const updated = get().rows;
+        if (updated.length === rows.length) return;
+        // Appends retain earlier row objects. A working-state refresh can reproject them.
+        checked = updated[rows.length - 1] === rows.at(-1) ? rows.length : 0;
       }
     },
     setDetail: (detail) =>

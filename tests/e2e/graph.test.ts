@@ -442,6 +442,31 @@ test('one Down key moves past the last initially loaded commit', async () => {
     await close();
   }
 });
+test('the upstream shortcut follows three native pages to the root commit', async () => {
+  const { page, repository, close } = await launch('linear', 12003, (repo) => {
+    const root = fixtureGit(repo, ['rev-list', '--max-parents=0', 'HEAD']);
+    fixtureGit(repo, ['branch', 'old-tip', root]);
+    fixtureGit(repo, ['branch', '--set-upstream-to=old-tip', 'main']);
+  });
+  try {
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    await expect(page.getByTestId('commit-count')).toHaveText('2,000 commits · more available');
+    await grid.press('Shift+H');
+    const selected = grid.getByRole('row', { selected: true });
+    await expect(selected).toHaveAttribute(
+      'data-oid',
+      fixtureGit(repository, ['rev-parse', 'old-tip']),
+    );
+    await expect(selected).toBeInViewport();
+    await expect(page.getByTestId('commit-count')).toHaveText('12,003 commits');
+    await grid.press('Enter');
+    await expect(page.getByRole('region', { name: 'Commit details' })).toContainText(
+      'Commit 1 — linear',
+    );
+  } finally {
+    await close();
+  }
+});
 test('5000-commit pages append without changing previous lanes; unloaded search and bounded scrolling', async ({
   browserName: _browserName,
 }, testInfo) => {
