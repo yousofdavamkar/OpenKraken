@@ -6,6 +6,8 @@ import { ActivityLog } from './activity-log.js';
 import type { Diagnostics } from './diagnostics.js';
 import { installTimeoutMs, Updates } from './updates.js';
 import type { UpdateConfiguration } from './update-protocol.js';
+import { pendingAppImageStartup } from './appimage-install.js';
+import { watchAppImageStartup } from './appimage-startup.js';
 import { appImageTarget } from './appimage-target.js';
 import {
   prepareUpdateRestart,
@@ -439,6 +441,8 @@ export function startDesktop(
     for (const argument of commandLine) repositoryLinks.receive(argument);
     focusForLink();
   });
+  let finishStartupWatch: (() => void) | undefined;
+  let closingUnconfirmedStartup = false;
   const ready = app.whenReady().then(async () => {
     const target = await appImageTarget({
       packaged: app.isPackaged,
@@ -454,6 +458,36 @@ export function startDesktop(
       arch: process.arch,
       ...(target ? { appImage: target } : {}),
     });
+    if (target) {
+      finishStartupWatch = watchAppImageStartup(
+        () => pendingAppImageStartup(target, app.getVersion()),
+        async (signal) => {
+          const options: Electron.MessageBoxOptions = {
+            type: 'question',
+            title: 'OpenKraken update',
+            message: 'The updated desktop is taking longer than usual to open.',
+            detail:
+              'You can keep waiting or close this launch to let the updater check for recovery.',
+            buttons: ['&Keep waiting', '&Close OpenKraken'],
+            normalizeAccessKeys: true,
+            defaultId: 0,
+            cancelId: 0,
+            signal,
+          };
+          const { response } =
+            window && !window.isDestroyed()
+              ? await dialog.showMessageBox(window, options)
+              : await dialog.showMessageBox(options);
+          return response === 1;
+        },
+        () => {
+          // The user closed an unconfirmed startup whose renderer may not process a close event.
+          closingUnconfirmedStartup = true;
+          if (window && !window.isDestroyed()) window.destroy();
+          else app.quit();
+        },
+      );
+    }
     await reportingReady;
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) =>
       callback(false),
@@ -465,8 +499,11 @@ export function startDesktop(
       });
     });
     const executeRequest = async (request: DesktopRequest): Promise<ServiceResult> => {
-      if (request.method === 'updatesStarted')
+      if (request.method === 'updatesStarted') {
+        if (closingUnconfirmedStartup) return { kind: 'cancelled' };
+        finishStartupWatch?.();
         return { kind: 'updates', state: updatesStateSchema.parse(await updates!.started()) };
+      }
       if (request.method === 'updatesDismissRecovery') {
         try {
           return {
@@ -1694,11 +1731,13 @@ export function startDesktop(
         window.webContents.send(EVENT_CHANNEL, { type: 'activityChanged', completed });
     });
     await activity.read();
+    if (closingUnconfirmedStartup || quitState !== 'running') return;
     startService();
     // Native installers own protocol registration and its uninstall lifecycle.
     // Launching an extracted/portable bundle must not leave a stale registry command.
     windowsReady = true;
     const loaded = createWindow(true);
+    if (finishStartupWatch) window!.once('closed', finishStartupWatch);
     app.on('activate', () => {
       if (!window) createWindow();
     });
@@ -1710,6 +1749,7 @@ export function startDesktop(
   let quitState: 'running' | 'draining' | 'ready' = 'running';
   // Keep the service and caches alive if a renderer cancels the window close.
   app.on('will-quit', (event) => {
+    finishStartupWatch?.();
     if (quitState !== 'running') {
       if (quitState === 'draining') event.preventDefault();
       return;
@@ -1818,5 +1858,8 @@ export function startDesktop(
       .finally(finishQuit);
     child?.postMessage({ shutdown: true });
   });
-  return ready;
+  return ready.catch((error: unknown) => {
+    finishStartupWatch?.();
+    throw error;
+  });
 }

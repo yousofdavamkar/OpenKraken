@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   stageAppImageUpdate,
+  pendingAppImageStartup,
   recoverAppImageUpdate,
   rollbackAppImageUpdate,
 } from './src/appimage-install.js';
@@ -352,6 +353,34 @@ test.skipIf(process.platform !== 'linux')(
       expect(await readFile(target)).toEqual(oldImage);
     } finally {
       await chmod(root, 0o700);
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
+  'only a committed matching replacement with its predecessor can prompt for startup recovery',
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-pending-start-'));
+    const target = join(root, 'OpenKraken.AppImage');
+    const source = join(root, 'artifact.ready');
+    const version = '0.2.0';
+    try {
+      await writeFile(target, oldImage, { mode: 0o700 });
+      await writeFile(source, newImage, { mode: 0o600 });
+      const staged = await stageAppImageUpdate(
+        { target, source, artifact, version, arch: 'x64' },
+        new AbortController().signal,
+      );
+      expect(await pendingAppImageStartup(target, version)).toBe(false);
+      await staged.arm();
+      expect(await pendingAppImageStartup(target, version)).toBe(false);
+      await staged.commit();
+      expect(await pendingAppImageStartup(target, '0.1.0')).toBe(false);
+      expect(await pendingAppImageStartup(target, version)).toBe(true);
+      await writeFile(join(target + '.openkraken-update', 'unexpected'), '');
+      expect(await pendingAppImageStartup(target, version)).toBe(false);
+    } finally {
       await rm(root, { recursive: true, force: true });
     }
   },

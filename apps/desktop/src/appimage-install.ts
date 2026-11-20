@@ -128,6 +128,24 @@ async function readTransaction(target: string) {
     await file.close();
   }
 }
+/** Identifies the installed transaction for the slow-start dialog. Recovery verifies the images. */
+export async function pendingAppImageStartup(target: string, version: string) {
+  try {
+    const transaction = await readTransaction(target);
+    if (transaction.version !== version || transaction.arch !== process.arch) return false;
+    const files = await readdir(targetPath(target), { withFileTypes: true });
+    return (
+      files.length === 2 &&
+      files.every(
+        (entry) => entry.isFile() && ['transaction.json', 'previous.AppImage'].includes(entry.name),
+      )
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 async function exists(path: string) {
   try {
     await lstat(path);
