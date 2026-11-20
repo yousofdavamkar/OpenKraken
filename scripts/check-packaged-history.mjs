@@ -32,6 +32,8 @@ async function checkPackagedReferenceList(page) {
     'refs/zz/range-check-last',
   ];
   for (const [index, name] of expected.entries()) {
+    if (index === expected.length - 1)
+      await list.evaluate((element) => element.scrollTo(0, element.scrollHeight));
     const item = list
       .getByRole('listitem')
       .filter({ has: page.locator(`[data-reference-name="${name}"]`) });
