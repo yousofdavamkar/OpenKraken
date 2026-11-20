@@ -387,3 +387,7 @@ sampled-annotation-roots,linux-nested-annotations,4,previous,708,408.2,524.2,282
 sampled-annotation-roots,linux-nested-annotations,4,candidate,577.1,288.9,418.5,238.4,188.6,196.2,,,,,,,9,5.6,,,
 sampled-annotation-roots,linux-nested-annotations,5,candidate,644.5,332.2,460.5,217.6,184.9,181.3,,,,,,,8.8,6.4,,,
 sampled-annotation-roots,linux-nested-annotations,5,previous,703.1,412.5,527.1,230.8,175.8,171,,,,,,,10.3,6,,,
+tag-walk-release-benchmark,linux-single,1,fd84fad,296.2,94.7,188.4,202.6,180.3,158.4,16.7,,65.7,53.5,40.8,195.5,6.9,0.2,36.9,7.9,55.9
+tag-walk-release-benchmark,linux-distinct,1,fd84fad,755.8,432.4,562.9,230.2,201.2,183.9,16.7,16.7,64.1,45.3,55.4,598,12.4,22.7,45,5.6,107.2
+tag-walk-release-benchmark,linux-nested-annotations,1,fd84fad,620.6,310.0,440.2,224.6,183.4,172.7,16.7,16.7,60,54.5,43.9,460.1,11.8,8.1,41.2,10.6,108.7
+tag-walk-release-benchmark,linux-nested-annotations-git-2.38,1,fd84fad,665.3,388.6,502.8,226.5,180.1,164.6,16.7,16.8,65.4,59.6,45.9,517.5,8.4,6.3,38.4,5.6,103.8

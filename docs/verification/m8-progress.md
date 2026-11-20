@@ -1,6 +1,20 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest three runs. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest run. The shared-HEAD 50,000-ref fixture meets the opening budget intermittently. The distinct-target and nested annotated-tag fixtures still exceed it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+
+## Cancelling, retrying and paging during full-history search
+
+On Linux x64, a controlled Git scan delayed by 65 seconds reproduced the previous desktop timeout at 30.5 seconds. The updated desktop returned the expected commit in 65.3 seconds. Each message or author scan now has a 120-second deadline. The service drains both scans if either fails. The main process allows 210 seconds for the full search, including queueing and object lookup. [Search and cancellation](../decisions/0004-m1-history-and-interaction.md)
+
+The Electron regression holds both native scans, appends a page, activates Cancel search using Enter and observes both child processes exit. The same focused button starts the query again. Store regressions cover late replies during a same-query retry, a failed cancellation, and searches queued behind a background refresh.
+
+On the 50,000-ref repository with 49,999 aliases of a nested annotated tag, forwarding aliases to the renderer reduced median first paint from 893.0 to 709.5 ms. In a second five-pair comparison, reusing the walk from sampled, peeled tag targets reduced it from 708.0 to 582.1 ms. Every candidate page append in both comparisons met the 300 ms budget. [Measurements and cursor checks](m8-reference-performance.md#starting-the-history-walk-from-annotated-refs)
+
+Four full benchmarks at `fd84fad` painted in 296.2 ms with one ref, 755.8 ms with 50,000 distinct targets, 620.6 ms with the annotated aliases and 665.3 ms with those aliases on Git 2.38.0. All 12 page appends took 158.4–230.2 ms and graph frame intervals were 16.7 ms p95 in all four runs. The three large-ref openings exceeded 500 ms. [Individual benchmark runs](m8-opening-experiments.csv)
+
+On the final Linux x64 package at `58e8d17`, one full-history search was cancelled after two appends. Its retry found the expected tagged commit in 28.6 seconds while the graph appended to 17,000 commits. Git 2.38.0 and 2.53.0 both matched every ref and the first 17,000 commits and parent lists from the native traversal. The full unit and native suite passed 1,119 tests with nine skips. Typechecking, lint, the production build, package fuse verification and packaged history smoke passed.
+
+All 35 graph, sidebar, history-cache, reference and serialized-IPC Electron tests passed in isolation. With build and test jobs running concurrently, one 5,000-commit page took 519.4 ms. On the isolated rerun it took 141.0 ms and scrolling measured 16.8 ms p95. The 300 ms paging threshold remains in force.
 
 ## History reachable through nested release tags
 
