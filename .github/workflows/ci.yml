@@ -423,7 +423,9 @@ jobs:
             xvfb-run -a pnpm smoke:installer "$upgrade_manifest"
           done
           xvfb-run -a pnpm smoke:installer "$INSTALLER_ROOT/AppImage/manifest.json"
-          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a pnpm smoke:installer "$INSTALLER_ROOT/AppImage/manifest.json"
+          staging="$RUNNER_TEMP/appimage-extraction-test-with-a-long-profile-directory"
+          mkdir -p "$staging"
+          TMPDIR="$staging" APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a pnpm smoke:installer "$INSTALLER_ROOT/AppImage/manifest.json"
       - if: runner.os == 'Linux'
         name: Debian install, version upgrade and removal in a disposable container
         shell: bash

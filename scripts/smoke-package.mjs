@@ -77,6 +77,10 @@ if (nativePicker) {
     await writeFile(join(profile, '.zshrc'), 'HISTFILE=/dev/null\nPROMPT="packaged> "\n');
   } else await writeFile(join(profile, '.bashrc'), 'HISTFILE=/dev/null\nPS1="packaged> "\n');
 }
+// Chromium creates its Linux singleton socket below TMPDIR. Installer staging and
+// user-data paths can exceed the Unix socket path limit.
+const runtimeTemp =
+  process.platform === 'linux' ? await mkdtemp('/tmp/openkraken-smoke-') : profile;
 const child = spawn(
   executable,
   [
@@ -89,7 +93,9 @@ const child = spawn(
     stdio: ['ignore', 'ignore', 'pipe'],
     env: {
       ...process.env,
-      ...(process.env.OPENKRAKEN_PACKAGE_EXECUTABLE ? { TMPDIR: profile } : {}),
+      ...(process.platform === 'linux' || process.env.OPENKRAKEN_PACKAGE_EXECUTABLE
+        ? { TMPDIR: runtimeTemp }
+        : {}),
       ...(nativePicker
         ? {
             SHELL: packageShell,
@@ -198,7 +204,7 @@ try {
   const socketPath =
     process.platform === 'win32'
       ? `\\\\.\\pipe\\openkraken-${randomUUID()}`
-      : join(profile, 'prompt.sock');
+      : join(runtimeTemp, 'prompt.sock');
   const token = randomBytes(32).toString('hex');
   const server = createServer((socket) => {
     let frame = '';
@@ -399,7 +405,7 @@ try {
     } else {
       await promisify(execFile)(executable, [`--user-data-dir=${profile}`, repositoryUri], {
         timeout: 15000,
-        env: { ...process.env, TMPDIR: profile },
+        env: { ...process.env, TMPDIR: runtimeTemp },
       });
     }
     await page.getByRole('button', { name: 'Review repository link', exact: true }).click();
@@ -423,7 +429,7 @@ try {
   await browser?.close();
   // CDP disconnect does not quit Electron. In extract-and-run mode the runtime
   // supervises a child; stop that child first so the runtime can finish and
-  // close inherited pipes. Its extraction directory is inside our temp profile.
+  // close inherited pipes before removing its runtime directory.
   if (mainProcessId && mainProcessId !== child.pid) {
     signalMainProcess('SIGTERM');
   } else child.kill();
@@ -449,8 +455,9 @@ try {
   });
   // The AppImage runtime can exit just before its FUSE mount is released.
   // Bound filesystem teardown retries separately from the unchanged app exit deadline.
-  if (!msiProfile)
-    await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  const cleanup = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 };
+  if (runtimeTemp !== profile) await rm(runtimeTemp, cleanup);
+  if (!msiProfile) await rm(profile, cleanup);
 }
 if (process.platform === 'win32') {
   expect(await windowsProtocolSnapshot()).toEqual(protocolBefore);
