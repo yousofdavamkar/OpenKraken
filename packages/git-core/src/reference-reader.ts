@@ -15,6 +15,7 @@ const PARALLEL_THRESHOLD = 10000;
 export interface PackedRefSample {
   singleTarget?: string;
   repeatedTargets: boolean;
+  hasPeeledTags?: boolean;
   manyBranches: boolean;
 }
 const ordinaryRefs: PackedRefSample = { repeatedTargets: false, manyBranches: false };
@@ -22,9 +23,8 @@ function sampleTargets(sample: Buffer, length: number): PackedRefSample {
   const targets = new Set<string>();
   let rows = 0,
     branches = 0;
-  for (const match of sample
-    .toString('latin1', 0, length)
-    .matchAll(/^([0-9a-f]{40}|[0-9a-f]{64}) refs\/(heads\/)?/gm)) {
+  const text = sample.toString('latin1', 0, length);
+  for (const match of text.matchAll(/^([0-9a-f]{40}|[0-9a-f]{64}) refs\/(heads\/)?/gm)) {
     targets.add(match[1]!);
     rows++;
     if (match[2]) branches++;
@@ -33,6 +33,7 @@ function sampleTargets(sample: Buffer, length: number): PackedRefSample {
     singleTarget: rows >= 32 && targets.size === 1 ? targets.values().next().value : undefined,
     repeatedTargets: rows >= 32 && targets.size * 4 <= rows,
     manyBranches: branches >= 32,
+    hasPeeledTags: text.includes('\n^'),
   };
 }
 

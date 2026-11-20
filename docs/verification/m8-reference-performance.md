@@ -24,6 +24,12 @@ Five alternating pairs followed one warm-up pair (pair 0) on the same 50,000-ref
 
 All five candidate openings exceeded 500 ms (688.0–817.1 ms). All 15 candidate page appends took less than 300 ms (186.0–272.2 ms). This comparison measured opening and paging only. The existing distinct-target fixture uses a different ref format. [Per-run measurements](m8-opening-experiments.csv) · [Transfer format](../decisions/0116-validated-snapshot-references.md#consecutive-names-for-annotated-tags)
 
+### Starting the history walk from annotated refs
+
+The earlier speculative walk received the direct tag object ID. The complete enumeration returned the peeled commit, so opening this repository started a second walk. Git now peels a bounded sample before the first walk starts. A native regression follows nested annotations through the first page, an append and exact-ID search. A second case puts an independent commit outside the sample and verifies that the service discards the tentative walk and returns all of Git's ordered commits and parents.
+
+Five alternating fresh-profile pairs followed one warm-up pair on the same annotated fixture. Both builds used compact renderer aliases. Median first paint fell from 708.0 to 582.1 ms and native snapshot time fell from 408.2 to 288.9 ms. All five candidate first paints exceeded 500 ms (576.9–644.5 ms), and all 15 appends took less than 239 ms. [Individual measurements](m8-opening-experiments.csv) · [Cursor adoption checks](../decisions/0122-overlap-reference-and-history-reads.md#packed-annotated-tags)
+
 ## Raw Git dates in the history stream
 
 On full Linux history, Git returned 21,207,090 bytes for 17,000 commits using the original author and committer dates. With raw dates it returned 20,527,090 bytes. All parsed fields matched on Git 2.53.0 and 2.38.0. The raw format also reads an epoch-zero commit whose negative timezone caused the original Git command to abort. [Format and compatibility](../decisions/0002-git-protocol.md#raw-author-and-committer-dates)

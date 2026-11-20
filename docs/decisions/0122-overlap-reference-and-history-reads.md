@@ -15,3 +15,7 @@ Refreshes, known shallow repositories, explicit graft/shallow/replacement-namesp
 ## Packed refs sharing the opened HEAD
 
 On an unfiltered open, if at least 32 sampled packed refs all point to the object Git reported for HEAD, the optional walk starts from that HEAD immediately. Enumerating all tentative roots would transfer the same object ID repeatedly on repositories with many aliases. The complete native ref enumeration still runs. The app adopts the early cursor only when its ordered roots exactly match those computed from the complete refs and worktrees, and the existing cache, stash, replacement, graft and shallow-history checks pass. A loose ref or a packed ref beyond the sample can introduce a different tip. In that case the service closes the early cursor and starts the ordinary walk before displaying any rows.
+
+## Packed annotated tags
+
+When the bounded packed-ref sample shows repeated targets and a peeled record, an unfiltered cold open asks Git for the direct object IDs of the first 128 refs. Git resolves the distinct IDs to commits in ref order with `rev-list --no-walk=unsorted --stdin` and replacement objects disabled. This lets the early walk start from the same commit IDs that the full enumeration will later use for nested annotations. The service compares every ordered root before adopting the cursor. A later independent ref, an incomplete sample, or an unavailable speculative result can require the ordinary walk. Both paths retain the original first-page and append deadlines.

@@ -515,13 +515,16 @@ export class RepositoryService {
         FIRST_PAGE_SIZE,
       );
     const filtered = !!view.soloRef || view.hiddenRefs.length > 0;
+    const sampleAnnotations = unfiltered && sample.repeatedTargets && sample.hasPeeledTags;
     const args = filtered
       ? [
           'for-each-ref',
           '--format=%(objectname) %(refname)',
           ...(view.soloRef ? ['--', view.soloRef] : []),
         ]
-      : ['rev-parse', '--all'];
+      : sampleAnnotations
+        ? ['for-each-ref', '--count=128', '--format=%(objectname)']
+        : ['rev-parse', '--all'];
     const { stdout } = await this.run(args, {
       cwd: repository.path,
       signal,
@@ -539,6 +542,20 @@ export class RepositoryService {
       starts.add(filtered ? line.slice(0, separator) : line);
     }
     for (const oid of starts) if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid)) return;
+    if (sampleAnnotations && starts.size) {
+      // Ask Git to peel the sampled objects in ref order. The complete enumeration
+      // below still has to confirm every ordered root before it can adopt the walk.
+      const peeled = await this.run(
+        ['--no-replace-objects', 'rev-list', '--no-walk=unsorted', '--stdin'],
+        { cwd: repository.path, signal, stdin: [...starts].join('\n') + '\n', maxBytes: 16 * 1024 },
+      );
+      if (signal.aborted) return;
+      starts.clear();
+      for (const oid of peeled.stdout.toString('utf8').trimEnd().split('\n')) {
+        if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid)) return;
+        starts.add(oid);
+      }
+    }
     addVisibleHead(starts, head, view, isVisible);
     return new HistoryCursor(
       this.git,

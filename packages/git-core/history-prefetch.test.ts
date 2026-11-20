@@ -385,3 +385,67 @@ test.each(['none', 'loose', 'packed'] as const)(
     }
   },
 );
+
+test.each([false, true])(
+  'an annotated alias sample preserves ordered roots with a later independent tip (%s)',
+  async (laterTip) => {
+    const path = await clone('tag-sample-' + laterTip);
+    const tree = fixtureGit(path, ['rev-parse', 'HEAD^{tree}']);
+    const orphan = fixtureGit(path, [
+      'commit-tree',
+      tree,
+      '-m',
+      'Reachable only through annotations',
+    ]);
+    fixtureGit(path, ['tag', '-a', '000-00-tree', tree, '-m', 'Non-commit annotation']);
+    fixtureGit(path, ['tag', '-a', 'inner', orphan, '-m', 'Inner']);
+    fixtureGit(path, ['tag', '-a', 'outer', 'inner', '-m', 'Outer']);
+    const tag = fixtureGit(path, ['rev-parse', 'outer']);
+    fixtureGit(
+      path,
+      ['update-ref', '--stdin'],
+      Array.from(
+        { length: 160 },
+        (_, i) => 'create refs/tags/000-alias-' + i + ' ' + tag + '\n',
+      ).join(''),
+    );
+    fixtureGit(path, ['tag', '-d', 'inner', 'outer']);
+    if (laterTip) {
+      const independent = fixtureGit(path, ['commit-tree', tree, '-m', 'Outside the sample']);
+      fixtureGit(path, ['update-ref', 'refs/tags/zzz-independent', independent]);
+    }
+    fixtureGit(path, ['pack-refs', '--all']);
+    const service = new RepositoryService('git');
+    const repo = await service.open(path);
+    const native = runner.runGit;
+    const walk = gate();
+    const calls = vi.spyOn(runner, 'runGit').mockImplementation(async (git, args, options) => {
+      if (readsSnapshotRefs(args)) await walk.promise;
+      if (args[0] === 'rev-list' && options?.env?.GIT_NO_REPLACE_OBJECTS) walk.resolve();
+      return native(git, args, options);
+    });
+    const opening = service.snapshot(repo.id, undefined, false);
+    try {
+      await vi.waitFor(
+        () => expect(calls.mock.calls.some(([, args]) => args[0] === 'rev-list')).toBe(true),
+        { timeout: 5000 },
+      );
+      const first = await opening;
+      const tail = await service.page(repo.id, first.cursor, first.commits.length, 5000);
+      expect(
+        [...first.commits, ...tail.commits].map((c) => [c.oid, ...c.parents].join(' ')),
+      ).toEqual(fixtureGit(path, ['rev-list', '--date-order', '--parents', '--all']).split('\n'));
+      expect(
+        (await service.search(repo.id, first.cursor, orphan)).commits.map((c) => c.oid),
+      ).toEqual([orphan]);
+      expect(
+        calls.mock.calls.filter(([, args]) => args[0] === 'rev-list' && args.includes('--parents')),
+      ).toHaveLength(laterTip ? 2 : 1);
+    } finally {
+      walk.resolve();
+      await opening.catch(() => {});
+      calls.mockRestore();
+      await service.dispose();
+    }
+  },
+);
