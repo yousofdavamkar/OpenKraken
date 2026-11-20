@@ -51,6 +51,7 @@ test.each([
   'reordered',
   'replace',
   'annotated',
+  'distinct annotated tip',
   'nested annotations',
   'moved annotation',
   'reordered annotations',
@@ -66,6 +67,8 @@ test.each([
     if (kind === 'detached') fixtureGit(path, ['update-ref', '--no-deref', 'HEAD', orphan]);
     if (kind === 'replace') fixtureGit(path, ['replace', 'HEAD~2050', orphan]);
     if (kind === 'annotated') fixtureGit(path, ['tag', '-a', 'annotation', '-m', 'Annotation']);
+    if (kind === 'distinct annotated tip')
+      fixtureGit(path, ['tag', '-a', 'independent', orphan, '-m', 'Independent commit']);
     if (kind === 'tree annotation') fixtureGit(path, ['tag', '-a', 'tree', tree, '-m', 'Tree']);
     if (kind === 'nested annotations' || kind === 'moved annotation') {
       fixtureGit(path, ['tag', '-a', 'inner', orphan, '-m', 'Inner']);
@@ -121,7 +124,14 @@ test.each([
       full.resolve();
       const first = await snapshot;
       expect(ordinary).toHaveBeenCalledTimes(
-        ['unchanged', 'loose', 'detached', 'annotated', 'nested annotations'].includes(kind)
+        [
+          'unchanged',
+          'loose',
+          'detached',
+          'annotated',
+          'distinct annotated tip',
+          'nested annotations',
+        ].includes(kind)
           ? 0
           : 1,
       );
@@ -129,7 +139,7 @@ test.each([
       expect(first.commits).toHaveLength(2000);
       expect(tail.offset).toBe(2000);
       expect(tail.hasMore).toBe(false);
-      if (kind === 'nested annotations') {
+      if (kind === 'distinct annotated tip' || kind === 'nested annotations') {
         const match = await service.search(repo.id, first.cursor, orphan);
         expect(match.commits.map((commit) => commit.oid)).toEqual([orphan]);
         expect(
