@@ -3,6 +3,7 @@ import { build } from 'esbuild';
 import type { UpdateConfiguration } from '../../apps/desktop/src/update-protocol.js';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
+import { once } from 'node:events';
 import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
@@ -229,6 +230,20 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     await expect(dialog.getByRole('status')).toContainText('download verified', { timeout: 60000 });
     expect(await fileDigest(join(profile, 'updates/artifact.ready'))).toBe(sha256);
     await page.screenshot({ path: test.info().outputPath('signed-update-verified.png') });
+    const beforeRecovery = requests.length;
+    const exited = once(app.process(), 'exit');
+    expect(app.process().kill('SIGKILL')).toBe(true);
+    await exited;
+    app = await electron.launch({ args, env });
+    page = await app.firstWindow();
+    await page.getByRole('button', { name: 'Updates', exact: true }).click();
+    dialog = page.getByRole('dialog', { name: 'App updates' });
+    await expect(dialog.getByRole('status')).toHaveText('Check for a newer signed release.');
+    expect(requests).toHaveLength(beforeRecovery);
+    await dialog.getByRole('button', { name: 'Check for updates' }).click();
+    await dialog.getByRole('button', { name: `Download ${format}` }).click();
+    await expect(dialog.getByRole('status')).toContainText('download verified', { timeout: 60000 });
+    expect(requests.slice(beforeRecovery)).toEqual([feedPath]);
     const exported = join(root, filename);
     const downloads = await app.evaluate(({ app }) => app.getPath('downloads'));
     await app.evaluate(
@@ -258,6 +273,13 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     const exportedDigest = await fileDigest(exported);
     expect(exportedDigest).toBe(sha256);
     expect((await stat(exported)).size).toBe(size);
+    if (manifestPath && format === 'AppImage') {
+      expect((await stat(exported)).mode & 0o777).toBe(0o700);
+      const runtime = await promisify(execFile)(exported, ['--appimage-version'], {
+        timeout: 15000,
+      });
+      expect(runtime.stdout + runtime.stderr).toContain('AppImage runtime version');
+    }
     if (manifestPath) {
       const receipt = {
         channel,
@@ -275,6 +297,25 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
       );
     }
     slow = true;
+    await dialog.getByRole('button', { name: 'Check for updates' }).click();
+    await dialog.getByRole('button', { name: `Download ${format}` }).press('Enter');
+    await expect(dialog.getByRole('progressbar', { name: 'Download progress' })).toHaveAttribute(
+      'value',
+      '3',
+    );
+    const partial = join(profile, 'updates/artifact.part');
+    const stopped = once(app.process(), 'exit');
+    expect(app.process().kill('SIGKILL')).toBe(true);
+    await stopped;
+    expect((await stat(partial)).size).toBe(3);
+    const beforeRetry = requests.length;
+    app = await electron.launch({ args, env });
+    page = await app.firstWindow();
+    await page.getByRole('button', { name: 'Updates', exact: true }).click();
+    dialog = page.getByRole('dialog', { name: 'App updates' });
+    await expect(dialog.getByRole('status')).toHaveText('Check for a newer signed release.');
+    await expect(stat(partial)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(requests).toHaveLength(beforeRetry);
     await dialog.getByRole('button', { name: 'Check for updates' }).click();
     await dialog.getByRole('button', { name: `Download ${format}` }).press('Enter');
     await expect(dialog.getByRole('progressbar', { name: 'Download progress' })).toHaveAttribute(
