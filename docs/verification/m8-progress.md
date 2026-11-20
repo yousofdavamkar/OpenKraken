@@ -2,6 +2,26 @@
 
 M8 remains in progress. On Linux x64, full Linux history with one ref and with 49,999 aliases on the first row met the 500 ms opening and 300 ms paging budgets in the latest fresh-profile runs. One nested-tag restart exceeded 500 ms. The 50,000-distinct-target fixture still exceeds the opening budget. Native Windows/macOS and ARM64 acceptance, the production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Recovering a Linux installer download after process exit
+
+A complete download used to disappear when OpenKraken restarted. The next launch now keeps it until the user checks the signed release and selects a format. If the saved file matches the signed size and SHA-256, the app issues a new save or install approval without downloading it again. An interrupted transfer starts from the beginning. Saving a verified AppImage now grants the owner execute permission so they can launch the exported file directly. [Signed update protocol](../decisions/0082-signed-update-release-protocol.md)
+
+On Linux x64, Electron was forcibly stopped after a complete transfer and after three bytes of a stalled transfer. For each format, restarting reused the complete download with exactly one new HTTPS manifest request. Restarting after the partial transfer removed the scratch file before contacting the server. The exported files matched the SHA-256 in their installer receipts. The exported AppImage also ran its embedded runtime directly.
+
+| Test installer from clean commit `192f3b3` | Saved bytes | SHA-256                                                            |
+| ------------------------------------------ | ----------: | ------------------------------------------------------------------ |
+| DEB                                        | 115,434,204 | `656b86c5af15f9bb4ed258e70c95069d1854c88ac06aaa806e0b44eea73bb350` |
+| RPM                                        |  99,000,597 | `5641657fcd322e14f4d83b4d5374f0cdef4b5f9582fe96dea7d3c8a227e4a1b3` |
+| AppImage                                   | 133,212,664 | `26587d963566a6596ff0166eb6d8b8b3be3ff72956845b771d15ec7fd81462c5` |
+
+Two packaged AppImage runs exercised **Install and restart** after recovery. The stable FUSE run upgraded from `0.1.0` to `0.2.0`. The beta extract-and-run fixture upgraded from `0.2.0-beta.2` to `0.2.0-beta.10`. Both rejected the original install approval, respected the unsaved-work cancellation, then launched the replacement with the expected digest and signed release sequence. Both used disposable signing keys and loopback HTTPS. [Packaged restart fixture](../../scripts/verify-update-restart.mjs)
+
+The unit and native suite passed 1,145 tests with nine skips. The six Electron update cases passed across the three installer formats. Each package passed its Canvas, append, repository search, keyboard and renderer-isolation smoke checks.
+
+## Graph keyboard shortcuts on Linux
+
+With the second commit selected, Ctrl+H moved focus to HEAD. The grid now leaves H, J and K combinations with Ctrl, Alt or Meta available to other handlers. H still selects HEAD and Shift+H selects the upstream. All 32 focused Electron graph, reference and history-cache cases passed, including six visual goldens. The 2,000-commit fixture painted in 231.3, 227.4 and 228.8 ms across three fresh profiles. On the paging fixture, appending 5,000 commits took 157.7 ms and the 12,000-row scroll frame interval was 16.8 ms at p95. The 50,000-distinct-ref opening budget remains open. [Graph interaction](../decisions/0004-m1-history-and-interaction.md)
+
 ## Crossing from cached history into live Git pages
 
 With cached rows left to display, the retained Git walk could pause before verifying later commit IDs and parent lists. In a 7,009-commit regression, the opening 2,000 rows appeared immediately, but the reader missed a disagreement at the end of the cached window until more pages were requested. The walk now compares those rows while the user reads the opening page. Once it detects a changed or extra commit, the cursor immediately rejects further page requests as stale, including requests received while the Git process is exiting. [History cache behavior](../decisions/0008-bounded-history-cache.md)
@@ -1187,7 +1207,7 @@ Evidence: `/tmp/openkraken-supervisor-{red,green,native,hook,unit,e2e,types,buil
 ## Remaining work
 
 - Native supervision runtime acceptance on Windows/macOS, further crash/write scenarios beyond the Linux fetch/PTY/prompt fixtures above, native lock handling and durable write recovery. POSIX processes that intentionally detach or daemonize beyond the active command's stream lifetime are not contained.
-- GitHub and GitHub Enterprise review, inline-comment and reply drafts and GitHub/GitLab issue action drafts are implemented. Pull/merge-request creation drafts are recoverable. GitHub, GitHub Enterprise and GitLab merge message drafts support recovery and read-only status inspection after an interrupted merge. Native Git editor, commit-form, working-file and conflict-editor recovery are implemented within the bounds above. Crash-report coverage before reporting initialization, live receiver configuration/acceptance, recovery when the main event loop is blocked or the updater is interrupted, non-AppImage installation/restart, signed installers/distribution, security review and beta evidence remain open. Signed release checks/downloads, opt-in automatic checks, supported AppImage desktop installation/restart and startup-exit restoration, opt-in process/JavaScript summaries and interrupted-session recovery are implemented within the bounds above.
+- GitHub and GitHub Enterprise review, inline-comment and reply drafts and GitHub/GitLab issue action drafts are implemented. Pull/merge-request creation drafts are recoverable. GitHub, GitHub Enterprise and GitLab merge message drafts support recovery and read-only status inspection after an interrupted merge. Native Git editor, commit-form, working-file and conflict-editor recovery are implemented within the bounds above. Crash-report coverage before reporting initialization, live receiver configuration/acceptance, further recovery when the main event loop is blocked or an installation is interrupted, non-AppImage installation/restart, signed installers/distribution, security review and beta evidence remain open. Signed release checks/downloads, opt-in automatic checks, supported AppImage desktop installation/restart and startup-exit restoration, opt-in process/JavaScript summaries and interrupted-session recovery are implemented within the bounds above.
 - Native DMG/MSI acceptance, broader RPM/AppImage distribution acceptance, Linux arm64 and macOS/Windows installer runtime checks, and real release metadata. Linux x64 has local DEB, RPM and AppImage test builds, including an RPM signed with a disposable key. Debian 13 and Fedora 43 x64 version upgrades are verified within the bounds above. Production signing and distribution remain open.
 - Broader real-repository and cross-platform performance/regression gates, plus the unresolved intermittent command exit-143 investigation recorded in M7 progress.
 
