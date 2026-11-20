@@ -210,6 +210,29 @@ test('real-repository first paint, paging and scrolling budgets', async ({
         element.scrollTop = 0;
       });
     }
+    await page.screenshot({ path: testInfo.outputPath('real-repository.png') });
+    let firstLiveAppendMs: number | undefined;
+    if (persistedCommits !== undefined) {
+      await grid.press('End');
+      const selected = grid.getByRole('row', { selected: true });
+      await expect
+        .poll(async () => Number(await selected.getAttribute('aria-rowindex')))
+        .toBeGreaterThanOrEqual(persistedCommits);
+      const index = Number(await selected.getAttribute('aria-rowindex'));
+      const oid = await selected.getAttribute('data-oid');
+      const measuresBefore = await page.evaluate(
+        () => performance.getEntriesByName('history-page').length,
+      );
+      await grid.press('ArrowDown');
+      await expect(selected).toHaveAttribute('aria-rowindex', String(index + 1));
+      const timings = await page.evaluate(() =>
+        performance.getEntriesByName('history-page').map((entry) => entry.duration),
+      );
+      expect(timings).toHaveLength(measuresBefore + 1);
+      firstLiveAppendMs = timings.at(-1)!;
+      await grid.press('ArrowUp');
+      await expect(selected).toHaveAttribute('data-oid', oid!);
+    }
     const git = (...args: string[]) =>
       execFileSync('git', args, { cwd: path, encoding: 'utf8', timeout: 30000 }).trim();
     const measurement = {
@@ -228,6 +251,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       firstPaintMs,
       firstPaintPhases,
       page5000Ms: pages,
+      firstLiveAppendMs,
       pagingPhases,
       scrollingRows: 12000,
       p95FrameMs,
@@ -262,7 +286,6 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       path: metricsPath,
       contentType: 'application/json',
     });
-    await page.screenshot({ path: testInfo.outputPath('real-repository.png') });
     const alias = process.env.OPENKRAKEN_BENCH_ALIAS_REF;
     if (alias) {
       const commit = git('rev-parse', '--verify', alias + '^{commit}');
@@ -305,6 +328,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
     expect.soft(mountedReferences).toBeLessThan(100);
     expect.soft(firstPaintMs).toBeLessThan(500);
     for (const pageMs of pages) expect.soft(pageMs).toBeLessThan(300);
+    if (firstLiveAppendMs !== undefined) expect.soft(firstLiveAppendMs).toBeLessThan(300);
     // 60 Hz is ~16.67 ms; allow 2 ms scheduling jitter in the headless runner.
     expect.soft(p95FrameMs).toBeLessThan(18.7);
   } finally {
