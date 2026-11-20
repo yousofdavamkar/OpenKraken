@@ -309,6 +309,12 @@ jobs:
           pnpm smoke:installer release/installers/win32-x64/test/msi/manifest.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - if: runner.os == 'Windows'
+        name: Sign and verify MSI and installed executables with a disposable certificate
+        timeout-minutes: 15
+        env:
+          OPENKRAKEN_DISPOSABLE_INSTALL_TEST: '1'
+        run: ./scripts/check-msi-signing.ps1
+      - if: runner.os == 'Windows'
         name: MSI install, repair, beta upgrades, stable promotion, downgrade rejection and removal
         timeout-minutes: 40
         env:
