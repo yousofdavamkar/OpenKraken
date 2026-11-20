@@ -354,3 +354,12 @@ annotated-alias-transfer,linux-49999-annotated,4,native-only,1009.1,385.6,801.2,
 annotated-alias-transfer,linux-49999-annotated,4,transport,894.9,412.2,664.5,185.4,224.3,192.4,16.8,16.8,61.3,61.6,53.3,712.9,48.3,0.1,55.5,11.4,115.1
 annotated-alias-transfer,linux-49999-annotated,5,native-only,1027.6,415.4,818.3,178.7,206.4,168.8,16.7,16.7,61,63.3,46.8,864.3,45.9,0.1,49.1,6.4,107.8
 annotated-alias-transfer,linux-49999-annotated,5,transport,894.5,400.2,645.7,197.8,196.4,182,16.7,16.8,67.2,55.8,42,694.8,49.1,0,66.7,10.2,122.8
+annotated-alias-final,distinct,1,candidate,1089.9,785.9,917.5,168.5,191.5,178.1,16.8,16.7,44.7,42.5,46.9,952.4,12.1,22.8,37.8,4.8,94.9
+annotated-alias-final,distinct,2,candidate,768.5,434.9,572.8,209.2,185.3,183.9,16.8,16.7,47.4,51.7,43.5,616.8,21.8,22.2,34.4,6,111.3
+annotated-alias-final,distinct,3,candidate,714.9,379.5,530.3,221.4,212.6,208.9,16.7,16.8,64.8,50.4,43.3,578.1,20.7,27.1,30.5,6,100.3
+annotated-alias-final,single,1,candidate,337.8,104.8,209.1,220.9,199,167.2,16.7,,60.5,64.6,46.7,214.1,4.9,0.1,35.3,9.5,78.9
+annotated-alias-final,single,2,candidate,343.8,98.6,222.6,226,207.2,178.4,16.7,,61.9,69.8,52.3,227.7,5,0.1,36.9,10.3,68.9
+annotated-alias-final,single,3,candidate,339.3,107.7,216.7,217,208.7,160.6,16.8,,56.3,68.5,43.4,220.9,4.1,0.1,38.2,10.4,69.8
+annotated-alias-final,legacy-annotated,1,candidate,924.3,454.3,701.4,196.7,207,171.7,16.7,16.8,59.9,60.9,46.9,745.8,44.4,0,54.8,8.9,114.8
+annotated-alias-final,legacy-annotated,2,candidate,933.6,433.7,703,180.9,194.3,186.1,16.7,16.7,52.1,56.9,43.1,750.4,47.3,0.1,51.4,6.8,125
+annotated-alias-final,legacy-annotated,3,candidate,914.8,448.6,687.2,196.9,188.9,170.9,16.8,16.8,55.8,58.7,45.7,734.7,47.3,0.1,58.7,6.4,115

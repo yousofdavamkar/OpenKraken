@@ -2,6 +2,16 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest three runs. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## History reachable through nested release tags
+
+Git 2.38.0 previously omitted commits reachable only through nested annotated tags. The graph now labels those commits, and selecting a tag as the sole history root shows the same commits as Git. A packaged Linux x64 desktop opened 50,000 refs on Git 2.38.0, appended to 7,000 commits, filtered to the last release tag, selected its commit by keyboard and found it through repository-wide message search.
+
+On full Linux history with 49,999 aliases for one annotation, batch peeling reduced median first paint from 2,408.4 to 1,031.3 ms on Git 2.38.0, and from 1,560.2 to 978.9 ms on Git 2.53.0. Staging consecutive alias names reduced the Git 2.53.0 median to 894.9 ms in a separate five-pair comparison. All 50,000 refs and 17,000 commit IDs and parent lists matched native Git on both versions. [Measurements and fixture](m8-reference-performance.md#nested-annotated-tags-on-full-linux-history)
+
+The final single-ref Linux fixture painted in 337.8–343.8 ms. The 50,000-distinct-target fixture took 714.9–1,089.9 ms. The annotated fixture on Git 2.38.0 took 914.8–933.6 ms. All 27 page appends in those nine runs met 300 ms, and the p95 graph frame interval stayed at or below 16.8 ms in every run. One unfiltered message search timed out under load and completed in 24.5 seconds on a later run.
+
+On Linux x64, 1,109 unit and native tests passed with nine skips. All 34 graph, sidebar, history-cache and snapshot-transfer Electron tests passed. The focused Git 2.38.0 native suite passed 90 tests with 12 skips, and both nested-tag and bridge tests passed in Electron on that version. Typechecking, lint, production build, packaging and packaged history smoke passed.
+
 ## Keyboard access to release settings
 
 On Linux x64, the Updates and Crash reporting dialogs previously discarded the invoking button's focus. In the packaged build, pressing Space immediately after Close could also leave the dialog closed. The native dialog had already restored focus while React was still waiting for its close event. The default build and a build with a loopback crash receiver passed five consecutive keyboard traversals each after the fix.
