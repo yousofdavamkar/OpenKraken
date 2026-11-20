@@ -2,6 +2,12 @@
 
 M8 remains in progress. On Linux x64, full Linux history with one ref and with 49,999 aliases on the first row met the 500 ms opening and 300 ms paging budgets in the latest fresh-profile runs. One nested-tag restart exceeded 500 ms. The 50,000-distinct-target fixture still exceeds the opening budget. Native Windows/macOS and ARM64 acceptance, the production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## PowerShell in the Linux packages
+
+The Linux x64 DEB, RPM and AppImage produced from clean commit `529e472` each opened a repository terminal using PowerShell 7.6.9. The packaged app recognized the prompt, received native Ctrl+P input, reported a failed command and exited the shell cleanly. The same runs exercised the Canvas graph, append-only paging, search and keyboard navigation, then switched back to a repository with a changed tip and paged to the root. Verification ran from extracted DEB/RPM payloads and through the AppImage’s embedded runtime.
+
+The Linux suite passed 1,171 unit and native tests with nine skips, plus all 23 terminal Electron scenarios. Archive tests covered intact, absent, removed and modified PowerShell startup scripts. The Windows signing fixture checks the packaged script against its publisher and rejects a modified copy. Native Authenticode execution and macOS/Windows terminal results remain outstanding. [PowerShell integration](../decisions/0132-powershell-terminal-integration.md)
+
 ## Cancelling a switch while the old repository writes its cache
 
 The Linux regression held the original repository’s cache write open during a switch. Before the fix, cancellation still had not returned after two seconds. A cancelled switch and an unavailable destination now release the request while the write is pending. The original graph loads its remaining commits, and the next successful switch persists both the 2,000-commit prefix and the three-commit tail. [Cache handoff behavior](../decisions/0008-bounded-history-cache.md#leaving-a-pending-cache-read)
