@@ -18,6 +18,8 @@ The post-GC renderer heap fell in each pair. The isolated Node test built the gr
 
 Two preliminary builds used offsets into copied per-kind arrays. That alone moved median full paint from 787.7 to 784.7 ms. Preparing commit badge data during worker layout on top of that build moved median paint from 840.2 to 848.0 ms. Each comparison used five pairs after a warm-up. The release uses the range index and initializes badge data on demand. [Full opening, paging and scrolling measurements](m8-opening-experiments.csv)
 
+On the subsequent Linux acceptance run at `116fc5b`, the 50,000-ref fixture took 1,210.6 ms to paint, including 817.2 ms in the native snapshot. Its three appends took 268.0, 255.6 and 248.3 ms. The graph scrolled at 16.8 ms p95 and the sidebar at 16.7 ms p95. The separate standard fixture painted in 355.9 ms and appended in 214.1 ms. The packaged app also compared the mounted names and their accessible positions against native Git at five offsets throughout the 50,000-ref list. It painted in 1,184.4 ms, filtered to the last tag, selected HEAD by keyboard and appended to 7,000 commits.
+
 ## Switching back to a cached repository with 50,000 refs
 
 A Linux x64 Electron profile first saved 17,000 commits from the 50,000-distinct-target fixture and restarted. It opened single-ref Linux history, loaded 17,000 commits there, then switched back to the saved fixture. Four measured pairs alternated build order after a warm-up pair. Both builds waited for the outgoing cache write and checked the destination’s current graph fingerprint. The prototype also read the destination’s first cache page during the outgoing write and rechecked the file stamp afterward.

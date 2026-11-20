@@ -2,6 +2,22 @@
 
 M8 remains in progress. On Linux x64, full Linux history with one ref and with 49,999 aliases on the first row met the 500 ms opening and 300 ms paging budgets in the latest fresh-profile runs. One nested-tag restart exceeded 500 ms. The 50,000-distinct-target fixture still exceeds the opening budget. Native Windows/macOS and ARM64 acceptance, the production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Reference sidebar memory and recovery after external ref changes
+
+On Linux x64, the range index reduced median post-GC renderer heap by 1,575,396 bytes while displaying 2,000 commits and 50,000 distinct ref targets. Median full opening time rose from 873.8 to 934.7 ms in that comparison. A subsequent full-suite run painted the standard fixture in 355.9 ms and the distinct-target fixture in 1,210.6 ms. Its native snapshot alone took 817.2 ms. All three large-fixture appends met 300 ms. [Individual timings and memory samples](m8-reference-performance.md#retained-memory-in-a-50000-ref-sidebar)
+
+Adding the 100th ref used to discard a rename draft when the sidebar switched layouts. The draft and keyboard focus now survive both transitions. Cancelling restores focus to the replacement button. Removing the reviewed ref dismisses the dialog, and moving its tip causes Git to reject the stale rename. [Reference review lifetime](../decisions/0094-bounded-reference-sidebar.md#keeping-a-review-open-across-layout-changes)
+
+The desktop also sometimes kept showing 99 refs after a branch was recreated at the same tip. A native regression reproduced this when Git restored the branch between watcher reads. The service now reconciles the ref list returned by a refresh against Git. All eight consecutive desktop repetitions on Git 2.38.0 passed after the change, as did all 18 watcher tests on Git 2.38.0 and 2.53.0. In a disposable copy of full Linux history, the packaged app kept the original reviewed object ID and the draft after an external branch move, observed the list shrink to 49,999 and return to 50,000, and paged to 7,000 commits. [Watcher reconciliation](../decisions/0104-snapshot-reference-watcher-baseline.md#reconciling-refs-returned-by-a-refresh)
+
+The Linux x64 DEB, RPM and AppImage from clean commit `9fa9d41` passed the packaged reference filter, draft retention, Canvas, two appends, all-history search, keyboard navigation, terminal and cache-reopen checks. Each format rejected mismatched archive, helper and version information. Debian 13 installed and reinstalled the DEB, upgraded from 0.1.0 to the 0.2.0 fixture, removed and purged the app, and retained user data. Fedora 43 installed, reinstalled and removed the RPM while retaining user data. The real HTTPS update fixture verified the rebuilt DEB with a temporary signing key. Both dependency audits reported zero advisories on November 20.
+
+| Linux x64 test installer |       Bytes | SHA-256                                                            |
+| ------------------------ | ----------: | ------------------------------------------------------------------ |
+| DEB                      | 115,441,196 | `4a45ce2d256417ea0a06efed622b564368c43afd386388e1ae0d060006dde0e2` |
+| RPM                      |  99,010,373 | `d86e6c76153146a5ab304ad796db452dc6fdb8c9fde1e6357e9b0fb1c23018df` |
+| AppImage                 | 133,212,664 | `2c5cb3500e70f4d421c8323735ebfca00a9aefc057bd2c6be9badfb643406975` |
+
 ## PowerShell in the Linux packages
 
 The Linux x64 DEB, RPM and AppImage produced from clean commit `529e472` each opened a repository terminal using PowerShell 7.6.9. The packaged app recognized the prompt, received native Ctrl+P input, reported a failed command and exited the shell cleanly. The same runs exercised the Canvas graph, append-only paging, search and keyboard navigation, then switched back to a repository with a changed tip and paged to the root. Verification ran from extracted DEB/RPM payloads and through the AppImage’s embedded runtime.
