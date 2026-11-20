@@ -2390,7 +2390,73 @@ const compactSnapshotResult = z.object({
   kind: z.literal('compactSnapshot'),
   snapshot: snapshotSchema.extend({ refs: compactRefsSchema }),
 });
+const tagPrefix = 'refs/tags/';
+function plainAnnotatedTag(ref: Ref) {
+  return (
+    ref.kind === 'tag' &&
+    ref.name === tagPrefix + ref.shortName &&
+    ref.objectType === 'tag' &&
+    ref.peeled !== undefined &&
+    ['commit', 'tree', 'blob'].includes(ref.peeledType) &&
+    ref.isHead === false &&
+    ref.upstream === undefined
+  );
+}
+const aliasedTagRefsSchema = z.array(z.unknown()).transform((rows, ctx) => {
+  let previous: Ref | undefined;
+  const refs: Ref[] = [];
+  for (const [index, row] of rows.entries()) {
+    if (typeof row === 'string') {
+      if (previous && row.startsWith(tagPrefix) && row.length > tagPrefix.length) {
+        refs.push({ ...previous, name: row, shortName: row.slice(tagPrefix.length) });
+        continue;
+      }
+    } else {
+      const full = refSchema.safeParse(row);
+      if (full.success) {
+        previous = plainAnnotatedTag(full.data) ? full.data : undefined;
+        refs.push(full.data);
+        continue;
+      }
+    }
+    ctx.addIssue({ code: 'custom', path: [index], message: 'Invalid annotated tag alias' });
+    return z.NEVER;
+  }
+  return refs;
+});
+
+export function encodeAliasedTagRefs(source: Ref[]) {
+  if (source.length < compactRefThreshold) return;
+  let previous: Ref | undefined;
+  let aliases = 0;
+  const rows = source.map((ref) => {
+    if (plainAnnotatedTag(ref)) {
+      if (
+        previous &&
+        ref.target === previous.target &&
+        ref.peeled === previous.peeled &&
+        ref.peeledType === previous.peeledType &&
+        ref.shortName.length
+      ) {
+        aliases++;
+        return ref.name;
+      }
+      previous = ref;
+    } else previous = undefined;
+    return ref;
+  });
+  if (aliases * 2 >= source.length) return rows;
+}
+
 export const snapshotPartSchema = z.discriminatedUnion('snapshotPart', [
+  z
+    .object({
+      id: requestId,
+      transferId: requestId,
+      snapshotPart: z.literal('tagAliases'),
+      refs: aliasedTagRefsSchema,
+    })
+    .strict(),
   z
     .object({
       id: requestId,

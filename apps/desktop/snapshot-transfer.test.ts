@@ -1,6 +1,12 @@
 import { expect, test } from 'vitest';
 import { SnapshotTransfer } from './src/snapshot-transfer.js';
-import { requestSchema, serviceRequestSchema } from '@openkraken/ipc-contract';
+import {
+  encodeAliasedTagRefs,
+  requestSchema,
+  serviceRequestSchema,
+  snapshotPartSchema,
+  type Ref,
+} from '@openkraken/ipc-contract';
 
 const id = '00000000-0000-4000-8000-000000000001';
 const transferId = '00000000-0000-4000-8000-000000000002';
@@ -54,6 +60,71 @@ test('main returns one validated snapshot for the matching request and opening',
   if (result?.kind !== 'compactSnapshot') throw Error('Missing snapshot');
   expect(result.snapshot.refs).toEqual([...refs.slice(0, -1), tag]);
   expect(result.snapshot.cursor).toBe(id);
+});
+
+test('main reconstructs consecutive annotated aliases and preserves exceptional refs in order', () => {
+  const source: Ref[] = Array.from({ length: 10000 }, (_, i) => ({
+    ...tag,
+    kind: 'tag',
+    name: 'refs/tags/发布/' + i,
+    shortName: '发布/' + i,
+  }));
+  source[2] = { ...source[2]!, peeledType: 'tree' };
+  source[4] = {
+    ...source[4]!,
+    upstream: { ref: 'refs/heads/main', ahead: 1, behind: 2, gone: false },
+  };
+  source[6] = { ...source[6]!, target: 'c'.repeat(64), peeled: 'd'.repeat(64), peeledType: 'blob' };
+  source[7] = { ...source[6]!, name: source[7]!.name, shortName: source[7]!.shortName };
+  expect(encodeAliasedTagRefs(source.slice(0, 9999))).toBeUndefined();
+  const rows = encodeAliasedTagRefs(source)!;
+  expect(rows.slice(0, 8)).toEqual([
+    source[0],
+    source[1]!.name,
+    source[2],
+    source[3],
+    source[4],
+    source[5],
+    source[6],
+    source[7]!.name,
+  ]);
+  const transfer = new SnapshotTransfer(id, transferId);
+  const message = { ...first, snapshotPart: 'tagAliases', refs: rows };
+  transfer.receive(message);
+  const result = transfer.receive(last);
+  expect(result?.kind).toBe('snapshot');
+  if (result?.kind !== 'snapshot') throw Error('Missing snapshot');
+  expect(result.snapshot.refs).toStrictEqual(source);
+});
+
+test('tag aliases require a matching opener and share the transfer identity and duplicate checks', () => {
+  const partial = {
+    ...first,
+    snapshotPart: 'tagAliases',
+    refs: [tag, ...Array<string>(9999).fill('refs/tags/two')],
+  };
+  for (const rows of [
+    ['refs/tags/two'],
+    [tag, 'refs/heads/main'],
+    [tag, 'refs/tags/'],
+    [{ ...tag, isHead: true }, 'refs/tags/two'],
+    [{ ...tag, target: 'bad' }, 'refs/tags/two'],
+    [tag, { ...tag, kind: 'other' }, 'refs/tags/two'],
+  ]) {
+    const transfer = new SnapshotTransfer(id, transferId);
+    const message = { ...partial, refs: rows };
+    expect(snapshotPartSchema.safeParse(message).success).toBe(false);
+    transfer.receive(message);
+    expect(transfer.receive(last)).toMatchObject({ kind: 'error', code: 'INVALID_SNAPSHOT' });
+  }
+  for (const duplicate of [
+    [first, partial],
+    [partial, first],
+  ]) {
+    const transfer = new SnapshotTransfer(id, transferId);
+    for (const message of duplicate) transfer.receive(message);
+    expect(transfer.receive(last)).toMatchObject({ kind: 'error', code: 'INVALID_SNAPSHOT' });
+  }
 });
 
 test('missing, duplicate, malformed or inconsistent parts fail without publishing a partial snapshot', () => {

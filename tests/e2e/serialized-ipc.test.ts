@@ -236,6 +236,74 @@ test('large Git snapshots round-trip their ordered reference records through all
   }
 });
 
+test('large annotated alias runs preserve ordinary reference records on the renderer bridge', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-annotation-ipc-'));
+  const repository = createFixture(join(root, 'repo'), 'linear', 3);
+  const target = fixtureGit(repository, ['rev-parse', 'refs/tags/annotated']);
+  const peeled = fixtureGit(repository, ['rev-parse', 'refs/tags/annotated^{}']);
+  const names = Array.from(
+    { length: 10000 },
+    (_, i) => 'refs/tags/版本-' + String(i).padStart(5, '0'),
+  );
+  fixtureGit(
+    repository,
+    ['update-ref', '--stdin'],
+    names.map((name) => `create ${name} ${target}\n`).join(''),
+  );
+  fixtureGit(repository, ['pack-refs', '--all']);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog, utilityProcess }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+      const fork = utilityProcess.fork.bind(utilityProcess);
+      utilityProcess.fork = (...args) => {
+        const child = fork(...args);
+        if (args[0].endsWith('git-service.cjs')) {
+          utilityProcess.fork = fork;
+          child.on('message', (message) => {
+            if (message?.snapshotPart === 'tagAliases')
+              Reflect.set(
+                globalThis,
+                'annotationAliases',
+                message.refs.filter((row: unknown) => typeof row === 'string').length,
+              );
+          });
+        }
+        return child;
+      };
+    }, repository);
+    const raw = await page.evaluate(() =>
+      window.openkraken.request({ id: crypto.randomUUID(), method: 'open' }, 'snapshot-transfer'),
+    );
+    const result: ServiceResult = JSON.parse(raw);
+    if (result.kind !== 'snapshot') throw Error('Expected ordinary snapshot');
+    const aliases = result.snapshot.refs.filter((ref) => ref.name.startsWith('refs/tags/版本-'));
+    expect(aliases.map((ref) => ref.name)).toEqual(names);
+    expect(
+      aliases.every(
+        (ref) =>
+          ref.shortName === ref.name.slice(10) &&
+          ref.target === target &&
+          ref.peeled === peeled &&
+          ref.kind === 'tag' &&
+          ref.peeledType === 'commit' &&
+          ref.objectType === 'tag' &&
+          !ref.upstream &&
+          !ref.isHead,
+      ),
+    ).toBe(true);
+    expect(
+      await app.evaluate(() => Reflect.get(globalThis, 'annotationAliases')),
+    ).toBeGreaterThanOrEqual(9999);
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 for (const interruption of ['early cancel', 'late cancel', 'stop utility'] as const) {
   test(`a staged opening waits for the native outcome and can reuse the request ID (${interruption})`, async () => {
     test.skip(
