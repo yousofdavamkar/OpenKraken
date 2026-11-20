@@ -8,6 +8,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { chmod, cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:https';
+import { once } from 'node:events';
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
@@ -48,6 +49,7 @@ const failStartup =
   rollbackSyncError ||
   pendingNotice;
 const installFolder = rollbackSyncError ? join(root, 'install') : root;
+const recoverDownload = process.argv.includes('--recover-download');
 const helperUnavailable = process.argv.includes('--helper-unavailable');
 const unchangedImage = process.argv.includes('--unchanged-image');
 const migrateFeed = process.argv.includes('--migrate-feed');
@@ -64,6 +66,7 @@ assert.ok(
     lateConfirmation,
     resumeSlowRenderer,
     helperUnavailable,
+    recoverDownload,
     unchangedImage,
     beforeRename,
     afterRename,
@@ -105,9 +108,11 @@ try {
   const images = [];
   let envelope, nextEnvelope;
   let newFeedChecks = 0;
+  const requests = [];
   server = createServer(
     { key: await readFile(key), cert: await readFile(cert) },
     (request, response) => {
+      requests.push(request.url);
       if (request.url === '/release.json' && envelope) response.end(envelope);
       else if (request.url === '/next/release.json' && nextEnvelope) {
         newFeedChecks++;
@@ -489,54 +494,90 @@ try {
     await mkdir(profile);
     args.push(`--user-data-dir=${profile}`);
   }
-  child = spawn(target, args, {
-    detached: true,
-    stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...process.env, TMPDIR: runtimeTemp, XDG_CONFIG_HOME: configHome },
-  });
-  const endpoint = await new Promise((resolve, reject) => {
-    let output = '';
-    const timer = setTimeout(() => reject(new Error(`AppImage did not start: ${output}`)), 15000);
-    createInterface({ input: child.stderr }).on('line', (line) => {
-      output = (output + '\n' + line).slice(-4096);
-      launchOutput = (launchOutput + '\n' + line).slice(-8192);
-      const match = /DevTools listening on (ws:\/\/.*)/.exec(line);
-      if (match) {
+  async function launchAndSelectUpdate() {
+    child = spawn(target, args, {
+      detached: true,
+      stdio: ['ignore', 'ignore', 'pipe'],
+      env: { ...process.env, TMPDIR: runtimeTemp, XDG_CONFIG_HOME: configHome },
+    });
+    const endpoint = await new Promise((resolve, reject) => {
+      let output = '';
+      const timer = setTimeout(() => reject(new Error(`AppImage did not start: ${output}`)), 15000);
+      createInterface({ input: child.stderr }).on('line', (line) => {
+        output = (output + '\n' + line).slice(-4096);
+        launchOutput = (launchOutput + '\n' + line).slice(-8192);
+        const match = /DevTools listening on (ws:\/\/.*)/.exec(line);
+        if (match) {
+          clearTimeout(timer);
+          resolve(match[1]);
+        }
+      });
+      child.once('error', (error) => {
         clearTimeout(timer);
-        resolve(match[1]);
-      }
+        reject(error);
+      });
+      child.once('exit', (code) => {
+        clearTimeout(timer);
+        reject(new Error(`AppImage exited ${code}: ${output}`));
+      });
     });
-    child.once('error', (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.once('exit', (code) => {
-      clearTimeout(timer);
-      reject(new Error(`AppImage exited ${code}: ${output}`));
-    });
-  });
-  browser = await chromium.connectOverCDP(endpoint);
-  const session = await browser.newBrowserCDPSession();
-  mainPid = (await session.send('SystemInfo.getProcessInfo')).processInfo.find(
-    (entry) => entry.type === 'browser',
-  ).id;
-  await session.detach();
-  const context = browser.contexts()[0];
-  const page = context.pages()[0] ?? (await context.waitForEvent('page'));
-  await page.getByRole('button', { name: 'Updates', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'App updates' });
-  if (beta) await expect(dialog.getByText(/Beta channel/)).toBeVisible();
-  if (migrateFeed) {
-    const consent = dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' });
-    await consent.check();
-    await expect(consent).toBeEnabled();
-    await expect(consent).toBeChecked();
+    browser = await chromium.connectOverCDP(endpoint);
+    const session = await browser.newBrowserCDPSession();
+    mainPid = (await session.send('SystemInfo.getProcessInfo')).processInfo.find(
+      (entry) => entry.type === 'browser',
+    ).id;
+    await session.detach();
+    const context = browser.contexts()[0];
+    const page = context.pages()[0] ?? (await context.waitForEvent('page'));
+    await page.getByRole('button', { name: 'Updates', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'App updates' });
+    if (beta) await expect(dialog.getByText(/Beta channel/)).toBeVisible();
+    if (migrateFeed) {
+      const consent = dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' });
+      await consent.check();
+      await expect(consent).toBeEnabled();
+      await expect(consent).toBeChecked();
+    }
+    await dialog.getByRole('button', { name: 'Check for updates' }).click();
+    await dialog.getByRole('button', { name: 'Download AppImage' }).click();
+    await expect(
+      dialog.getByRole('button', { name: 'Install and restart', exact: true }),
+    ).toBeVisible({ timeout: 30000 });
+    return { page, dialog };
   }
-  await dialog.getByRole('button', { name: 'Check for updates' }).click();
-  await dialog.getByRole('button', { name: 'Download AppImage' }).click();
-  await expect(
-    dialog.getByRole('button', { name: 'Install and restart', exact: true }),
-  ).toBeVisible({ timeout: 30000 });
+  let previousInstallId;
+  if (recoverDownload) {
+    const before = requests.length;
+    const { page } = await launchAndSelectUpdate();
+    const { state } = await page.evaluate(() =>
+      window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesRead' }),
+    );
+    previousInstallId = state.installId;
+    assert.ok(previousInstallId);
+    assert.deepEqual(requests.slice(before), ['/release.json', '/' + basename(artifact)]);
+    const exited = once(child, 'exit', { signal: AbortSignal.timeout(30000) });
+    process.kill(mainPid, 'SIGKILL');
+    await exited;
+    mainPid = undefined;
+    await browser.close();
+    assert.equal(await sha256(target), originalDigest);
+  }
+  const beforeSelection = requests.length;
+  const { page, dialog } = await launchAndSelectUpdate();
+  if (recoverDownload) {
+    assert.deepEqual(requests.slice(beforeSelection), ['/release.json']);
+    const { state } = await page.evaluate(
+      (installId) =>
+        window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesInstall', installId }),
+      previousInstallId,
+    );
+    assert.equal(state.phase, 'verified');
+    assert.ok(state.installId && state.installId !== previousInstallId);
+    await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
+    console.log(
+      'Recovered the verified AppImage after process exit with one metadata request and fresh install approval.',
+    );
+  }
   if (unchangedImage) {
     await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
     await expect(dialog).toContainText('This release contains the installed AppImage.', {
@@ -796,13 +837,15 @@ try {
     );
     assert.deepEqual(
       JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')),
-      rollbackSyncError
-        ? [initialVersion, replacementVersion, initialVersion, initialVersion]
-        : predecessorInstalled
-          ? [initialVersion, initialVersion]
-          : failStartup
-            ? [initialVersion, replacementVersion, initialVersion]
-            : [initialVersion, replacementVersion],
+      recoverDownload
+        ? [initialVersion, initialVersion, replacementVersion]
+        : rollbackSyncError
+          ? [initialVersion, replacementVersion, initialVersion, initialVersion]
+          : predecessorInstalled
+            ? [initialVersion, initialVersion]
+            : failStartup
+              ? [initialVersion, replacementVersion, initialVersion]
+              : [initialVersion, replacementVersion],
     );
     assert.equal(
       JSON.parse(await readFile(join(profile, 'updates/trusted-release.json'), 'utf8')).sequence,

@@ -389,7 +389,7 @@ jobs:
           xvfb-run -a node scripts/verify-update-restart.mjs --interrupt-before-rename
           xvfb-run -a node scripts/verify-update-restart.mjs --interrupt-after-rename
           xvfb-run -a node scripts/verify-update-restart.mjs --helper-unavailable
-          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --recover-download
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --beta --failed-startup
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --beta --late-startup-confirmation
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --failed-startup
