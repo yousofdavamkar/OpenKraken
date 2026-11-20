@@ -12,6 +12,10 @@ The desktop also sometimes kept showing 99 refs after a branch was recreated at 
 
 The Linux x64 DEB, RPM and AppImage from clean commit `9fa9d41` passed the packaged reference filter, draft retention, Canvas, two appends, all-history search, keyboard navigation, terminal and cache-reopen checks. Each format rejected mismatched archive, helper and version information. Debian 13 installed and reinstalled the DEB, upgraded from 0.1.0 to the 0.2.0 fixture, removed and purged the app, and retained user data. Fedora 43 installed, reinstalled and removed the RPM while retaining user data. The real HTTPS update fixture verified the rebuilt DEB with a temporary signing key. Both dependency audits reported zero advisories on November 20.
 
+With Git LFS enabled, 1,173 unit and native tests passed across 125 files, with nine skips. The full Linux Electron run at `116fc5b` enabled the scale, Gitea and native-shell fixtures. Of 288 tests, 287 passed. The single failure was the distinct-target first paint. All 302 pages matched native Git through 1,505,199 commits. On the separate two-million-commit checkout, ten clean and dirty status reads over 100,000 files took 217.2–252.1 ms. Typechecking, build and lint passed.
+
+An earlier desktop run reached the sixth of seven launches in the signed-update scenario before its 90-second overall deadline expired. Both fixture sizes now use the existing 180-second packaged-fixture deadline. The ordinary signed-update scenario passed in the complete run, and the real DEB passed separately. The graph's first-paint limit remains 500 ms.
+
 | Linux x64 test installer |       Bytes | SHA-256                                                            |
 | ------------------------ | ----------: | ------------------------------------------------------------------ |
 | DEB                      | 115,441,196 | `4a45ce2d256417ea0a06efed622b564368c43afd386388e1ae0d060006dde0e2` |
