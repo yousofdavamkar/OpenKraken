@@ -1,6 +1,7 @@
 import { afterAll, expect, test, vi } from 'vitest';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
@@ -632,5 +633,36 @@ test('bare state skips the tree diff until an index exists and still tracks stag
   } finally {
     run.mockRestore();
     await service.dispose();
+  }
+});
+
+test('working revision streams the index listing and matches the saved revision format', async () => {
+  const { path, work } = await setup('streamed-index-revision');
+  const run = vi.spyOn(runner, 'runGit');
+  try {
+    for (const staged of [false, true]) {
+      if (staged) {
+        await writeFile(join(path, 'résumé.txt'), 'new staging entry');
+        fixtureGit(path, ['add', '--', 'résumé.txt']);
+      }
+      const state = await work.state();
+      const git = (args: string[]) => execFileSync('git', args, { cwd: path });
+      const entries = git(['ls-files', '--stage', '-v', '-z']);
+      const diff = git(['diff', '--cached', '--raw', '-z', '--no-ext-diff', '--no-renames']);
+      expect(diff.length > 0).toBe(staged);
+      const signature = createHash('sha256').update(entries).update(diff).digest('hex');
+      expect(state.revision).toBe(
+        createHash('sha256')
+          .update(JSON.stringify(state.head) + signature)
+          .digest('hex'),
+      );
+      const indexRead = run.mock.calls.find(
+        ([, args]) => args.includes('ls-files') && args.includes('--stage'),
+      );
+      expect(indexRead?.[2]?.onStdout).toBeTypeOf('function');
+      run.mockClear();
+    }
+  } finally {
+    run.mockRestore();
   }
 });
