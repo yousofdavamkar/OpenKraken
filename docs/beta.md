@@ -20,7 +20,7 @@ format=AppImage  # AppImage, deb or rpm
 pnpm installer --target "$format" --metadata /path/to/installer-metadata.json
 ```
 
-For a macOS DMG, set `OPENKRAKEN_UPDATE_CONFIG` to the same JSON when running `pnpm package`. For a Windows MSI, set `$env:OPENKRAKEN_UPDATE_CONFIG = Get-Content -LiteralPath .\beta-config.json -Raw` in the PowerShell session used for packaging. Then follow the native signing and verification steps for your installer. [Native installer builds](../README.md)
+For a macOS DMG, increment `macBuildNumber` in the root `package.json` for each distributed build and keep the full beta release in `version`. Set `OPENKRAKEN_UPDATE_CONFIG` to the same JSON when running `pnpm package`. For a Windows MSI, set `$env:OPENKRAKEN_UPDATE_CONFIG = Get-Content -LiteralPath .\beta-config.json -Raw` in the PowerShell session used for packaging. Then follow the native signing and verification steps for your installer. [Native installer builds](../README.md)
 
 Collect the native installer build receipts and their named installer files on the signing machine. Keep each pair together. For example, a release descriptor can list `{"manifest":"linux-x64/AppImage/manifest.json"}` and `{"manifest":"win32-x64/msi/manifest.json"}` as entries in its `artifacts` array. The paths are relative to the descriptor. The signer checks the descriptor version against each receipt and rechecks the size and digest of its installer. [Descriptor format](decisions/0082-signed-update-release-protocol.md#signing-from-installer-build-receipts)
 

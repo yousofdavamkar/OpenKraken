@@ -4,13 +4,29 @@
 
 The macOS installer target uses native `hdiutil` to create a compressed, read-only UDZO image from the existing hardened `OpenKraken.app`. It supports native x64 and arm64 builders and refuses cross-platform creation. The image contains the app and an `Applications` shortcut. It does not modify `/Applications`, invoke a privileged installer, publish an artifact or configure an update feed.
 
-Packager sets the bundle identifier to `org.openkraken.desktop`. POSIX bundle permissions are normalized before the existing fuse operation resets the macOS ad-hoc signature. The producer requires the root release version, `openkraken` executable and repository URL scheme in `Info.plist`, hardened fuses, and successful `codesign --verify --deep --strict`. Copies and the final source must preserve every recorded file digest, mode and relative link. `ditto` copies the bundle into the image source and from its mounted volume.
+Packager sets the bundle identifier to `org.openkraken.desktop`. POSIX bundle permissions are normalized before the existing fuse operation resets the macOS ad-hoc signature. The producer checks the native version fields, `openkraken` executable and repository URL scheme in `Info.plist`, the exact release version in the ASAR, hardened fuses, and successful `codesign --verify --deep --strict`. Copies and the final source must preserve every recorded file digest, mode and relative link. `ditto` copies the bundle into the image source and from its mounted volume.
 
 The default installer records an unsigned manifest with either test-only or supplied metadata. The `signed: false` field means no distribution identity: the local ad-hoc bundle signature is an integrity prerequisite, not Developer ID signing, notarization or a release signature. Metadata values are not invented. The default macOS target is `dmg`; Linux keeps `deb`.
 
 The verifier first checks the artifact size and SHA-256. It mounts the image read-only without browsing or opening it, verifies the mounted payload, bundle metadata, signature, fuses and exact `/Applications` shortcut, then copies the app into a disposable installation directory. It checks that copy again, detaches the image and runs the existing packaged desktop smoke against the copied executable. Only locally built or independently authenticated images are eligible; an adjacent manifest is not authentication.
 
 The verifier owns its temporary directory separately from the Linux extractor. Once attachment starts, recursive cleanup is prohibited until successful detachment. An uncertain attachment or failed detach retains the directory and reports its path. It does not force-unmount a volume or kill another application's processes for cleanup. Successful verification removes only its disposable copy and directory.
+
+## macOS beta and stable versions
+
+The release owner increments the positive integer `macBuildNumber` in the root `package.json` for each distributed macOS build, including the stable build following a beta. Use the same number for both architectures of one build. For example, `0.2.0-beta.1`, `0.2.0-beta.2` and `0.2.0` can use build numbers 2, 3 and 4. All three display `0.2.0` as their native short version. The publisher records the build number in the DMG receipt. Existing stable receipts that predate that field use their three-component release version for both native fields. [Apple release version](https://developer.apple.com/help/glossary/version-number/) · [Apple build version](https://developer.apple.com/help/glossary/build-string/)
+
+Electron Packager also copies its `appVersion` option into the staged application's package manifest. For a beta, the packaging hook restores the complete release version immediately before ASAR creation so the archive integrity digest covers the correct manifest. OpenKraken uses that full version for update comparisons. Native installer verification checks both plist fields and the ASAR. After detaching the DMG it launches the installed copy and compares the version reported in its startup diagnostics with the receipt.
+
+On a Mac, the following commands build a disposable candidate from the current checkout and run its installed-app and signed-feed checks.
+
+```sh
+pnpm build
+node scripts/check-installer-upgrade.mjs dmg --beta
+manifest=$(node -p 'require("./release/installer-upgrade-dmg-beta.json").manifestPath')
+pnpm smoke:installer "$manifest"
+OPENKRAKEN_UPDATE_TEST_MANIFEST="$manifest" pnpm exec playwright test tests/e2e/updates.test.ts -g 'signed update UI'
+```
 
 ## Verification and limits
 

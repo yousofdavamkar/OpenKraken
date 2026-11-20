@@ -2,6 +2,20 @@
 
 M8 remains in progress. On Linux x64, the full Linux history with one ref passed the opening budget in all three fresh profiles. Fresh openings with 49,999 nested tag aliases passed three of six times across two runs, and all three restarted profiles passed. All six fresh and all three restarted profiles with distinct targets exceeded 500 ms. Native Windows, macOS and ARM64 acceptance, production release gates, and remaining [M6](m6-progress.md) and [M7](m7-progress.md) work are open.
 
+## macOS beta release identity
+
+On Linux x64, Electron Packager 20.3.0 produced Intel and Apple silicon metadata fixtures from the checksum-verified Electron 45.2.1 archives. With the previous options the app and four helper plists contained `0.2.0-beta.1` in both native version fields. Setting just the numeric short version also changed the embedded application version to `0.2.0`. The corrected packaging hook preserved the following values on both architectures.
+
+| Version inside app.asar | Native short version | Native build number |
+| ----------------------- | -------------------- | ------------------- |
+| 0.2.0-beta.1            | 0.2.0                | 2                   |
+| 0.2.0-beta.2            | 0.2.0                | 3                   |
+| 0.2.0                   | 0.2.0                | 4                   |
+
+The macOS verification matrix includes Intel and Apple silicon runners. On each, CI builds a beta DMG, checks that a stale bundle with matching plist versions cannot be issued as the final release, and compares the running app's startup version with the receipt after copy-install. It also exercises signed-feed download and export. Native Mac launch, image mounting, signature verification and notarization remain open. [macOS beta packaging](../decisions/0089-native-dmg-payload-and-copy-install.md#macos-beta-and-stable-versions)
+
+On Linux x64, a newly built `0.2.0-beta.1` package rejected a smoke check expecting the final version and passed with the exact beta version. The packaged app passed Canvas, paging, search, keyboard and terminal checks. Electron recovered, saved and verified the corresponding 115,440,444-byte beta DEB through local HTTPS. The full unit and native suite passed 1,200 tests with ten skips. Typechecking, lint, the build and workflow validation passed.
+
 ## Signing a release from installer build receipts
 
 The release signer checks the exact version, platform, format, filename, size and digest from each build receipt against the release descriptor, the supported installer formats and the installer bytes. A local HTTPS feed served three Linux x64 test packages for version `0.1.0`. Feed verification checked the DEB (115,440,864 bytes), RPM (99,010,373 bytes) and AppImage (133,212,664 bytes) and recorded the public key fingerprint, signed payload digest and validity period. [Release protocol](../decisions/0082-signed-update-release-protocol.md)
