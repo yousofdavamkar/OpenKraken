@@ -2,6 +2,21 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest three runs. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Search after a working-tree rename
+
+With 7,000 commits loaded, the Electron graph kept the same history page after an external stage and rename. The active search for the old filename dropped to zero matches, and the new name matched the working row. The worker received a single-document update. Store tests also cover open details, selection, lane and passage reuse, and a rename before the page containing HEAD arrives.
+
+A Linux x64 worker benchmark compared a full refresh at `7ad1822` with the single-document update. Each sample indexed the history, searched for the original filename, cloned and processed the update, then searched for the new name. Each pair ran in fresh Node processes. The table gives medians from five alternating pairs after one warm-up pair. Message size uses V8 serialization. Timings cover the clone, worker and active query and exclude Electron rendering and Git.
+
+| Loaded commits | Full refresh size | Single update size | Full refresh and search | Single update and search |
+| -------------: | ----------------: | -----------------: | ----------------------: | -----------------------: |
+|          7,000 |   1,335,039 bytes |          175 bytes |               117.21 ms |                  0.43 ms |
+|         32,000 |   6,154,041 bytes |          175 bytes |               485.57 ms |                  0.45 ms |
+
+On the 1,505,199-commit Linux fixture, the first 2,000 commits painted in 336.9–344.7 ms with one ref. With 50,000 distinct targets, first paint took 1,074.1, 713.7 and 684.1 ms, each above the 500 ms budget. All 18 appends took 176.5–229.6 ms. Each run used Git 2.53.0, a fresh profile and retained OS caches. [Per-run timings](m8-opening-experiments.csv)
+
+Typechecking, lint, the build and packaged history smoke passed on Linux x64. The unit/native suite passed 1,092 tests with nine skips. All 31 graph and worktree Electron tests passed on X11, including six Canvas goldens. The search shortcut and watcher rename also passed on Git 2.38.0. In a mixed-display run, Xvfb inherited the host Wayland session and the native Ctrl+F assertion missed focus. The same assertion failed in four isolated repeats with that environment. The explicit X11 checks above exercised the virtual display.
+
 ## Windows publisher signatures
 
 Windows x64 packaging can sign the native askpass helper before ASAR creation, the application executable after its fuses are set, and the MSI after WiX builds it. The release owner selects the certificate by its DER SHA-256 fingerprint and can request RFC 3161 timestamps. Verification authenticates the private MSI copy before extraction and checks the two executable signatures and ASAR helper digest before launch. [Publisher setup and verification commands](../../README.md) · [Signing policy](../decisions/0091-native-msi-and-installer-owned-protocol.md#authenticode-signing)
