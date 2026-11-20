@@ -19,6 +19,8 @@ import { packageFuses, pinnedElectronRuntime, sha256, verifyFuses } from './pack
 if (process.platform !== 'linux') throw new Error('Linux AppImage acceptance requires Linux');
 await mkdir('release', { recursive: true });
 const root = await mkdtemp(resolve('release/update-restart-check-'));
+// Chromium puts its Unix-domain singleton socket under TMPDIR, even in extract-and-run mode.
+const runtimeTemp = await mkdtemp('/tmp/openkraken-image-');
 let server, child, browser, mainPid;
 let completed = false;
 let launchOutput = '';
@@ -29,7 +31,9 @@ const lateConfirmation = process.argv.includes('--late-startup-confirmation');
 const delayedStartup = lateExit || lateConfirmation;
 const rollbackSyncError = process.argv.includes('--rollback-sync-error');
 const pendingNotice = process.argv.includes('--pending-notice');
+const missingDocument = process.argv.includes('--missing-renderer-document');
 const failStartup =
+  missingDocument ||
   process.argv.includes('--failed-startup') ||
   delayedDescendant ||
   lateExit ||
@@ -194,6 +198,8 @@ try {
     const staging = join(root, version, 'staging');
     await mkdir(staging, { recursive: true });
     await cp(runtime, join(staging, 'dist'), { recursive: true });
+    if (missingDocument && version === replacementVersion)
+      await rm(join(staging, 'dist/renderer/index.html'));
     // Test trust and dialog responses are compiled into disposable fixture apps.
     // Production has no TLS bypass, test key or runtime test switch.
     const banner = `
@@ -288,7 +294,7 @@ try {
           require('node:fs').writeFileSync(${JSON.stringify(descendantMarker)}, JSON.stringify({ pid: descendant.pid, started: Date.now() }));
           descendant.unref();
         }
-        process.exit(23);
+        if (!${missingDocument}) process.exit(23);
       }
       if (fixtureReturning && ${delayedDescendant}) {
         const descendant = JSON.parse(require('node:fs').readFileSync(${JSON.stringify(descendantMarker)}, 'utf8'));
@@ -424,7 +430,7 @@ try {
   child = spawn(target, args, {
     detached: true,
     stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...process.env, TMPDIR: root, XDG_CONFIG_HOME: configHome },
+    env: { ...process.env, TMPDIR: runtimeTemp, XDG_CONFIG_HOME: configHome },
   });
   const endpoint = await new Promise((resolve, reject) => {
     let output = '';
@@ -620,7 +626,7 @@ try {
       child = spawn(target, [`--user-data-dir=${profile}`], {
         detached: true,
         stdio: 'ignore',
-        env: { ...process.env, TMPDIR: root, XDG_CONFIG_HOME: configHome },
+        env: { ...process.env, TMPDIR: runtimeTemp, XDG_CONFIG_HOME: configHome },
       });
     }
     let started = JSON.parse(await waitForFile(marker, slowCommit ? 60000 : 30000));
@@ -653,7 +659,7 @@ try {
       child = spawn(target, [`--user-data-dir=${profile}`], {
         detached: true,
         stdio: 'ignore',
-        env: { ...process.env, TMPDIR: root, XDG_CONFIG_HOME: configHome },
+        env: { ...process.env, TMPDIR: runtimeTemp, XDG_CONFIG_HOME: configHome },
       });
       started = JSON.parse(await waitForFile(marker));
       console.log(
@@ -667,6 +673,11 @@ try {
     }
     if (slowCommit)
       assert.equal(await readFile(join(root, 'slow-commit'), 'utf8'), 'rename resumed');
+    if (missingDocument)
+      assert.equal(
+        await readFile(join(root, 'install-error'), 'utf8'),
+        'OpenKraken could not start',
+      );
     if (delayedDescendant)
       assert.equal(
         await readFile(join(root, 'descendant-stopped'), 'utf8'),
@@ -816,6 +827,7 @@ try {
   if (server) await new Promise((resolve) => server.close(resolve));
   await delay(300);
   if (rollbackSyncError) await chmod(installFolder, 0o700).catch(() => {});
+  await rm(runtimeTemp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (completed) await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   else console.error('Retained disposable failure fixture:', root);
 }
