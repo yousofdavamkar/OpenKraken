@@ -95,11 +95,11 @@ export class HistoryCache {
   private dirty = false;
   private disabled = false;
   private directory: string;
-  static async hasPrefix(root: string, repoId: string) {
-    return stat(join(root, 'history', repoId, prefixName)).then(
-      () => true,
-      () => false,
-    );
+  static async prefixModifiedAt(root: string, repoId: string) {
+    const info = await stat(join(cacheDirectory(root, repoId), prefixName)).catch(() => undefined);
+    return info?.isFile() && info.size > 0 && info.size <= 8 * 1024 * 1024
+      ? info.mtimeMs
+      : undefined;
   }
   constructor(
     private root: string,

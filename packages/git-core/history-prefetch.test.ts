@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, rm, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
@@ -200,6 +200,70 @@ test('a slow optional ref read yields to the normal snapshot, and a warm prefix 
     await Promise.all([warm.dispose(), service.dispose()]);
   }
 });
+
+test.each(['loose branch', 'packed refs', 'detached HEAD'])(
+  'a newer %s can start the live walk before a stale saved profile finishes opening',
+  async (change) => {
+    const path = await clone('stale-' + change);
+    const profile = { dataDir: join(root, 'profile-' + change) };
+    const first = new RepositoryService('git', profile);
+    const original = await first.open(path);
+    try {
+      await first.snapshot(original.id);
+    } finally {
+      await first.dispose();
+    }
+    const tip = fixtureGit(path, ['commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'New tip']);
+    const ref = change === 'packed refs' ? 'refs/heads/independent' : 'HEAD';
+    fixtureGit(path, [
+      'update-ref',
+      ...(change === 'detached HEAD' ? ['--no-deref'] : []),
+      ref,
+      tip,
+    ]);
+    if (change === 'packed refs') fixtureGit(path, ['pack-refs', '--all']);
+    const changedFile =
+      change === 'packed refs'
+        ? 'packed-refs'
+        : change === 'detached HEAD'
+          ? 'HEAD'
+          : fixtureGit(path, ['symbolic-ref', 'HEAD']);
+    // Make the ordering deterministic even on low-resolution filesystems.
+    const newer = new Date(Date.now() + 2000);
+    await utimes(join(path, changedFile), newer, newer);
+    const service = new RepositoryService('git', profile);
+    const stop = gate();
+    const walk = vi.fn();
+    const native = runner.runGit;
+    const spy = vi.spyOn(runner, 'runGit').mockImplementation(async (binary, args, options) => {
+      if (readsSnapshotRefs(args)) await stop.promise;
+      if (args[0] === 'rev-list' && options?.env?.GIT_NO_REPLACE_OBJECTS) walk();
+      return native(binary, args, options);
+    });
+    try {
+      const repo = await service.open(path);
+      const opening = service.snapshot(repo.id, undefined, false);
+      let snapshot;
+      try {
+        await vi.waitFor(() => expect(walk).toHaveBeenCalledOnce(), { timeout: 2000 });
+      } finally {
+        stop.resolve();
+        snapshot = await opening;
+      }
+      const next = await service.page(repo.id, snapshot.cursor, snapshot.commits.length, 5000);
+      expect(
+        [...snapshot.commits, ...next.commits].map((c) => [c.oid, ...c.parents].join(' ')),
+      ).toEqual(
+        fixtureGit(path, ['rev-list', '--date-order', '--parents', '--all', 'HEAD']).split('\n'),
+      );
+      expect(next.hasMore).toBe(false);
+    } finally {
+      stop.resolve();
+      spy.mockRestore();
+      await service.dispose();
+    }
+  },
+);
 
 test('a failed authoritative ref read closes the unpublished cursor', async () => {
   const path = await clone('failed');

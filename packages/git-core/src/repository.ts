@@ -507,11 +507,20 @@ export class RepositoryService {
     // File size is only a scheduling hint. Git supplies every tentative root.
     const packed = await stat(join(repository.commonDir, 'packed-refs')).catch(() => undefined);
     if (!packed || packed.size < 512 * 1024) return;
-    if (
-      (await exists(join(repository.commonDir, 'info/grafts'))) ||
-      (this.dataDir && (await HistoryCache.hasPrefix(this.dataDir, repository.id)))
-    )
-      return;
+    if (await exists(join(repository.commonDir, 'info/grafts'))) return;
+    if (this.dataDir) {
+      const savedAt = await HistoryCache.prefixModifiedAt(this.dataDir, repository.id);
+      if (savedAt !== undefined && packed.mtimeMs <= savedAt) {
+        const paths = [join(repository.gitDir, 'HEAD')];
+        const head = repository.head;
+        if (head.kind === 'branch' && head.ref.startsWith('refs/heads/'))
+          paths.push(join(repository.commonDir, head.ref));
+        const heads = await Promise.all(paths.map((path) => stat(path).catch(() => undefined)));
+        // A newer ref may make the saved window stale. Only the canonical
+        // fingerprint and ordered live roots decide which history can be shown.
+        if (heads.every((info) => !info || info.mtimeMs <= savedAt)) return;
+      }
+    }
     if (signal.aborted) return;
     const head = repository.head;
     const unfiltered = !view.soloRef && view.hiddenRefs.length === 0;
