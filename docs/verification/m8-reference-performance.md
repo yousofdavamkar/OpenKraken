@@ -2,6 +2,12 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Streaming object-type lookup
+
+On the pinned full Linux fixture with 50,000 distinct targets, a native probe piped the ref name, target and tracking fields from `for-each-ref` into `cat-file --batch-check`. The second command looked up the type of each object and returned the other fields using `%(rest)`. Across eight alternating pairs after warm-up, the median command time with empty upstream fields fell from 163.9 to 140.4 ms. With both upstream fields requested, it fell from 216.3 to 169.8 ms. The direct and piped commands returned byte-identical output in all runs on this fixture.
+
+A separate diagnostic Git utility passed the identity stream between two supervised Git processes and parsed the returned records. Both builds opened the same fixture, displayed 2,000 commits and reported all 50,000 matching refs. After one warm-up pair, six alternating fresh-profile pairs measured median snapshot time of 383.2 ms with the existing reader and 404.0 ms with the pipeline. Median first paint was 724.1 and 730.9 ms, respectively. The shipping reader retains the single direct enumeration for this case.
+
 ## Wide graph drawing and append-only passage indexing
 
 A Linux x64 Electron Canvas probe drew a 400 × 560 CSS-pixel viewport straddling rows 499 and 500 at device pixel ratio 1. It alternated between the first lane and the middle of the graph. Each case included a diagonal crossing the viewport, dashed passages and two warm-up draws. Both builds produced identical RGBA hashes at both horizontal positions for each case.
