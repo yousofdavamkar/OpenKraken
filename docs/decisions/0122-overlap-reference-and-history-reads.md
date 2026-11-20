@@ -18,7 +18,7 @@ On an unfiltered open, if at least 32 sampled packed refs all point to the objec
 
 ## Packed annotated tags
 
-When the bounded packed-ref sample shows repeated targets and a peeled record, an unfiltered cold open asks Git for the direct object IDs of the first 128 refs. Git resolves the distinct IDs to commits in ref order with `rev-list --no-walk=unsorted --stdin` and replacement objects disabled. This lets the early walk start from the same commit IDs that the full enumeration will later use for nested annotations. The service compares every ordered root before adopting the cursor. A later independent ref, an incomplete sample, or an unavailable speculative result can require the ordinary walk. Both paths retain the original first-page and append deadlines.
+When the bounded packed-ref sample shows repeated targets and a peeled record, the reference reader supplies replacement-free object metadata for the first 128 refs. An unfiltered cold open takes commit targets and peeled commits from that same sample in native ref order. Tree and blob targets do not enter the walk. This lets the early walk start from the same commit IDs that the full enumeration will later use for nested annotations. The service compares every ordered root before adopting the cursor. A later independent ref, an incomplete sample, or an unavailable speculative result can require the ordinary walk. Both paths retain the original first-page and append deadlines.
 
 ## Validating walks started from tag objects
 

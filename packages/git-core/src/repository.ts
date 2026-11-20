@@ -36,6 +36,7 @@ import type {
   WorktreeAction,
   GraphView,
   Repository,
+  Ref,
   Snapshot,
 } from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
@@ -352,22 +353,29 @@ export class RepositoryService {
         const repository = refresh ? await this.open(known.path, signal) : known;
         const stop = new AbortController();
         const readSignal = signal ? AbortSignal.any([signal, stop.signal]) : stop.signal;
-        const refRead = this.referenceReader.read(repository.path, readSignal, packedRefs);
+        const probeStop = new AbortController();
+        let prefetch: Promise<HistoryCursor | undefined> | undefined;
+        const refRead = this.referenceReader.read(
+          repository.path,
+          readSignal,
+          packedRefs,
+          (objects) => {
+            if (!refresh)
+              prefetch = this.prefetchHistory(
+                repository,
+                view,
+                packedRefs,
+                AbortSignal.any([readSignal, probeStop.signal]),
+                objects,
+              ).catch(() => undefined);
+          },
+        );
         const worktreeRead = exists(join(repository.commonDir, 'worktrees')).then((present) =>
           present ? this.worktreeManager(id).manager.list(readSignal) : undefined,
         );
         const statusRead = this.readSnapshotStatus(repository, readSignal, observe?.status);
         const cacheReads = this.cacheFingerprintReads(repository, readSignal);
         const cacheFlush = this.cache?.flush();
-        const probeStop = new AbortController();
-        const prefetch = refresh
-          ? Promise.resolve(undefined)
-          : this.prefetchHistory(
-              repository,
-              view,
-              packedRefs,
-              AbortSignal.any([readSignal, probeStop.signal]),
-            ).catch(() => undefined);
         const graphRead = Promise.all([refRead, worktreeRead, Promise.all(cacheReads)]).then(
           async ([refs, worktrees, cacheInputs]) => {
             // The normal snapshot can start now. Only reuse a walk already in progress.
@@ -480,6 +488,7 @@ export class RepositoryService {
     view: GraphView,
     sample: PackedRefSample,
     signal: AbortSignal,
+    objects?: ReadonlyMap<string, Ref>,
   ) {
     if (
       (sample.repeatedTargets && !view.soloRef && view.hiddenRefs.length > 0) ||
@@ -514,47 +523,36 @@ export class RepositoryService {
         undefined,
         FIRST_PAGE_SIZE,
       );
-    const filtered = !!view.soloRef || view.hiddenRefs.length > 0;
-    const sampleAnnotations = unfiltered && sample.repeatedTargets && sample.hasPeeledTags;
-    const args = filtered
-      ? [
-          'for-each-ref',
-          '--format=%(objectname) %(refname)',
-          ...(view.soloRef ? ['--', view.soloRef] : []),
-        ]
-      : sampleAnnotations
-        ? ['for-each-ref', '--count=128', '--format=%(objectname)']
-        : ['rev-parse', '--all'];
-    const { stdout } = await this.run(args, {
-      cwd: repository.path,
-      signal,
-      maxBytes: 8 * 1024 * 1024,
-    });
-    if (signal.aborted) return;
     const isVisible = graphRefVisibility(view);
     const starts = new Set<string>();
-    const lines = stdout.toString('utf8').split('\n');
-    if (lines.pop() !== '') return;
-    for (const line of lines) {
-      const separator = filtered ? line.indexOf(' ') : -1;
-      if (filtered && separator === -1) return;
-      if (filtered && !isVisible(line.slice(separator + 1))) continue;
-      starts.add(filtered ? line.slice(0, separator) : line);
-    }
-    for (const oid of starts) if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid)) return;
-    if (sampleAnnotations && starts.size) {
-      // Ask Git to peel the sampled objects in ref order. The complete enumeration
-      // below still has to confirm every ordered root before it can adopt the walk.
-      const peeled = await this.run(
-        ['--no-replace-objects', 'rev-list', '--no-walk=unsorted', '--stdin'],
-        { cwd: repository.path, signal, stdin: [...starts].join('\n') + '\n', maxBytes: 16 * 1024 },
-      );
-      if (signal.aborted) return;
-      starts.clear();
-      for (const oid of peeled.stdout.toString('utf8').trimEnd().split('\n')) {
-        if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid)) return;
-        starts.add(oid);
+    if (unfiltered && objects) {
+      for (const ref of objects.values()) {
+        if (ref.objectType === 'commit') starts.add(ref.target);
+        else if (ref.peeledType === 'commit' && ref.peeled) starts.add(ref.peeled);
       }
+    } else {
+      const args = unfiltered
+        ? ['rev-parse', '--all']
+        : [
+            'for-each-ref',
+            '--format=%(objectname) %(refname)',
+            ...(view.soloRef ? ['--', view.soloRef] : []),
+          ];
+      const { stdout } = await this.run(args, {
+        cwd: repository.path,
+        signal,
+        maxBytes: 8 * 1024 * 1024,
+      });
+      if (signal.aborted) return;
+      const lines = stdout.toString('utf8').split('\n');
+      if (lines.pop() !== '') return;
+      for (const line of lines) {
+        const separator = unfiltered ? -1 : line.indexOf(' ');
+        if (!unfiltered && separator === -1) return;
+        if (!unfiltered && !isVisible(line.slice(separator + 1))) continue;
+        starts.add(unfiltered ? line : line.slice(0, separator));
+      }
+      for (const oid of starts) if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid)) return;
     }
     addVisibleHead(starts, head, view, isVisible);
     return new HistoryCursor(

@@ -111,19 +111,25 @@ export class ReferenceReader {
       throw new Error('Invalid output limit');
   }
 
-  async read(cwd: string, signal?: AbortSignal, sample = ordinaryRefs): Promise<Ref[]> {
+  async read(
+    cwd: string,
+    signal?: AbortSignal,
+    sample = ordinaryRefs,
+    onSample?: (objects?: ReadonlyMap<string, Ref>) => void,
+  ): Promise<Ref[]> {
     const deadline = new AbortController();
     const timer = setTimeout(() => deadline.abort(), 30000);
     timer.unref();
     const active = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
     try {
-      const omitUpstreams = sample.manyBranches && (await this.noConfiguredUpstreams(cwd, active));
       const sampled =
         sample.repeatedTargets &&
         sample.hasPeeledTags &&
         process.env.GIT_REPLACE_REF_BASE === undefined
           ? await this.sampleTagObjects(cwd, active)
           : undefined;
+      onSample?.(sampled);
+      const omitUpstreams = sample.manyBranches && (await this.noConfiguredUpstreams(cwd, active));
       const refs = await this.readStable(
         cwd,
         active,

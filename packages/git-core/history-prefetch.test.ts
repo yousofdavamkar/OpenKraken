@@ -477,6 +477,8 @@ test.each([false, true])(
       expect(
         (await service.search(repo.id, first.cursor, orphan)).commits.map((c) => c.oid),
       ).toEqual([orphan]);
+      expect(calls.mock.calls.filter(([, args]) => args.includes('--count=128'))).toHaveLength(1);
+      expect(calls.mock.calls.some(([, args]) => args.includes('--no-walk=unsorted'))).toBe(false);
       expect(
         calls.mock.calls.filter(([, args]) => args[0] === 'rev-list' && args.includes('--parents')),
       ).toHaveLength(laterTip ? 2 : 1);
