@@ -56,6 +56,8 @@ export * from './appearance.js';
 export * from './theme-colors.js';
 export * from './commands.js';
 import {
+  providerBitbucketMergeabilityOptionsSchema,
+  providerBitbucketMergeChecksSchema,
   providerBitbucketStatusesOptionsSchema,
   providerBitbucketStatusesPageSchema,
   providerBitbucketCommentsOptionsSchema,
@@ -1763,6 +1765,14 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerBitbucketPullMergeability'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerBitbucketMergeabilityOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerBitbucketPullStatuses'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerBitbucketStatusesOptionsSchema,
@@ -2259,6 +2269,12 @@ export const resultSchema = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({ kind: z.literal('providerBitbucketPullDiff'), diff: providerBitbucketDiffSchema })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerBitbucketPullMergeability'),
+      checks: providerBitbucketMergeChecksSchema,
+    })
     .strict(),
   z
     .object({

@@ -931,6 +931,7 @@ export function startDesktop(
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
           request.method === 'providerBitbucketPullRequest' ||
+          request.method === 'providerBitbucketPullMergeability' ||
           request.method === 'providerBitbucketPullStatuses' ||
           request.method === 'providerBitbucketPullComments' ||
           request.method === 'providerBitbucketPullFiles' ||
@@ -1225,6 +1226,15 @@ export function startDesktop(
             return resultSchema.parse({
               kind: 'providerBitbucketPullDiff',
               diff: await providers.bitbucketPullDiff(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerBitbucketPullMergeability')
+            return resultSchema.parse({
+              kind: 'providerBitbucketPullMergeability',
+              checks: await providers.bitbucketPullMergeability(
                 request.accountId,
                 request.options,
                 controller.signal,
@@ -1578,6 +1588,7 @@ export function startDesktop(
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
           request.method === 'providerBitbucketPullRequest' ||
+          request.method === 'providerBitbucketPullMergeability' ||
           request.method === 'providerBitbucketPullStatuses' ||
           request.method === 'providerBitbucketPullComments' ||
           request.method === 'providerBitbucketPullFiles' ||

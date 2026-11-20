@@ -5,9 +5,8 @@ import {
   providerBitbucketStatusesPageSchema,
   type ProviderBitbucketStatusesOptions,
 } from '@openkraken/ipc-contract';
-import { loadBitbucketPull, type BitbucketRead } from './bitbucket-pulls.js';
+import { checkBitbucketPullRevision, type BitbucketRead } from './bitbucket-pulls.js';
 import { bitbucketPageSchema, bitbucketPagination } from './bitbucket-response.js';
-import { ProviderError } from './provider-error.js';
 
 const fields = providerBitbucketStatusSchema.shape;
 const status = z.object({
@@ -24,23 +23,8 @@ export async function loadBitbucketStatuses(
   input: ProviderBitbucketStatusesOptions,
 ) {
   const options = providerBitbucketStatusesOptionsSchema.parse(input);
-  const { repository, number, repositoryId, source, page } = options;
-  const checkSource = async () => {
-    const pull = await loadBitbucketPull(read, { repository, number });
-    if (
-      pull.repositoryId !== repositoryId ||
-      pull.source.repository?.id !== source.repository?.id ||
-      pull.source.repository?.owner !== source.repository?.owner ||
-      pull.source.repository?.name !== source.repository?.name ||
-      pull.source.branch !== source.branch ||
-      pull.source.commit !== source.commit
-    )
-      throw new ProviderError(
-        'STALE_PROVIDER_MERGE',
-        'The pull-request source changed. Refresh the pull-request details.',
-      );
-  };
-  await checkSource();
+  const { repository, number, page } = options;
+  await checkBitbucketPullRevision(read, options);
   const endpoint = `repositories/${repository.owner}/${repository.name}/pullrequests/${number}/statuses`;
   const result = await read(`${endpoint}?page=${page}&pagelen=100&sort=key`, (value) => {
     const data = bitbucketPageSchema(status).parse(value);
@@ -57,6 +41,6 @@ export async function loadBitbucketStatuses(
       ...bitbucketPagination(data, page, endpoint),
     });
   });
-  await checkSource();
+  await checkBitbucketPullRevision(read, options);
   return result;
 }

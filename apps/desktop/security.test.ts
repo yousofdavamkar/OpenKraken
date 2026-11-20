@@ -1701,3 +1701,41 @@ test('native editor draft storage accepts bounded text and reviewed identities o
   expect(requestSchema.safeParse({ ...write, text: '\0' }).success).toBe(false);
   expect(requestSchema.safeParse({ ...write, text: 'ü'.repeat(524289) }).success).toBe(false);
 });
+
+test('Bitbucket build and merge check reads have main-only, bounded IPC inputs', () => {
+  const common = {
+    id: '00000000-0000-4000-8000-000000000000',
+    accountId: 'a'.repeat(64),
+  };
+  const endpoint = { repository: null, branch: 'main', commit: '123abcd' };
+  const review = {
+    repository: { owner: 'team', name: 'project' },
+    number: 1,
+    repositoryId: '{20000000-0000-4000-8000-000000000001}',
+    source: endpoint,
+  };
+  const statuses = {
+    ...common,
+    method: 'providerBitbucketPullStatuses',
+    options: { ...review, page: 1 },
+  };
+  const merge = {
+    ...common,
+    method: 'providerBitbucketPullMergeability',
+    options: { ...review, destination: endpoint },
+  };
+  for (const request of [statuses, merge]) {
+    expect(requestSchema.safeParse(request).success).toBe(true);
+    expect(serviceRequestSchema.safeParse(request).success).toBe(false);
+    expect(
+      requestSchema.safeParse({
+        ...request,
+        options: { ...request.options, url: 'https://ci.invalid' },
+      }).success,
+    ).toBe(false);
+  }
+  expect(requestSchema.safeParse({ ...merge, options: review }).success).toBe(false);
+  expect(requestSchema.safeParse({ ...statuses, options: { ...review, page: 101 } }).success).toBe(
+    false,
+  );
+});

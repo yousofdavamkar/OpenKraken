@@ -1,3 +1,5 @@
+import { loadBitbucketMergeability } from './bitbucket-mergeability.js';
+import type { ProviderBitbucketMergeabilityOptions } from '@openkraken/ipc-contract';
 import { loadBitbucketStatuses } from './bitbucket-statuses.js';
 import type { ProviderBitbucketStatusesOptions } from '@openkraken/ipc-contract';
 import { loadBitbucketComments } from './bitbucket-comments.js';
@@ -138,6 +140,17 @@ export class BitbucketProvider {
   }
   pullRequest(origin: string, token: string, input: ProviderPullOptions, signal?: AbortSignal) {
     return loadBitbucketPull(
+      (endpoint, parse) => this.request(origin, token, endpoint, signal, parse),
+      input,
+    );
+  }
+  pullMergeability(
+    origin: string,
+    token: string,
+    input: ProviderBitbucketMergeabilityOptions,
+    signal?: AbortSignal,
+  ) {
+    return loadBitbucketMergeability(
       (endpoint, parse) => this.request(origin, token, endpoint, signal, parse),
       input,
     );

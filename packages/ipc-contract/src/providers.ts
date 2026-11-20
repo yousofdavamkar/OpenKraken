@@ -403,6 +403,35 @@ export const providerBitbucketStatusesOptionsSchema = providerBitbucketCommentsO
     source: providerBitbucketEndpointSchema,
   },
 );
+export const providerBitbucketMergeabilityOptionsSchema = providerBitbucketStatusesOptionsSchema
+  .omit({ page: true })
+  .extend({
+    destination: providerBitbucketEndpointSchema,
+  });
+export const providerBitbucketMergeCheckSchema = z
+  .object({
+    type: z.enum([
+      'pullrequest_state_check',
+      'current_user_permission_check',
+      'git_mergeability_check',
+      'standard_merge_check',
+      'custom_pre_merge_check',
+      'custom_on_merge_check',
+      'merge_queue_check',
+    ]),
+    status: z.enum(['PASSED', 'FAILED', 'PENDING', 'SKIPPED', 'UNKNOWN']),
+    required: z.boolean(),
+    blocking: z.boolean(),
+    name: z.string().max(1024).nullable(),
+    detail: z.string().max(16384).nullable(),
+  })
+  .strict();
+export const providerBitbucketMergeChecksSchema = z
+  .array(providerBitbucketMergeCheckSchema)
+  .max(1000);
+export type ProviderBitbucketMergeabilityOptions = z.infer<
+  typeof providerBitbucketMergeabilityOptionsSchema
+>;
 export const providerBitbucketStatusSchema = z
   .object({
     key: z.string().min(1).max(512),

@@ -4,6 +4,8 @@ import { DraftEncryptionUnavailable } from './protected-draft-files.js';
 import type { IssueDraftRequest, IssueDrafts } from './issue-drafts.js';
 import type { ReviewDraftRequest, ReviewDrafts } from './review-drafts.js';
 import {
+  providerBitbucketMergeabilityOptionsSchema,
+  type ProviderBitbucketMergeabilityOptions,
   providerBitbucketStatusesOptionsSchema,
   type ProviderBitbucketStatusesOptions,
   providerBitbucketCommentsOptionsSchema,
@@ -517,6 +519,19 @@ export class ProviderService {
       if (account.provider !== 'bitbucket')
         throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
       return this.bitbucket.pullDiff(account.origin, token, options, signal);
+    });
+  }
+  bitbucketPullMergeability(
+    id: string,
+    input: ProviderBitbucketMergeabilityOptions,
+    signal?: AbortSignal,
+  ) {
+    return this.run(async () => {
+      const options = providerBitbucketMergeabilityOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'bitbucket')
+        throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
+      return this.bitbucket.pullMergeability(account.origin, token, options, signal);
     });
   }
   bitbucketPullStatuses(id: string, input: ProviderBitbucketStatusesOptions, signal?: AbortSignal) {
