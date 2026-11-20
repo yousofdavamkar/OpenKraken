@@ -2,6 +2,16 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest three runs. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Verifying a hosted update feed
+
+The release check compares the hosted signed manifest with the approved candidate, streams every installer through the desktop download checks and reads the manifest again. A loopback feed failed the check for a missing, short, redirected or corrupted Windows installer after the Linux installer passed. A different signed payload for the same version and sequence failed both before download and when the feed changed during download. An invalid signature and an untrusted TLS certificate each stopped the check before any installer request. [Release-owner command and Caddy configuration](../decisions/0082-signed-update-release-protocol.md#serving-and-checking-a-release)
+
+On Linux x64, Caddy 2.6.2 served the existing 0.1.0 test DEB (115,433,232 bytes), RPM (99,006,721 bytes) and AppImage (133,192,184 bytes). All three matched a manifest signed with a temporary Ed25519 key. Removing the AppImage from the web root failed the release check and identified the missing file.
+
+Caddy obtained a certificate for a loopback hostname from Pebble 2.6.0 using a real TLS-ALPN-01 challenge. With a 50-second test certificate and a two-second renewal check interval, the running server renewed and presented a different leaf certificate. The client trusted the fixture CA and verified the same signed manifest and all three installers before and after renewal. An earlier fixture run using Pebble's optional HTTP-date retry hints stopped during order finalization with Caddy 2.6.2. The successful runs used Pebble's default retry settings. The public configuration passed Caddy validation. Production DNS, public CA issuance and participant distribution still require a publisher-controlled host. [Pebble test authority](https://github.com/letsencrypt/pebble)
+
+The Linux suite passed 1,101 unit and native tests with nine skips. Typechecking, lint, the production build and packaged Canvas, search, paging and keyboard smoke passed. The Electron update test downloaded and exported the DEB and RPM, rejected a changed digest and checked a release after feed and key migration. The DEB check saved a sequence-9 receipt whose digest matched the installer inventory. The native installer CI jobs now retain that receipt alongside their test output.
+
 ## Search after a working-tree rename
 
 With 7,000 commits loaded, the Electron graph kept the same history page after an external stage and rename. The active search for the old filename dropped to zero matches, and the new name matched the working row. The worker received a single-document update. Store tests also cover open details, selection, lane and passage reuse, and a rename before the page containing HEAD arrives.
