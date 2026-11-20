@@ -2,6 +2,22 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Nested annotated tags on full Linux history
+
+A shared-object bare clone of the one-ref Linux fixture retained its original branch at `46fec1c3029b552ec63b2d01af9d43a386f043ea`. The fixture added a parentless commit and a three-level annotated tag chain pointing to it. After the intermediate tag names were removed, 49,999 packed tag names pointed to the outer annotation. Native Git counted 50,000 refs and 1,505,200 reachable commits. The earlier 50,000-distinct-target fixture has a different distribution and remains a separate gate.
+
+Git 2.38.0 originally omitted the parentless commit from the application graph. With recursive peeling, both Git 2.38.0 and 2.53.0 returned all 50,000 ref records with every field matching Git 2.53.0's full ref enumeration. On both versions, the first 17,000 displayed IDs and parent lists matched native traversal byte for byte (SHA-256 `06f2b482653f92d39961da5c7a2853af13de640ec0fc4885ee08825a6d22d110`). A solo view of the last tag found the parentless commit by its message. An unfiltered message search during concurrent verification reached the 30-second native deadline. A subsequent search found that commit in 24.5 seconds.
+
+The table gives medians from alternating fresh-profile Electron runs on Linux x64 with populated OS caches. The first two comparisons include the compatibility fix in both builds. The third comparison includes native batch peeling in both builds and changes the utility-to-main transfer. Each run opened 2,000 commits, appended three 5,000-commit pages, and scrolled the 12,000-row graph.
+
+| Change                       | Git    | Pairs | First paint before | First paint after | Native snapshot before | Native snapshot after |
+| ---------------------------- | ------ | ----: | -----------------: | ----------------: | ---------------------: | --------------------: |
+| Peel each shared object once | 2.53.0 |     3 |         1,560.2 ms |          978.9 ms |               965.4 ms |              394.0 ms |
+| Peel each shared object once | 2.38.0 |     3 |         2,408.4 ms |        1,031.3 ms |             1,750.1 ms |              438.3 ms |
+| Stage repeated tag names     | 2.53.0 |     5 |         1,018.1 ms |          894.9 ms |               403.6 ms |              412.2 ms |
+
+Staging the aliases reduced median time from the open request to receipt in the renderer from 806.5 to 658.8 ms. All 15 appends with the staged transfer took 182.0–226.8 ms. Graph frame intervals were at most 16.8 ms p95. Every first paint in the table exceeded 500 ms. [Per-run timings](m8-opening-experiments.csv)
+
 ## Raw Git dates in the history stream
 
 On full Linux history, Git returned 21,207,090 bytes for 17,000 commits using the original author and committer dates. With raw dates it returned 20,527,090 bytes. All parsed fields matched on Git 2.53.0 and 2.38.0. The raw format also reads an epoch-zero commit whose negative timezone caused the original Git command to abort. [Format and compatibility](../decisions/0002-git-protocol.md#raw-author-and-committer-dates)
