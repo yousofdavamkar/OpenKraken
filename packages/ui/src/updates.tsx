@@ -59,6 +59,7 @@ function UpdatesDialog({
   onState: (state: UpdateState) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
   const [state, setState] = useState<UpdateState>();
   const [error, setError] = useState('');
   const [dispatching, setDispatching] = useState(false);
@@ -93,7 +94,7 @@ function UpdatesDialog({
     };
   }, [onState]);
   const saveAutomatic = async (enabled: boolean) => {
-    if (!state) return;
+    if (!state || savingAutomatic) return;
     preferenceChange.current++;
     setPendingAutomatic(enabled);
     setError('');
@@ -128,6 +129,12 @@ function UpdatesDialog({
       | 'updatesDismissRecovery',
     format?: UpdateState['selected'],
   ) => {
+    // The invoked action can disappear as soon as the transfer changes phase.
+    if (
+      document.activeElement instanceof HTMLButtonElement &&
+      dialog.current?.contains(document.activeElement)
+    )
+      closeButton.current?.focus();
     setDispatching(true);
     setError('');
     try {
@@ -183,8 +190,8 @@ function UpdatesDialog({
             <input
               type="checkbox"
               checked={pendingAutomatic ?? state.automatic.enabled}
+              aria-disabled={savingAutomatic || undefined}
               disabled={
-                savingAutomatic ||
                 !!state.automatic.warning ||
                 state.error === 'storage' ||
                 ['preparing', 'restart-ready', 'installed'].includes(state.phase)
@@ -265,7 +272,7 @@ function UpdatesDialog({
             Check for updates
           </button>
         )}
-        <button autoFocus onClick={() => dialog.current?.close()}>
+        <button ref={closeButton} autoFocus onClick={() => dialog.current?.close()}>
           Close
         </button>
       </div>

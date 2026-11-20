@@ -276,13 +276,18 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     }
     slow = true;
     await dialog.getByRole('button', { name: 'Check for updates' }).click();
-    await dialog.getByRole('button', { name: `Download ${format}` }).click();
+    await dialog.getByRole('button', { name: `Download ${format}` }).press('Enter');
     await expect(dialog.getByRole('progressbar', { name: 'Download progress' })).toHaveAttribute(
       'value',
       '3',
     );
-    await dialog.getByRole('button', { name: 'Cancel transfer' }).click();
+    const closeTransfer = dialog.getByRole('button', { name: 'Close' });
+    await expect(closeTransfer).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(dialog.getByRole('button', { name: 'Cancel transfer' })).toBeFocused();
+    await page.keyboard.press('Enter');
     await expect(dialog.getByRole('status')).toHaveText('Update transfer cancelled.');
+    await expect(closeTransfer).toBeFocused();
     await expect(stat(join(profile, 'updates/artifact.part'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
@@ -299,6 +304,7 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     await automatic.check();
     await expect(automatic).toBeEnabled();
     await expect(automatic).toBeChecked();
+    await expect(automatic).toBeFocused();
     const beforeAutomatic = requests.length;
     await app.close();
     app = await electron.launch({ args, env });

@@ -123,7 +123,7 @@ function ReportingDialog({
       <div className="dialog-actions">
         <button
           onClick={() => void save()}
-          aria-disabled={saving}
+          aria-disabled={saving || undefined}
           disabled={
             !state.destination || (!!state.warning && (state.warning !== 'session' || enabled))
           }
@@ -162,7 +162,7 @@ export function CrashReporting() {
   };
   return (
     <>
-      <button onClick={() => void open()} aria-disabled={loading}>
+      <button onClick={() => void open()} aria-disabled={loading || undefined}>
         Crash reporting
       </button>
       {error && <span role="alert">{error}</span>}
