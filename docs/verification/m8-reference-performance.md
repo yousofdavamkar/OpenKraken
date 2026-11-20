@@ -2,6 +2,36 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Hashing ordered history roots
+
+The Git service hashes roots in batches of 1,024 and shares the ordered root array with the history cursor. Six pairs of fresh Node processes followed a warm-up pair on Linux x64. Each process loaded the roots, ran GC, and measured elapsed time and memory growth through producing the cache key and cursor inputs. The 50,000-root input came from the full Linux fixture. The 250,000-root input added synthetic IDs. All paired digests matched.
+
+|   Roots | Median time, before → after | Median resident memory growth | Median JS heap growth |
+| ------: | --------------------------: | ----------------------------: | --------------------: |
+|  50,000 |               13.8 → 8.9 ms |               4.81 → 0.75 MiB |       2.94 → 3.15 MiB |
+| 250,000 |             115.9 → 93.9 ms |             30.18 → 12.44 MiB |     24.87 → 25.80 MiB |
+
+On each 50,000-ref fixture, Electron at `fb13733` saved four contiguous pages containing 17,000 commits. The new service reopened that profile, navigated into the live page and back across the cache boundary, and matched the selected commit IDs with Git. After quitting, the cache files retained their content digests, inode numbers and modification times. An independent restarted traversal compared all 50,000 refs and all 302 pages with native Git on both fixtures.
+
+In five alternating fresh-profile pairs after warm-up, median first paint on distinct targets changed from 743.5 to 735.9 ms, with median native snapshot time changing from 418.6 to 413.0 ms. The nested-tag fixture changed from 525.6 to 501.0 ms, with native snapshot time changing from 186.7 to 186.5 ms. [Individual desktop measurements](m8-opening-experiments.csv) · [Cache key format](../decisions/0117-history-cache-inputs.md#hashing-large-ordered-root-lists)
+
+The independent Linux x64 gates used Git 2.53.0 with the OS cache retained. Each series used three profiles. The nested fixture also verified the first-row dialog for 49,999 aliases. All 78 measured page appends across the full Linux and synthetic fixtures, including the six live pages immediately after the restarted cache windows, took 109.9–287.3 ms.
+
+| Fixture                                    | Fresh first paint, series one | Fresh first paint, final series | First paint after restart |
+| ------------------------------------------ | ----------------------------: | ------------------------------: | ------------------------: |
+| Full Linux, one ref                        |                             — |                  335.9–369.3 ms |                         — |
+| Full Linux, nested tag aliases             |                497.3–540.8 ms |                  470.7–504.1 ms |            442.4–476.6 ms |
+| Full Linux, distinct targets               |                749.3–897.9 ms |                  726.7–865.7 ms |            648.2–690.9 ms |
+| Two million commits, 100,000 tracked files |                             — |        1,117.7, 302.0, 339.6 ms |                         — |
+
+The slow first opening on the synthetic checkout spent 950.8 ms in the native snapshot. The later three-profile diagnostic run with Git tracing painted in 312.4–333.1 ms, with native snapshots of 139.5–167.1 ms. It did not reproduce the slow opening. The watcher-warm status benchmark on that checkout passed all 30 clean and dirty requests in 185.5–245.3 ms and reported all three external edits within 861.2 ms.
+
+## Checking object existence on the first page
+
+On the 50,000-distinct-target fixture with one annotated tag, a prototype combined a revision walk for commit IDs with the existing sparse tag lookup and native ref enumeration. Across five alternating fresh desktop pairs the median first paint changed from 752.2 to 715.3 ms. A separate fixture revealed that the prototype accepted a ref to a missing loose commit that was still present in the commit-graph. Native Git’s typed ref query rejected the missing object. The regression failed with the prototype and passed with the shipping reader.
+
+In six isolated native trials after warm-up, the revision walk took 122.1 ms at the median. Running it with `core.commitGraph=false` rejected the missing object and took 799.0 ms in the separate verification series. Checking captured IDs with `cat-file --batch-check=%(objectname)` took 125.3 ms by itself and reported the absent ID as missing. The shipped reader continues to ask Git for object types. [Individual desktop measurements](m8-opening-experiments.csv) · [Missing-object regression](../decisions/0098-direct-first-reference-enumeration.md#missing-objects-in-a-commit-graph)
+
 ## Reusing validated object IDs
 
 On Linux x64, five paired parser runs compared `4e20003` and `c6b8c9a` on native output from 50,000 refs. Each run started a new Node process, streamed the same bytes in 64 KiB chunks, and measured retained heap after GC. All four streams produced identical digests for every record across builds. The full format includes peeled fields. The direct format omits them.

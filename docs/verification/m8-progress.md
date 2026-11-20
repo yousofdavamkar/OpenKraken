@@ -1,6 +1,14 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. On Linux x64, the first 2,000 commits painted within 500 ms on full Linux history with one ref and with 49,999 nested tag aliases on the first row. The fixture with 50,000 distinct targets exceeded the budget in all three fresh profiles and after all three restarts. Native Windows, macOS and ARM64 acceptance, production release gates, and remaining [M6](m6-progress.md) and [M7](m7-progress.md) work are open.
+M8 remains in progress. On Linux x64, the full Linux history with one ref passed the opening budget in all three fresh profiles. Fresh openings with 49,999 nested tag aliases passed three of six times across two runs, and all three restarted profiles passed. All six fresh and all three restarted profiles with distinct targets exceeded 500 ms. Native Windows, macOS and ARM64 acceptance, production release gates, and remaining [M6](m6-progress.md) and [M7](m7-progress.md) work are open.
+
+## Reusing saved history after an upgrade
+
+The Git service now hashes the ordered history roots in batches while preserving the format-2 key. On 50,000 roots, median key construction time fell from 13.8 to 8.9 ms and resident memory growth fell from 4.81 to 0.75 MiB. On both large-ref fixtures, the new build reused all four files written by the previous build, loaded the first live page, and matched Git through 302 pages on restart. Moving a root after the first batch invalidated the cache with the root count unchanged. [Measurements and compatibility checks](m8-reference-performance.md#hashing-ordered-history-roots)
+
+Across the full Linux and two-million-commit synthetic fixtures, all 78 measured appends took 109.9–287.3 ms. The synthetic checkout missed the 500 ms first-paint budget once in three fresh profiles. All 30 watcher-warm status reads on its 100,000 tracked files took 185.5–245.3 ms.
+
+A native regression verifies that reference enumeration fails when a loose commit disappears but remains listed in the commit-graph. The unit and native suite passed 1,197 tests with nine skips. All 36 targeted desktop tests passed, including the cache restart, graph navigation and six Canvas goldens. Typechecking, lint, build, Linux x64 packaging and packaged history smoke tests passed. [Object lookup experiment](m8-reference-performance.md#checking-object-existence-on-the-first-page)
 
 ## Reference parsing and graph restarts
 
