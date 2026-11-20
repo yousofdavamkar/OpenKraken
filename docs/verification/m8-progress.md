@@ -2,6 +2,16 @@
 
 M8 remains in progress. On Linux x64, full Linux history with one ref and with 49,999 aliases on the first row met the 500 ms opening and 300 ms paging budgets in the latest fresh-profile runs. One nested-tag restart exceeded 500 ms. The 50,000-distinct-target fixture still exceeds the opening budget. Native Windows/macOS and ARM64 acceptance, the production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Switching repositories while the history cache is reading
+
+A slow cache file could keep an old Git walk open, delay shutdown or prevent a cancelled repository open from returning. The Linux regression held the next cache page's file open request after the first 2,000 commits were visible. The desktop service now switches repositories and shuts down while that request is still pending. When the destination fails, paging the original cursor returns the remaining commits in native Git order. Cancelling a separate open while it waits for its first cache file also preserves the displayed cursor. The late file handle closes when the operating system returns it. [Cache handoff and write behavior](../decisions/0008-bounded-history-cache.md#leaving-a-pending-cache-read)
+
+The restarted traversal now runs from the checked-in test harness. Both Linux x64 profiles persisted 17,000 commits before relaunch. Git 2.53.0 matched every ordered ID and parent through 302 pages of the distinct-target fixture with one annotated tag (1,505,199 commits). Git 2.38.0 matched all 302 pages of the nested-tag fixture, including its independent root (1,505,200 commits). The minimum-Git native history and cache suites passed all 70 tests. [Repeat the restarted traversal](m8-scale-performance.md#comparing-a-restarted-graph-with-native-git)
+
+On the standard 2,000-commit fixture, three fresh profiles painted in 222.8, 222.2 and 226.3 ms. With the same build, the 50,000-distinct-target fixture painted in 708.2 ms from a fresh profile and 698.0 ms after a cache restart. Both exceeded the 500 ms opening budget. All six 5,000-commit appends took 173.7–235.7 ms. The first live append beyond the restored window took 206.3 ms, and scrolling at 12,000 rows measured 16.8 ms p95 in both runs. Three separate opening prototypes were measured and discarded. [Paired comparisons and timings](m8-reference-performance.md#testing-three-ways-to-open-50000-distinct-refs)
+
+The full unit and native suite passed 1,151 tests with nine skips. All 39 focused Electron graph, sidebar, cache and transfer cases passed. The Linux x64 package from clean commit `33ccd5b` passed the Canvas, two appends, repository search, keyboard and renderer-isolation checks. Typechecking, lint and local workflow validation passed.
+
 ## Recovering a Linux installer download after process exit
 
 A complete download used to disappear when OpenKraken restarted. The next launch now keeps it until the user checks the signed release and selects a format. If the saved file matches the signed size and SHA-256, the app issues a new save or install approval without downloading it again. An interrupted transfer starts from the beginning. Saving a verified AppImage now grants the owner execute permission so they can launch the exported file directly. [Signed update protocol](../decisions/0082-signed-update-release-protocol.md)
