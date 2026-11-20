@@ -208,6 +208,12 @@ export class HistoryCache {
   stopReadingTails() {
     this.tailRead.abort();
   }
+  async flushBeforeSnapshot(signal: AbortSignal) {
+    const writing = this.flush();
+    // The current cache still owns the write if the destination is cancelled.
+    await waitForHistoryCache(writing, signal);
+    if (!signal.aborted) await writing;
+  }
   async flush() {
     clearTimeout(this.timer);
     await this.ready;

@@ -382,7 +382,7 @@ export class RepositoryService {
           !refresh && !this.cache && cacheReads.length && this.dataDir
             ? HistoryCache.prefetchPrefix(this.dataDir, repository.id, readSignal)
             : undefined;
-        const cacheFlush = this.cache?.flush();
+        const cacheFlush = this.cache?.flushBeforeSnapshot(readSignal);
         const graphRead = Promise.all([refRead, worktreeRead, Promise.all(cacheReads)]).then(
           async ([refs, worktrees, cacheInputs]) => {
             // The normal snapshot can start now. Only reuse a walk already in progress.
@@ -622,6 +622,7 @@ export class RepositoryService {
     }
     // The previous cache may be writing this prefix or trimming other repositories.
     await cacheFlush;
+    if (signal.aborted) throw new GitError('CANCELLED', 'Snapshot loading cancelled');
     let cache: HistoryCache | undefined;
     if (this.dataDir && cacheInputs.length) {
       const [version, config, ...metadata] = cacheInputs;
