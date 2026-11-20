@@ -21,7 +21,7 @@ export function createPackagedHistoryFixture(repository) {
   );
 }
 
-async function checkPackagedReferenceList(page) {
+async function checkPackagedReferenceList(page, repository) {
   const filter = page.getByRole('textbox', { name: 'Filter references' });
   await filter.fill('  RANGE-CHECK  ');
   const list = page.getByRole('list', { name: 'Reference list' });
@@ -41,9 +41,40 @@ async function checkPackagedReferenceList(page) {
     await expect(item).toHaveAttribute('aria-setsize', '4');
   }
   await expect(list.getByRole('heading', { name: 'Other refs', exact: true })).toHaveCount(1);
-  await filter.fill('');
+  const rename = page.getByRole('button', {
+    name: 'Rename branch range-check-branch',
+    exact: true,
+  });
+  await rename.click();
+  const draft = page
+    .getByRole('dialog', { name: 'Rename branch' })
+    .getByRole('textbox', { name: 'Branch name' });
+  await draft.fill('keep-my-draft');
+  const refs = fixtureGit(repository, ['for-each-ref', '--format=%(refname)']).split('\n');
+  const tags = refs
+    .filter((name) => name.startsWith('refs/tags/fixture-'))
+    .slice(0, refs.length - 99);
+  const target = fixtureGit(repository, ['rev-parse', 'HEAD~1']);
+  fixtureGit(
+    repository,
+    ['update-ref', '--stdin'],
+    tags.map((name) => `delete ${name} ${target}\n`).join(''),
+  );
+  await expect(page.getByRole('heading', { name: 'References 99', exact: true })).toBeVisible();
+  await expect(draft).toBeFocused();
+  fixtureGit(
+    repository,
+    ['update-ref', '--stdin'],
+    tags.map((name) => `create ${name} ${target}\n`).join(''),
+  );
+  await expect(
+    page.getByRole('heading', { name: `References ${refs.length}`, exact: true }),
+  ).toBeVisible();
+  await expect(draft).toHaveValue('keep-my-draft');
+  await draft.press('Escape');
+  await expect(rename).toBeFocused();
   console.log(
-    'Packaged sidebar preserved filtered positions across disjoint reference namespaces.',
+    'Packaged sidebar preserved filtered positions, the rename draft and keyboard focus after external Git changes.',
   );
 }
 
@@ -66,7 +97,7 @@ export async function checkPackagedHistory(page, repository) {
     );
   const root = fixtureGit(repository, ['rev-list', '--max-parents=0', 'HEAD']);
   await expect(count).toHaveText('2,000 commits · more available');
-  await checkPackagedReferenceList(page);
+  await checkPackagedReferenceList(page, repository);
   await expect(grid).toHaveAttribute('aria-rowcount', '-1');
   const tipRow = grid.locator(`[data-oid="${tip}"]`);
   await expect(tipRow).toBeInViewport();
