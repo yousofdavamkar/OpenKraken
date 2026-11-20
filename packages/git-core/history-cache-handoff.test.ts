@@ -5,10 +5,65 @@ import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
 import { RepositoryService } from './src/repository.js';
+import * as runner from './src/runner.js';
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs/promises')>();
   return { ...fs, open: vi.fn(fs.open) };
+});
+
+test('a restarted service reads its cached prefix while Git enumerates changed refs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-cache-restart-'));
+  const dataDir = join(root, 'profile');
+  const path = createFixture(join(root, 'repository'), 'linear', 3);
+  let service = new RepositoryService('git', { dataDir });
+  let finishRefs!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    finishRefs = resolve;
+  });
+  const git = runner.runGit;
+  try {
+    const repo = await service.open(path);
+    await service.snapshot(repo.id);
+    await service.dispose();
+    fixtureGit(path, ['commit', '--allow-empty', '-m', 'New tip after shutdown']);
+    service = new RepositoryService('git', { dataDir });
+    await service.open(path);
+    vi.mocked(open).mockClear();
+    let readingRefs = false;
+    vi.spyOn(runner, 'runGit').mockImplementation(async (binary, args, options) => {
+      if (args[0] === 'for-each-ref') {
+        readingRefs = true;
+        await gate;
+      }
+      return git(binary, args, options);
+    });
+    const opening = service.observeInitialSnapshot(repo.id);
+    try {
+      await expect
+        .poll(
+          () =>
+            readingRefs &&
+            vi
+              .mocked(open)
+              .mock.calls.some(
+                ([name]) => name === join(dataDir, 'history', repo.id, 'prefix.json'),
+              ),
+        )
+        .toBe(true);
+    } finally {
+      finishRefs();
+      const { snapshot } = await opening;
+      expect(snapshot.commits.map((c) => c.oid)).toEqual(
+        fixtureGit(path, ['rev-list', '--date-order', '--all']).split('\n'),
+      );
+    }
+  } finally {
+    finishRefs();
+    vi.restoreAllMocks();
+    await service.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test.each(['switch', 'failed switch', 'dispose'])(
@@ -89,6 +144,53 @@ test.each(['switch', 'failed switch', 'dispose'])(
     }
   },
 );
+
+test('cancelling an initial cache read lets the service open another repository immediately', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-cancel-prefix-'));
+  const dataDir = join(root, 'profile');
+  const service = new RepositoryService('git', { dataDir });
+  const original = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+  let resume!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  let reached!: () => void;
+  const stalled = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
+  try {
+    const first = await service.open(createFixture(join(root, 'first')));
+    const second = await service.open(createFixture(join(root, 'second')));
+    vi.mocked(open).mockImplementation(async (...args) => {
+      if (args[0] === join(dataDir, 'history', first.id, 'prefix.json')) {
+        reached();
+        await gate;
+      }
+      return original.open(...args);
+    });
+    const controller = new AbortController();
+    const rejected = expect(
+      service.observeInitialSnapshot(first.id, controller.signal),
+    ).rejects.toMatchObject({ code: 'CANCELLED' });
+    await stalled;
+    controller.abort();
+    try {
+      expect(
+        await Promise.race([rejected.then(() => true), delay(2000, false, { ref: false })]),
+      ).toBe(true);
+      const { snapshot } = await service.observeInitialSnapshot(second.id);
+      expect(snapshot.commits[0]?.oid).toBe(second.head.oid);
+    } finally {
+      resume();
+      await rejected;
+    }
+  } finally {
+    resume();
+    vi.mocked(open).mockImplementation(original.open);
+    await service.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('cancelling the opening cache read preserves the displayed history cursor', async () => {
   const root = await mkdtemp(join(tmpdir(), 'openkraken-cache-open-'));

@@ -19,6 +19,11 @@ const pageSchema = z.object({
 function fileStamp(file: BigIntStats) {
   return [file.dev, file.ino, file.size, file.mtimeNs, file.ctimeNs].join('/');
 }
+function cacheDirectory(root: string, repoId: string) {
+  if (!/^[0-9a-f]{64}$/.test(repoId)) throw new Error('Invalid cache repository');
+  return join(root, 'history', repoId);
+}
+
 /** One bounded immutable-history window per repository, entirely under the app profile. */
 export class HistoryCache {
   private records: Commit[] = [];
@@ -46,12 +51,15 @@ export class HistoryCache {
     private repoId: string,
     private key: string,
   ) {
-    if (!/^[0-9a-f]{64}$/.test(repoId)) throw new Error('Invalid cache repository');
-    this.directory = join(root, 'history', repoId);
+    this.directory = cacheDirectory(root, repoId);
   }
-  private async read(name: string, maxBytes: number, signal?: AbortSignal) {
+  private static async readPage(
+    path: string,
+    maxBytes: number,
+    signal?: AbortSignal,
+    key?: string,
+  ) {
     try {
-      const path = join(this.directory, name);
       const file = await open(path, 'r');
       let stamp: string, content: string;
       try {
@@ -64,7 +72,7 @@ export class HistoryCache {
         await file.close();
       }
       const result = pageSchema.safeParse(JSON.parse(content));
-      if (!result.success || result.data.key !== this.key) return;
+      if (!result.success || (key !== undefined && result.data.key !== key)) return;
       const page = result.data,
         commits: Commit[] = [];
       const hash = createHash('sha256')
@@ -81,14 +89,40 @@ export class HistoryCache {
         commits.push(...batch.data);
         await yieldTurn();
       }
-      if (hash.update(']').digest('hex') === page.digest) return { ...page, commits, stamp };
+      if (hash.update(']').digest('hex') === page.digest) return { ...page, commits, stamp, path };
     } catch {
       /* A cache miss always falls back to the real Git stream. */
     }
   }
-  async load(signal?: AbortSignal): Promise<HistorySeed | undefined> {
+  static prefetchPrefix(root: string, repoId: string, signal: AbortSignal) {
+    return HistoryCache.readPage(
+      join(cacheDirectory(root, repoId), prefixName),
+      8 * 1024 * 1024,
+      signal,
+    );
+  }
+  private async currentPrefix(
+    signal?: AbortSignal,
+    prefetched?: ReturnType<typeof HistoryCache.prefetchPrefix>,
+  ) {
+    const path = join(this.directory, prefixName);
+    if (prefetched) {
+      const prefix = await prefetched;
+      if (signal?.aborted) return;
+      if (
+        prefix?.path === path &&
+        (await stat(path, { bigint: true }).then(fileStamp, () => undefined)) === prefix.stamp
+      )
+        return prefix.key === this.key ? prefix : undefined;
+    }
+    return HistoryCache.readPage(path, 8 * 1024 * 1024, signal, this.key);
+  }
+  async load(
+    signal?: AbortSignal,
+    prefetched?: ReturnType<typeof HistoryCache.prefetchPrefix>,
+  ): Promise<HistorySeed | undefined> {
     if (signal?.aborted) return;
-    const read = this.read(prefixName, 8 * 1024 * 1024, signal);
+    const read = this.currentPrefix(signal, prefetched);
     const prefix = signal ? await waitForHistoryCache(read, signal) : await read;
     if (!prefix || prefix.offset !== 0 || !prefix.commits.length || prefix.commits.length > 2000)
       return;
@@ -106,7 +140,12 @@ export class HistoryCache {
       const reading = (async () => {
         if (!prefix.hasMore || signal.aborted) return;
         for (const name of tailNames) {
-          const tail = await this.read(name, 18 * 1024 * 1024, signal);
+          const tail = await HistoryCache.readPage(
+            join(this.directory, name),
+            18 * 1024 * 1024,
+            signal,
+            this.key,
+          );
           if (
             signal.aborted ||
             !tail ||

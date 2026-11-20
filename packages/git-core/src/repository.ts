@@ -376,6 +376,12 @@ export class RepositoryService {
         );
         const statusRead = this.readSnapshotStatus(repository, readSignal, observe?.status);
         const cacheReads = this.cacheFingerprintReads(repository, readSignal);
+        // On startup there is no outgoing cache writer. Check the file while Git reads refs,
+        // then compare its stamp and the snapshot fingerprint before adopting any commits.
+        const earlyPrefix =
+          !refresh && !this.cache && cacheReads.length && this.dataDir
+            ? HistoryCache.prefetchPrefix(this.dataDir, repository.id, readSignal)
+            : undefined;
         const cacheFlush = this.cache?.flush();
         const graphRead = Promise.all([refRead, worktreeRead, Promise.all(cacheReads)]).then(
           async ([refs, worktrees, cacheInputs]) => {
@@ -391,6 +397,7 @@ export class RepositoryService {
               cacheFlush,
               readSignal,
               await prefetch,
+              earlyPrefix,
             );
           },
         );
@@ -574,6 +581,7 @@ export class RepositoryService {
     cacheFlush: Promise<void> | undefined,
     signal: AbortSignal,
     candidate?: HistoryCursor,
+    earlyPrefix?: ReturnType<typeof HistoryCache.prefetchPrefix>,
   ) {
     // Keep missing ref preferences: a deleted solo ref must not silently reveal all history.
     const isVisible = graphRefVisibility(view);
@@ -632,7 +640,7 @@ export class RepositoryService {
         .digest('hex');
       cache = new HistoryCache(this.dataDir, repository.id, key);
     }
-    const seed = await cache?.load(signal);
+    const seed = await cache?.load(signal, earlyPrefix);
     if (signal.aborted) throw new GitError('CANCELLED', 'Snapshot loading cancelled');
     const ordered = [...starts];
     if (candidate) {

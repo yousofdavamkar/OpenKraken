@@ -246,6 +246,32 @@ test.each(['GIT_SHALLOW_FILE', 'GIT_NO_REPLACE_OBJECTS', 'GIT_REPLACE_REF_BASE']
     expect(displayed(await open())).toEqual(ordinary);
   },
 );
+test('an early prefix follows the final graph key and the current on-disk file', async () => {
+  const service = new RepositoryService('git');
+  const repo = await service.open(createFixture(join(root, 'early-prefix'), 'linear', 4));
+  const { commits } = await service.snapshot(repo.id);
+  await service.dispose();
+  const profile = join(root, 'early-profile');
+  const writePrefix = async (key: string, count: number) => {
+    const cache = new HistoryCache(profile, repo.id, key);
+    cache.record(0, commits.slice(0, count), true);
+    await cache.flush();
+  };
+  const signal = new AbortController().signal;
+  await writePrefix('original', 2);
+  const early = HistoryCache.prefetchPrefix(profile, repo.id, signal);
+  await early;
+  const load = (key: string) => new HistoryCache(profile, repo.id, key).load(signal, early);
+  expect((await load('original'))?.commits).toEqual(commits.slice(0, 2));
+  expect(await load('different')).toBeUndefined();
+  await writePrefix('original', 3);
+  expect((await load('original'))?.commits).toEqual(commits.slice(0, 3));
+  await writePrefix('different', 1);
+  expect(await load('original')).toBeUndefined();
+  expect((await load('different'))?.commits).toEqual(commits.slice(0, 1));
+  await rm(join(profile, 'history', repo.id, 'prefix.json'));
+  expect(await load('original')).toBeUndefined();
+});
 test('damaged records miss safely; cache quotas and invalidation do not affect repositories', async () => {
   const service = new RepositoryService('git');
   const snapshot = await service.snapshot(
