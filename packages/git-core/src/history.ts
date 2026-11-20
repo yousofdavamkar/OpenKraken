@@ -13,15 +13,16 @@ export interface HistorySeed {
   invalidate: () => void;
 }
 /** A late optional cache read may finish after its owner has moved on. */
-export function waitForHistoryCache(read: Promise<void>, signal: AbortSignal) {
-  return new Promise<void>((resolve) => {
-    const done = () => {
-      signal.removeEventListener('abort', done);
-      resolve();
+export function waitForHistoryCache<T>(read: Promise<T>, signal: AbortSignal) {
+  return new Promise<T | undefined>((resolve) => {
+    const done = (value?: T) => {
+      signal.removeEventListener('abort', abort);
+      resolve(value);
     };
-    if (signal.aborted) done();
-    else signal.addEventListener('abort', done, { once: true });
-    void read.then(done, done);
+    const abort = () => done();
+    if (signal.aborted) abort();
+    else signal.addEventListener('abort', abort, { once: true });
+    void read.then(done, abort);
   });
 }
 export class HistoryCursor {

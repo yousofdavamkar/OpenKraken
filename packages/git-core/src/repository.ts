@@ -632,7 +632,8 @@ export class RepositoryService {
         .digest('hex');
       cache = new HistoryCache(this.dataDir, repository.id, key);
     }
-    const seed = await cache?.load();
+    const seed = await cache?.load(signal);
+    if (signal.aborted) throw new GitError('CANCELLED', 'Snapshot loading cancelled');
     const ordered = [...starts];
     if (candidate) {
       if (

@@ -86,8 +86,10 @@ export class HistoryCache {
       /* A cache miss always falls back to the real Git stream. */
     }
   }
-  async load(): Promise<HistorySeed | undefined> {
-    const prefix = await this.read(prefixName, 8 * 1024 * 1024);
+  async load(signal?: AbortSignal): Promise<HistorySeed | undefined> {
+    if (signal?.aborted) return;
+    const read = this.read(prefixName, 8 * 1024 * 1024, signal);
+    const prefix = signal ? await waitForHistoryCache(read, signal) : await read;
     if (!prefix || prefix.offset !== 0 || !prefix.commits.length || prefix.commits.length > 2000)
       return;
     this.persisted.set(prefixName, {

@@ -89,3 +89,54 @@ test.each(['switch', 'failed switch', 'dispose'])(
     }
   },
 );
+
+test('cancelling the opening cache read preserves the displayed history cursor', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-cache-open-'));
+  const dataDir = join(root, 'profile');
+  const service = new RepositoryService('git', { dataDir });
+  const original = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+  let resume!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  let reached!: () => void;
+  const stalled = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
+  try {
+    const source = createFixture(join(root, 'source'), 'linear', 2010);
+    const active = await service.open(source);
+    const displayed = await service.snapshot(active.id);
+    const other = await service.open(createFixture(join(root, 'destination'), 'linear', 3));
+    vi.mocked(open).mockImplementation(async (...args) => {
+      if (args[0] === join(dataDir, 'history', other.id, 'prefix.json')) {
+        reached();
+        await gate;
+      }
+      return original.open(...args);
+    });
+    const controller = new AbortController();
+    const attempt = expect(
+      service.snapshot(other.id, controller.signal, false),
+    ).rejects.toMatchObject({ code: 'CANCELLED' });
+    await stalled;
+    controller.abort();
+    try {
+      expect(
+        await Promise.race([attempt.then(() => true), delay(2000, false, { ref: false })]),
+      ).toBe(true);
+      const tail = await service.page(active.id, displayed.cursor, 2000, 5000);
+      expect(tail.commits.map((c) => c.oid)).toEqual(
+        fixtureGit(source, ['rev-list', '--date-order', '--all']).split('\n').slice(2000),
+      );
+    } finally {
+      resume();
+      await attempt;
+    }
+  } finally {
+    resume();
+    vi.mocked(open).mockImplementation(original.open);
+    await service.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
