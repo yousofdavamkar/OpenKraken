@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -1016,6 +1016,26 @@ describe('packed annotation sampling across read boundaries', () => {
     );
     return dir;
   }
+
+  test.each([
+    { repeated: true, limit: 8192 },
+    { repeated: false, limit: windowSize },
+  ])('bounds individual buffer allocations to $limit bytes', async ({ repeated, limit }) => {
+    const dir = writeSample(caret, 2);
+    if (repeated) {
+      const rows = Array.from({ length: 10000 }, (_, i) => `${id} refs/tags/shared-${i}\n`);
+      writeFileSync(join(dir, 'packed-refs'), rows.join(''));
+    }
+    const allocation = vi.spyOn(Buffer, 'allocUnsafe');
+    try {
+      const sample = await samplePackedRefs(dir);
+      const largest = Math.max(0, ...allocation.mock.calls.map(([bytes]) => bytes));
+      expect(largest).toBeLessThanOrEqual(limit);
+      expect(sample.repeatedTargets).toBe(repeated);
+    } finally {
+      allocation.mockRestore();
+    }
+  });
 
   test.each([12, row.indexOf('最後') + 1, caret - 1, caret, caret + 1])(
     'retains each complete name once when the boundary splits the row at byte %i',

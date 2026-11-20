@@ -76,10 +76,12 @@ export async function samplePackedRefs(commonDir: string) {
     if (!info.isFile() || info.size < 512 * 1024) return ordinaryRefs;
     // Contiguous aliases usually fit in one small read. A larger prefix
     // also detects targets that recur hundreds of names apart in Git order.
-    const sample = Buffer.allocUnsafe(256 * 1024);
-    const { bytesRead } = await file.read(sample, 0, 8192, 0);
-    const prefix = sampleTargets(sample, bytesRead);
+    const preview = Buffer.allocUnsafe(8192);
+    const { bytesRead } = await file.read(preview, 0, preview.length, 0);
+    const prefix = sampleTargets(preview, bytesRead);
     if (prefix.repeatedTargets) return prefix;
+    const sample = Buffer.allocUnsafe(256 * 1024);
+    preview.copy(sample, 0, 0, bytesRead);
     const more = await file.read(sample, bytesRead, sample.length - bytesRead, bytesRead);
     const length = bytesRead + more.bytesRead;
     const result = sampleTargets(sample, length);
