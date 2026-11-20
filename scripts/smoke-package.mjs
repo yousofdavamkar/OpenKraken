@@ -52,7 +52,11 @@ const executable =
   (process.platform === 'darwin'
     ? join(directory, 'OpenKraken.app/Contents/MacOS/openkraken')
     : join(directory, process.platform === 'win32' ? 'openkraken.exe' : 'openkraken'));
-const profile = msiProfile ?? (await mkdtemp(join(tmpdir(), 'openkraken-package-')));
+const installedDeb = process.platform === 'linux' && process.argv.includes('--installed-deb');
+const fixtureRoot = msiProfile ?? (await mkdtemp(join(tmpdir(), 'openkraken-package-')));
+const profile = installedDeb ? join(fixtureRoot, 'OpenKraken') : fixtureRoot;
+if (installedDeb) await mkdir(profile);
+const desktopEnv = installedDeb ? { XDG_CONFIG_HOME: fixtureRoot } : {};
 const history = process.argv.includes('--history');
 const linkedRepository = join(
   history ? await mkdtemp(join(profile, 'history-')) : profile,
@@ -93,7 +97,7 @@ const child = spawn(
   executable,
   [
     '--remote-debugging-port=0',
-    ...(msiProfile ? [] : [`--user-data-dir=${profile}`]),
+    ...(msiProfile || installedDeb ? [] : [`--user-data-dir=${profile}`]),
     repositoryUri,
     ...(nativePicker ? ['--ozone-platform=x11', '--xdg-portal-required-version=999'] : []),
   ],
@@ -119,6 +123,7 @@ const child = spawn(
             ZSH_TEST_MODULES: process.env.OPENKRAKEN_ZSH_MODULE_PATH ?? '',
           }
         : {}),
+      ...desktopEnv,
     },
   },
 );
@@ -416,6 +421,15 @@ try {
           env: { ...process.env, OPENKRAKEN_REPOSITORY_URI: repositoryUri },
         },
       );
+    } else if (installedDeb) {
+      const env = { ...process.env, HOME: profile, TMPDIR: runtimeTemp, ...desktopEnv };
+      const { stdout } = await promisify(execFile)(
+        'xdg-mime',
+        ['query', 'default', 'x-scheme-handler/openkraken'],
+        { env, timeout: 15000 },
+      );
+      expect(stdout.trim()).toBe('openkraken.desktop');
+      await promisify(execFile)('gio', ['open', repositoryUri], { env, timeout: 15000 });
     } else {
       await promisify(execFile)(executable, [`--user-data-dir=${profile}`, repositoryUri], {
         timeout: 15000,
@@ -432,7 +446,9 @@ try {
     console.log(
       msiProfile
         ? 'Installed repository link delivered through the Windows URI handler and explicitly accepted.'
-        : 'Packaged cold-start and second-process repository links require explicit consent.',
+        : installedDeb
+          ? 'The installed Linux desktop handler delivered the repository link for explicit consent.'
+          : 'Packaged cold-start and second-process repository links require explicit consent.',
     );
   }
   await page.screenshot({ path: 'test-results/packaged-shell.png' });
@@ -471,7 +487,7 @@ try {
   // Bound filesystem teardown retries separately from the unchanged app exit deadline.
   const cleanup = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 };
   if (runtimeTemp !== profile) await rm(runtimeTemp, cleanup);
-  if (!msiProfile) await rm(profile, cleanup);
+  if (!msiProfile) await rm(fixtureRoot, cleanup);
 }
 if (process.platform === 'win32') {
   expect(await windowsProtocolSnapshot()).toEqual(protocolBefore);

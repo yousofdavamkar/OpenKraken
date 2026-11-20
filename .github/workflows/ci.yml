@@ -280,7 +280,7 @@ jobs:
           cache: pnpm
       - if: runner.os == 'Linux'
         name: Native terminal build and picker automation
-        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool git-lfs rpm gnupg2 libarchive-tools fuse3 fish zsh dbus-daemon libglib2.0-bin gnome-keyring
+        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool git-lfs rpm gnupg2 libarchive-tools fuse3 fish zsh dbus-daemon libglib2.0-bin gnome-keyring podman slirp4netns
       - if: runner.os == 'Linux'
         name: Verify native shell prerequisites
         run: |
@@ -437,24 +437,19 @@ jobs:
           mkdir -p "$staging"
           TMPDIR="$staging" APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a pnpm smoke:installer "$INSTALLER_ROOT/AppImage/manifest.json"
       - if: runner.os == 'Linux'
-        name: Debian install, version upgrade and removal in a disposable container
+        name: Debian DEB upgrade, installed desktop and URI handler
         shell: bash
         timeout-minutes: 15
         run: |
-          artifact=$(node -p 'require("./" + process.env.INSTALLER_ROOT + "/deb/manifest.json").artifact.file')
-          upgrade_dir=$(node -p 'require("node:path").dirname(require("./release/installer-upgrade-deb.json").manifestPath)')
-          upgrade_artifact=$(node -p 'require(require("./release/installer-upgrade-deb.json").manifestPath).artifact.file')
-          beta_dir=$(node -p 'require("node:path").dirname(require("./release/installer-upgrade-deb-beta.json").manifestPath)')
-          beta_artifact=$(node -p 'require(require("./release/installer-upgrade-deb-beta.json").manifestPath).artifact.file')
           mkdir -p test-results
-          docker run --rm \
-            --env OPENKRAKEN_DISPOSABLE_INSTALL_TEST=1 \
-            --volume "$PWD/$INSTALLER_ROOT/deb:/artifacts:ro" \
-            --volume "$beta_dir:/beta:ro" \
-            --volume "$upgrade_dir:/upgrade:ro" \
-            --volume "$PWD/scripts/check-deb-lifecycle.sh:/check.sh:ro" \
-            docker.io/library/debian@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4 \
-            timeout 12m bash /check.sh "/artifacts/$artifact" "/upgrade/$upgrade_artifact" "/beta/$beta_artifact" 2>&1 | tee test-results/deb-lifecycle.log
+          bash scripts/run-deb-lifecycle.sh debian 2>&1 | tee test-results/deb-lifecycle.log
+      - if: runner.os == 'Linux'
+        name: Ubuntu DEB upgrade, installed desktop and URI handler
+        shell: bash
+        timeout-minutes: 15
+        run: |
+          mkdir -p test-results
+          bash scripts/run-deb-lifecycle.sh ubuntu 2>&1 | tee test-results/ubuntu-deb-lifecycle.log
       - if: runner.os == 'Linux'
         name: Fedora RPM install, upgrade and removal in a disposable container
         timeout-minutes: 15
