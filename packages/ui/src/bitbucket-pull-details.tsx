@@ -1,4 +1,4 @@
-import { BitbucketStatuses } from './bitbucket-statuses.js';
+import { BitbucketMergeChecks, BitbucketStatuses } from './bitbucket-statuses.js';
 import { BitbucketComments } from './bitbucket-comments.js';
 import { BitbucketFiles } from './bitbucket-files.js';
 import { providerBitbucketRevisionSchema } from '@openkraken/ipc-contract';
@@ -121,7 +121,7 @@ export function BitbucketPullDetails({
   const [error, setError] = useState('');
   const [pending, setPending] = useState(true);
   const [attempt, setAttempt] = useState(0);
-  const [panel, setPanel] = useState<'files' | 'comments' | 'checks'>();
+  const [panel, setPanel] = useState<'files' | 'comments' | 'checks' | 'merge'>();
   const showFiles = panel === 'files';
   const showComments = panel === 'comments';
   const comparisonKey = JSON.stringify([detail?.repositoryId, detail?.source, detail?.destination]);
@@ -141,6 +141,11 @@ export function BitbucketPullDetails({
           }
         : undefined,
     [target.repository, number, repositoryId, source],
+  );
+  const destination = detail?.destination;
+  const mergeOptions = useMemo(
+    () => (statusOptions && destination ? { ...statusOptions, destination } : undefined),
+    [statusOptions, destination],
   );
   const context = useMemo(() => {
     const revision = providerBitbucketRevisionSchema.safeParse({
@@ -199,7 +204,7 @@ export function BitbucketPullDetails({
       return {
         resetChildren:
           detail?.repositoryId !== result.pullRequest.repositoryId ||
-          ((showFiles || panel === 'checks') &&
+          ((showFiles || panel === 'checks' || panel === 'merge') &&
             comparisonKey !==
               JSON.stringify([
                 result.pullRequest.repositoryId,
@@ -209,8 +214,13 @@ export function BitbucketPullDetails({
         commit: () => {
           setDetail((previous) =>
             previous &&
-            JSON.stringify(previous.source) === JSON.stringify(result.pullRequest.source)
-              ? { ...result.pullRequest, source: previous.source }
+            JSON.stringify(previous.source) === JSON.stringify(result.pullRequest.source) &&
+            JSON.stringify(previous.destination) === JSON.stringify(result.pullRequest.destination)
+              ? {
+                  ...result.pullRequest,
+                  source: previous.source,
+                  destination: previous.destination,
+                }
               : result.pullRequest,
           );
           setError('');
@@ -302,6 +312,19 @@ export function BitbucketPullDetails({
               key={comparisonKey}
               accountId={target.accountId}
               options={statusOptions}
+            />
+          )}
+          <button
+            aria-expanded={panel === 'merge'}
+            onClick={() => setPanel(panel === 'merge' ? undefined : 'merge')}
+          >
+            {panel === 'merge' ? 'Hide merge checks' : 'Show merge checks'}
+          </button>
+          {panel === 'merge' && mergeOptions && (
+            <BitbucketMergeChecks
+              key={comparisonKey}
+              accountId={target.accountId}
+              options={mergeOptions}
             />
           )}
           <People

@@ -13,6 +13,7 @@ test('Bitbucket pull requests page, search, preserve native details and refresh 
     await app.evaluate(({ session }, fixture) => {
       Object.assign(globalThis, {
         bbDeleted: false,
+        bbConflicts: true,
         bbDiffFail: false,
         bbPages: [] as number[],
         bbFail: false,
@@ -32,6 +33,7 @@ test('Bitbucket pull requests page, search, preserve native details and refresh 
           throw new Error('Unexpected request');
         const flags = globalThis as typeof globalThis & {
           bbDeleted: boolean;
+          bbConflicts: boolean;
           bbDiffFail: boolean;
           bbPages: number[];
           bbFail: boolean;
@@ -122,6 +124,27 @@ test('Bitbucket pull requests page, search, preserve native details and refresh 
             { headers: { 'Content-Type': 'text/plain' } },
           );
         }
+        if (url.pathname === '/2.0/repositories/team/project/pullrequests/101/mergeability/checks')
+          return Response.json({
+            size: 2,
+            values: [
+              {
+                type: 'custom_pre_merge_check',
+                check: { name: 'Reviewer policy' },
+                status: 'FAILED',
+                required: false,
+                blocking: false,
+                message: 'One reviewer requested',
+              },
+              {
+                type: 'git_mergeability_check',
+                status: flags.bbConflicts ? 'FAILED' : 'PASSED',
+                required: true,
+                blocking: flags.bbConflicts,
+                reason: flags.bbConflicts ? 'conflicts' : 'clean',
+              },
+            ],
+          });
         if (url.pathname === '/2.0/repositories/team/project/pullrequests/101/statuses') {
           const page = Number(url.searchParams.get('page'));
           if (flags.bbFail) return new Response('pull-secret', { status: 503 });
@@ -248,6 +271,23 @@ test('Bitbucket pull requests page, search, preserve native details and refresh 
     await expect(checks).toContainText('In progress');
     await checks.getByRole('button', { name: 'Previous checks' }).click();
     await expect(checks).toContainText('Successful');
+    await details.getByRole('button', { name: 'Show merge checks' }).press('Enter');
+    const mergeChecks = details.getByRole('region', { name: 'Bitbucket merge checks' });
+    await expect(checks).toHaveCount(0);
+    await expect(
+      mergeChecks.getByRole('listitem').filter({ hasText: 'Reviewer policy' }),
+    ).toContainText('Failed · Optional · Nonblocking');
+    await expect(mergeChecks.getByRole('listitem').filter({ hasText: 'Git merge' })).toContainText(
+      'Failed · Required · Blocks merge',
+    );
+    await expect(mergeChecks).toContainText('conflicts');
+    await app.evaluate(() => Object.assign(globalThis, { bbConflicts: false }));
+    await dialog.getByLabel('Automatic refresh', { exact: true }).selectOption('1');
+    await page.clock.fastForward(60000);
+    await expect(mergeChecks.getByRole('listitem').filter({ hasText: 'Git merge' })).toContainText(
+      'Passed · Required · Nonblocking',
+    );
+    await dialog.getByLabel('Automatic refresh', { exact: true }).selectOption('0');
     await details.getByRole('button', { name: 'Show files', exact: true }).click();
     const files = details.getByRole('region', { name: 'Bitbucket changed files' });
     await expect(files.getByRole('status')).toHaveText('100 files loaded.');
@@ -295,7 +335,7 @@ test('Bitbucket pull requests page, search, preserve native details and refresh 
     );
     expect(
       await app.evaluate(() => (globalThis as typeof globalThis & { bbPages: number[] }).bbPages),
-    ).toEqual([1, 2, 1, 2, 1, 2]);
+    ).toEqual([1, 2, 1, 2, 1, 2, 1, 2]);
     await expect(dialog.getByLabel('Search loaded pull requests')).toHaveValue('#101');
     await expect(list.getByRole('option')).toHaveAttribute('aria-selected', 'true');
     await expect(details).toContainText('Source repository unavailable.');
