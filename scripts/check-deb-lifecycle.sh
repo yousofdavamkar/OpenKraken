@@ -92,6 +92,26 @@ check_installed() {
 }
 check_installed
 
+desktop=${OPENKRAKEN_DEB_DESKTOP_SMOKE:-0}
+config_home=/home/openkraken-smoke/.config
+smoke_installed() {
+  # Use the same XDG configuration across versions and fresh repositories per launch.
+  runuser -u openkraken-smoke -- env OPENKRAKEN_PACKAGE_EXECUTABLE=/usr/bin/openkraken \
+    OPENKRAKEN_PACKAGE_DIRECTORY=/opt/OpenKraken OPENKRAKEN_XDOTOOL=/usr/bin/xdotool \
+    OPENKRAKEN_DEB_CONFIG_HOME="$config_home" \
+    bash -c 'cd "$HOME" && exec dbus-run-session -- xvfb-run -a /usr/local/bin/node /source/scripts/smoke-package.mjs --history --installed-deb "$@"' bash "$@"
+}
+if [[ $desktop == 1 ]]; then
+  # Add GUI automation tools only after checking the application dependencies.
+  apt-get "${apt_options[@]}" install -y --no-install-recommends xvfb xauth xdotool dbus-x11 libglib2.0-bin
+  if [[ $ID == ubuntu ]]; then
+    apt-get "${apt_options[@]}" install -y --no-install-recommends apparmor
+    apparmor_parser --skip-kernel-load --skip-read-cache /opt/OpenKraken/resources/apparmor-profile
+  fi
+  useradd --create-home --shell /bin/bash openkraken-smoke
+  smoke_installed --save-upgrade-theme
+fi
+
 # Exercise the shipped replacement guards while a real installation is present.
 mkdir /tmp/control
 dpkg-deb --control "$artifact" /tmp/control
@@ -109,29 +129,23 @@ for package in "${upgrades[@]}"; do
   expected_artifact=$package
   expected_asar=$next_asar
   check_installed
+  if [[ $desktop == 1 ]]; then smoke_installed; fi
   echo "$PRETTY_NAME upgrade to $(dpkg-query -W -f='${Version}' openkraken) preserved launcher and user data"
 done
 
-if [[ ${OPENKRAKEN_DEB_DESKTOP_SMOKE:-} == 1 ]]; then
-  # Run the installed launcher after dependency and upgrade checks. Node and
-  # the test checkout are read-only harness mounts supplied by the caller.
-  apt-get "${apt_options[@]}" install -y --no-install-recommends xvfb xauth xdotool dbus-x11 libglib2.0-bin
-  if [[ $ID == ubuntu ]]; then
-    apt-get "${apt_options[@]}" install -y --no-install-recommends apparmor
-    apparmor_parser --skip-kernel-load --skip-read-cache /opt/OpenKraken/resources/apparmor-profile
-  fi
-  useradd --create-home --shell /bin/bash openkraken-smoke
-  runuser -u openkraken-smoke -- env OPENKRAKEN_PACKAGE_EXECUTABLE=/usr/bin/openkraken \
-    OPENKRAKEN_PACKAGE_DIRECTORY=/opt/OpenKraken OPENKRAKEN_XDOTOOL=/usr/bin/xdotool \
-    bash -c 'cd "$HOME" && exec dbus-run-session -- xvfb-run -a /usr/local/bin/node /source/scripts/smoke-package.mjs --history --installed-deb'
+# Both removal operations must preserve the app-written settings byte for byte.
+if [[ $desktop == 1 ]]; then
+  settings="$config_home/OpenKraken/settings.json"
+  test -s "$settings"
+  saved_settings=$(sha256sum "$settings")
 fi
-
 # Uninstall must remove system integration and leave user data alone.
 apt-get remove -y openkraken
 for path in "${integration_paths[@]}"; do
   [[ ! -e $path && ! -L $path ]]
 done
 test "$(cat /home/fixture/.config/OpenKraken/draft.txt)" = keep-this-draft
+if [[ $desktop == 1 ]]; then [[ $(sha256sum "$settings") == "$saved_settings" ]]; fi
 apt-get purge -y openkraken
 registered_packages=$(dpkg-query -W -f='${Package}\n')
 if grep -Fxq openkraken <<< "$registered_packages"; then
@@ -139,4 +153,5 @@ if grep -Fxq openkraken <<< "$registered_packages"; then
   exit 1
 fi
 test "$(cat /home/fixture/.config/OpenKraken/draft.txt)" = keep-this-draft
+if [[ $desktop == 1 ]]; then [[ $(sha256sum "$settings") == "$saved_settings" ]]; fi
 echo "$PRETTY_NAME install, replacement guards, reinstall, version upgrade, removal, purge and user-data retention passed"

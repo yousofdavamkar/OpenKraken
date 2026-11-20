@@ -53,10 +53,10 @@ const executable =
     ? join(directory, 'OpenKraken.app/Contents/MacOS/openkraken')
     : join(directory, process.platform === 'win32' ? 'openkraken.exe' : 'openkraken'));
 const installedDeb = process.platform === 'linux' && process.argv.includes('--installed-deb');
-const fixtureRoot = msiProfile ?? (await mkdtemp(join(tmpdir(), 'openkraken-package-')));
-const profile = installedDeb ? join(fixtureRoot, 'OpenKraken') : fixtureRoot;
-if (installedDeb) await mkdir(profile);
-const desktopEnv = installedDeb ? { XDG_CONFIG_HOME: fixtureRoot } : {};
+const profile = msiProfile ?? (await mkdtemp(join(tmpdir(), 'openkraken-package-')));
+const retainedConfig = installedDeb ? process.env.OPENKRAKEN_DEB_CONFIG_HOME : undefined;
+const desktopEnv = installedDeb ? { XDG_CONFIG_HOME: retainedConfig ?? profile } : {};
+const applicationProfile = installedDeb ? join(desktopEnv.XDG_CONFIG_HOME, 'OpenKraken') : profile;
 const history = process.argv.includes('--history');
 const linkedRepository = join(
   history ? await mkdtemp(join(profile, 'history-')) : profile,
@@ -206,6 +206,19 @@ try {
     !diagnostics.state.entries.some((entry) => entry.type === 'started')
   )
     throw new Error('Packaged local diagnostics failed to initialize');
+  if (retainedConfig) {
+    await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+    const appearance = page.getByRole('dialog', { name: 'Appearance', exact: true });
+    const theme = appearance.getByLabel('Color theme');
+    if (process.argv.includes('--save-upgrade-theme')) {
+      await expect(theme).toHaveValue('dark');
+      await theme.selectOption('light');
+      await appearance.getByRole('button', { name: 'Apply', exact: true }).click();
+      await expect(appearance.getByRole('status')).toHaveText('Appearance saved.');
+    }
+    await expect(theme).toHaveValue('light');
+    await appearance.getByRole('button', { name: 'Close', exact: true }).click();
+  }
   await checkReleaseKeyboard(page);
   console.log('Packaged release and diagnostics dialogs restored keyboard focus to the toolbar.');
   await page.getByRole('button', { name: 'Review repository link', exact: true }).click();
@@ -398,7 +411,7 @@ try {
     console.log(
       `Packaged native terminal opened the repository, tracked ${basename(packageShell)} commands, received native keyboard input and exited cleanly.`,
     );
-    if (history) changedTip = await advanceCachedFixture(profile, linkedRepository);
+    if (history) changedTip = await advanceCachedFixture(applicationProfile, linkedRepository);
   }
   if (process.platform !== 'darwin') {
     if (msiProfile) {
@@ -487,7 +500,7 @@ try {
   // Bound filesystem teardown retries separately from the unchanged app exit deadline.
   const cleanup = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 };
   if (runtimeTemp !== profile) await rm(runtimeTemp, cleanup);
-  if (!msiProfile) await rm(fixtureRoot, cleanup);
+  if (!msiProfile) await rm(profile, cleanup);
 }
 if (process.platform === 'win32') {
   expect(await windowsProtocolSnapshot()).toEqual(protocolBefore);
