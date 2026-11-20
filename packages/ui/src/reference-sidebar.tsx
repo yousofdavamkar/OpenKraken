@@ -2,18 +2,21 @@ import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react
 import { defaultRangeExtractor, measureElement, useVirtualizer } from '@tanstack/react-virtual';
 import type { Ref, Snapshot } from '@openkraken/ipc-contract';
 import { RefControls } from './ref-controls.js';
-import { ReferenceActions } from './references.js';
+import { ReferenceActions, ReferenceDialog, type ReferenceReview } from './references.js';
 import { referenceDragProps } from './reference-drop.js';
 import { blockStart, blockLength, groupReferences, referenceGroups } from './reference-list.js';
 import { useRepository } from './store.js';
 
 const headingHeightEstimate = 48;
+type ReviewHandler = (review: ReferenceReview) => void;
 
 function ReferenceRow({
   reference,
   snapshot,
   busy,
+  onReview,
 }: {
+  onReview: ReviewHandler;
   reference: Ref;
   snapshot: Snapshot;
   busy: boolean;
@@ -39,17 +42,28 @@ function ReferenceRow({
         )}
       </div>
       <RefControls reference={reference} />
-      <ReferenceActions reference={reference} />
+      <ReferenceActions reference={reference} onReview={onReview} />
     </div>
   );
 }
 
-function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boolean }) {
+function VirtualReferences({
+  snapshot,
+  busy,
+  reviewedName,
+  onReview,
+}: {
+  snapshot: Snapshot;
+  busy: boolean;
+  reviewedName?: string;
+  onReview: ReviewHandler;
+}) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState<string>();
   const scroll = useRef<HTMLDivElement>(null);
   const list = useMemo(() => groupReferences(snapshot.refs, query), [snapshot.refs, query]);
-  const focusedBlock = useMemo(() => (focused ? list.focusedBlock(focused) : -1), [list, focused]);
+  const retain = reviewedName ?? focused;
+  const focusedBlock = useMemo(() => (retain ? list.focusedBlock(retain) : -1), [list, retain]);
   const getItemKey = useCallback(
     (index: number) => list.refs[blockStart(list.section(index)!, index)]!.name,
     [list],
@@ -85,7 +99,7 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
       ].sort((a, b) => a - b),
   });
   // One element measures all grid rows in a block. The controls share a parent
-  // so React keeps a focused dialog mounted when a ref moves to another block.
+  // so React can preserve focus when a ref moves to another block.
   const cells: ReactElement[] = [];
   let track = 1;
   let previousEnd = 0;
@@ -120,7 +134,7 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
           aria-posinset={section.firstPosition + index - section.from}
           aria-setsize={list.count}
         >
-          <ReferenceRow reference={reference} snapshot={snapshot} busy={busy} />
+          <ReferenceRow reference={reference} snapshot={snapshot} busy={busy} onReview={onReview} />
         </div>,
       );
     }
@@ -180,12 +194,41 @@ function VirtualReferences({ snapshot, busy }: { snapshot: Snapshot; busy: boole
 }
 
 export function ReferenceSidebar() {
-  const { snapshot, busy: active, syncing, setView } = useRepository();
-  if (!snapshot) return null;
-  const busy = !!active && !syncing;
+  const { snapshot, busy, syncing } = useRepository();
+  return (
+    snapshot && (
+      <RepositorySidebar
+        key={snapshot.repository.id}
+        snapshot={snapshot}
+        busy={!!busy && !syncing}
+      />
+    )
+  );
+}
+
+function RepositorySidebar({ snapshot, busy }: { snapshot: Snapshot; busy: boolean }) {
+  const aside = useRef<HTMLElement>(null);
+  const [review, setReview] = useState<ReferenceReview>();
+  const present = useMemo(
+    () => !review || snapshot.refs.some((ref) => ref.name === review.reference.name),
+    [snapshot.refs, review],
+  );
+  if (!present) setReview(undefined);
+  function closeReview() {
+    aside.current?.querySelector<HTMLDialogElement>('dialog[open]')?.close();
+    if (review) {
+      const row = aside.current?.querySelector(
+        `[data-reference-name="${CSS.escape(review.reference.name)}"]`,
+      );
+      row
+        ?.querySelector<HTMLButtonElement>(`[data-review-action="${review.action}"]`)
+        ?.focus({ preventScroll: true });
+    }
+    setReview(undefined);
+  }
   const large = snapshot.refs.length >= 100;
   return (
-    <aside className={`refs${large ? ' virtualized-refs' : ''}`}>
+    <aside ref={aside} className={`refs${large ? ' virtualized-refs' : ''}`}>
       <h2>
         References <span>{snapshot.refs.length}</span>
       </h2>
@@ -198,13 +241,21 @@ export function ReferenceSidebar() {
           )}
           {snapshot.view.soloRef && <p>Solo: {snapshot.view.soloRef}</p>}
           {snapshot.view.pinnedRef && <p>Pinned: {snapshot.view.pinnedRef}</p>}
-          <button disabled={busy} onClick={() => void setView({ hiddenRefs: [] })}>
+          <button
+            disabled={busy}
+            onClick={() => void useRepository.getState().setView({ hiddenRefs: [] })}
+          >
             Reset graph view
           </button>
         </div>
       )}
       {large ? (
-        <VirtualReferences key={snapshot.repository.id} snapshot={snapshot} busy={busy} />
+        <VirtualReferences
+          snapshot={snapshot}
+          busy={busy}
+          reviewedName={review?.reference.name}
+          onReview={setReview}
+        />
       ) : (
         referenceGroups.map(([kind, title]) => {
           const refs = snapshot.refs.filter((ref) => ref.kind === kind);
@@ -217,11 +268,20 @@ export function ReferenceSidebar() {
                   reference={reference}
                   snapshot={snapshot}
                   busy={busy}
+                  onReview={setReview}
                 />
               ))}
             </section>
           ) : null;
         })
+      )}
+      {review && present && (
+        <ReferenceDialog
+          action={review.action}
+          reference={review.reference}
+          target={review.reference.target}
+          close={closeReview}
+        />
       )}
     </aside>
   );

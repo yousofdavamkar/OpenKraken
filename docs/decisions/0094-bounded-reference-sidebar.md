@@ -12,10 +12,16 @@ See the [performance report](../verification/m8-reference-performance.md) for th
 
 ## Measuring several refs together
 
-The virtualizer measures up to four adjacent refs from one section together. The first block in a section includes its heading. A transparent CSS grid item spans each mounted block so the browser reports its total height, including wrapped controls and inline errors. A spacer covers skipped blocks when scrolling or retaining a focused action. Each reference remains a separately keyed list item with its own position in the filtered result. Keeping those items under one parent allows React to preserve a dialog and its draft when newly inserted refs shift it into a different block.
+The virtualizer measures up to four adjacent refs from one section together. The first block in a section includes its heading. A transparent CSS grid item spans each mounted block so the browser reports its total height, including wrapped controls and inline errors. A spacer covers skipped blocks when scrolling or retaining a focused action. Each reference remains a separately keyed list item with its own position in the filtered result. Keeping those items under one parent lets React preserve a focused control when newly inserted refs shift it into a different block.
 
 The desktop regression resizes the last ref in a block and checks that the next ref stays adjacent. It opens a rename dialog there, inserts an earlier branch through Git, and checks that the original draft and input focus survive the watcher's refresh. [Measurements](../verification/m8-reference-performance.md#reference-sidebar-measurements-and-commit-badge-grouping)
 
 ## Indexing reference sections
 
 Index each contiguous run of a reference kind by its start and end in the snapshot. For a nonempty filter, index the matching names in their original order. Arrange the runs in sidebar section order, keep the heading on the first run of each kind and carry the list position across run boundaries. A binary search locates the range containing a virtual block. This avoids copying every group of four refs on open and keeps distinct namespaces under a single “Other refs” heading. [Memory and timing measurements](../verification/m8-reference-performance.md#retained-memory-in-a-50000-ref-sidebar)
+
+## Keeping a review open across layout changes
+
+A repository with 99 references uses grouped sections. Adding a branch switches it to the virtualized list at 100. The old row-owned rename dialog unmounted during that switch and discarded its draft. The sidebar now owns its reference review for the lifetime of the open repository. Keep the originally reviewed object ID for submission, retain the reviewed row while virtualized and restore keyboard focus to the current action button on cancellation. Removing the reviewed ref dismisses its dialog. Creating another ref with the same name starts a fresh review.
+
+A desktop test adds and removes a real branch while the rename field is focused, checks the typed name in both layouts, and submits the rename through Git. It also cancels after the opening button has been replaced and removes a branch while its review is open.

@@ -161,3 +161,62 @@ test('large reference sidebar stays bounded and filtered actions survive scrolli
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a pending rename survives switching between grouped and virtualized references', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-ref-threshold-'));
+  const repository = createFixture(join(root, 'repo'));
+  const tip = fixtureGit(repository, ['rev-parse', 'HEAD']);
+  const existing = fixtureGit(repository, ['for-each-ref', '--format=%(refname)']).split('\n');
+  fixtureGit(
+    repository,
+    ['update-ref', '--stdin'],
+    Array.from(
+      { length: 99 - existing.length },
+      (_, index) => `create refs/tags/fixture-${index} ${tip}\n`,
+    ).join(''),
+  );
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, repository);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    const rename = page.getByRole('button', { name: 'Rename branch main', exact: true });
+    await rename.click();
+    const dialog = page.getByRole('dialog', { name: 'Rename branch', exact: true });
+    const draft = dialog.getByRole('textbox', { name: 'Branch name', exact: true });
+    await draft.fill('keep-this-name');
+    fixtureGit(repository, ['branch', 'threshold']);
+    await expect(page.getByRole('heading', { name: 'References 100', exact: true })).toBeVisible();
+    await expect(draft).toHaveValue('keep-this-name');
+    await expect(draft).toBeFocused();
+    fixtureGit(repository, ['branch', '-D', 'threshold']);
+    await expect(page.getByRole('heading', { name: 'References 99', exact: true })).toBeVisible();
+    await expect(draft).toBeFocused();
+    await expect(draft).toHaveValue('keep-this-name');
+    await dialog.getByRole('button', { name: 'Rename branch', exact: true }).click();
+    await expect(page.getByTestId('head')).toHaveText('keep-this-name');
+    expect(fixtureGit(repository, ['rev-parse', 'refs/heads/keep-this-name'])).toBe(tip);
+    const renamed = page.getByRole('button', { name: 'Rename branch keep-this-name', exact: true });
+    await renamed.click();
+    fixtureGit(repository, ['branch', 'threshold']);
+    await expect(page.getByRole('heading', { name: 'References 100', exact: true })).toBeVisible();
+    await draft.press('Escape');
+    await expect(renamed).toBeFocused();
+
+    const threshold = page.getByRole('button', { name: 'Rename branch threshold', exact: true });
+    await threshold.click();
+    await draft.fill('removed-branch');
+    fixtureGit(repository, ['branch', '-D', 'threshold']);
+    await expect(dialog).toHaveCount(0);
+    fixtureGit(repository, ['branch', 'threshold']);
+    await expect(page.getByRole('heading', { name: 'References 100', exact: true })).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
