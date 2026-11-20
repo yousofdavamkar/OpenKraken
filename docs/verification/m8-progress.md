@@ -10,6 +10,21 @@ A shallow-boundary change during tag enumeration could leave a tracked branch sh
 
 The graph accepts j and k for row navigation and Shift+J and Shift+K for ancestry. Electron tests used the merge fixture, text input and a 2,003-commit repository to verify the shortcuts and a single-key transition across the first page boundary. [Graph keyboard behavior](../decisions/0004-m1-history-and-interaction.md)
 
+With Git 2.38.0, the same 302 pages produced the same digest. A second full traversal on that version covered all 1,505,200 commits of the nested-alias fixture, including its independent root (SHA-256 `14265a4f6a6e292ae639a6f7d4fb71a016aff71c7e97bf7a9d1581ccaf6a049c`). The checked-in generator reproduced the 50,000-distinct-ref distribution with a single annotation. Its full desktop traversal matched the mixed fixture digest on Git 2.53.0.
+
+The final unit and native suite passed 1,126 tests with nine skips. The broad Electron run at `6bc9069` passed 267 of 280 tests. Its 13 opt-in Gitea, fish and zsh tests all passed in a separate run with their dependencies enabled. Two added graph shortcut tests and the existing ArrowDown boundary test passed against the updated renderer. Typechecking, lint and the production build passed.
+
+On the two-million-commit, 100,000-file fixture, ten watcher-warm clean and dirty status reads took 204.0–248.1 ms. An external edit appeared in 859.6 ms. The final six fresh-profile graph benchmarks on Git 2.53.0 produced the following results. OS caches were populated. [Individual phase and page timings](m8-opening-experiments.csv)
+
+| Full Linux history                                       |    First paint | 5,000-commit appends | Graph frame interval p95 |
+| -------------------------------------------------------- | -------------: | -------------------: | -----------------------: |
+| One ref                                                  |       329.2 ms |       168.4–215.3 ms |                  16.8 ms |
+| 50,000 distinct refs with one annotation, three profiles | 760.9–866.3 ms |       164.7–247.8 ms |                  16.8 ms |
+| 50,000 refs with nested tag aliases                      |       592.3 ms |       191.7–254.6 ms |                  16.7 ms |
+| 50,000 distinct ordinary refs                            |     1,097.0 ms |       190.2–209.6 ms |                  16.8 ms |
+
+The unsigned Linux x64 DEB, RPM and AppImage from clean commit `f8a4d51` each launched the packaged Canvas, preserved the first ten rows across two appends, found an unloaded commit, and selected it by keyboard after loading 7,003 rows. Debian 13 and Fedora 43 disposable containers installed and reinstalled these 0.1.0 packages, upgraded through the existing 0.2.0-beta.1 and 0.2.0 fixtures and retained a user draft through removal. The Debian check also verified purge. [Installer acceptance](../decisions/0074-linux-installer-payload-verification.md)
+
 ## Cancelling, retrying and paging during full-history search
 
 On Linux x64, a controlled Git scan delayed by 65 seconds reproduced the previous desktop timeout at 30.5 seconds. The updated desktop returned the expected commit in 65.3 seconds. Each message or author scan now has a 120-second deadline. The service drains both scans if either fails. The main process allows 210 seconds for the full search, including queueing and object lookup. [Search and cancellation](../decisions/0004-m1-history-and-interaction.md)

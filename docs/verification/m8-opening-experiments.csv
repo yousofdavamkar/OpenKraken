@@ -487,3 +487,9 @@ adopt-ordered-peeled-roots,linux-distinct-one-annotation,4,previous,1031.1,716.4
 adopt-ordered-peeled-roots,linux-distinct-one-annotation,4,candidate,856.1,527.5,654.7,215.1,211.3,188.9,,,,,,,14.3,22.7,,,
 adopt-ordered-peeled-roots,linux-distinct-one-annotation,5,candidate,867.8,547.3,691.8,239.9,217.4,189.2,,,,,,,13,23.2,,,
 adopt-ordered-peeled-roots,linux-distinct-one-annotation,5,previous,1032.5,714.5,842.1,234.8,215.1,186.4,,,,,,,21.4,23.3,,,
+peeled-roots-release-benchmark,linux-single,1,8f4a9d8,329.2,103.2,204.7,214.9,215.3,168.4,16.8,,60,76.9,50.1,209.8,4.9,0.2,37.7,9.8,71.9
+peeled-roots-release-benchmark,linux-distinct-one-annotation,1,8f4a9d8,866.3,552.4,688.2,247.8,203,188.3,16.8,16.7,73.3,55.5,64,732.1,15.8,28.1,31.8,5.3,97.1
+peeled-roots-release-benchmark,linux-distinct-one-annotation,2,8f4a9d8,760.9,471.5,589,224.8,204.3,168,16.8,16.8,60.1,55.1,41.7,622.4,12.1,21.3,41,6.3,91.2
+peeled-roots-release-benchmark,linux-distinct-one-annotation,3,8f4a9d8,837.9,494.3,641.8,218.4,214.6,164.7,16.8,16.8,66.3,60,45.1,683.7,13,28.9,32.7,14.3,107.2
+peeled-roots-release-benchmark,linux-nested-annotations,1,8f4a9d8,592.3,272.5,400.4,254.6,191.7,193.3,16.7,16.7,72.8,53.9,68.5,419.7,10.9,8.3,36,10.2,126.4
+peeled-roots-release-benchmark,linux-distinct,1,8f4a9d8,1097,770.8,914.6,202.5,209.6,190.2,16.8,16.8,52.9,66.6,54,949.1,12.4,22,38.8,5.7,103.4
