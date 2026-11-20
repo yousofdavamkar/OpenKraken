@@ -53,6 +53,7 @@ test.each([
   'annotated',
   'nested annotations',
   'moved annotation',
+  'reordered annotations',
   'tree annotation',
   'failed walk',
 ] as const)(
@@ -71,6 +72,10 @@ test.each([
       fixtureGit(path, ['tag', '-a', 'outer', 'inner', '-m', 'Outer']);
       fixtureGit(path, ['tag', '-a', 'other', orphan, '-m', 'Same commit, different tag']);
       fixtureGit(path, ['tag', '-d', 'inner']);
+    }
+    if (kind === 'reordered annotations') {
+      fixtureGit(path, ['tag', '-a', 'left', orphan, '-m', 'Independent tip']);
+      fixtureGit(path, ['tag', '-a', 'right', 'HEAD~2', '-m', 'Older tip']);
     }
     if (kind === 'reordered') {
       fixtureGit(path, ['update-ref', 'refs/heads/a', 'HEAD~2']);
@@ -95,6 +100,15 @@ test.each([
     const snapshot = service.snapshot(repo.id, undefined, false);
     try {
       await vi.waitFor(() => expect(early).toHaveBeenCalledOnce(), { timeout: 5000 });
+      if (kind === 'reordered annotations') {
+        const left = fixtureGit(path, ['rev-parse', 'refs/tags/left']);
+        const right = fixtureGit(path, ['rev-parse', 'refs/tags/right']);
+        fixtureGit(
+          path,
+          ['update-ref', '--stdin'],
+          `update refs/tags/left ${right}\nupdate refs/tags/right ${left}\n`,
+        );
+      }
       if (kind === 'moved annotation') {
         fixtureGit(path, ['tag', '-f', 'outer', 'HEAD~2']);
         fixtureGit(path, ['tag', '-d', 'other']);
