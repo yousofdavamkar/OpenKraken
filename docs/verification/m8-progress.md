@@ -2,6 +2,16 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Startup failures before the first window finishes loading
+
+A failed desktop module load could leave the primary process running with no usable window after the error was dismissed. A missing renderer document could also strand an unconfirmed AppImage replacement. The primary now starts its consent-checked reporter before loading the desktop, records a fixed failure category and exits with status 1 after dismissal. Closing the app during its first navigation exits normally. [Startup behavior and coverage](../decisions/0078-interrupted-session-and-javascript-reports.md#fatal-desktop-initialization-errors)
+
+With a local HTTPS receiver, Linux Electron sent one fixed-category summary for a failing startup after opt-in and zero on a fresh or revoked profile. The same profile reopened after each fatal exit. All 23 targeted startup, crash reporting, diagnostics, shutdown, update and repository-opening Electron cases passed. During development, quitting during the first document load produced `ERR_FAILED` before the window was destroyed. A regression now checks the normal exit code and absence of the fatal dialog.
+
+At `0b3c693`, stable FUSE and beta extract-and-run fixtures each installed a signed replacement whose initial HTML file was absent. Both recorded the startup error, relaunched the predecessor, verified its digest and signed release sequence, and displayed and dismissed the rollback notice. The fixtures used temporary keys and loopback HTTPS. The full Linux unit/native suite passed 1,017 tests with 14 skipped. Typecheck, build, lint, packaged fuse verification and packaged smoke passed. [AppImage recovery](../decisions/0086-appimage-startup-exit-recovery.md#replacement-with-a-missing-desktop-document)
+
+A separate damaged-bundle probe kept the entry HTML and removed its referenced JavaScript file from a disposable build. Chromium completed the document load, the preload bridge was present, and the React root was still empty three seconds later. The process remained alive. This case is open.
+
 ## Repository opening, watcher startup and graph paging
 
 On Linux x64, the ordinary bare-repository working-state read fell from a median 324.4 ms to 12.6 ms across seven pairs. The app skips a whole-tree diff when there is no index, avoids a duplicate watcher ref scan on prompt subscription, and reads verified HEAD alongside repository metadata. On full Linux history with 50,000 distinct ref targets, the combined changes made the first append faster in all three benchmark pairs. First paint took longer in all three, and six of nine appends met the paging budget. In three subsequent fresh profiles, the same 50,000-ref repository painted in 805.1–900.2 ms against the 500 ms target. Eight of nine appends met 300 ms. [Measurements and individual runs](m8-reference-performance.md#opening-a-bare-repository-with-50000-distinct-refs)
