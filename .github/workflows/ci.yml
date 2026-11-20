@@ -195,7 +195,7 @@ jobs:
           cache: pnpm
       - if: runner.os == 'Linux'
         name: Native terminal build and picker automation
-        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool git-lfs rpm gnupg2 libarchive-tools fuse3 fish zsh
+        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool git-lfs rpm gnupg2 libarchive-tools fuse3 fish zsh dbus-daemon libglib2.0-bin gnome-keyring
       - if: runner.os == 'Linux'
         name: Verify native shell prerequisites
         run: |
@@ -229,6 +229,9 @@ jobs:
         env:
           OPENKRAKEN_XDOTOOL: xdotool
         run: xvfb-run -a pnpm smoke:package
+      - if: runner.os == 'Linux'
+        name: Packaged merge draft recovery with a private GNOME keyring
+        run: xvfb-run -a node scripts/verify-linux-merge-keyring.mjs
       - if: runner.os == 'Linux'
         name: Packaged zsh shell integration
         env:
