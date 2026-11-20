@@ -66,15 +66,23 @@ else {
 const repositoryUri = `openkraken://repo?path=${encodeURIComponent(linkedRepository)}`;
 const nativePicker = process.platform === 'linux' && !!process.env.OPENKRAKEN_XDOTOOL;
 const packageShell = process.env.OPENKRAKEN_PACKAGE_SHELL ?? '/bin/bash';
+const powerShell = basename(packageShell) === 'pwsh';
 if (nativePicker) {
-  if (!isAbsolute(packageShell) || !['bash', 'zsh'].includes(basename(packageShell)))
-    throw new Error('Packaged terminal smoke requires an absolute Bash or zsh executable');
+  if (!isAbsolute(packageShell) || !['bash', 'zsh', 'pwsh'].includes(basename(packageShell)))
+    throw new Error('Packaged terminal smoke requires an absolute Bash, zsh or pwsh executable');
   if (basename(packageShell) === 'zsh') {
     await writeFile(
       join(profile, '.zshenv'),
       'if [[ -n ${ZSH_TEST_MODULES-} ]]; then module_path=("$ZSH_TEST_MODULES"); fi\n',
     );
     await writeFile(join(profile, '.zshrc'), 'HISTFILE=/dev/null\nPROMPT="packaged> "\n');
+  } else if (powerShell) {
+    const config = join(profile, '.config', 'powershell');
+    await mkdir(config, { recursive: true });
+    await writeFile(
+      join(config, 'Microsoft.PowerShell_profile.ps1'),
+      "Set-PSReadLineOption -HistorySaveStyle SaveNothing -PredictionSource None\nfunction global:prompt { 'packaged> ' }\n",
+    );
   } else await writeFile(join(profile, '.bashrc'), 'HISTFILE=/dev/null\nPS1="packaged> "\n');
 }
 // Chromium creates its Linux singleton socket below TMPDIR. Installer staging and
@@ -100,6 +108,13 @@ const child = spawn(
         ? {
             SHELL: packageShell,
             HOME: profile,
+            ...(powerShell
+              ? {
+                  XDG_CONFIG_HOME: join(profile, '.config'),
+                  XDG_DATA_HOME: join(profile, '.local/share'),
+                  XDG_CACHE_HOME: join(profile, '.cache'),
+                }
+              : {}),
             ...(basename(packageShell) === 'zsh' ? { ZDOTDIR: profile } : {}),
             ZSH_TEST_MODULES: process.env.OPENKRAKEN_ZSH_MODULE_PATH ?? '',
           }
@@ -325,9 +340,8 @@ try {
           ).length,
       )
       .toBe(2);
-    await input.pressSequentially(
-      'stty -echo -icanon; dd bs=1 count=1 2>/dev/null | od -An -t u1; stty sane',
-    );
+    const readByte = 'stty -echo -icanon; dd bs=1 count=1 2>/dev/null | od -An -t u1; stty sane';
+    await input.pressSequentially(powerShell ? `/bin/sh -c '${readByte}'` : readByte);
     await input.press('Enter');
     // An AppImage runtime can supervise Electron in a child process. Ask the
     // connected browser for its actual PID instead of assuming the launcher PID.
@@ -336,7 +350,7 @@ try {
     await xdo('key', '--clearmodifiers', 'ctrl+p');
     await expect(page.getByRole('dialog', { name: 'Command palette' })).toHaveCount(0);
     await expect(panel.locator('.xterm-accessibility-tree')).toContainText('16');
-    await input.pressSequentially('false');
+    await input.pressSequentially(powerShell ? '/bin/false' : 'false');
     await input.press('Enter');
     await expect(integration).toHaveText('Ready for command · last exit 1');
     await page.screenshot({ path: 'test-results/packaged-terminal.png' });

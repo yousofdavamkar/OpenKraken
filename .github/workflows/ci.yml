@@ -286,6 +286,8 @@ jobs:
         run: |
           fish --version
           zsh --version
+          pwsh --version
+          echo "OPENKRAKEN_POWERSHELL=$(command -v pwsh)" >> "$GITHUB_ENV"
       - name: Verify native Git LFS prerequisite
         run: git lfs version
       - run: pnpm install --frozen-lockfile
@@ -324,6 +326,11 @@ jobs:
           OPENKRAKEN_XDOTOOL: xdotool
           OPENKRAKEN_PACKAGE_SHELL: /usr/bin/zsh
         run: xvfb-run -a pnpm smoke:package
+      - if: runner.os == 'Linux'
+        name: Packaged PowerShell integration
+        env:
+          OPENKRAKEN_XDOTOOL: xdotool
+        run: OPENKRAKEN_PACKAGE_SHELL="$(command -v pwsh)" xvfb-run -a pnpm smoke:package
       - if: runner.os != 'Linux'
         run: pnpm smoke:package --history
       - if: runner.os == 'macOS'
