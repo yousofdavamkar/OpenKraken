@@ -10,11 +10,14 @@ import { GitError, type RunOptions, type runGit } from './runner.js';
 type Run = (args: string[], options: RunOptions) => ReturnType<typeof runGit>;
 const MAX_BYTES = 32 * 1024 * 1024;
 const PARALLEL_THRESHOLD = 10000;
+const MAX_SPARSE_PACK_BYTES = 8 * 1024 * 1024;
+const MAX_SAMPLED_NAMES = 8;
 
 export interface PackedRefSample {
   singleTarget?: string;
   repeatedTargets: boolean;
   hasPeeledTags?: boolean;
+  annotationNames?: string[];
   manyBranches: boolean;
 }
 const ordinaryRefs: PackedRefSample = { repeatedTargets: false, manyBranches: false };
@@ -36,6 +39,24 @@ function sampleTargets(sample: Buffer, length: number): PackedRefSample {
   };
 }
 
+// A peeled line identifies a possible annotated ref on the preceding line.
+function sparseAnnotationNames(packed: Buffer) {
+  const names: string[] = [];
+  for (let end = packed.indexOf('\n^'); end >= 0; end = packed.indexOf('\n^', end + 2)) {
+    if (names.length === MAX_SAMPLED_NAMES || end === 0) return;
+    const start = packed.lastIndexOf(10, end - 1) + 1;
+    const space = packed.indexOf(32, start);
+    if ((space - start !== 40 && space - start !== 64) || space >= end || end - space > 1025)
+      return;
+    const field = packed.subarray(space + 1, end);
+    if (!isUtf8(field) || field.some((byte) => byte <= 32)) return;
+    const name = field.toString('utf8');
+    if (!name.startsWith('refs/') || /[*?\[]/.test(name)) return;
+    names.push(name);
+  }
+  return names.length ? names : undefined;
+}
+
 // This bounded sample selects a Git query. Only Git supplies the actual refs and types.
 export async function samplePackedRefs(commonDir: string) {
   if (process.env.GIT_REPLACE_REF_BASE !== undefined) return ordinaryRefs;
@@ -52,7 +73,16 @@ export async function samplePackedRefs(commonDir: string) {
     const prefix = sampleTargets(sample, bytesRead);
     if (prefix.repeatedTargets) return prefix;
     const more = await file.read(sample, bytesRead, sample.length - bytesRead, bytesRead);
-    return sampleTargets(sample, bytesRead + more.bytesRead);
+    const length = bytesRead + more.bytesRead;
+    const result = sampleTargets(sample, length);
+    if (!result.repeatedTargets && info.size <= MAX_SPARSE_PACK_BYTES) {
+      const packed = Buffer.allocUnsafe(info.size);
+      sample.copy(packed, 0, 0, length);
+      const tail = await file.read(packed, length, packed.length - length, length);
+      if (length + tail.bytesRead === packed.length)
+        result.annotationNames = sparseAnnotationNames(packed);
+    }
+    return result;
   } catch {
     return ordinaryRefs;
   } finally {
@@ -122,13 +152,14 @@ export class ReferenceReader {
     timer.unref();
     const active = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
     try {
+      const groupedSample = sample.repeatedTargets && sample.hasPeeledTags;
+      if (!groupedSample) onSample?.();
       const sampled =
-        sample.repeatedTargets &&
-        sample.hasPeeledTags &&
+        (groupedSample || sample.annotationNames?.length) &&
         process.env.GIT_REPLACE_REF_BASE === undefined
-          ? await this.sampleTagObjects(cwd, active)
+          ? await this.sampleTagObjects(cwd, active, sample.annotationNames)
           : undefined;
-      onSample?.(sampled);
+      if (groupedSample) onSample?.(sampled);
       const omitUpstreams = sample.manyBranches && (await this.noConfiguredUpstreams(cwd, active));
       const refs = await this.readStable(
         cwd,
@@ -219,12 +250,18 @@ export class ReferenceReader {
     for (const ref of tags) Object.assign(ref, resolved.get(ref.peeled ?? ref.target)!);
   }
 
-  private async sampleTagObjects(cwd: string, signal: AbortSignal) {
+  private async sampleTagObjects(cwd: string, signal: AbortSignal, names?: string[]) {
     const parser = new RefsParser();
     const format = REF_FORMAT.replace('%(upstream)', '').replace('%(upstream:track)', '');
     try {
       await this.run(
-        ['--no-replace-objects', 'for-each-ref', '--count=128', '--format=' + format],
+        [
+          '--no-replace-objects',
+          'for-each-ref',
+          '--count=128',
+          '--format=' + format,
+          ...(names ? ['--', ...names] : []),
+        ],
         {
           cwd,
           signal,
@@ -337,14 +374,22 @@ export class ReferenceReader {
     if (
       sampled &&
       validUtf8 &&
-      refs.every((ref) => !ref.name.startsWith('refs/replace/') && sampled.has(ref.target))
+      refs.every(
+        (ref) =>
+          !ref.name.startsWith('refs/replace/') &&
+          ((!grouped && ref.objectType !== 'tag') || sampled.has(ref.target)),
+      )
     ) {
       for (const ref of refs) {
+        if (!grouped && ref.objectType !== 'tag') continue;
         const object = sampled.get(ref.target)!;
         ref.objectType = object.objectType;
         ref.peeledType = object.peeledType;
         if (object.peeled) ref.peeled = object.peeled;
-        bytes += object.objectType.length + object.peeledType.length + (object.peeled?.length ?? 0);
+        bytes +=
+          (grouped ? object.objectType.length : 0) +
+          object.peeledType.length +
+          (object.peeled?.length ?? 0);
       }
       if (bytes > this.maxBytes)
         throw new GitError('OUTPUT_LIMIT', 'Git output exceeded the safety limit');

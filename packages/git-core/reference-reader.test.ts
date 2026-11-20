@@ -965,3 +965,47 @@ describe('packed annotated aliases', () => {
     });
   });
 });
+
+describe('sparse annotated refs among distinct packed targets', () => {
+  const cwd = join(root, 'sparse-annotation');
+  let sample: Awaited<ReturnType<typeof samplePackedRefs>>;
+  beforeAll(async () => {
+    createFixture(cwd, 'linear', 3000);
+    const commits = fixtureGit(cwd, ['rev-list', 'HEAD']).split('\n');
+    const commands = commits.map((oid, i) => `create refs/tags/${'a'.repeat(140)}-${i} ${oid}\n`);
+    fixtureGit(cwd, ['update-ref', '--stdin'], commands.join(''));
+    fixtureGit(cwd, ['tag', '-a', '最後', '-m', 'Late tag', 'HEAD~1500']);
+    fixtureGit(cwd, ['pack-refs', '--all']);
+    sample = await samplePackedRefs(join(cwd, '.git'));
+    expect(sample.repeatedTargets).toBe(false);
+  });
+  test('a sparse annotation beyond the packed prefix needs one full direct enumeration', async () => {
+    const calls: string[][] = [];
+    const reader = new ReferenceReader((args, options) => {
+      calls.push(args);
+      return runGit(git.path, args, options);
+    });
+    const result = await reader.read(cwd, undefined, sample);
+    expect(result).toEqual(await nativeRefs(cwd));
+    expect(
+      calls.filter((args) => args.includes('for-each-ref') && !args.includes('--')),
+    ).toHaveLength(1);
+    expect(calls[0]).toContain('refs/tags/最後');
+  });
+
+  test('a packed name that moves after the probe cannot supply stale object fields', async () => {
+    const tree = fixtureGit(cwd, ['rev-parse', 'HEAD^{tree}']);
+    const reader = new ReferenceReader(async (args, options) => {
+      const result = await runGit(git.path, args, options);
+      if (args.includes('--count=128'))
+        fixtureGit(cwd, ['tag', '-f', '-a', '最後', '-m', 'New target', tree]);
+      return result;
+    });
+    const refs = await reader.read(cwd, undefined, sample);
+    expect(refs).toEqual(await nativeRefs(cwd));
+    expect(refs.find((ref) => ref.name === 'refs/tags/最後')).toMatchObject({
+      peeled: tree,
+      peeledType: 'tree',
+    });
+  });
+});
