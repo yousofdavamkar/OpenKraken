@@ -134,6 +134,7 @@ export async function verifyDmg(source, manifest, identity) {
       env: {
         ...process.env,
         OPENKRAKEN_PACKAGE_DIRECTORY: installed,
+        OPENKRAKEN_EXPECTED_PACKAGE_VERSION: manifest.version,
         OPENKRAKEN_PACKAGE_EXECUTABLE: join(copied, 'Contents/MacOS/openkraken'),
       },
     });

@@ -9,11 +9,13 @@ import { msiVersion } from './msi.mjs';
 
 // Build a disposable future version through the real bundle and installer CLIs.
 // Never change the workspace version or relabel an unchanged application ASAR.
-const target = process.argv[2] ?? (process.platform === 'win32' ? 'msi' : 'rpm');
+const defaultTarget = { darwin: 'dmg', win32: 'msi', linux: 'rpm' };
+const target = process.argv[2] ?? defaultTarget[process.platform];
 assert.ok(
   (process.platform === 'linux' && ['deb', 'rpm'].includes(target)) ||
-    (process.platform === 'win32' && process.arch === 'x64' && target === 'msi'),
-  'Upgrade fixtures require native Linux deb/rpm or Windows x64 msi',
+    (process.platform === 'win32' && process.arch === 'x64' && target === 'msi') ||
+    (process.platform === 'darwin' && target === 'dmg'),
+  'Upgrade fixtures require native Linux deb/rpm, Windows x64 msi or macOS dmg',
 );
 const root = resolve('.');
 const source = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
@@ -30,9 +32,11 @@ const version = beta
   ? `${stable}-beta.${BigInt(prerelease?.slice(5) ?? 0) + BigInt(betaOffset)}`
   : stable;
 if (target === 'msi') msiVersion(version);
+const candidate = { ...source, version };
+if (target === 'dmg') candidate.macBuildNumber = source.macBuildNumber + Number(betaOffset);
 await mkdir(join(root, 'release'), { recursive: true });
 const fixture = await mkdtemp(join(root, 'release/installer-upgrade-'));
-await writeFile(join(fixture, 'package.json'), JSON.stringify({ ...source, version }));
+await writeFile(join(fixture, 'package.json'), JSON.stringify(candidate));
 // Simulate leftovers from interrupted developer builds and Electron tests.
 for (const directory of ['', 'helpers', 'shell-integration', 'node_modules']) {
   const path = join(fixture, 'apps/desktop/dist', directory);
@@ -69,7 +73,8 @@ try {
   );
   const archive = join(
     fixture,
-    `release/OpenKraken-${process.platform}-${process.arch}/resources/app.asar`,
+    `release/OpenKraken-${process.platform}-${process.arch}`,
+    target === 'dmg' ? 'OpenKraken.app/Contents/Resources/app.asar' : 'resources/app.asar',
   );
   const entries = listPackage(archive).map((path) => path.replaceAll('\\', '/'));
   assert.ok(
@@ -87,12 +92,15 @@ try {
     'Bundle must use the release version, not a hard-coded value',
   );
   // Model a failed rebuild that updated staging but left the previous bundle on disk.
-  await writeFile(join(fixture, 'package.json'), JSON.stringify(source));
+  // A beta and its final release share the same numeric macOS short version.
+  // Keep both plist fields identical to exercise the full version in the ASAR.
+  const stale = target === 'dmg' && beta ? { ...candidate, version: stable } : source;
+  await writeFile(join(fixture, 'package.json'), JSON.stringify(stale));
   const staging = join(fixture, 'release/staging');
   await mkdir(staging, { recursive: true });
   await writeFile(
     join(staging, 'package.json'),
-    JSON.stringify({ ...bundled, version: source.version }),
+    JSON.stringify({ ...bundled, version: stale.version }),
   );
   await assert.rejects(
     promisify(execFile)(
@@ -101,12 +109,17 @@ try {
       { cwd: fixture },
     ),
     (error) => {
-      assert.match(error.stderr, /Rebuild the platform bundle/);
+      assert.match(
+        error.stderr,
+        target === 'dmg' && !beta
+          ? /macOS bundle identity, version, executable or repository scheme differs/
+          : /Rebuild the platform bundle/,
+      );
       return true;
     },
     'An installer must reject a bundle whose embedded version differs from the requested release',
   );
-  await writeFile(join(fixture, 'package.json'), JSON.stringify({ ...source, version }));
+  await writeFile(join(fixture, 'package.json'), JSON.stringify(candidate));
   await rm(staging, { recursive: true });
   // An installer workspace can have a different checkout or no source history.
   await promisify(execFile)('git', ['init', '--quiet'], { cwd: fixture });
@@ -117,6 +130,7 @@ try {
   );
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   assert.equal(manifest.version, version);
+  if (target === 'dmg') assert.equal(manifest.macBuildNumber, candidate.macBuildNumber);
   assert.equal(manifest.source?.commit, sourceCommit);
   assert.deepEqual(manifest.source, bundled.openkrakenSource);
   const pointer = JSON.stringify({ fixture, target, version, manifestPath }, null, 2) + '\n';

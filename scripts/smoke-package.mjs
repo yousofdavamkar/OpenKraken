@@ -206,6 +206,12 @@ try {
     !diagnostics.state.entries.some((entry) => entry.type === 'started')
   )
     throw new Error('Packaged local diagnostics failed to initialize');
+  const expectedVersion = process.env.OPENKRAKEN_EXPECTED_PACKAGE_VERSION;
+  if (
+    expectedVersion &&
+    diagnostics.state.entries.find((entry) => entry.type === 'started')?.version !== expectedVersion
+  )
+    throw new Error(`The running application did not report release ${expectedVersion}`);
   if (retainedConfig) {
     await page.getByRole('button', { name: 'Appearance', exact: true }).click();
     const appearance = page.getByRole('dialog', { name: 'Appearance', exact: true });

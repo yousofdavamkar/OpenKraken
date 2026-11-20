@@ -344,6 +344,13 @@ jobs:
           manifest="release/installers/darwin-$(node -p 'process.arch')/test/dmg/manifest.json"
           node scripts/check-installer-guards.mjs "$manifest"
           pnpm smoke:installer "$manifest"
+      - if: runner.os == 'macOS'
+        name: Build beta DMG and launch its installed app
+        timeout-minutes: 15
+        run: |
+          node scripts/check-installer-upgrade.mjs dmg --beta
+          manifest=$(node -p 'require("./release/installer-upgrade-dmg-beta.json").manifestPath')
+          pnpm smoke:installer "$manifest"
       - if: runner.os == 'Windows'
         name: Build and verify unsigned MSI payload
         timeout-minutes: 15
@@ -490,7 +497,7 @@ jobs:
           display=()
           case "$RUNNER_OS" in
             Linux) targets=(deb rpm AppImage deb-beta rpm-beta); display=(xvfb-run -a) ;;
-            macOS) targets=(dmg) ;;
+            macOS) targets=(dmg dmg-beta) ;;
             Windows) targets=(msi msi-beta) ;;
           esac
           for target in "${targets[@]}"; do
