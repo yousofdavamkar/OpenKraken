@@ -2,6 +2,16 @@
 
 M8 remains in progress. On Linux x64, full Linux history with one ref and with 49,999 aliases on the first row met the 500 ms opening and 300 ms paging budgets in the latest fresh-profile runs. One nested-tag restart exceeded 500 ms. The 50,000-distinct-target fixture still exceeds the opening budget. Native Windows/macOS and ARM64 acceptance, the production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Retaining reference searches and bounding cache-key memory
+
+An external branch deletion used to remove the focused search field when a repository dropped from 100 references to 99. The sidebar now keeps the query and keyboard focus through deletions and additions. Opening a different repository resets the filter. Electron and the packaged Linux x64 app exercised the change. [Sidebar behavior](../decisions/0094-bounded-reference-sidebar.md)
+
+The Git service now fingerprints large shallow, graft and alternates files in 64 KiB chunks. A 32.8 MB input increased the process high-water mark by 124–256 KiB in three fresh runs. The earlier implementation added 160,620–161,796 KiB. Native tests verified that an unreadable input preserves the saved cache, and that changing a graft beyond the first chunk changes displayed parentage on restart. [Cache compatibility and measurements](../decisions/0117-history-cache-inputs.md#reading-graph-metadata-within-a-fixed-memory-budget)
+
+Linux x64 verification passed 1,177 unit and native tests with nine skips. All 37 focused Electron checks passed, including six graph visual goldens. A restart with 17,000 persisted commits matched native Git’s ordered IDs and parents over 302 pages and 1,505,199 commits. Typechecking, lint, the build and the unsigned Linux package smoke passed. The packaged app exercised native folder opening, search, Canvas rendering, keyboard navigation and paging to the root after a cached repository changed.
+
+The standard fixture painted its first 2,000 commits in 228.5 ms. On the 50,000-distinct-target Linux fixture the same first page took 746.7 ms against the 500 ms budget. The native snapshot took 409.6 ms. The three subsequent pages took 211.7, 211.8 and 193.1 ms against the 300 ms budget. Graph and sidebar frame intervals were 16.7 and 16.8 ms p95. Two experiments improved isolated measurements without improving median desktop opening time. [Per-run results and experimental conditions](m8-reference-performance.md#git-object-cache-and-snapshot-transfer-on-november-20)
+
 ## Reference sidebar memory and recovery after external ref changes
 
 On Linux x64, the range index reduced median post-GC renderer heap by 1,575,396 bytes while displaying 2,000 commits and 50,000 distinct ref targets. Median full opening time rose from 873.8 to 934.7 ms in that comparison. A subsequent full-suite run painted the standard fixture in 355.9 ms and the distinct-target fixture in 1,210.6 ms. Its native snapshot alone took 817.2 ms. All three large-fixture appends met 300 ms. [Individual timings and memory samples](m8-reference-performance.md#retained-memory-in-a-50000-ref-sidebar)
