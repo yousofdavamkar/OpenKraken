@@ -94,6 +94,64 @@ test('canvas work and pixel buffer are bounded by viewport, including DPR and pa
   expect(context.canvas).toMatchObject({ width: 240, height: 1120 });
 });
 
+test('a horizontally scrolled canvas clips passages before styling and keeps crossing edges', () => {
+  const rows = allocateLanes(documents(502), emptyCheckpoint(), true).rows;
+  rows[499]!.edges = [
+    { from: 0, to: 4, kind: 'branch-out', colorIndex: 0, dashed: false, target: '501' },
+  ];
+  rows[500]!.edges = [];
+  const strokes: number[][] = [];
+  const context = {
+    canvas: { width: 0, height: 0 },
+    setTransform() {},
+    translate() {},
+    clearRect() {},
+    setLineDash() {},
+    beginPath() {},
+    moveTo(x: number, y: number) {
+      strokes.push([x, y]);
+    },
+    lineTo(x: number, y: number) {
+      strokes.at(-1)!.push(x, y);
+    },
+    bezierCurveTo(_a: number, _b: number, _c: number, _d: number, x: number, y: number) {
+      strokes.at(-1)!.push(x, y);
+    },
+    stroke() {},
+    fill() {},
+    arc() {},
+  } as unknown as CanvasRenderingContext2D;
+  let offscreenStyles = 0;
+  const passages = [4, 3, 0, 2, 1].map((column) => ({
+    start: 499,
+    end: column === 2 ? 500 : 501,
+    column,
+    target: '501',
+    dashed: false,
+    get colorIndex() {
+      if (column === 0 || column === 4) offscreenStyles++;
+      return column;
+    },
+  }));
+  paintGraph(context, rows, {
+    width: 36,
+    height: 28,
+    scrollTop: 499 * 28 + 7,
+    scrollLeft: 36,
+    dpr: 2,
+    passages: passageBuckets(passages),
+  });
+  expect(strokes).toEqual([
+    [34, -7, 34, 21],
+    [54, -7, 54, 21],
+    [74, -7, 74, 21],
+    [14, 7, 94, 21],
+    [34, 21, 34, 49],
+    [74, 21, 74, 49],
+  ]);
+  expect(offscreenStyles).toBe(0);
+});
+
 test('pin reserves lane zero for the first-parent chain across pages and converging branches', () => {
   const commits = [
     { oid: 'other', parents: ['shared'] },
