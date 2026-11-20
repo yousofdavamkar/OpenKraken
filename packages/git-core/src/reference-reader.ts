@@ -149,8 +149,12 @@ export class ReferenceReader {
   private async peelNestedTags(cwd: string, signal: AbortSignal, refs: Ref[]) {
     // Older for-each-ref versions peel a single layer. Resolve only the remaining tags.
     const nested = refs.filter((ref) => ref.peeledType === 'tag');
-    if (!nested.length) return refs;
-    const ids = [...new Set(nested.map((ref) => ref.peeled!))];
+    if (nested.length) await this.peelTags(cwd, signal, nested);
+    return refs;
+  }
+
+  private async peelTags(cwd: string, signal: AbortSignal, tags: Ref[]) {
+    const ids = [...new Set(tags.map((ref) => ref.peeled ?? ref.target))];
     const { stdout } = await this.run(
       ['cat-file', '--buffer', '--batch-check=%(rest) %(objectname) %(objecttype)'],
       {
@@ -160,18 +164,26 @@ export class ReferenceReader {
         stdin: ids.map((id) => id + '^{} ' + id + '\n').join(''),
       },
     );
-    const lines = stdout.toString('ascii').split('\n');
+    const lines = stdout.toString('utf8').split('\n');
     const resolved = new Map<string, { peeled: string; peeledType: string }>();
     if (lines.pop() !== '' || lines.length !== ids.length)
-      throw new GitError('INVALID_REFS', 'Incomplete nested tag targets');
+      throw new GitError('INVALID_REFS', 'Incomplete annotated tag targets');
     for (const [index, id] of ids.entries()) {
       const match = /^(\S+) ([0-9a-f]+) (commit|tree|blob)$/.exec(lines[index]!);
       if (!match || match[1] !== id || match[2]!.length !== id.length)
-        throw new GitError('INVALID_REFS', 'Invalid nested tag target');
+        throw new GitError('INVALID_REFS', 'Invalid annotated tag target');
       resolved.set(id, { peeled: match[2]!, peeledType: match[3]! });
     }
-    for (const ref of nested) Object.assign(ref, resolved.get(ref.peeled!)!);
-    return refs;
+    for (const ref of tags) Object.assign(ref, resolved.get(ref.peeled ?? ref.target)!);
+  }
+
+  private async identities(cwd: string, signal: AbortSignal) {
+    const { stdout } = await this.run(['for-each-ref', `--format=${KEY_FORMAT}`], {
+      cwd,
+      signal,
+      maxBytes: this.maxBytes,
+    });
+    return isUtf8(stdout) ? keys(stdout) : undefined;
   }
 
   private async resolveRepeatedTypes(cwd: string, signal: AbortSignal, refs: Ref[]) {
@@ -265,18 +277,28 @@ export class ReferenceReader {
     if (!refs.some((ref) => ref.objectType === 'tag')) return refs;
     checkUtf8();
     if (!validUtf8) return this.all(cwd, signal);
+    const tags = refs.filter((ref) => ref.objectType === 'tag');
+    if (
+      grouped &&
+      tags.length > 128 &&
+      new Set(tags.map((ref) => ref.target)).size * 4 <= tags.length
+    ) {
+      // Keep the direct records and ask Git to peel the captured objects once per ID.
+      await this.peelTags(cwd, signal, tags);
+      for (const tag of tags) bytes += tag.peeled!.length + tag.peeledType.length;
+      if (bytes > this.maxBytes)
+        throw new GitError('OUTPUT_LIMIT', 'Git output exceeded the safety limit');
+      const observed = await this.identities(cwd, signal);
+      if (observed?.length === refs.length && refs.every((ref, i) => matches(ref, observed[i]!)))
+        return refs;
+      return this.all(cwd, signal);
+    }
     const expected: Key[] = refs.map((ref) => [
       ref.name,
       ref.target,
       ref.upstream?.ref ?? '',
       ref.isHead ? '*' : ' ',
     ]);
-    const identity = () =>
-      this.run(['for-each-ref', `--format=${KEY_FORMAT}`], {
-        cwd,
-        signal,
-        maxBytes: this.maxBytes,
-      });
     const cancelled = new AbortController();
     const groupSignal = AbortSignal.any([signal, cancelled.signal]);
     const readPages = async (format: string): Promise<Ref[]> => {
@@ -316,7 +338,6 @@ export class ReferenceReader {
     };
     // Exact names are valid ref names (no glob metacharacters). Git also matches
     // slash descendants, so retain only requested names and validate coverage.
-    const tags = refs.filter((ref) => ref.objectType === 'tag');
     const batches: string[][] = [];
     let names: string[] = [],
       nameBytes = 0;
@@ -367,12 +388,11 @@ export class ReferenceReader {
       }
       refs = refs.map((ref) => details.get(ref.name) ?? ref);
     }
-    const after = (await identity()).stdout;
-    if (!isUtf8(after)) return this.all(cwd, signal);
-    const observed = keys(after);
+    const observed = await this.identities(cwd, signal);
     // New/deleted/moved refs or changed HEAD/upstream state invalidate page
     // boundaries. Retry once with the original complete native command.
     if (
+      !observed ||
       observed.length !== expected.length ||
       observed.some((key, index) => key.some((field, at) => field !== expected[index]?.[at])) ||
       refs.length !== expected.length ||

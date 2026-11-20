@@ -621,6 +621,58 @@ describe('repeated targets in a packed SHA-256 repository', () => {
     expect(queries).toBe(1);
   });
 
+  test('batches aliased annotations by object, checks output limits and recovers a moved alias', async () => {
+    const names = Array.from({ length: 512 }, (_, i) => 'refs/tags/alias-' + i);
+    const annotations = [
+      'refs/tags/annotated',
+      'refs/tags/annotated-tree',
+      'refs/tags/annotated-blob',
+    ];
+    fixtureGit(cwd, ['tag', '-a', 'annotated-tree', '-m', 'Tree', tree]);
+    fixtureGit(cwd, ['tag', '-a', 'annotated-blob', '-m', 'Blob', blob]);
+    fixtureGit(
+      cwd,
+      ['update-ref', '--stdin'],
+      names.map((name, i) => `create ${name} ${annotations[i % 3]}`).join('\n') + '\n',
+    );
+    try {
+      const ids = annotations.map((name) => fixtureGit(cwd, ['rev-parse', name]));
+      let move = false;
+      const batches: string[][] = [];
+      const reader = new ReferenceReader((args, options) => {
+        if (args.some((arg) => arg.includes('%(rest)'))) {
+          batches.push(String(options.stdin).trimEnd().split('\n'));
+          if (move) fixtureGit(cwd, ['update-ref', names[0]!, blob]);
+        }
+        return runGit(git.path, args, options);
+      });
+      expect(await reader.read(cwd, undefined, sample)).toEqual(await nativeRefs(cwd));
+      expect(batches).toHaveLength(1);
+      expect(batches[0]!.sort()).toEqual(ids.map((id) => id + '^{} ' + id).sort());
+      const direct = await runGit(git.path, ['for-each-ref', '--format=' + directFormat], { cwd });
+      const limited = new ReferenceReader((args, options) => runGit(git.path, args, options), {
+        maxBytes: direct.stdout.length + 1,
+      });
+      await expect(limited.read(cwd, undefined, sample)).rejects.toMatchObject({
+        code: 'OUTPUT_LIMIT',
+      });
+      move = true;
+      const changed = await reader.read(cwd, undefined, sample);
+      expect(batches).toHaveLength(2);
+      expect(changed).toEqual(await nativeRefs(cwd));
+      expect(changed.find((ref) => ref.name === names[0])).toMatchObject({
+        target: blob,
+        objectType: 'blob',
+      });
+    } finally {
+      fixtureGit(
+        cwd,
+        ['update-ref', '--stdin'],
+        [...names, ...annotations.slice(1)].map((name) => 'delete ' + name).join('\n') + '\n',
+      );
+    }
+  });
+
   test('reads per-worktree HEAD and upstream through the shared packed store', async () => {
     const linked = join(root, 'linked-grouped');
     fixtureGit(cwd, ['worktree', 'add', '-b', 'linked', linked, 'peer']);
