@@ -317,10 +317,21 @@ export class HistoryCache {
           let size = header.byteLength;
           const hash = createHash('sha256').update(JSON.stringify({ offset, hasMore })).update('[');
           for (let i = 0; i < commits.length; i += 100) {
-            const batch = JSON.stringify(commits.slice(i, i + 100)).slice(1, -1);
-            const chunk = Buffer.from((i ? ',' : '') + batch);
-            size += chunk.byteLength;
+            const batch: string[] = [];
+            for (let j = i; j < Math.min(i + 100, commits.length); j++) {
+              const commit = commits[j]!;
+              // JSON requires at least one byte per UTF-16 code unit in these fields.
+              if (commit.body.length + commit.summary.length > limit - size) {
+                size = limit + 1;
+                break;
+              }
+              const record = JSON.stringify(commit);
+              size += Buffer.byteLength(record) + (j ? 1 : 0);
+              if (size > limit) break;
+              batch.push(record);
+            }
             if (size > limit) break;
+            const chunk = Buffer.from((i ? ',' : '') + batch.join(','));
             hash.update(chunk);
             chunks.push(chunk);
             await yieldTurn();

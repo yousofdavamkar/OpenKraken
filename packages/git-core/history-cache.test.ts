@@ -438,6 +438,38 @@ test('an oversized UTF-8 history page stops encoding later batches and removes i
   }
 });
 
+test('an oversized commit stops a cache write before the next commit in the same batch', async () => {
+  const path = createFixture(join(root, 'oversized-first'), 'linear', 2);
+  const profile = join(root, 'oversized-first-profile');
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const { commits } = await service.snapshot(repo.id);
+    const cache = new HistoryCache(profile, repo.id, 'oversized-first');
+    const readNext = vi.fn(() => commits[1]!.body);
+    cache.record(
+      0,
+      [
+        { ...commits[0]!, body: '\x01'.repeat(2 * 1024 * 1024) },
+        {
+          ...commits[1]!,
+          get body() {
+            return readNext();
+          },
+        },
+      ],
+      false,
+    );
+    await cache.flush();
+    expect(readNext).not.toHaveBeenCalled();
+    await expect(readFile(join(profile, 'history', repo.id, 'prefix.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  } finally {
+    await service.dispose();
+  }
+});
+
 test('appending rewrites only changed cache pages and repairs lost or edited prefixes', async () => {
   const path = createFixture(join(root, 'incremental'), 'linear', 10);
   const service = new RepositoryService('git');
