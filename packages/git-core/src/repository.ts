@@ -4,7 +4,7 @@ import { lfsState } from './lfs.js';
 import { LfsSetup, type LfsSetupPlan } from './lfs-setup.js';
 import type { ProviderGitTarget, ProviderRemoteAuthorization } from '@openkraken/ipc-contract';
 import { createHash } from 'node:crypto';
-import { access, readdir, realpath, readFile, stat } from 'node:fs/promises';
+import { access, readdir, realpath, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
   Commit,
@@ -42,7 +42,7 @@ import type {
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { rawHistoryStream, StatusParser } from './parsers.js';
 import { samplePackedRefs, ReferenceReader, type PackedRefSample } from './reference-reader.js';
-import { HistoryCache } from './history-cache.js';
+import { HistoryCache, historyMetadataFingerprint } from './history-cache.js';
 import { RepositoryPreferences } from './preferences.js';
 import { HistoryCursor } from './history.js';
 import { Remotes, transportError } from './remotes.js';
@@ -480,14 +480,12 @@ export class RepositoryService {
       this.text(repository.path, ['--version'], signal),
       this.text(repository.path, ['config', '--null', '--list'], signal),
       ...['shallow', 'info/grafts', 'objects/info/alternates'].map((p) =>
-        readFile(join(repository.commonDir, p))
-          .then((b) => b.toString('base64'))
-          .catch(() => ''),
+        historyMetadataFingerprint(join(repository.commonDir, p), signal),
       ),
       ...['objects/info/commit-graph', 'objects/info/commit-graphs/commit-graph-chain'].map((p) =>
         stat(join(repository.commonDir, p))
-          .then((s) => `${s.size}:${s.mtimeMs}`)
-          .catch(() => ''),
+          .then((s) => (s.isFile() ? `${s.size}:${s.mtimeMs}` : undefined))
+          .catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? '' : undefined)),
       ),
     ];
   }
@@ -577,7 +575,7 @@ export class RepositoryService {
     view: GraphView,
     refs: Snapshot['refs'],
     worktrees: Snapshot['worktrees'],
-    cacheInputs: string[],
+    cacheInputs: (string | undefined)[],
     cacheFlush: Promise<void> | undefined,
     signal: AbortSignal,
     candidate?: HistoryCursor,
@@ -624,7 +622,7 @@ export class RepositoryService {
     await cacheFlush;
     if (signal.aborted) throw new GitError('CANCELLED', 'Snapshot loading cancelled');
     let cache: HistoryCache | undefined;
-    if (this.dataDir && cacheInputs.length) {
+    if (this.dataDir && cacheInputs.length && !cacheInputs.includes(undefined)) {
       const [version, config, ...metadata] = cacheInputs;
       const key = createHash('sha256')
         .update(

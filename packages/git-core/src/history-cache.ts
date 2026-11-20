@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { BigIntStats } from 'node:fs';
+import { constants, type BigIntStats } from 'node:fs';
 import { mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setImmediate as yieldTurn } from 'node:timers/promises';
@@ -18,6 +18,41 @@ const pageSchema = z.object({
 });
 function fileStamp(file: BigIntStats) {
   return [file.dev, file.ino, file.size, file.mtimeNs, file.ctimeNs].join('/');
+}
+// Missing metadata has the original empty cache key. An unreadable or changing
+// input makes the optional disk cache ineligible for this snapshot.
+export async function historyMetadataFingerprint(path: string, signal: AbortSignal) {
+  let file;
+  try {
+    file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? '' : undefined;
+  }
+  try {
+    const before = await file.stat({ bigint: true });
+    const size = Number(before.size);
+    if (!before.isFile() || !Number.isSafeInteger(size) || signal.aborted) return;
+    const chunk = Buffer.allocUnsafe(Math.min(size, 64 * 1024));
+    const hash = size > chunk.length ? createHash('sha256') : undefined;
+    for (let offset = 0; offset < size;) {
+      if (signal.aborted) return;
+      const start = hash ? 0 : offset;
+      const length = Math.min(chunk.length - start, size - offset);
+      const { bytesRead } = await file.read(chunk, start, length, offset);
+      if (!bytesRead) return;
+      hash?.update(chunk.subarray(0, bytesRead));
+      offset += bytesRead;
+    }
+    // A pseudo-file can report an empty or short size while still yielding bytes.
+    if ((await file.read(Buffer.allocUnsafe(1), 0, 1, size)).bytesRead) return;
+    if (fileStamp(before) !== fileStamp(await stat(path, { bigint: true }))) return;
+    // Preserve existing cache generations for ordinary small metadata files.
+    return hash ? 'sha256:' + hash.digest('hex') : chunk.toString('base64');
+  } catch {
+    return undefined;
+  } finally {
+    await file.close();
+  }
 }
 function cacheDirectory(root: string, repoId: string) {
   if (!/^[0-9a-f]{64}$/.test(repoId)) throw new Error('Invalid cache repository');

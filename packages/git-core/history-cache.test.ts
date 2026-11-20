@@ -1,12 +1,13 @@
 import { afterAll, expect, test, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import type { Snapshot } from '@openkraken/ipc-contract';
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
 import { RepositoryService } from './src/repository.js';
-import { HistoryCache } from './src/history-cache.js';
+import { HistoryCache, historyMetadataFingerprint } from './src/history-cache.js';
 import { HistoryCursor } from './src/history.js';
 import * as runner from './src/runner.js';
 const root = await mkdtemp(join(tmpdir(), 'openkraken-history-cache-'));
@@ -460,4 +461,54 @@ test('a tail declined by the cursor cannot stand in for a live page of the same 
   const append = vi.fn(() => true);
   await next!.continuation!(append);
   expect(append).toHaveBeenCalledExactlyOnceWith({ commits: commits.slice(4), hasMore: true });
+});
+
+test.each(['info/grafts', 'objects/info/commit-graph'])(
+  'unreadable %s leaves the saved window intact and opens live history',
+  async (metadata) => {
+    const fixture = await mkdtemp(join(root, 'unreadable-metadata-'));
+    const path = createFixture(join(fixture, 'repo'), 'linear', 8);
+    fixtureGit(path, ['config', 'core.commitGraph', 'false']);
+    const dataDir = join(fixture, 'profile');
+    const openHistory = async () => {
+      const service = new RepositoryService('git', { dataDir });
+      try {
+        return await service.snapshot((await service.open(path)).id);
+      } finally {
+        await service.dispose();
+      }
+    };
+    const original = await openHistory();
+    const prefix = join(dataDir, 'history', original.repository.id, 'prefix.json');
+    const saved = await readFile(prefix);
+    fixtureGit(path, ['commit', '--allow-empty', '-m', 'New tip']);
+    await mkdir(join(path, '.git', metadata));
+    const current = await openHistory();
+    expect(current.commits.map((commit) => commit.oid)).toEqual(
+      fixtureGit(path, ['rev-list', '--date-order', '--all']).split('\n'),
+    );
+    expect((await readFile(prefix)).equals(saved)).toBe(true);
+    await rm(join(path, '.git', metadata), { recursive: true });
+    const restored = await openHistory();
+    expect(restored.commits).toEqual(current.commits);
+    expect((await readFile(prefix)).equals(saved)).toBe(false);
+  },
+);
+
+test('history metadata retains small cache keys and hashes every byte of larger files', async () => {
+  const path = join(root, 'metadata-boundaries');
+  const signal = new AbortController().signal;
+  expect(await historyMetadataFingerprint(root, signal)).toBeUndefined();
+  expect(await historyMetadataFingerprint(path, signal)).toBe('');
+  for (const length of [0, 1, 65536, 65537, 2 * 65536 + 37]) {
+    const bytes = Buffer.alloc(length, 0xff);
+    if (length) bytes[length - 1] = 0x01;
+    await writeFile(path, bytes);
+    const expected =
+      length <= 65536
+        ? bytes.toString('base64')
+        : 'sha256:' + createHash('sha256').update(bytes).digest('hex');
+    expect(await historyMetadataFingerprint(path, signal)).toBe(expected);
+  }
+  expect(await historyMetadataFingerprint(path, AbortSignal.abort())).toBeUndefined();
 });
