@@ -136,12 +136,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
-    defaults:
-      run:
-        shell: bash
     env:
       OPENKRAKEN_LFS_TEST: '1'
     steps:
@@ -155,14 +152,53 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Build the minimum supported Git in an isolated prefix
+      - if: runner.os == 'Linux'
+        name: Install minimum Git build prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential curl xz-utils libcurl4-openssl-dev libexpat1-dev zlib1g-dev git-lfs xvfb
+      - if: runner.os != 'Windows'
+        name: Build Git 2.38.0 in an isolated prefix
+        shell: bash
+        run: |
           bash scripts/build-minimum-git.sh "$RUNNER_TEMP/git-2.38.0"
           echo "$RUNNER_TEMP/git-2.38.0/bin" >> "$GITHUB_PATH"
           echo "OPENKRAKEN_GIT=$RUNNER_TEMP/git-2.38.0/bin/git" >> "$GITHUB_ENV"
-      - name: Verify selected Git and LFS
+      - if: runner.os == 'Windows'
+        name: Extract the verified Git for Windows 2.38.0 fixture
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'MinGit-2.38.0-64-bit.zip'
+          $prefix = Join-Path $env:RUNNER_TEMP 'git-2.38.0'
+          if (Test-Path $prefix) { throw 'Minimum Git fixture path already exists' }
+          Invoke-WebRequest 'https://github.com/git-for-windows/git/releases/download/v2.38.0.windows.1/MinGit-2.38.0-64-bit.zip' -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne '52c9b2a4b10a0a25b1be9466f60a5d5ca5330d5eb8c1661a8fac4bf2677a0e46') {
+            throw 'Git for Windows fixture checksum mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $prefix
+          $bin = Join-Path $prefix 'cmd'
+          # MinGit omits LFS. Some runners expose LFS only inside the system Git installation.
+          if (!(Get-Command git-lfs.exe -ErrorAction SilentlyContinue)) {
+            $gitExec = git --exec-path
+            $lfs = @("$gitExec/git-lfs.exe", "$gitExec/../../bin/git-lfs.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (!$lfs) { throw 'System Git LFS executable is missing' }
+            Copy-Item -LiteralPath $lfs -Destination $bin
+          }
+          $bin >> $env:GITHUB_PATH
+          "OPENKRAKEN_GIT=$(Join-Path $bin 'git.exe')" >> $env:GITHUB_ENV
+      - if: runner.os == 'Windows'
+        name: Verify selected Git for Windows and LFS
+        shell: pwsh
+        run: |
+          if ((Get-Command git.exe).Source -ne $env:OPENKRAKEN_GIT) { throw 'Unexpected Git on PATH' }
+          if ((git --version) -ne 'git version 2.38.0.windows.1') { throw 'Unexpected Git version' }
+          New-Item -ItemType Directory -Force test-results | Out-Null
+          git --version | Tee-Object test-results/minimum-git-version.log
+          git lfs version | Tee-Object -Append test-results/minimum-git-version.log
+          exit $LASTEXITCODE
+      - if: runner.os != 'Windows'
+        name: Verify selected Git and LFS
+        shell: bash
         run: |
           test "$(git --version)" = 'git version 2.38.0'
           test "$(command -v git)" = "$OPENKRAKEN_GIT"
@@ -170,11 +206,18 @@ jobs:
           git --version | tee test-results/minimum-git-version.log
           git lfs version | tee -a test-results/minimum-git-version.log
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test | tee test-results/minimum-git-unit.log
+      - if: runner.os != 'Windows'
+        shell: bash
+        run: pnpm test | tee test-results/minimum-git-unit.log
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pnpm test | Tee-Object test-results/minimum-git-unit.log
+          exit $LASTEXITCODE
       - run: pnpm build
       - name: Minimum Git desktop acceptance
         run: >-
-          xvfb-run -a pnpm exec playwright test
+          ${{ runner.os == 'Linux' && 'xvfb-run -a pnpm' || 'pnpm' }} exec playwright test
           tests/e2e/desktop.test.ts tests/e2e/graph.test.ts
           tests/e2e/references.test.ts tests/e2e/reference-sidebar.test.ts
           tests/e2e/operations.test.ts tests/e2e/submodules.test.ts
