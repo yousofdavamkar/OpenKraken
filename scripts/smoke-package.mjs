@@ -7,12 +7,12 @@ import { mkdtemp, rm, mkdir, writeFile, readFile, lstat, symlink } from 'node:fs
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
-import { createFixture } from '../packages/test-fixtures/src/index.ts';
 import { checkReleaseKeyboard } from '../tests/e2e/check-release-keyboard.ts';
 import {
   advanceCachedFixture,
   checkPackagedHistory,
   checkReopenedHistory,
+  createPackagedHistoryFixture,
 } from './check-packaged-history.mjs';
 import { assertMsiSmokeProfile } from './msi-lifecycle.mjs';
 
@@ -58,7 +58,7 @@ const linkedRepository = join(
   history ? await mkdtemp(join(profile, 'history-')) : profile,
   'linked repository',
 );
-if (history) createFixture(linkedRepository, 'linear', 7003);
+if (history) createPackagedHistoryFixture(linkedRepository);
 else {
   await mkdir(linkedRepository, { recursive: !!msiProfile });
   await promisify(execFile)('git', ['init', '--initial-branch=main', linkedRepository]);

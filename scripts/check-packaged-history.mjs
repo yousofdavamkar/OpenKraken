@@ -2,7 +2,48 @@ import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect } from '@playwright/test';
-import { fixtureGit } from '../packages/test-fixtures/src/index.ts';
+import { createFixture, fixtureGit } from '../packages/test-fixtures/src/index.ts';
+
+export function createPackagedHistoryFixture(repository) {
+  createFixture(repository, 'linear', 7003);
+  const target = fixtureGit(repository, ['rev-parse', 'HEAD~1']);
+  const refs = [
+    ...Array.from({ length: 100 }, (_, i) => `refs/tags/fixture-${i}`),
+    'refs/archive/range-check-first',
+    'refs/heads/range-check-branch',
+    'refs/tags/range-check-tag',
+    'refs/zz/range-check-last',
+  ];
+  fixtureGit(
+    repository,
+    ['update-ref', '--stdin'],
+    refs.map((ref) => `create ${ref} ${target}\n`).join(''),
+  );
+}
+
+async function checkPackagedReferenceList(page) {
+  const filter = page.getByRole('textbox', { name: 'Filter references' });
+  await filter.fill('  RANGE-CHECK  ');
+  const list = page.getByRole('list', { name: 'Reference list' });
+  const expected = [
+    'refs/heads/range-check-branch',
+    'refs/tags/range-check-tag',
+    'refs/archive/range-check-first',
+    'refs/zz/range-check-last',
+  ];
+  for (const [index, name] of expected.entries()) {
+    const item = list
+      .getByRole('listitem')
+      .filter({ has: page.locator(`[data-reference-name="${name}"]`) });
+    await expect(item).toHaveAttribute('aria-posinset', String(index + 1));
+    await expect(item).toHaveAttribute('aria-setsize', '4');
+  }
+  await expect(list.getByRole('heading', { name: 'Other refs', exact: true })).toHaveCount(1);
+  await filter.fill('');
+  console.log(
+    'Packaged sidebar preserved filtered positions across disjoint reference namespaces.',
+  );
+}
 
 export async function checkPackagedHistory(page, repository) {
   const grid = page.getByRole('grid', { name: 'Commit history' });
@@ -23,6 +64,7 @@ export async function checkPackagedHistory(page, repository) {
     );
   const root = fixtureGit(repository, ['rev-list', '--max-parents=0', 'HEAD']);
   await expect(count).toHaveText('2,000 commits · more available');
+  await checkPackagedReferenceList(page);
   await expect(grid).toHaveAttribute('aria-rowcount', '-1');
   const tipRow = grid.locator(`[data-oid="${tip}"]`);
   await expect(tipRow).toBeInViewport();
