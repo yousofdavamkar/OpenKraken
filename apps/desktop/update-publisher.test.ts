@@ -1,8 +1,8 @@
 import { expect, test } from 'vitest';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { generateKeyPairSync } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { createHash, generateKeyPairSync } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { updateConfiguration, verifyUpdateRelease } from './src/update-protocol.js';
@@ -158,6 +158,91 @@ test('concurrent signers publish exactly one complete release', async () => {
       ).release.sequence,
     ).toBe(JSON.parse(winners[0]!.value.stdout).sequence);
     expect((await readdir(directory)).sort()).toEqual([...before, 'release.json'].sort());
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('publisher binds a multi-platform release to each selected installer build receipt', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'openkraken-receipt-release-'));
+  try {
+    const { publicKey, descriptor, now, invoke } = await publisherFixture(directory);
+    const installers = join(directory, 'installers');
+    await mkdir(installers);
+    const receipts = [
+      { platform: 'darwin', arch: 'arm64', target: 'dmg', file: 'OpenKraken.dmg' },
+      { platform: 'win32', arch: 'x64', target: 'msi', file: 'OpenKraken.msi' },
+    ];
+    for (const { platform, arch, target, file } of receipts) {
+      const bytes = Buffer.from(file);
+      await writeFile(join(installers, file), bytes);
+      await writeFile(
+        join(installers, target + '.json'),
+        JSON.stringify({
+          schemaVersion: 1,
+          platform,
+          arch,
+          target,
+          version: descriptor.version,
+          artifact: {
+            file,
+            size: bytes.length,
+            sha256: createHash('sha256').update(bytes).digest('hex'),
+          },
+          payload: {},
+        }),
+      );
+    }
+    const manifests = receipts.map(({ target }) => ({
+      manifest: 'installers/' + target + '.json',
+    }));
+    await writeFile(
+      join(directory, 'input.json'),
+      JSON.stringify({ ...descriptor, artifacts: [...descriptor.artifacts, ...manifests] }),
+    );
+    await invoke('verified.json', [], 'input.json');
+    const { release } = verifyUpdateRelease(
+      await readFile(join(directory, 'verified.json'), 'utf8'),
+      { feed: 'https://updates.example.test/release.json', publicKey },
+      now,
+    );
+    expect(
+      release.artifacts.map(({ platform, arch, format, name }) => [platform, arch, format, name]),
+    ).toEqual([
+      ['linux', 'x64', 'AppImage', 'OpenKraken-0.2.0.AppImage'],
+      ...receipts.map(({ platform, arch, target, file }) => [platform, arch, target, file]),
+    ]);
+    const path = join(installers, 'msi.json');
+    const original = JSON.parse(await readFile(path, 'utf8'));
+    for (const changed of [
+      { ...original, version: '0.1.0' },
+      { ...original, schemaVersion: 2 },
+      { ...original, platform: 'linux' },
+      { ...original, artifact: { ...original.artifact, size: 1 } },
+      { ...original, artifact: { ...original.artifact, sha256: 'a'.repeat(64) } },
+      { ...original, artifact: { ...original.artifact, file: '../OpenKraken.msi' } },
+    ]) {
+      await writeFile(path, JSON.stringify(changed));
+      await expect(invoke('rejected.json', [], 'input.json')).rejects.toMatchObject({
+        code: 1,
+        stdout: '',
+      });
+      await expect(readFile(join(directory, 'rejected.json'))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    }
+    await writeFile(path, JSON.stringify(original));
+    await writeFile(
+      join(installers, original.artifact.file),
+      Buffer.alloc(original.artifact.size, 65),
+    );
+    await expect(invoke('rejected.json', [], 'input.json')).rejects.toMatchObject({
+      code: 1,
+      stdout: '',
+    });
+    await expect(readFile(join(directory, 'rejected.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
