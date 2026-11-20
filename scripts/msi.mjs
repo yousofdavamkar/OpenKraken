@@ -43,9 +43,10 @@ async function powershell(script, args) {
   );
 }
 
+export const windowsAskpassArchivePath = 'dist/helpers/openkraken-askpass.exe';
 export const msiExecutables = [
   'openkraken.exe',
-  'resources/app.asar.unpacked/dist/helpers/openkraken-askpass.exe',
+  'resources/app.asar.unpacked/' + windowsAskpassArchivePath,
 ];
 
 export function windowsIdentity(target, fingerprint) {
@@ -356,10 +357,7 @@ export async function verifyMsi(source, manifest, identity, requireTimestamp = f
     if (identity) {
       for (const name of msiExecutables)
         await authenticode(join(directory, name), identity, signatureOptions);
-      await verifyAsarUnpackedFile(
-        join(directory, 'resources'),
-        'dist/helpers/openkraken-askpass.exe',
-      );
+      await verifyAsarUnpackedFile(join(directory, 'resources'), windowsAskpassArchivePath);
     }
     await verifyFuses(executable);
     verifyPackagedApplication(directory, manifest.version, manifest.source ?? null);

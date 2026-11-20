@@ -5,12 +5,18 @@ import {
   pinnedElectronRuntime,
   payloadManifest,
   verifyFuses,
+  verifyAsarUnpackedFile,
 } from './package-security.mjs';
 import { buildLinuxNative } from './linux-native.mjs';
 import { mkdir, readFile, writeFile, rm, lstat, readdir, chmod } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { authenticode, windowsIdentity, windowsTimestamp } from './msi.mjs';
+import {
+  authenticode,
+  windowsAskpassArchivePath,
+  windowsIdentity,
+  windowsTimestamp,
+} from './msi.mjs';
 import { execFileSync } from 'node:child_process';
 const workspace = resolve(import.meta.dirname, '..');
 function readBuildSource() {
@@ -50,7 +56,7 @@ execFileSync(process.execPath, [join(import.meta.dirname, 'build.mjs'), join(sta
 await buildLinuxNative(staging);
 // Electron records unpacked file sizes and digests when it creates the ASAR.
 if (winIdentity)
-  await authenticode(join(staging, 'dist/helpers/openkraken-askpass.exe'), winIdentity, {
+  await authenticode(join(staging, windowsAskpassArchivePath), winIdentity, {
     sign: true,
     timestampUrl,
   });
@@ -101,7 +107,16 @@ for (const output of outputs) {
     resetAdHocDarwinSignature: process.platform === 'darwin',
     ...packageFuses,
   });
-  if (winIdentity) await authenticode(binary, winIdentity, { sign: true, timestampUrl });
+  if (winIdentity) {
+    const resources = join(output, 'resources');
+    await verifyAsarUnpackedFile(resources, windowsAskpassArchivePath);
+    await authenticode(
+      join(resources, 'app.asar.unpacked', windowsAskpassArchivePath),
+      winIdentity,
+      { requireTimestamp: !!timestampUrl },
+    );
+    await authenticode(binary, winIdentity, { sign: true, timestampUrl });
+  }
   await verifyFuses(binary);
   if (process.platform === 'win32') await payloadManifest(output);
   console.log(`Packaged and verified fuses: ${output}`);

@@ -11,6 +11,7 @@ import {
   msiExecutables,
   readMsiMetadata,
   verifyMsiMetadata,
+  windowsAskpassArchivePath,
   windowsIdentity,
   windowsTimestamp,
 } from './msi.mjs';
@@ -135,10 +136,7 @@ try {
         await authenticode(join(prepackaged, name), winIdentity, {
           requireTimestamp: !!timestampUrl,
         });
-      await verifyAsarUnpackedFile(
-        join(prepackaged, 'resources'),
-        'dist/helpers/openkraken-askpass.exe',
-      );
+      await verifyAsarUnpackedFile(join(prepackaged, 'resources'), windowsAskpassArchivePath);
     }
     artifacts = await buildMsi({
       root,
