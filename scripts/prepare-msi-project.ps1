@@ -1,4 +1,7 @@
-param([Parameter(Mandatory = $true)][string]$Project)
+param(
+    [Parameter(Mandatory = $true)][string]$Project,
+    [ValidatePattern('^(0|[1-9][0-9]*)$')][string]$BetaSequence
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -55,4 +58,40 @@ foreach ($attributes in $values) {
     [void]$component.AppendChild($value)
 }
 [void]$group.AppendChild($component)
+
+if ($PSBoundParameters.ContainsKey('BetaSequence')) {
+    $null = [int]::Parse($BetaSequence, [cultureinfo]::InvariantCulture)
+    $version = $product.GetAttribute('Version')
+    if ($version -notmatch '^([0-9]+\.[0-9]+\.[0-9]+)\.0$') { throw 'Expected numeric MSI product version' }
+    $key = 'Software\OpenKraken\Installer\Beta\' + $Matches[1]
+    $upgradeCode = [guid]::Parse($product.GetAttribute('UpgradeCode')).ToString('D')
+    function Add-Wix($parent, $tag, [hashtable]$attrs) {
+        $element = $document.CreateElement($tag, $namespace)
+        foreach ($attr in $attrs.Keys) { $element.SetAttribute($attr, $attrs[$attr]) }
+        [void]$parent.AppendChild($element)
+        return ,$element
+    }
+    $beta = Add-Wix $group 'Component' @{ Id = 'OpenKrakenBeta'; Guid = '*'; Win64 = 'yes' }
+    [void](Add-Wix $beta 'RegistryValue' @{
+        Id = 'OpenKrakenBetaSequence'; Root = 'HKCU'; Key = $key; Name = 'Sequence'
+        Value = $BetaSequence; Type = 'string'; KeyPath = 'yes'
+    })
+    $search = Add-Wix $product 'Property' @{ Id = 'OPENKRAKEN_INSTALLED_BETA'; Secure = 'yes' }
+    [void](Add-Wix $search 'RegistrySearch' @{
+        Id = 'OpenKrakenBetaSearch'; Root = 'HKCU'; Key = $key; Name = 'Sequence'; Type = 'raw'; Win64 = 'yes'
+    })
+    $upgrade = Add-Wix $product 'Upgrade' @{ Id = $upgradeCode }
+    [void](Add-Wix $upgrade 'UpgradeVersion' @{
+        Minimum = $version; Maximum = $version; IncludeMinimum = 'yes'; IncludeMaximum = 'yes'
+        OnlyDetect = 'yes'; MigrateFeatures = 'no'; Property = 'OPENKRAKEN_SAME_CORE'
+    })
+    $guard = Add-Wix $product 'Condition' @{ Message = 'A newer OpenKraken beta or the stable release is already installed.' }
+    $guard.InnerText = 'Installed OR NOT OPENKRAKEN_SAME_CORE OR (OPENKRAKEN_INSTALLED_BETA <> "" AND OPENKRAKEN_INSTALLED_BETA <= ' + $BetaSequence + ')'
+    foreach ($table in @('InstallExecuteSequence', 'InstallUISequence')) {
+        $sequence = $product.SelectSingleNode("w:$table", $names)
+        if ($null -eq $sequence) { $sequence = Add-Wix $product $table @{} }
+        [void](Add-Wix $sequence 'AppSearch' @{ After = 'FindRelatedProducts' })
+        [void](Add-Wix $sequence 'LaunchConditions' @{ After = 'AppSearch' })
+    }
+}
 $document.Save($Project)

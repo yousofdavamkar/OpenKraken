@@ -12,7 +12,7 @@ const powershell =
     ? join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe')
     : process.env.OPENKRAKEN_POWERSHELL;
 const directories = [];
-const projectXml = `<?xml version="1.0"?><Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"><Product>
+const projectXml = `<?xml version="1.0"?><Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"><Product Version="0.1.0.0" UpgradeCode="8B1BEDFC-AAA5-5EFE-9437-351F2D7682D7">
     <Package InstallerVersion="500"/>
     <Property Id="ALLUSERS" Value="2"/><Property Id="MSIINSTALLPERUSER" Value="1"/>
     <Directory Id="APPLICATIONFOLDER"/>
@@ -26,7 +26,7 @@ async function projectFixture(xml = projectXml) {
   await writeFile(project, xml);
   return project;
 }
-const prepare = (project) =>
+const prepare = (project, ...args) =>
   run(powershell, [
     '-NoProfile',
     '-NonInteractive',
@@ -34,6 +34,7 @@ const prepare = (project) =>
     resolve('scripts/prepare-msi-project.ps1'),
     '-Project',
     project,
+    ...args,
   ]);
 const manifest = { version: '0.1.0', metadata: { name: 'Installer fixture' } };
 function metadata() {
@@ -114,12 +115,19 @@ test('MSI metadata verifies a per-user package with owned, quoted protocol value
   verifyMsiMetadata(metadata(), manifest);
 });
 
-test.each(['0.1.0-beta.1', '256.0.0', '0.256.0', '0.1.65536', '01.2.3', '1.2', '1.2.3.4'])(
-  'MSI refuses release versions that cannot round-trip: %s',
-  (version) => {
-    expect(() => msiVersion(version)).toThrow('MSI requires a stable release version');
-  },
-);
+test.each([
+  '0.1.0-beta.01',
+  '0.1.0-beta.2147483648',
+  '0.1.0-rc.1',
+  '256.0.0',
+  '0.256.0',
+  '0.1.65536',
+  '01.2.3',
+  '1.2',
+  '1.2.3.4',
+])('MSI refuses release versions that cannot round-trip: %s', (version) => {
+  expect(() => msiVersion(version)).toThrow('Windows Installer limits');
+});
 
 test.each([
   [
@@ -253,4 +261,86 @@ test.skipIf(!powershell).each([
   const project = await projectFixture(xml);
   await expect(prepare(project)).rejects.toThrow();
   expect(await readFile(project, 'utf8')).toBe(xml);
+});
+
+test.each(['255.255.65535-beta.2147483647', '255.255.65535-beta.0', '255.255.65535'])(
+  'accepts MSI version bounds for %s',
+  (version) => {
+    expect(msiVersion(version)).toBe('255.255.65535.0');
+  },
+);
+
+test.skipIf(!powershell)(
+  'WiX beta registry search, component and upgrade detection use the same release core',
+  async () => {
+    const project = await projectFixture();
+    await prepare(project, '-BetaSequence', '10');
+    const xml = await readFile(project, 'utf8');
+    expect(xml.match(/Software\\OpenKraken\\Installer\\Beta\\0\.1\.0/g)).toHaveLength(2);
+    expect(xml).toContain('OnlyDetect="yes"');
+    expect(xml).toContain('Minimum="0.1.0.0"');
+    expect(xml).toContain('Maximum="0.1.0.0"');
+    expect(xml).toContain('Value="10"');
+    expect(xml).toContain('OPENKRAKEN_INSTALLED_BETA &lt;= 10');
+    expect(xml.match(/After="FindRelatedProducts"/g)).toHaveLength(2);
+    expect(xml.match(/After="AppSearch"/g)).toHaveLength(2);
+  },
+);
+function betaMetadata() {
+  const info = metadata();
+  const key = 'Software\\OpenKraken\\Installer\\Beta\\0.1.0';
+  info.registry.push({
+    id: 'OpenKrakenBetaSequence',
+    component: 'OpenKrakenBeta',
+    key,
+    name: 'Sequence',
+    value: '10',
+    root: '1',
+  });
+  info.components.push({
+    id: 'OpenKrakenBeta',
+    attributes: '260',
+    keyPath: 'OpenKrakenBetaSequence',
+  });
+  const sequence = { FindRelatedProducts: '25', AppSearch: '50', LaunchConditions: '100' };
+  info.betaPolicy = {
+    registrySearch: { key, root: '1', name: 'Sequence', type: '18' },
+    searchProperty: 'OPENKRAKEN_INSTALLED_BETA',
+    sameVersion: {
+      code: info.properties.UpgradeCode,
+      min: '0.1.0.0',
+      max: '0.1.0.0',
+      language: '',
+      attributes: '770',
+    },
+    InstallExecuteSequence: { ...sequence },
+    InstallUISequence: { ...sequence },
+  };
+  info.conditions.push({
+    condition:
+      'Installed OR NOT OPENKRAKEN_SAME_CORE OR (OPENKRAKEN_INSTALLED_BETA <> "" AND OPENKRAKEN_INSTALLED_BETA <= 10)',
+  });
+  return info;
+}
+test.each([
+  ['missing same-core detection', (info) => delete info.betaPolicy.sameVersion],
+  ['wrong registry view', (info) => (info.betaPolicy.registrySearch.type = '2')],
+  ['missing full-version guard', (info) => info.conditions.pop()],
+  ['a marker from another beta', (info) => (info.registry.at(-1).value = '9')],
+  ['a late execute search', (info) => (info.betaPolicy.InstallExecuteSequence.AppSearch = '200')],
+  ['missing UI detection', (info) => delete info.betaPolicy.InstallUISequence.FindRelatedProducts],
+])('beta MSI metadata refuses %s', (_label, mutate) => {
+  const info = betaMetadata();
+  const beta = { ...manifest, version: '0.1.0-beta.10' };
+  verifyMsiMetadata(info, beta);
+  mutate(info);
+  expect(() => verifyMsiMetadata(info, beta)).toThrow('MSI beta');
+});
+
+test('stable MSI refuses a leftover beta search and downgrade condition', () => {
+  const info = betaMetadata();
+  info.registry.pop();
+  expect(() => verifyMsiMetadata(info, manifest)).toThrow(
+    'Stable MSI contains a beta upgrade policy',
+  );
 });

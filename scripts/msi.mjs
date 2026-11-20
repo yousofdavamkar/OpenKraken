@@ -42,18 +42,26 @@ async function powershell(script, args) {
 }
 
 export function msiVersion(version) {
+  const match =
+    typeof version === 'string' &&
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.(0|[1-9]\d*))?$/.exec(version);
   if (
-    typeof version !== 'string' ||
-    !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version) ||
-    version.split('.').some((part, index) => Number(part) > (index === 2 ? 65535 : 255))
+    !match ||
+    Number(match[1]) > 255 ||
+    Number(match[2]) > 255 ||
+    Number(match[3]) > 65535 ||
+    (match[4] !== undefined && Number(match[4]) > 2147483647)
   )
-    throw new Error('MSI requires a stable release version within Windows Installer limits');
-  return `${version}.0`;
+    throw new Error(
+      'MSI requires a stable or numbered beta release within Windows Installer limits',
+    );
+  return `${match[1]}.${match[2]}.${match[3]}.0`;
 }
 
 export async function buildMsi({ root, prepackaged, work, version, metadata, testMetadata }) {
   nativeTool('msiexec.exe');
   msiVersion(version);
+  const beta = version.split('-beta.')[1];
   return build({
     projectDir: root,
     prepackaged,
@@ -94,7 +102,11 @@ export async function buildMsi({ root, prepackaged, work, version, metadata, tes
         warningsAsErrors: true,
       },
       msiProjectCreated: async (project) => {
-        await powershell('./prepare-msi-project.ps1', ['-Project', project]);
+        await powershell('./prepare-msi-project.ps1', [
+          '-Project',
+          project,
+          ...(beta === undefined ? [] : ['-BetaSequence', beta]),
+        ]);
       },
     },
   });
@@ -162,7 +174,13 @@ export function verifyMsiMetadata(info, manifest) {
       '"[#mainExecutable]" "%1"',
     ],
   ];
-  if (!Array.isArray(info.registry) || info.registry.length !== expected.length)
+  const beta = manifest.version.split('-beta.')[1];
+  if (beta !== undefined) verifyBetaPolicy(info, manifest.version, beta);
+  else if (info.betaPolicy) throw new Error('Stable MSI contains a beta upgrade policy');
+  if (
+    !Array.isArray(info.registry) ||
+    info.registry.length !== expected.length + Number(beta !== undefined)
+  )
     throw new Error('MSI repository protocol registration differs');
   for (const [id, key, name, value] of expected) {
     const entries = info.registry.filter((entry) => entry.id === id);
@@ -184,6 +202,46 @@ export function verifyMsiMetadata(info, manifest) {
     Number(component.attributes) !== 260
   )
     throw new Error('MSI protocol must have an uninstallable 64-bit registry key path');
+}
+
+function verifyBetaPolicy(info, version, beta) {
+  const native = msiVersion(version);
+  const key = 'Software\\OpenKraken\\Installer\\Beta\\' + version.split('-')[0];
+  const value = info.registry?.find((row) => row.id === 'OpenKrakenBetaSequence');
+  const component = info.components?.find((row) => row.id === 'OpenKrakenBeta');
+  const search = info.betaPolicy?.registrySearch;
+  const range = info.betaPolicy?.sameVersion;
+  const condition = `Installed OR NOT OPENKRAKEN_SAME_CORE OR (OPENKRAKEN_INSTALLED_BETA <> "" AND OPENKRAKEN_INSTALLED_BETA <= ${beta})`;
+  if (
+    value?.root !== '1' ||
+    value?.key !== key ||
+    value?.name !== 'Sequence' ||
+    value?.value !== beta ||
+    value?.component !== 'OpenKrakenBeta' ||
+    component?.keyPath !== value?.id ||
+    Number(component?.attributes) !== 260 ||
+    search?.key !== key ||
+    search?.root !== '1' ||
+    search?.name !== 'Sequence' ||
+    search?.type !== '18' ||
+    info.betaPolicy?.searchProperty !== 'OPENKRAKEN_INSTALLED_BETA' ||
+    range?.code?.toUpperCase() !== `{${msiUpgradeCode}}` ||
+    range?.min !== native ||
+    range?.max !== native ||
+    range?.language !== '' ||
+    Number(range?.attributes) !== 770 ||
+    !info.conditions?.some((row) => row.condition === condition)
+  )
+    throw new Error('MSI beta revision, upgrade detection or launch condition differs');
+  for (const table of ['InstallExecuteSequence', 'InstallUISequence']) {
+    const sequence = info.betaPolicy[table];
+    if (!(
+      Number(sequence?.FindRelatedProducts) > 0 &&
+      Number(sequence.AppSearch) > Number(sequence.FindRelatedProducts) &&
+      Number(sequence.LaunchConditions) > Number(sequence.AppSearch)
+    ))
+      throw new Error('MSI beta checks must run before launch conditions');
+  }
 }
 
 export async function verifyMsi(artifact, manifest) {
