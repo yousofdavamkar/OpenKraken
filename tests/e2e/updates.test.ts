@@ -12,7 +12,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 
 async function buildFixture(main: string, config: UpdateConfiguration) {
   await build({
-    entryPoints: ['apps/desktop/src/main.ts'],
+    entryPoints: ['apps/desktop/src/bootstrap.ts'],
     bundle: true,
     platform: 'node',
     format: 'cjs',

@@ -2,10 +2,9 @@ import { PullDrafts } from './pull-drafts.js';
 import { IssueDrafts } from './issue-drafts.js';
 import { ReviewDrafts } from './review-drafts.js';
 import { ActivityLog } from './activity-log.js';
-import { Diagnostics } from './diagnostics.js';
+import type { Diagnostics } from './diagnostics.js';
 import { installTimeoutMs, Updates } from './updates.js';
 import type { UpdateConfiguration } from './update-protocol.js';
-import { mkdirSync } from 'node:fs';
 import { appImageTarget } from './appimage-target.js';
 import {
   prepareUpdateRestart,
@@ -20,7 +19,7 @@ import { CommitDrafts } from './commit-drafts.js';
 import { CommandMenu } from './command-menu.js';
 import { TerminalHost } from './terminal-host.js';
 import { AppSettings } from './app-settings.js';
-import { CrashReports } from './crash-reports.js';
+import type { CrashReports } from './crash-reports.js';
 import { BitbucketProvider } from './bitbucket-provider.js';
 import {
   app,
@@ -81,7 +80,6 @@ import {
   electronSecretProtection,
 } from './provider-vault.js';
 const htmlPath = join(__dirname, 'renderer', 'index.html');
-declare const __OPENKRAKEN_SENTRY_DSN__: string | null;
 declare const __OPENKRAKEN_UPDATE_CONFIG__: UpdateConfiguration | null;
 let updates: Updates | undefined;
 let updateHandoff = false;
@@ -338,6 +336,10 @@ function createWindow() {
     backgroundColor: nativeBackground(),
     webPreferences: { ...windowPreferences, preload: join(__dirname, 'preload.cjs') },
   });
+  let closing = false;
+  window.on('close', () => {
+    closing = true;
+  });
   commandMenu = new CommandMenu(window);
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-prevent-unload', (event) => {
@@ -356,13 +358,16 @@ function createWindow() {
       nativeDrafts?.detach(true);
       void workingFileDrafts?.close(undefined, true).catch(() => {});
       event.preventDefault();
-    } else if (updateHandoff) {
-      installOnQuit = false;
-      void cancelPreparedRestart()
-        .then(() => updates?.abandonInstall())
-        .finally(() => {
-          updateHandoff = false;
-        });
+    } else {
+      closing = false;
+      if (updateHandoff) {
+        installOnQuit = false;
+        void cancelPreparedRestart()
+          .then(() => updates?.abandonInstall())
+          .finally(() => {
+            updateHandoff = false;
+          });
+      }
     }
   });
   const cancelProviderSignIn = () => {
@@ -394,50 +399,24 @@ function createWindow() {
     providers?.deviceCancel();
     providers?.gitlabCancel();
   });
-  void window.loadFile(htmlPath);
+  const opening = window;
+  return opening.loadFile(htmlPath).catch((error: unknown) => {
+    // Closing or reloading the window can cancel its original navigation.
+    if (
+      !closing &&
+      !opening.isDestroyed() &&
+      (error as NodeJS.ErrnoException)?.code !== 'ERR_ABORTED'
+    )
+      throw error;
+  });
 }
-if (
-  __OPENKRAKEN_UPDATE_CONFIG__?.channel === 'beta' &&
-  !app.commandLine.hasSwitch('user-data-dir')
+export function startDesktop(
+  reports: CrashReports,
+  reportingReady: Promise<void>,
+  log: Diagnostics,
 ) {
-  const profile = join(app.getPath('appData'), 'OpenKraken Beta');
-  mkdirSync(profile, { recursive: true, mode: 0o700 });
-  app.setPath('userData', profile);
-  app.setPath('sessionData', profile);
-}
-if (!app.requestSingleInstanceLock()) app.quit();
-else {
-  const profile = app.getPath('userData');
-  const runtime = { version: app.getVersion(), platform: process.platform, arch: process.arch };
-  crashReports = new CrashReports(profile, __OPENKRAKEN_SENTRY_DSN__, runtime);
-  const reportingReady = crashReports.start();
-  // Observe failures without replacing Node/Electron's exception handling or
-  // inspecting the error object. Fatal exits are recovered through the marker.
-  process.on('uncaughtExceptionMonitor', (_error, origin) => {
-    diagnostics?.failure(
-      'main',
-      origin === 'unhandledRejection' ? 'unhandled-rejection' : 'unhandled-exception',
-    );
-    void crashReports?.capture(
-      'main',
-      origin === 'unhandledRejection' ? 'unhandled-rejection' : 'unhandled-exception',
-    );
-  });
-  app.on('child-process-gone', (_event, details) => {
-    const kind =
-      details.name === 'OpenKraken Git'
-        ? 'git'
-        : details.name === 'OpenKraken Terminal'
-          ? 'terminal'
-          : details.type === 'GPU'
-            ? 'gpu'
-            : null;
-    if (kind) {
-      diagnostics?.failure(kind, details.reason);
-      void crashReports?.capture(kind, details.reason);
-    }
-  });
-  diagnostics = new Diagnostics(join(profile, 'diagnostics'), runtime);
+  crashReports = reports;
+  diagnostics = log;
   // macOS may deliver a URL before ready. No path is opened until renderer consent.
   app.on('open-url', (event, url) => {
     event.preventDefault();
@@ -449,7 +428,7 @@ else {
     for (const argument of commandLine) repositoryLinks.receive(argument);
     focusForLink();
   });
-  app.whenReady().then(async () => {
+  const ready = app.whenReady().then(async () => {
     const target = await appImageTarget({
       packaged: app.isPackaged,
       platform: process.platform,
@@ -1691,10 +1670,11 @@ else {
     // Native installers own protocol registration and its uninstall lifecycle.
     // Launching an extracted/portable bundle must not leave a stale registry command.
     windowsReady = true;
-    createWindow();
+    const loaded = createWindow();
     app.on('activate', () => {
       if (!window) createWindow();
     });
+    await loaded;
   });
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
@@ -1810,4 +1790,5 @@ else {
       .finally(finishQuit);
     child?.postMessage({ shutdown: true });
   });
+  return ready;
 }

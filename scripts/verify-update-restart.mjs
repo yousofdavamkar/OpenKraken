@@ -323,7 +323,7 @@ try {
       });
     `;
     await build({
-      entryPoints: ['apps/desktop/src/main.ts'],
+      entryPoints: ['apps/desktop/src/bootstrap.ts'],
       outfile: join(staging, 'dist/main.cjs'),
       bundle: true,
       platform: 'node',
