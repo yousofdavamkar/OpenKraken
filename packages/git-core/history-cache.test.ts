@@ -494,8 +494,10 @@ test.each(['prefix', 'tail'])(
         commits.slice(offset, offset + 2).map((commit) => ({ ...commit, body })),
         true,
       );
-      await cache.flush();
-      cache.record(offset + 2, commits.slice(offset + 2), false);
+      const retiring = cache.flush();
+      cache.record(offset + 2, commits.slice(offset + 2, offset + 3), true);
+      await Promise.all([retiring, cache.flush()]);
+      cache.record(offset + 3, commits.slice(offset + 3), false);
       await cache.flush();
       expect(await readdir(directory)).toEqual(offset ? ['prefix.json'] : []);
       const restarted = new HistoryCache(profile, repo.id, 'new');
