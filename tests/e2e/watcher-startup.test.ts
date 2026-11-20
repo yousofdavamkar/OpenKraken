@@ -37,6 +37,36 @@ test('a failed initial snapshot can be reopened and observes subsequent native c
   }
 });
 
+test('a first push to an open bare repository replaces the empty graph', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-first-push-'));
+  const repository = join(root, 'empty.git');
+  fixtureGit(root, ['init', '--bare', '--initial-branch=main', repository]);
+  const source = join(root, 'source');
+  fixtureGit(root, ['init', '--initial-branch=main', source]);
+  fixtureGit(source, ['commit', '--allow-empty', '-m', 'First published commit']);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, repository);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    const empty = page.getByText('No commits yet. This repository is ready for its first commit.');
+    await expect(empty).toBeVisible();
+    fixtureGit(source, ['push', repository, 'HEAD:refs/heads/main']);
+    const shortId = fixtureGit(source, ['rev-parse', 'HEAD']).slice(0, 8);
+    const firstCommit = page.getByRole('row', { name: /First published commit/ });
+    await expect(firstCommit.getByRole('gridcell', { name: shortId, exact: true })).toBeVisible();
+    await expect(empty).toHaveCount(0);
+    await expect(page.locator('.refs .ref', { hasText: 'main' })).toBeVisible();
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 for (const failure of ['missing-ref-object', 'missing-parent'] as const)
   test(`a failed repository switch (${failure}) keeps the displayed repository watched and pageable`, async () => {
     const root = mkdtempSync(join(tmpdir(), 'openkraken-watcher-switch-'));
