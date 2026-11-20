@@ -3,7 +3,8 @@ import { authenticateRpm } from './rpm-signature.mjs';
 import { verifyLinuxPackage } from './linux-package.mjs';
 import { build, Platform, Arch } from 'electron-builder';
 import { buildAppImage } from './appimage.mjs';
-import { buildDmg, saveSignedDmg, verifyMacBundle } from './dmg.mjs';
+import { saveSignedInstaller } from './signed-installer.mjs';
+import { buildDmg, verifyMacBundle } from './dmg.mjs';
 import { buildMsi, readMsiMetadata, verifyMsiMetadata } from './msi.mjs';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
@@ -257,7 +258,7 @@ try {
     payload,
   };
   let file = basename(artifact);
-  if (identity) file = await saveSignedDmg(output, artifact, manifest);
+  if (identity) file = await saveSignedInstaller(output, artifact, manifest);
   else {
     await cp(artifact, join(output, file));
     await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
