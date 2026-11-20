@@ -985,6 +985,54 @@ describe('packed annotated aliases', () => {
   });
 });
 
+describe('packed annotation sampling across read boundaries', () => {
+  const windowSize = 256 * 1024;
+  const id = 'a'.repeat(64);
+  const name = 'refs/tags/' + 'x'.repeat(1008) + '最後';
+  const row = Buffer.from(`${id} ${name}\n^${id}\n`);
+  const caret = row.indexOf(94);
+
+  // Build byte-aligned input with distinct targets and a maximum-length UTF-8 name.
+  function writeSample(split: number, extraNames: number) {
+    const dir = mkdtempSync(join(root, 'sample-'));
+    const offset = windowSize - split;
+    const prefix = Array.from(
+      { length: 100 },
+      (_, i) => i.toString(16).padStart(64, '0') + ' refs/heads/topic-' + i + '\n',
+    ).join('');
+    const comment = '#' + ' '.repeat(offset - prefix.length - 2) + '\n';
+    const later = Array.from(
+      { length: extraNames },
+      (_, i) => `${id} refs/tags/later-${i}\n^${id}\n`,
+    ).join('');
+    writeFileSync(
+      join(dir, 'packed-refs'),
+      Buffer.concat([
+        Buffer.from(prefix + comment),
+        row,
+        Buffer.alloc(windowSize, 10),
+        Buffer.from(later),
+      ]),
+    );
+    return dir;
+  }
+
+  test.each([12, row.indexOf('最後') + 1, caret - 1, caret, caret + 1])(
+    'retains each complete name once when the boundary splits the row at byte %i',
+    async (split) => {
+      const sample = await samplePackedRefs(writeSample(split, 7));
+      expect(sample.annotationNames).toEqual([
+        name,
+        ...Array.from({ length: 7 }, (_, i) => 'refs/tags/later-' + i),
+      ]);
+    },
+  );
+
+  test('a ninth annotation in a later window discards the sparse sample', async () => {
+    expect((await samplePackedRefs(writeSample(caret, 8))).annotationNames).toBeUndefined();
+  });
+});
+
 describe('sparse annotated refs among distinct packed targets', () => {
   const cwd = join(root, 'sparse-annotation');
   let sample: Awaited<ReturnType<typeof samplePackedRefs>>;

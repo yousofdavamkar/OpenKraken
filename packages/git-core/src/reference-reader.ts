@@ -12,6 +12,9 @@ const MAX_BYTES = 32 * 1024 * 1024;
 const PARALLEL_THRESHOLD = 10000;
 const MAX_SPARSE_PACK_BYTES = 8 * 1024 * 1024;
 const MAX_SAMPLED_NAMES = 8;
+const MAX_SAMPLED_NAME_BYTES = 1024;
+// Previous newline, SHA-256 ID, space, name and newline before a peeled record.
+const ANNOTATION_OVERLAP = 1 + 64 + 1 + MAX_SAMPLED_NAME_BYTES + 1;
 
 export interface PackedRefSample {
   singleTarget?: string;
@@ -40,21 +43,26 @@ function sampleTargets(sample: Buffer, length: number): PackedRefSample {
 }
 
 // A peeled line identifies a possible annotated ref on the preceding line.
-function sparseAnnotationNames(packed: Buffer) {
-  const names: string[] = [];
-  for (let end = packed.indexOf('\n^'); end >= 0; end = packed.indexOf('\n^', end + 2)) {
-    if (names.length === MAX_SAMPLED_NAMES || end === 0) return;
-    const start = packed.lastIndexOf(10, end - 1) + 1;
-    const space = packed.indexOf(32, start);
-    if ((space - start !== 40 && space - start !== 64) || space >= end || end - space > 1025)
-      return;
-    const field = packed.subarray(space + 1, end);
-    if (!isUtf8(field) || field.some((byte) => byte <= 32)) return;
+function collectAnnotationNames(window: Buffer, from: number, names: string[]) {
+  for (let caret = window.indexOf(94, from); caret >= 0; caret = window.indexOf(94, caret + 1)) {
+    const end = caret - 1;
+    if (end < 0 || window[end] !== 10) continue;
+    if (names.length === MAX_SAMPLED_NAMES || end === 0) return false;
+    const start = window.lastIndexOf(10, end - 1) + 1;
+    const space = window.indexOf(32, start);
+    if (
+      (space - start !== 40 && space - start !== 64) ||
+      space >= end ||
+      end - space - 1 > MAX_SAMPLED_NAME_BYTES
+    )
+      return false;
+    const field = window.subarray(space + 1, end);
+    if (!isUtf8(field) || field.some((byte) => byte <= 32)) return false;
     const name = field.toString('utf8');
-    if (!name.startsWith('refs/') || /[[*?\\]/.test(name)) return;
+    if (!name.startsWith('refs/') || /[[*?\\]/.test(name)) return false;
     names.push(name);
   }
-  return names.length ? names : undefined;
+  return true;
 }
 
 // This bounded sample selects a Git query. Only Git supplies the actual refs and types.
@@ -76,11 +84,24 @@ export async function samplePackedRefs(commonDir: string) {
     const length = bytesRead + more.bytesRead;
     const result = sampleTargets(sample, length);
     if (!result.repeatedTargets && info.size <= MAX_SPARSE_PACK_BYTES) {
-      const packed = Buffer.allocUnsafe(info.size);
-      sample.copy(packed, 0, 0, length);
-      const tail = await file.read(packed, length, packed.length - length, length);
-      if (length + tail.bytesRead === packed.length)
-        result.annotationNames = sparseAnnotationNames(packed);
+      const names: string[] = [];
+      let position = length;
+      let used = length;
+      let from = 0;
+      while (collectAnnotationNames(sample.subarray(0, used), from, names)) {
+        if (position === info.size) {
+          if (names.length) result.annotationNames = names;
+          break;
+        }
+        // Retain one complete candidate row and inspect each new caret exactly once.
+        from = Math.min(used, ANNOTATION_OVERLAP);
+        sample.copyWithin(0, used - from, used);
+        const count = Math.min(sample.length - from, info.size - position);
+        const next = await file.read(sample, from, count, position);
+        if (!next.bytesRead) break;
+        used = from + next.bytesRead;
+        position += next.bytesRead;
+      }
     }
     return result;
   } catch {
