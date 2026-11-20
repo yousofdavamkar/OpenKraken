@@ -2,6 +2,14 @@
 
 M8 remains in progress. On Linux x64, full Linux history with one ref and with 49,999 aliases on the first row met the 500 ms opening and 300 ms paging budgets in the latest fresh-profile runs. One nested-tag restart exceeded 500 ms. The 50,000-distinct-target fixture still exceeds the opening budget. Native Windows/macOS and ARM64 acceptance, the production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Page Up and Page Down across graph pages
+
+On a Linux desktop showing nine whole rows, Page Down from row 1 used to select row 21. It now selects row 10. Resizing the window changes the distance for both page keys. With 2,000 commits loaded and three still on disk, one Page Down from row 2,000 appends the remaining commits and selects row 2,003. The packaged Linux x64 build from `fd4063a` also passed the viewport-sized navigation check, Canvas rendering, two appends, repository search and renderer isolation. [Graph navigation decision](../decisions/0004-m1-history-and-interaction.md)
+
+On Linux x64, 1,155 unit and native tests passed with nine skips. All 38 targeted Electron cases passed, including graph goldens, repository opening, history cache, reference badges and submodule refresh. The standard 2,000-commit fixture painted in 288.0 ms. Appending 5,000 commits took 165.3 ms and scrolling at 12,000 rows measured 16.7 ms p95.
+
+Two separate runs on the 1,505,199-commit fixture with 50,000 distinct reference targets exceeded the 500 ms opening budget. A fresh profile painted in 1,380.7 ms and a restarted profile in 914.3 ms. The six 5,000-commit appends took 231.5–293.2 ms. The first live append beyond the restored window took 226.7 ms. Scrolling measured 16.7 and 16.8 ms p95 respectively. The OS cache was left in place. [Scale benchmark methodology](m8-reference-performance.md)
+
 ## Switching repositories while the history cache is reading
 
 A slow cache file could keep an old Git walk open, delay shutdown or prevent a cancelled repository open from returning. The Linux regression held the next cache page's file open request after the first 2,000 commits were visible. The desktop service now switches repositories and shuts down while that request is still pending. When the destination fails, paging the original cursor returns the remaining commits in native Git order. Cancelling a separate open while it waits for its first cache file also preserves the displayed cursor. The late file handle closes when the operating system returns it. [Cache handoff and write behavior](../decisions/0008-bounded-history-cache.md#leaving-a-pending-cache-read)
