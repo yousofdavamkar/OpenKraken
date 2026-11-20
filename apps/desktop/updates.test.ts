@@ -954,13 +954,13 @@ test.skipIf(process.platform === 'win32').each(['sync failure', 'expiry', 'cance
               ? 'invalid-release'
               : scenario === 'cancellation'
                 ? 'cancelled'
-                : 'storage',
+                : 'download-unconfirmed',
           installId: null,
         });
         expect(state.saveId).toBeUndefined();
         if (scenario === 'sync failure') {
           await updater.check();
-          expect((await updater.download('AppImage')).error).toBe('storage');
+          expect((await updater.download('AppImage')).error).toBe('download-unconfirmed');
           expect(attempts).toBe(2);
         }
       } finally {

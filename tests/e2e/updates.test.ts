@@ -28,6 +28,28 @@ async function buildFixture(main: string, config: UpdateConfiguration) {
   });
 }
 
+async function failNextDirectorySync(
+  app: Awaited<ReturnType<typeof electron.launch>>,
+  path: string,
+) {
+  await app.evaluate(async (_, parent) => {
+    const fs = process.getBuiltinModule('fs')!.promises;
+    const directory = await fs.open(parent, 'r');
+    const target = await directory.stat();
+    const prototype: typeof directory = Object.getPrototypeOf(directory);
+    await directory.close();
+    const sync = prototype.sync;
+    prototype.sync = async function () {
+      const info = await this.stat();
+      if (info.dev === target.dev && info.ino === target.ino) {
+        prototype.sync = sync;
+        throw new Error('Fixture directory sync failed');
+      }
+      return sync.call(this);
+    };
+  }, path);
+}
+
 test('the default build stays disconnected and offers no update download', async () => {
   const profile = await mkdtemp(join(tmpdir(), 'openkraken-updates-disabled-'));
   const app = await electron.launch({
@@ -226,8 +248,25 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     });
     sequence = 7;
     await dialog.getByRole('button', { name: 'Check for updates' }).click();
-    await dialog.getByRole('button', { name: `Download ${format}` }).click();
+    const download = dialog.getByRole('button', { name: `Download ${format}` });
+    await expect(download).toBeVisible();
+    const beforeDownload = requests.length;
+    if (process.platform !== 'win32') {
+      await failNextDirectorySync(app, join(profile, 'updates'));
+      await download.click();
+      await expect(dialog.getByRole('status')).toContainText(
+        'filesystem could not confirm the download',
+        { timeout: 60000 },
+      );
+      await expect(dialog.getByRole('button', { name: 'Save installer…' })).toHaveCount(0);
+      await dialog.getByRole('button', { name: 'Check for updates' }).click();
+    }
+    await download.click();
     await expect(dialog.getByRole('status')).toContainText('download verified', { timeout: 60000 });
+    const artifactPath = `/${channel}/${filename}`;
+    expect(requests.slice(beforeDownload)).toEqual(
+      process.platform === 'win32' ? [artifactPath] : [artifactPath, feedPath],
+    );
     expect(await fileDigest(join(profile, 'updates/artifact.ready'))).toBe(sha256);
     await page.screenshot({ path: test.info().outputPath('signed-update-verified.png') });
     const beforeRecovery = requests.length;
@@ -267,23 +306,7 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
     await expect(save).toBeEnabled();
     await expect(stat(exported)).rejects.toMatchObject({ code: 'ENOENT' });
     if (process.platform !== 'win32') {
-      // Fail just the first directory sync on the chosen volume after publication.
-      await app.evaluate(async (_, parent) => {
-        const fs = process.getBuiltinModule('fs')!.promises;
-        const directory = await fs.open(parent, 'r');
-        const target = await directory.stat();
-        const prototype: typeof directory = Object.getPrototypeOf(directory);
-        await directory.close();
-        const sync = prototype.sync;
-        prototype.sync = async function () {
-          const info = await this.stat();
-          if (info.dev === target.dev && info.ino === target.ino) {
-            prototype.sync = sync;
-            throw new Error('Fixture directory sync failed');
-          }
-          return sync.call(this);
-        };
-      }, root);
+      await failNextDirectorySync(app, root);
       await save.click();
       await expect(dialog.getByRole('status')).toContainText(
         'filesystem could not confirm the save',

@@ -742,7 +742,7 @@ export class Updates {
         this.recoverableArtifact = true;
         // A failed directory sync can leave a complete file for a checked retry.
         await syncDirectory(this.directory).catch(() => {
-          throw new UpdateFailure('storage');
+          throw new UpdateFailure('download-unconfirmed');
         });
         await this.checkStorage();
         validateSelection();

@@ -64,6 +64,7 @@ export const updatesStateSchema = z.strictObject({
       'unchanged-image',
       'save',
       'save-unconfirmed',
+      'download-unconfirmed',
     ])
     .nullable(),
 });

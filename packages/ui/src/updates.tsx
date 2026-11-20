@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { UpdateState } from '@openkraken/ipc-contract';
 
 const failures: Record<NonNullable<UpdateState['error']>, string> = {
+  'download-unconfirmed':
+    'The filesystem could not confirm the download. Check for updates again to retry.',
   'save-unconfirmed':
     'The installer was written. The filesystem could not confirm the save. You can save it again.',
   save: 'The installer could not be saved. Choose a writable location and keep the installer extension.',
