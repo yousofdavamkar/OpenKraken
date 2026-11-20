@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest three runs. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Windows beta installer ordering
+
+The pinned WiX compiler and linker built three small x64 MSI fixtures with the production project hook. Strict compilation caught a lowercase upgrade GUID. Commit `4cddb83` fixes its spelling and adds a PowerShell regression. The linked databases contained the expected 64-bit registry search, exact-version upgrade range and uninstallable beta component. Both installation sequences ran related-product detection at 25, registry search at 26 and launch conditions at 27.
+
+Wine 10 installed beta.9, upgraded to beta.10 and promoted it to stable. Reinstalling beta.9 over beta.10 and reinstalling beta.10 over stable both failed at the launch condition. The fixture checked the installed file and registry revision after every attempt, then uninstalled stable and checked file removal. Wine normalized the default `ALLUSERS=2` to machine scope and the package refused installation. For the ordering run only, the fixture copies cleared that default to select per-user scope, including during nested uninstall. These runs used synthetic payloads and skipped WiX ICE validation. The hosted Windows job exercises the actual application and shipping defaults, repair, OS URI dispatch and profile retention. Its result and Windows signing remain outstanding. [MSI version policy](../decisions/0091-native-msi-and-installer-owned-protocol.md) · [Native acceptance](../decisions/0092-disposable-msi-lifecycle-acceptance.md)
+
 ## Navigating deep history on Linux x64
 
 Keyboard navigation, pointer selection and range selection reuse row positions after checking the commit ID. The regression at row 32,000 traverses zero preceding commit IDs when positions match and still finds the correct endpoints after a working row shifts the history. On a 560-pixel Canvas viewport that straddled two partial rows, the painter inspected 21 row kinds. Its fill colors matched the original set-based painter for every visible node.

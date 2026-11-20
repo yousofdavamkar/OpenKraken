@@ -34,6 +34,10 @@ node /path/to/openkraken/scripts/sign-update.mjs descriptor.json private-key.pem
 
 Publish the immutable, versioned installers before the signed manifest. In the invitation, give participants the candidate version, architecture, HTTPS artifact URL, feedback contact and the **one-line SHA256SUMS from the signing machine**. Deliver that line through an independently authenticated release-owner channel the participant already trusts. [Installer instructions](../README.md) · [Feed and signing procedure](decisions/0082-signed-update-release-protocol.md)
 
+## Validate a Windows beta installer
+
+On Windows x64, set the checkout version to the candidate, then run `pnpm package`, `pnpm installer --test-metadata --target msi` and `pnpm smoke:installer release/installers/win32-x64/test/msi/manifest.json`. The receipt and installed application carry the full beta version, such as `0.2.0-beta.10`. Windows Installer displays the numeric core and the package tracks the beta revision in the current user’s registry. The Windows CI workflow also exercises promotion to stable, attempted downgrades and profile retention on a disposable runner. Public Windows distribution still requires native acceptance and release signing. [MSI lifecycle acceptance](decisions/0092-disposable-msi-lifecycle-acceptance.md)
+
 ## Verify the first Linux download
 
 Save the checksum line from the invitation as `SHA256SUMS` in an empty directory. Download the selected installer into the same directory with the exact filename from that line. Run this command there before opening or installing it.
