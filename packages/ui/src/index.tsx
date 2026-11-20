@@ -239,7 +239,7 @@ function App() {
             <section className="history">
               <div className="panel-title">
                 <h2>History</h2>
-                <span data-testid="commit-count">
+                <span id="history-commit-count" data-testid="commit-count">
                   {snapshot.commits.length.toLocaleString()} commits
                   {snapshot.hasMore ? ' · more available' : ''}
                 </span>

@@ -36,7 +36,7 @@ Down on the last loaded row selects the first appended row when more history exi
 
 The grid passes its known focused index to keyboard navigation. Home, End, page keys and ordinary arrows can select loaded positions directly. Shift+Up scans backward to the nearest child. Parent and ref jumps resolve commit IDs. While a jump waits for an append, it remembers how many rows it has checked and resumes at the first new row. If a working-state refresh replaced the earlier rows, the jump rechecks the projection.
 
-When keyboard navigation targets the already focused commit, bring its row back into view even if the user has scrolled away. Ordinary scrolling can leave the selection offscreen until the next navigation command. The grid publishes its active descendant only while that row is mounted.
+When keyboard navigation targets the already focused commit, bring its row back into view even if the user has scrolled away. Ordinary scrolling can leave the selection offscreen until the next navigation command. The grid publishes its active descendant only while that row is mounted. Its accessible description gives the loaded commit count and whether more are available. While a further page exists, the total row count is unknown. After the final page, the grid reports every displayed row, including linked checkouts and working-tree rows. [WAI-ARIA grid and table properties](https://www.w3.org/WAI/ARIA/apg/practices/grid-and-table-properties/#usingaria-rowcountandaria-rowindex)
 
 ## Starting the graph worker on repository open
 

@@ -292,7 +292,8 @@ export function History() {
           role="grid"
           aria-label="Commit history"
           tabIndex={0}
-          aria-rowcount={rows.length}
+          aria-describedby="history-commit-count"
+          aria-rowcount={snapshot?.hasMore ? -1 : rows.length}
           aria-colcount={5}
           aria-multiselectable="true"
           aria-activedescendant={activeVisible ? `commit-row-${focused}` : undefined}

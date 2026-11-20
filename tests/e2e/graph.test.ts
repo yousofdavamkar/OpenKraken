@@ -426,6 +426,8 @@ test('one Down key moves past the last initially loaded commit', async () => {
   const { page, close } = await launch('linear', 2003);
   try {
     const grid = page.getByRole('grid');
+    await expect(grid).toHaveAttribute('aria-rowcount', '-1');
+    await expect(grid).toHaveAccessibleDescription('2,000 commits · more available');
     // Stay at the top while End selects the last loaded row. Scrolling there would prefetch it.
     await grid.evaluate((element) => {
       Object.defineProperty(element, 'scrollTo', { configurable: true, value: () => {} });
@@ -437,7 +439,12 @@ test('one Down key moves past the last initially loaded commit', async () => {
     await grid.evaluate((element) => Reflect.deleteProperty(element, 'scrollTo'));
     await grid.press('ArrowDown');
     await expect(grid.getByRole('row', { selected: true })).toContainText('Commit 3 — linear');
-    await expect(page.getByTestId('commit-count')).toHaveText('2,003 commits');
+    await expect(grid).toHaveAttribute('aria-rowcount', '2003');
+    await expect(grid.getByRole('row', { selected: true })).toHaveAttribute(
+      'aria-rowindex',
+      '2001',
+    );
+    await expect(grid).toHaveAccessibleDescription('2,003 commits');
   } finally {
     await close();
   }

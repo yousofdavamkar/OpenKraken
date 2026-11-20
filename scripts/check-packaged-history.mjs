@@ -20,6 +20,7 @@ export async function checkPackagedHistory(page, repository) {
     );
   const root = fixtureGit(repository, ['rev-list', '--max-parents=0', 'HEAD']);
   await expect(count).toHaveText('2,000 commits · more available');
+  await expect(grid).toHaveAttribute('aria-rowcount', '-1');
   const tipRow = grid.locator(`[data-oid="${tip}"]`);
   await expect(tipRow).toBeInViewport();
   const before = await firstRows();
@@ -51,6 +52,7 @@ export async function checkPackagedHistory(page, repository) {
   expect(await firstRows()).toEqual(before);
   await more.click();
   await expect(count).toHaveText('7,003 commits');
+  await expect(grid).toHaveAttribute('aria-rowcount', '7003');
   expect(await firstRows()).toEqual(before);
   await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
   await search.press('Enter');
