@@ -12,7 +12,9 @@ Submodule paths must remain inside the parent checkout. Traversal refuses symbol
 
 The renderer requests an entry by a service-derived path hash and reviewed inventory revision. The revision covers the displayed recursive inventory and inspected canonical checkout/Git-directory identities. Opening rereads the inventory, verifies selection and initialization, then rechecks the opened repository's canonical path and Git directory. The renderer cannot submit an arbitrary path, URL or Git option. Opening uses the normal repository snapshot, watcher and terminal-context transition.
 
-The Submodules dialog is available from the toolbar and command catalogue. Refresh rereads external changes; an open error remains in the dialog so the user can refresh and retry. Bare repositories disable the control because this view reads checkout indexes.
+The Submodules dialog is available from the toolbar and command catalogue. While the dialog is open and visible, repository notifications trigger a recursive inventory read. The dialog also checks five seconds after each completed read because edits inside an already dirty child can leave the parent’s Git status unchanged. A burst of notifications during a read schedules one more check. Returning to a visible window triggers a check immediately. Manual refresh remains available after an error. Bare repositories disable the control because this view reads checkout indexes.
+
+Background checks use the read-only inventory operation and preserve keyboard focus. Opening an update or URL-sync review suspends observation so the user can inspect the same state until they act. Git revalidates the review at confirmation. Closing the dialog or starting a foreground action cancels any outstanding observation and discards its late reply.
 
 ## Reviewed recursive initialization and update
 
@@ -24,7 +26,7 @@ Preflight refuses conflicted/unavailable modules, nonempty uninitialized destina
 
 Git configuration reads include effective native includes and URL rewrites for the transport review; `.gitmodules` discovery still disables includes. Allowed protocols are HTTPS, HTTP, SSH and Git, with local file transports disabled unless the user opts in for this recursive operation. External helpers remain blocked even through URL rewriting. The existing runner enforces TLS verification, and command configuration also overrides discovered URL-specific `sslVerify=false` settings. Existing askpass, transport error redaction, progress and cancellation support are reused. Provider account tokens are not automatically forwarded to recursively discovered hosts.
 
-The dialog focuses Cancel review, restores the update button on dismissal, disables conflicting controls during mutation, permits cancellation of a running update, and refreshes the repository snapshot afterward. Errors and cancellation explicitly tell the user to refresh before retrying because some modules may already have changed. The inventory itself is refreshed on successful completion or through **Refresh submodules**. Manual refresh clears earlier review focus intent and restores the Refresh button after loading.
+The dialog focuses Cancel review, restores the update button on dismissal, disables conflicting controls during mutation, permits cancellation of a running update, and refreshes the repository snapshot afterward. Errors and cancellation explicitly tell the user to refresh before retrying because some modules may already have changed. Successful completion also refreshes the inventory. Manual refresh clears earlier review focus intent and restores the Refresh button after loading.
 
 ## Reviewed recursive URL synchronization
 
@@ -36,7 +38,7 @@ The dialog explains replacement of local overrides, configuration shared by link
 
 ## Scope and verification
 
-Recursive discovery, status, guarded opening, reviewed recursive initialization/update and URL synchronization are implemented for Linux fixtures. Feature 1.8’s recursive init/update fixture is covered; this does not establish cross-platform or live authenticated-provider acceptance. Add/remove controls, automatic refresh of this dialog, non-UTF-8 paths and cross-platform runtime acceptance also remain open.
+Recursive discovery, status, guarded opening, reviewed recursive initialization/update and URL synchronization are implemented for Linux fixtures. Feature 1.8’s recursive init/update fixture is covered; this does not establish cross-platform or live authenticated-provider acceptance. Add/remove controls, non-UTF-8 paths and cross-platform runtime acceptance remain open.
 
 Native Git tests cover initialized and uninitialized nested modules, dirty/out-of-date checkouts, stale and unknown selections, Unicode/newline paths, configuration-only paths, symlink refusal, parent-directory cycles, conflict stages, cancellation, bare-repository refusal, duplicate/redirected configuration and the inventory count bound. Typed IPC tests reject caller paths, URLs, force/recursive options and malformed identities. Electron acceptance lists a nested uninitialized module, refuses an old selection after an external edit, refreshes its dirty count and opens the reviewed child with its draft intact.
 
