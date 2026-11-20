@@ -1,3 +1,4 @@
+import { PullDrafts, type PullDraftRequest } from './pull-drafts.js';
 import { DraftEncryptionUnavailable } from './protected-draft-files.js';
 import type { IssueDraftRequest, IssueDrafts } from './issue-drafts.js';
 import type { ReviewDraftRequest, ReviewDrafts } from './review-drafts.js';
@@ -343,23 +344,31 @@ export class ProviderService {
     });
   }
   issueDraft(store: IssueDrafts, request: IssueDraftRequest) {
+    return this.connectedDraft(request.scope.accountId, 'issue', () => store.request(request));
+  }
+  pullDraft(store: PullDrafts, request: PullDraftRequest) {
+    return this.connectedDraft(request.scope.accountId, 'pull-request', () =>
+      store.request(request),
+    );
+  }
+  private connectedDraft<T>(accountId: string, kind: string, action: () => Promise<T>) {
     return this.run(async () => {
       if (
         !(await this.load()).some(
           (account) =>
-            account.id === request.scope.accountId &&
+            account.id === accountId &&
             (account.provider === 'github' || account.provider === 'gitlab'),
         )
       )
-        throw new ProviderError('PROVIDER_ACCOUNT', 'This issue account is no longer connected.');
+        throw new ProviderError('PROVIDER_ACCOUNT', `This ${kind} account is no longer connected.`);
       try {
-        return await store.request(request);
+        return await action();
       } catch (error) {
         if (error instanceof DraftEncryptionUnavailable)
           throw new ProviderError('DRAFT_ENCRYPTION_UNAVAILABLE', error.message);
         throw new ProviderError(
           'DRAFT_UNAVAILABLE',
-          'The issue draft could not be accessed or changed. Check the keychain and reopen the saved copy.',
+          `The ${kind} draft could not be accessed or changed. Check the keychain and reopen the saved copy.`,
         );
       }
     });

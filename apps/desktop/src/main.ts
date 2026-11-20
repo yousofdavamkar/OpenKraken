@@ -1,3 +1,4 @@
+import { PullDrafts } from './pull-drafts.js';
 import { IssueDrafts } from './issue-drafts.js';
 import { ReviewDrafts } from './review-drafts.js';
 import { ActivityLog } from './activity-log.js';
@@ -920,6 +921,9 @@ else {
           request.method === 'providerBitbucketWorkspaces' ||
           request.method === 'providerBitbucketRepositories' ||
           request.method === 'providerRepositories' ||
+          request.method === 'pullDraftRead' ||
+          request.method === 'pullDraftSave' ||
+          request.method === 'pullDraftList' ||
           request.method === 'issueDraftRead' ||
           request.method === 'issueDraftSave' ||
           request.method === 'issueDraftList' ||
@@ -944,6 +948,16 @@ else {
           const controller = new AbortController();
           providerRequests.set(request.id, controller);
 
+          if (
+            request.method === 'pullDraftRead' ||
+            request.method === 'pullDraftSave' ||
+            request.method === 'pullDraftList'
+          ) {
+            return await providers.pullDraft(
+              new PullDrafts(app.getPath('userData'), electronSecretProtection(safeStorage)),
+              request,
+            );
+          }
           if (
             request.method === 'issueDraftRead' ||
             request.method === 'issueDraftList' ||
@@ -1531,6 +1545,9 @@ else {
           request.method === 'providerBitbucketWorkspaces' ||
           request.method === 'providerBitbucketRepositories' ||
           request.method === 'providerRepositories' ||
+          request.method === 'pullDraftRead' ||
+          request.method === 'pullDraftSave' ||
+          request.method === 'pullDraftList' ||
           request.method === 'issueDraftRead' ||
           request.method === 'issueDraftSave' ||
           request.method === 'issueDraftList' ||
@@ -1589,6 +1606,7 @@ else {
           'commitDraftSave',
           'reviewDraftSave',
           'issueDraftSave',
+          'pullDraftSave',
           'nativeDraftWrite',
           'nativeDraftDismiss',
           'workingDraftWrite',

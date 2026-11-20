@@ -1,3 +1,5 @@
+import { pullDraftRequests, pullDraftResults } from './pull-drafts.js';
+export * from './pull-drafts.js';
 import type { HistoryPageReply, SnapshotBodies } from './page-transfer.js';
 import { canCompactRef, objectIdPattern, packedRefKind, validCompactRef } from './compact-refs.js';
 export { expandGitServiceResult, serializeLegacySnapshot } from './compact-refs.js';
@@ -1354,6 +1356,7 @@ export const requestSchema = z.discriminatedUnion('method', [
   ...commitDraftRequests,
   ...reviewDraftRequests,
   ...issueDraftRequests,
+  ...pullDraftRequests,
   z
     .object({
       id: requestId,
@@ -2064,6 +2067,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('workingDraft'), draft: fileEditorDraftSchema.nullable() }).strict(),
   ...reviewDraftResults,
   ...issueDraftResults,
+  ...pullDraftResults,
   z.object({ kind: z.literal('commitDraft'), state: commitDraftStateSchema }).strict(),
   z.object({ kind: z.literal('activity'), state: activityStateSchema }).strict(),
   z
