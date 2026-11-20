@@ -33,8 +33,14 @@ const rollbackSyncError = process.argv.includes('--rollback-sync-error');
 const pendingNotice = process.argv.includes('--pending-notice');
 const missingDocument = process.argv.includes('--missing-renderer-document');
 const missingModule = process.argv.includes('--missing-renderer-module');
+const closeSlowMain = process.argv.includes('--close-slow-main');
+const closeSlowRenderer = process.argv.includes('--close-slow-renderer');
+const resumeSlowRenderer = process.argv.includes('--resume-slow-renderer');
+const slowStartup = closeSlowRenderer || resumeSlowRenderer || closeSlowMain;
 const damagedRenderer = missingDocument || missingModule;
 const failStartup =
+  closeSlowRenderer ||
+  closeSlowMain ||
   damagedRenderer ||
   process.argv.includes('--failed-startup') ||
   delayedDescendant ||
@@ -56,6 +62,7 @@ assert.ok(
   [
     failStartup,
     lateConfirmation,
+    resumeSlowRenderer,
     helperUnavailable,
     unchangedImage,
     beforeRename,
@@ -215,6 +222,19 @@ try {
     // Production has no TLS bypass, test key or runtime test switch.
     const banner = `
       const fixtureElectron = require('electron');
+      if (${slowStartup && version === replacementVersion}) setTimeout(() => fixtureElectron.app.exit(124), 180000).unref();
+      if (${closeSlowMain && version === replacementVersion}) {
+        const files = require('node:fs/promises');
+        const original = files.lstat;
+        files.lstat = (...args) => {
+          if (require('node:path').basename(String(args[0])) === 'activity.json') {
+            if (fixtureElectron.BrowserWindow.getAllWindows().length) throw Error('Expected startup before window creation');
+            require('node:fs').writeFileSync(${JSON.stringify(heldStartup)}, String(process.pid));
+            return new Promise(() => {});
+          }
+          return original(...args);
+        };
+      }
       if (${helperUnavailable}) {
         const fixtureChildProcess = require('node:child_process');
         const fixtureSpawn = fixtureChildProcess.spawn;
@@ -305,7 +325,7 @@ try {
           require('node:fs').writeFileSync(${JSON.stringify(descendantMarker)}, JSON.stringify({ pid: descendant.pid, started: Date.now() }));
           descendant.unref();
         }
-        if (!${damagedRenderer}) process.exit(23);
+        if (!${damagedRenderer || closeSlowRenderer || closeSlowMain}) process.exit(23);
       }
       if (fixtureReturning && ${delayedDescendant}) {
         const descendant = JSON.parse(require('node:fs').readFileSync(${JSON.stringify(descendantMarker)}, 'utf8'));
@@ -320,12 +340,43 @@ try {
       fixtureElectron.app.relaunch = (options) => { require('node:fs').writeFileSync(${JSON.stringify(join(root, 'relaunch.json'))}, JSON.stringify(options)); return fixtureRelaunch(options); };
       const fixtureTls = require('node:tls');
       fixtureTls.setDefaultCACertificates([...fixtureTls.getCACertificates('default'), ${JSON.stringify(await readFile(cert, 'utf8'))}]);
-      fixtureElectron.dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
+      const nativeMessageBox = fixtureElectron.dialog.showMessageBox.bind(fixtureElectron.dialog);
+      fixtureElectron.dialog.showMessageBox = async (...args) => {
+        if (${slowStartup && version === replacementVersion} && args.at(-1).title === 'OpenKraken update') {
+          const result = await nativeMessageBox(...args);
+          require('node:fs').writeFileSync(${JSON.stringify(join(root, 'startup-choice'))}, String(result.response));
+          return result;
+        }
+        return { response: 1, checkboxChecked: false };
+      };
       fixtureElectron.dialog.showMessageBoxSync = () => 0;
       fixtureElectron.dialog.showErrorBox = (title) => require('node:fs').writeFileSync(${JSON.stringify(join(root, 'install-error'))}, title);
+      let startupPickers = 0;
+      if (${resumeSlowRenderer && version === replacementVersion}) {
+        fixtureElectron.dialog.showOpenDialog = () => { startupPickers++; return new Promise(() => {}); };
+      }
       let fixtureCancelBeforeQuit = ${!helperUnavailable && version === initialVersion} && !fixtureReturning;
       const fixtureHandle = fixtureElectron.ipcMain.handle.bind(fixtureElectron.ipcMain);
       fixtureElectron.ipcMain.handle = (channel, listener) => fixtureHandle(channel, async (...args) => {
+        if (${(closeSlowRenderer || resumeSlowRenderer) && version === replacementVersion} && args[1]?.method === 'appearancePreferences') {
+          const fs = require('node:fs');
+          if (${closeSlowRenderer}) {
+            const debuggerSession = args[0].sender.debugger;
+            debuggerSession.attach();
+            await debuggerSession.sendCommand('Debugger.enable');
+            const paused = new Promise(resolve => {
+              debuggerSession.on('message', (_event, method) => { if (method === 'Debugger.paused') resolve(); });
+            });
+            void debuggerSession.sendCommand('Runtime.evaluate', { expression: 'debugger;' }).catch(() => {});
+            await paused;
+          }
+          if (${resumeSlowRenderer}) {
+            await args[0].sender.executeJavaScript("for(let i=0;i<8;i++) void window.openkraken.request({id:crypto.randomUUID(),method:'open'}); void 0;");
+            while (startupPickers !== 8) await new Promise(resolve => setTimeout(resolve, 20));
+          }
+          fs.writeFileSync(${JSON.stringify(heldStartup)}, String(process.pid));
+          while (!fs.existsSync(${JSON.stringify(resumeStartup)})) await new Promise(resolve => setTimeout(resolve, 100));
+        }
         let result = await listener(...args);
         if (fixtureCancelBeforeQuit && args[1]?.method === 'updatesInstall' && result.state?.phase === 'restart-ready') {
           fixtureCancelBeforeQuit = false;
@@ -600,6 +651,43 @@ try {
       window.removeEventListener('beforeunload', Reflect.get(window, 'fixtureUnload')),
     );
     await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
+    if (slowStartup) {
+      const replacementPid = Number(await waitForFile(heldStartup));
+      const xdotool = process.env.OPENKRAKEN_XDOTOOL ?? 'xdotool';
+      const keys = closeSlowMain ? ['Escape', 'alt+c'] : [resumeSlowRenderer ? null : 'alt+c'];
+      const choice = join(root, 'startup-choice');
+      for (const key of keys) {
+        const { stdout } = await promisify(execFile)(
+          xdotool,
+          ['search', '--sync', '--onlyvisible', '--name', '^OpenKraken update$'],
+          { timeout: 90000 },
+        );
+        const [nativeDialog] = stdout.trim().split('\n');
+        assert.equal(
+          (await promisify(execFile)(xdotool, ['getwindowpid', nativeDialog])).stdout.trim(),
+          String(replacementPid),
+        );
+        assert.deepEqual(JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')), [
+          initialVersion,
+          replacementVersion,
+        ]);
+        assert.equal(await sha256(target), receipts[1].artifacts[0].sha256);
+        assert.equal(await sha256(target + '.openkraken-update/previous.AppImage'), originalDigest);
+        if (key) {
+          await promisify(execFile)(xdotool, ['windowfocus', '--sync', nativeDialog, 'key', key], {
+            timeout: 5000,
+          });
+        } else await writeFile(resumeStartup, 'resume');
+        assert.equal(await waitForFile(choice), key === 'alt+c' ? '1' : '0');
+        if (key === 'Escape') await rm(choice);
+      }
+      console.log(
+        resumeSlowRenderer
+          ? 'Renderer startup dismissed the native recovery dialog with all eight ordinary request slots occupied.'
+          : 'The native dialog accepted Close OpenKraken during ' +
+              (closeSlowMain ? 'pre-window initialization.' : 'a paused renderer.'),
+      );
+    }
     if (delayedStartup) {
       const replacementPid = Number(await waitForFile(heldStartup));
       await delay(61000);

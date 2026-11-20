@@ -22,11 +22,11 @@ import {
   rollbackAppImageUpdate,
 } from './src/appimage-install.js';
 
-function image(text: string) {
+function image(text: string, arch: 'x64' | 'arm64' = 'x64') {
   const bytes = Buffer.alloc(64);
   bytes.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]);
   bytes.set([0x41, 0x49, 2], 8);
-  bytes.writeUInt16LE(62, 18);
+  bytes.writeUInt16LE(arch === 'arm64' ? 183 : 62, 18);
   return Buffer.concat([bytes, Buffer.from(text)]);
 }
 
@@ -358,18 +358,25 @@ test.skipIf(process.platform !== 'linux')(
   },
 );
 
-test.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
+test.skipIf(process.platform !== 'linux' || !['x64', 'arm64'].includes(process.arch))(
   'only a committed matching replacement with its predecessor can prompt for startup recovery',
   async () => {
     const root = await mkdtemp(join(tmpdir(), 'openkraken-pending-start-'));
     const target = join(root, 'OpenKraken.AppImage');
     const source = join(root, 'artifact.ready');
     const version = '0.2.0';
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+    const replacement = image('replacement', arch);
+    const receipt = {
+      size: replacement.length,
+      sha256: createHash('sha256').update(replacement).digest('hex'),
+    };
     try {
-      await writeFile(target, oldImage, { mode: 0o700 });
-      await writeFile(source, newImage, { mode: 0o600 });
+      await writeFile(target, image('predecessor', arch), { mode: 0o700 });
+      await writeFile(source, replacement, { mode: 0o600 });
+      expect(await pendingAppImageStartup(target, version)).toBe(false);
       const staged = await stageAppImageUpdate(
-        { target, source, artifact, version, arch: 'x64' },
+        { target, source, artifact: receipt, version, arch },
         new AbortController().signal,
       );
       expect(await pendingAppImageStartup(target, version)).toBe(false);
