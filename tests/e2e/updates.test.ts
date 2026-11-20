@@ -445,7 +445,11 @@ test('signed update UI checks, downloads, cancels and rejects tampering through 
         sequence,
         issuedAt,
         expiresAt,
-        artifacts: [{ platform: process.platform, arch: process.arch, format, path: exported }],
+        artifacts: [
+          manifestPath
+            ? { manifest: resolve(manifestPath) }
+            : { platform: process.platform, arch: process.arch, format, path: exported },
+        ],
       }),
     );
     await writeFile(signingPem, nextKeys.privateKey.export({ type: 'pkcs8', format: 'pem' }), {

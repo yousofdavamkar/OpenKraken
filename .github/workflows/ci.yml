@@ -489,9 +489,9 @@ jobs:
           platform=$(node -p 'process.platform + "-" + process.arch')
           display=()
           case "$RUNNER_OS" in
-            Linux) targets=(deb rpm deb-beta rpm-beta); display=(xvfb-run -a) ;;
+            Linux) targets=(deb rpm AppImage deb-beta rpm-beta); display=(xvfb-run -a) ;;
             macOS) targets=(dmg) ;;
-            Windows) targets=(msi) ;;
+            Windows) targets=(msi msi-beta) ;;
           esac
           for target in "${targets[@]}"; do
             if [[ "$target" == *-beta ]]; then
