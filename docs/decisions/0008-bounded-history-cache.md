@@ -43,3 +43,8 @@ Serialize a page in batches of 100 commits and encode each batch as UTF-8. The d
 ## Persisting an extended window
 
 Each cache instance tracks the files it wrote and the pages its cursor accepted from disk. When paging extends the window, the writer can retain a file with the same offset, record count and continuation flag because the records in that instance are append-only. It checks the file’s device, inode, size, modification time and change time before skipping serialization. A changed or missing file is rebuilt from the retained commits on the next dirty flush. The next reader still validates the page schema and digest. A tail that the cursor declined contributes no reusable file.
+
+
+## Leaving a pending cache read
+
+A cancelled repository open releases its wait for the opening cache file and preserves the displayed cursor. A refresh, switch or service shutdown stops optional reads of later cache pages. The service still flushes any writes it owes. If the destination fails to open, the previous cursor can continue from Git. A late file open closes its descriptor, and a discarded page cannot append commits or invalidate the current history. Reads already in the operating system may settle after the request returns.
