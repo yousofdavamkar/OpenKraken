@@ -228,8 +228,9 @@ jobs:
         name: Gitea HTTPS and SSH acceptance
         env:
           OPENKRAKEN_GITEA_TEST: '1'
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/gitea/e2e.json
         run: >-
-          xvfb-run -a pnpm exec playwright test
+          xvfb-run -a pnpm exec playwright test --output=test-results/gitea
           tests/e2e/gitea.test.ts
           tests/e2e/provider-push.test.ts
           tests/e2e/provider-delete.test.ts
