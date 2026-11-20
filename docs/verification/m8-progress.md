@@ -2,6 +2,16 @@
 
 M8 remains in progress. On Linux x64, the full Linux history with one ref passed the opening budget in all three fresh profiles. Fresh openings with 49,999 nested tag aliases passed three of six times across two runs, and all three restarted profiles passed. All six fresh and all three restarted profiles with distinct targets exceeded 500 ms. Native Windows, macOS and ARM64 acceptance, production release gates, and remaining [M6](m6-progress.md) and [M7](m7-progress.md) work are open.
 
+## Rechecking and saving release installers
+
+The Linux x64 desktop revalidated previously downloaded bytes after an app restart and after another check in the running app. Each check of the same release fetched one signed manifest and issued a fresh approval ID. A new release, a damaged file and a different format with the same size all exercised the download path. A simulated POSIX directory-sync failure after publishing the cached installer withheld approval. A failed sync after export left the complete file at the chosen path and allowed another save. [Download recovery](../decisions/0082-signed-update-release-protocol.md#rechecking-a-downloaded-installer) · [Export confirmation](../decisions/0121-save-verified-installers.md#confirming-the-destination)
+
+Fedora 43 DNF rejected a 99,019,021-byte Linux x64 RPM with an unrelated key. With the disposable signing certificate it installed and reinstalled the package, then removed it with the fixture user's data intact. Electron saved the RPM from a signed loopback HTTPS feed with the digest recorded in the build receipt. The packaged app in that RPM passed Canvas, paging, keyboard, search and terminal smoke tests. On Linux, the shared DMG, MSI and RPM publication tests covered a truncated copy, a same-size content change, a receipt size mismatch and concurrent saves. [Signed package publication](../decisions/0088-native-rpm-lifecycle-and-release-version.md#retaining-signed-builds)
+
+In an AppImage extract-and-run trial, the host temporary volume reached its per-user quota. The replacement exited before mounting the desktop and the helper restored the predecessor. Using a disk-backed temporary directory, the packaged app then completed recovery of the signed download, cancelled an unapproved restart, installed the accepted version and acknowledged startup. The packaged update also passed under FUSE. The small native AppImage fixture separately exercised replacement, rollback and retry in both modes.
+
+The full Linux x64 suite passed 1,223 tests with ten skips. The Electron signed-feed fixture exercised both the 115,440,864-byte DEB and the signed RPM, including retry after a cache or destination directory sync failed. Typechecking, build and lint passed.
+
 ## Restarting after a branch update
 
 On Linux x64, the desktop reopened a 17,000-row saved window after its branch moved. All 50,000 refs and all 1,505,200 commit IDs with their ordered parents matched Git across 302 pages. In five paired openings, median first paint improved from 1,116.7 to 1,011.5 ms after the branch moved. When the saved window was already current, median first paint increased from 968.6 to 1,026.6 ms. The reader also recovers from an unexpected named pipe in place of a cache file on Linux.

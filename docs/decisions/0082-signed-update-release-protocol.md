@@ -18,6 +18,12 @@ Metadata is streamed with a 48 KiB cap. Artifacts stream to an exclusive private
 
 The original Updates dialog offered check, download, progress and cancellation without installation. [ADR 0084](0084-appimage-desktop-update-handoff.md) adds supported AppImage installation/restart, ADR 0085 adds opt-in automatic checks, and [ADR 0086](0086-appimage-startup-exit-recovery.md) adds startup-exit restoration. Closing the dialog does not cancel a transfer; quitting does. Further recovery of hung or interrupted installations, other native installation formats, production release configuration, signed installers and native platform acceptance remain open. No release has been published by this implementation.
 
+## Rechecking a downloaded installer
+
+The running desktop retains a verified download across manual and scheduled checks, including an unsuccessful metadata request. A successful check of the same signed release makes its formats selectable again. Selecting a format reads the cached bytes, verifies their signed size and SHA-256 and issues a fresh approval ID. A different digest or size requires another download. A newer release sequence retires the old file before recording the new release.
+
+On POSIX the desktop syncs the update directory after renaming the scratch file to `artifact.ready`. It checks the release validity, local trust record and cancellation again before offering Save or Install. If the sync fails, the next selection revalidates the file and retries the sync. A file surviving a process exit follows the same verification on restart.
+
 ## Configuring a release feed
 
 For a beta feed, configure the channel and prerelease versions described in [ADR 0118](0118-beta-update-channel.md). The following example configures a stable build.
