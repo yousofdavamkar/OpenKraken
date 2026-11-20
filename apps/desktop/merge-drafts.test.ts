@@ -1,5 +1,7 @@
-import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { ProviderService } from './src/providers.js';
+import { ProviderVault } from './src/provider-vault.js';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
@@ -85,3 +87,78 @@ test.each(drafts)(
     }
   },
 );
+
+test('both GitLab messages fit at their draft limits after JSON escaping and encryption', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ok-merge-draft-limit-'));
+  try {
+    const store = new MergeDrafts(root, protection());
+    const text = '\u0001'.repeat(65536);
+    const draft = {
+      provider: 'gitlab' as const,
+      defaults: false,
+      selectedSquash: true,
+      removeSource: false,
+      mergeMessage: text,
+      squashMessage: text,
+      uncertain: false,
+    };
+    const saved = await store.request({
+      id,
+      method: 'mergeDraftSave',
+      scope,
+      draft,
+      revision: null,
+    });
+    expect(await store.request({ id, method: 'mergeDraftRead', scope })).toEqual(saved);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('merge drafts require their connected provider account', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ok-merge-account-'));
+  try {
+    const origin = 'https://git.example.test';
+    const account = {
+      id: createHash('sha256')
+        .update(JSON.stringify(['github', origin, '42']))
+        .digest('hex'),
+      provider: 'github',
+      origin,
+      providerUserId: '42',
+      login: 'fixture',
+    };
+    const key = protection();
+    const service = new ProviderService(root, new ProviderVault(root, key));
+    const store = new MergeDrafts(root, key);
+    const owned = { ...scope, accountId: account.id };
+    const save = {
+      id,
+      method: 'mergeDraftSave' as const,
+      scope: owned,
+      revision: null,
+      draft: drafts[0]!,
+    };
+    const manifest = join(root, 'provider-accounts.json');
+    await writeFile(manifest, JSON.stringify([account]));
+    await expect(service.mergeDraft(store, { ...save, draft: drafts[1]! })).rejects.toMatchObject({
+      code: 'PROVIDER_ACCOUNT',
+    });
+    await service.mergeDraft(store, save);
+    await service.disconnect(account.id);
+    for (const request of [
+      save,
+      { id, method: 'mergeDraftRead' as const, scope: owned },
+      { id, method: 'mergeDraftList' as const, scope: { accountId: account.id } },
+    ])
+      await expect(service.mergeDraft(store, request)).rejects.toMatchObject({
+        code: 'PROVIDER_ACCOUNT',
+      });
+    await writeFile(manifest, JSON.stringify([account]));
+    expect(
+      await service.mergeDraft(store, { id, method: 'mergeDraftRead', scope: owned }),
+    ).toMatchObject({ draft: drafts[0] });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

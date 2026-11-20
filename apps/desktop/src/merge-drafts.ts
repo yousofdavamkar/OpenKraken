@@ -30,6 +30,8 @@ export class MergeDrafts {
       this.protection,
       record,
       (entry) => identity(entry.scope),
+      // Two 64 KiB messages can expand under JSON escaping and base64 encoding.
+      2 * 1024 * 1024,
     );
     if (request.method === 'mergeDraftList') {
       const entries: MergeDraftScope[] = [];
