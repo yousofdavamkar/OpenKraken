@@ -3,7 +3,7 @@ import { authenticateRpm } from './rpm-signature.mjs';
 import { verifyLinuxPackage } from './linux-package.mjs';
 import { build, Platform, Arch } from 'electron-builder';
 import { buildAppImage } from './appimage.mjs';
-import { buildDmg, verifyMacBundle } from './dmg.mjs';
+import { buildDmg, saveSignedDmg, verifyMacBundle } from './dmg.mjs';
 import { buildMsi, readMsiMetadata, verifyMsiMetadata } from './msi.mjs';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
@@ -256,10 +256,14 @@ try {
     },
     payload,
   };
-  await cp(artifact, join(output, basename(artifact)));
-  await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+  let file = basename(artifact);
+  if (identity) file = await saveSignedDmg(output, artifact, manifest);
+  else {
+    await cp(artifact, join(output, file));
+    await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+  }
   console.log(
-    `${signer ? 'Signed' : 'Unsigned'} ${testMetadata ? 'TEST-ONLY ' : ''}installer: ${join(output, basename(artifact))}`,
+    `${signer ? 'Signed' : 'Unsigned'} ${testMetadata ? 'TEST-ONLY ' : ''}installer: ${join(output, file)}`,
   );
   console.log(
     `Verify and smoke-test with: node scripts/verify-installer.mjs ${join(output, 'manifest.json')}${identity ? ' --mac-identity <trusted-fingerprint>' : rpmKey ? ' --rpm-key <trusted-certificate-file>' : ''}${notarySubmissionId ? ' --require-notarization' : ''}`,

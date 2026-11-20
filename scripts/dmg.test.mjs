@@ -1,11 +1,21 @@
 import { afterEach, expect, test } from 'vitest';
 import { execFile } from 'node:child_process';
-import { chmod, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { comparePayload, payloadManifest } from './package-security.mjs';
-import { verifyMacBundle } from './dmg.mjs';
+import { comparePayload, payloadManifest, sha256 } from './package-security.mjs';
+import { saveSignedDmg, verifyMacBundle } from './dmg.mjs';
 import { isMacCode, macIdentity, verifyDmgReceipt, verifyMacSignature } from './mac-signing.mjs';
 
 const run = promisify(execFile);
@@ -191,3 +201,32 @@ test.skipIf(process.platform !== 'darwin')(
     });
   },
 );
+
+test('concurrent signed image saves retain the bytes referenced by each receipt', async () => {
+  const directory = await fixture();
+  const output = join(directory, 'output');
+  await mkdir(output);
+  const builds = await Promise.all(
+    ['first', 'second'].map(async (value) => {
+      const build = join(directory, value);
+      await mkdir(build);
+      const path = join(build, 'OpenKraken.dmg');
+      await writeFile(path, value);
+      return { path, value, manifest: { artifact: { sha256: await sha256(path) } } };
+    }),
+  );
+  const files = await Promise.all(
+    builds.map(({ path, manifest }) => saveSignedDmg(output, path, manifest)),
+  );
+  expect(new Set(files).size).toBe(2);
+  const receipt = JSON.parse(await readFile(join(output, 'manifest.json'), 'utf8'));
+  expect(files).toContain(receipt.artifact.file);
+  expect(await sha256(join(output, receipt.artifact.file))).toBe(receipt.artifact.sha256);
+  await expect(
+    saveSignedDmg(output, join(directory, 'missing.dmg'), builds[0].manifest),
+  ).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(JSON.parse(await readFile(join(output, 'manifest.json'), 'utf8'))).toEqual(receipt);
+  expect((await readdir(output)).sort()).toEqual([...files, 'manifest.json'].sort());
+  for (const [index, file] of files.entries())
+    expect(await readFile(join(output, file), 'utf8')).toBe(builds[index].value);
+});

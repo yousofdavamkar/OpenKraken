@@ -1,5 +1,16 @@
 import { execFile, spawn } from 'node:child_process';
-import { copyFile, stat, lstat, mkdir, mkdtemp, readlink, rm, symlink } from 'node:fs/promises';
+import {
+  rename,
+  writeFile,
+  copyFile,
+  stat,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readlink,
+  rm,
+  symlink,
+} from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { signDiskImage, verifyMacSignature, verifyNotaryTicket } from './mac-signing.mjs';
 import { promisify } from 'node:util';
@@ -147,5 +158,24 @@ export async function verifyDmg(source, manifest, identity) {
     if (safeToRemove) await rm(temporary, { recursive: true, force: true });
     else
       console.error(`DMG mount state uncertain; retained ${temporary}. Detach before removing it.`);
+  }
+}
+
+// Timestamped signatures give each build its own bytes. Move the complete
+// image into place before atomically switching the receipt to its digest.
+export async function saveSignedDmg(output, artifact, manifest) {
+  const temporary = await mkdtemp(join(output, '.dmg-save-'));
+  try {
+    const file = basename(artifact, '.dmg') + '-' + manifest.artifact.sha256 + '.dmg';
+    const staged = join(temporary, file);
+    await copyFile(artifact, staged);
+    const receipt = { ...manifest, artifact: { ...manifest.artifact, file } };
+    const receiptPath = join(temporary, 'manifest.json');
+    await writeFile(receiptPath, JSON.stringify(receipt, null, 2) + '\n');
+    await rename(staged, join(output, file));
+    await rename(receiptPath, join(output, 'manifest.json'));
+    return file;
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
   }
 }
