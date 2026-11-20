@@ -2,7 +2,11 @@ name: CI
 on: [push, pull_request]
 jobs:
   scale-performance:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     env:
       LINUX_HISTORY_REVISION: 46fec1c3029b552ec63b2d01af9d43a386f043ea
@@ -20,7 +24,8 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: sudo apt-get update && sudo apt-get install -y build-essential xvfb
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential xvfb
       - run: pnpm install --frozen-lockfile
       - run: mkdir -p test-results/performance
       - name: Build once before measuring
@@ -33,22 +38,13 @@ jobs:
           cp "$RUNNER_TEMP/openkraken-scale/fixture.json" test-results/performance/fixture.json
       - name: Large synthetic history gates, three fresh profiles
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.fixture.outcome == 'success' }}
-        run: |
-          OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/openkraken-scale/repository" GIT_NO_LAZY_FETCH=1 \
-            xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --reporter=list \
-            --output=test-results/performance/graph > test-results/performance/graph.log 2>&1
+        run: bash scripts/run-scale-test.sh graph "$RUNNER_TEMP/openkraken-scale/repository" test-results/performance/graph
       - name: Watcher-warm status gates, three fresh profiles
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.fixture.outcome == 'success' }}
-        run: |
-          OPENKRAKEN_STATUS_BENCH_FIXTURE="$RUNNER_TEMP/openkraken-scale/fixture.json" \
-            xvfb-run -a pnpm exec playwright test tests/e2e/status-benchmark.test.ts --repeat-each=3 --reporter=list \
-            --output=test-results/performance/status > test-results/performance/status.log 2>&1
+        run: bash scripts/run-scale-test.sh status "$RUNNER_TEMP/openkraken-scale/fixture.json" test-results/performance/status
       - name: Compare every synthetic history page with native Git
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.fixture.outcome == 'success' }}
-        run: |
-          OPENKRAKEN_TRAVERSAL_REPO="$RUNNER_TEMP/openkraken-scale/repository" GIT_NO_LAZY_FETCH=1 \
-            xvfb-run -a pnpm exec playwright test tests/e2e/history-traversal.test.ts --reporter=list \
-            --output=test-results/performance/synthetic-traversal > test-results/performance/synthetic-traversal.log 2>&1
+        run: bash scripts/run-scale-test.sh traversal "$RUNNER_TEMP/openkraken-scale/repository" test-results/performance/synthetic-traversal
       - name: Generate and verify 50,000-reference fixtures
         id: references
         if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
@@ -60,22 +56,13 @@ jobs:
           done
       - name: 50,000 references with distinct targets, three fresh profiles
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.references.outcome == 'success' }}
-        run: |
-          OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/refs-distinct/repository.git" GIT_NO_LAZY_FETCH=1 \
-            xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --workers=1 --reporter=list \
-            --output=test-results/performance/refs-distinct > test-results/performance/refs-distinct.log 2>&1
+        run: bash scripts/run-scale-test.sh graph "$RUNNER_TEMP/refs-distinct/repository.git" test-results/performance/refs-distinct
       - name: 50,000 references across 500 targets, three fresh profiles
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.references.outcome == 'success' }}
-        run: |
-          OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/refs-grouped/repository.git" GIT_NO_LAZY_FETCH=1 \
-            xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --workers=1 --reporter=list \
-            --output=test-results/performance/refs-grouped > test-results/performance/refs-grouped.log 2>&1
+        run: bash scripts/run-scale-test.sh graph "$RUNNER_TEMP/refs-grouped/repository.git" test-results/performance/refs-grouped
       - name: 50,000 references with shared targets, three fresh profiles
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.references.outcome == 'success' }}
-        run: |
-          OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/refs-shared/repository.git" GIT_NO_LAZY_FETCH=1 \
-            xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --workers=1 --reporter=list \
-            --output=test-results/performance/refs-shared > test-results/performance/refs-shared.log 2>&1
+        run: bash scripts/run-scale-test.sh graph "$RUNNER_TEMP/refs-shared/repository.git" test-results/performance/refs-shared
       - name: Initialize the full Linux history fixture
         id: linux_init
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
@@ -86,7 +73,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/linux-history.git/objects/pack
-          key: linux-history-tree-filter-v1-${{ env.LINUX_HISTORY_REVISION }}
+          key: linux-history-tree-filter-v1-${{ matrix.os }}-${{ env.LINUX_HISTORY_REVISION }}
       - name: Prepare and verify pinned Linux history
         id: linux_history
         if: ${{ !cancelled() && steps.linux_init.outcome == 'success' }}
@@ -114,23 +101,30 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/linux-history.git/objects/pack
-          key: linux-history-tree-filter-v1-${{ env.LINUX_HISTORY_REVISION }}
+          key: linux-history-tree-filter-v1-${{ matrix.os }}-${{ env.LINUX_HISTORY_REVISION }}
       - name: Full Linux history gates, three fresh profiles
         if: ${{ !cancelled() && steps.linux_history.outcome == 'success' }}
-        run: |
-          OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/linux-history.git" GIT_NO_LAZY_FETCH=1 \
-            xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --workers=1 --reporter=list \
-            --output=test-results/performance/linux-history > test-results/performance/linux-history.log 2>&1
+        run: bash scripts/run-scale-test.sh graph "$RUNNER_TEMP/linux-history.git" test-results/performance/linux-history
       - name: Compare every Linux history page with native Git
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.linux_history.outcome == 'success' }}
+        run: bash scripts/run-scale-test.sh traversal "$RUNNER_TEMP/linux-history.git" test-results/performance/linux-traversal
+      - name: Generate 50,000 distinct references over full Linux history
+        id: linux_distinct
+        if: ${{ !cancelled() && steps.linux_history.outcome == 'success' }}
         run: |
-          OPENKRAKEN_TRAVERSAL_REPO="$RUNNER_TEMP/linux-history.git" GIT_NO_LAZY_FETCH=1 \
-            xvfb-run -a pnpm exec playwright test tests/e2e/history-traversal.test.ts --reporter=list \
-            --output=test-results/performance/linux-traversal > test-results/performance/linux-traversal.log 2>&1
+          node scripts/create-reference-performance-fixture.mjs "$RUNNER_TEMP/linux-history.git" \
+            "$RUNNER_TEMP/linux-refs-distinct" distinct > test-results/performance/linux-refs-distinct-fixture.log 2>&1
+          cp "$RUNNER_TEMP/linux-refs-distinct/fixture.json" test-results/performance/linux-refs-distinct-fixture.json
+      - name: Full Linux history with 50,000 distinct targets, three fresh profiles
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.linux_distinct.outcome == 'success' }}
+        run: bash scripts/run-scale-test.sh graph "$RUNNER_TEMP/linux-refs-distinct/repository.git" test-results/performance/linux-refs-distinct
+      - name: Compare every page of the 50,000-reference Linux fixture with native Git
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.linux_distinct.outcome == 'success' }}
+        run: bash scripts/run-scale-test.sh traversal "$RUNNER_TEMP/linux-refs-distinct/repository.git" test-results/performance/linux-refs-distinct-traversal
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: evidence-scale-performance-linux
+          name: evidence-scale-performance-${{ matrix.os }}
           path: test-results/performance/
   minimum-git:
     strategy:
