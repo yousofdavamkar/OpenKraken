@@ -112,7 +112,7 @@ async function kill(app: ElectronApplication) {
   expect(app.process().kill('SIGKILL')).toBe(true);
   await exited;
 }
-async function openCreate(app: ElectronApplication, provider: Provider) {
+async function openCreate(app: ElectronApplication, provider: Provider, clearTarget = false) {
   const page = await setup(app, provider);
   const connected = await page.evaluate(
     (provider) =>
@@ -132,7 +132,7 @@ async function openCreate(app: ElectronApplication, provider: Provider) {
       }),
     provider,
   );
-  expect(connected.kind).toBe('providerAccounts');
+  if (connected.kind !== 'providerAccounts') throw new Error('Missing fixture account');
   if (provider === 'enterprise') {
     await app.evaluate(({ session }) => {
       const connection = session.fromPartition('openkraken-providers');
@@ -179,13 +179,21 @@ async function openCreate(app: ElectronApplication, provider: Provider) {
   if (provider === 'enterprise') {
     await expect.poll(() => app.evaluate(() => 'releaseTemplates' in globalThis)).toBe(true);
     await expect(dialog.getByLabel('Target branch', { exact: true })).toHaveValue('');
+    if (clearTarget) {
+      const base = dialog.getByLabel('Target branch', { exact: true });
+      await base.fill('temporary');
+      await base.fill('');
+    }
     await app.evaluate(() =>
       (globalThis as typeof globalThis & { releaseTemplates: () => void }).releaseTemplates(),
     );
+    await expect(dialog.getByText(/Templates from main at/)).toBeVisible();
   }
-  await expect(dialog.getByLabel('Target branch', { exact: true })).toHaveValue('main');
+  await expect(dialog.getByLabel('Target branch', { exact: true })).toHaveValue(
+    clearTarget ? '' : 'main',
+  );
   await expect(dialog.getByText('Draft saved locally')).toBeVisible();
-  return { page, dialog };
+  return { page, dialog, accountId: connected.state.accounts[0]!.id };
 }
 
 for (const provider of ['github', 'enterprise', 'gitlab'] as const)
@@ -377,6 +385,30 @@ test('cancel during protected creation save prevents dispatch, and a changed dra
     await dialog.getByRole('button', { name: 'Submit without crash recovery' }).click();
     await expect(dialog.getByRole('alert')).toContainText('rejected');
     expect((await traffic(app)).posts).toBe(1);
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('an explicitly cleared target branch stays empty in the saved draft when templates finish', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ok-cleared-creation-base-'));
+  const app = await electron.launch({ args: [resolve('apps/desktop'), '--user-data-dir=' + root] });
+  try {
+    const { page, accountId } = await openCreate(app, 'enterprise', true);
+    const result = await page.evaluate(
+      (accountId) =>
+        window.openkraken.request({
+          id: crypto.randomUUID(),
+          method: 'pullDraftRead',
+          scope: { accountId, repository: { owner: 'team', name: 'project' } },
+        }),
+      accountId,
+    );
+    expect(result).toMatchObject({
+      kind: 'pullDraft',
+      draft: { base: '', head: 'feature/topic', body: 'Private request description' },
+    });
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });
