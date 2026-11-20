@@ -1,6 +1,14 @@
 import { _electron as electron, expect, type ElectronApplication } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 
 export async function loadHistory(app: ElectronApplication, path: string) {
@@ -17,6 +25,19 @@ export async function loadHistory(app: ElectronApplication, path: string) {
   }
 }
 
+const pageFiles = ['prefix.json', 'tail-0.json', 'tail-1.json', 'tail-2.json'];
+
+export function copySavedHistoryWindow(source: string, profile: string, path: string) {
+  const directory = join('history', createHash('sha256').update(realpathSync(path)).digest('hex'));
+  mkdirSync(join(profile, directory), { recursive: true });
+  for (const name of pageFiles) {
+    const file = join(source, directory, name);
+    expect(lstatSync(file).isFile(), name).toBe(true);
+    cpSync(file, join(profile, directory, name), { preserveTimestamps: true });
+  }
+  return persistedWindowSize(profile, path);
+}
+
 // The warm-up opens one repository in an otherwise empty profile.
 function persistedWindowSize(profile: string, path: string) {
   const history = join(profile, 'history');
@@ -25,7 +46,7 @@ function persistedWindowSize(profile: string, path: string) {
   expect(directories).toEqual([createHash('sha256').update(realpathSync(path)).digest('hex')]);
   let offset = 0;
   let key: string | undefined;
-  for (const name of ['prefix.json', 'tail-0.json', 'tail-1.json', 'tail-2.json']) {
+  for (const name of pageFiles) {
     const file = join(history, directories[0]!, name);
     const page = JSON.parse(readFileSync(file, 'utf8'));
     if (offset === 0) {

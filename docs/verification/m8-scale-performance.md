@@ -14,6 +14,12 @@ Set `OPENKRAKEN_BENCH_WARM=1` when running the traversal against a scale fixture
 OPENKRAKEN_BENCH_WARM=1 bash scripts/run-scale-test.sh traversal "$fixture/repository.git" test-results/restarted-traversal
 ```
 
+To test an existing 17,000-commit window after a branch moves, set `OPENKRAKEN_TRAVERSAL_PROFILE` to the Electron profile that saved the window at the same repository path. The traversal copies its four history pages into a temporary profile, preserves their timestamps and compares the entire current history against Git. Supplying a saved profile skips the warm-up launch.
+
+```sh
+OPENKRAKEN_TRAVERSAL_PROFILE="$saved_profile" bash scripts/run-scale-test.sh traversal "$fixture/repository.git" test-results/changed-history-traversal
+```
+
 To check a repository switch as well, set `OPENKRAKEN_BENCH_FROM_REPO` to a different fixture with at least 17,001 commits. The test opens that source, loads 17,000 commits there, then opens the destination through the desktop bridge. It checks the canonical destination path before comparing every page with Git. With `OPENKRAKEN_BENCH_WARM=1`, the destination already has a saved 17,000-commit window.
 
 ## Native desktop CI gates

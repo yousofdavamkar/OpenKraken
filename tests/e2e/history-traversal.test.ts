@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test } from '@playwright/test';
-import { loadHistory, warmHistoryProfile } from '../history-profile.js';
+import { copySavedHistoryWindow, loadHistory, warmHistoryProfile } from '../history-profile.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
@@ -81,10 +81,11 @@ test('every desktop history page matches native Git through the final commit', a
   const profile = mkdtempSync(join(tmpdir(), 'openkraken-traversal-'));
   let app;
   try {
-    const persistedCommits =
-      process.env.OPENKRAKEN_BENCH_WARM === '1'
-        ? await warmHistoryProfile(profile, cwd)
-        : undefined;
+    const savedProfile = process.env.OPENKRAKEN_TRAVERSAL_PROFILE;
+    let persistedCommits: number | undefined;
+    if (savedProfile) persistedCommits = copySavedHistoryWindow(savedProfile, profile, cwd);
+    else if (process.env.OPENKRAKEN_BENCH_WARM === '1')
+      persistedCommits = await warmHistoryProfile(profile, cwd);
     app = await electron.launch({
       args: [resolve('apps/desktop'), `--user-data-dir=${profile}`],
     });
