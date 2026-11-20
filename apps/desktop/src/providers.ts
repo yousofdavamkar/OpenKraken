@@ -1,3 +1,4 @@
+import type { MergeDrafts, MergeDraftRequest } from './merge-drafts.js';
 import { PullDrafts, type PullDraftRequest } from './pull-drafts.js';
 import { DraftEncryptionUnavailable } from './protected-draft-files.js';
 import type { IssueDraftRequest, IssueDrafts } from './issue-drafts.js';
@@ -351,12 +352,26 @@ export class ProviderService {
       store.request(request),
     );
   }
-  private connectedDraft<T>(accountId: string, kind: string, action: () => Promise<T>) {
+  mergeDraft(store: MergeDrafts, request: MergeDraftRequest) {
+    return this.connectedDraft(
+      request.scope.accountId,
+      'merge',
+      () => store.request(request),
+      request.method === 'mergeDraftSave' ? request.draft?.provider : undefined,
+    );
+  }
+  private connectedDraft<T>(
+    accountId: string,
+    kind: string,
+    action: () => Promise<T>,
+    provider?: 'github' | 'gitlab',
+  ) {
     return this.run(async () => {
       if (
         !(await this.load()).some(
           (account) =>
             account.id === accountId &&
+            (!provider || account.provider === provider) &&
             (account.provider === 'github' || account.provider === 'gitlab'),
         )
       )

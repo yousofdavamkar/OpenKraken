@@ -1,3 +1,5 @@
+import { mergeDraftRequests, mergeDraftResults } from './merge-drafts.js';
+export * from './merge-drafts.js';
 import { pullDraftRequests, pullDraftResults } from './pull-drafts.js';
 export * from './pull-drafts.js';
 import type { HistoryPageReply, SnapshotBodies } from './page-transfer.js';
@@ -1357,6 +1359,7 @@ export const requestSchema = z.discriminatedUnion('method', [
   ...reviewDraftRequests,
   ...issueDraftRequests,
   ...pullDraftRequests,
+  ...mergeDraftRequests,
   z
     .object({
       id: requestId,
@@ -2068,6 +2071,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   ...reviewDraftResults,
   ...issueDraftResults,
   ...pullDraftResults,
+  ...mergeDraftResults,
   z.object({ kind: z.literal('commitDraft'), state: commitDraftStateSchema }).strict(),
   z.object({ kind: z.literal('activity'), state: activityStateSchema }).strict(),
   z

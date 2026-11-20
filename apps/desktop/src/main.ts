@@ -1,3 +1,4 @@
+import { MergeDrafts } from './merge-drafts.js';
 import { PullDrafts } from './pull-drafts.js';
 import { IssueDrafts } from './issue-drafts.js';
 import { ReviewDrafts } from './review-drafts.js';
@@ -913,6 +914,9 @@ export function startDesktop(
           request.method === 'providerBitbucketWorkspaces' ||
           request.method === 'providerBitbucketRepositories' ||
           request.method === 'providerRepositories' ||
+          request.method === 'mergeDraftRead' ||
+          request.method === 'mergeDraftSave' ||
+          request.method === 'mergeDraftList' ||
           request.method === 'pullDraftRead' ||
           request.method === 'pullDraftSave' ||
           request.method === 'pullDraftList' ||
@@ -940,6 +944,16 @@ export function startDesktop(
           const controller = new AbortController();
           providerRequests.set(request.id, controller);
 
+          if (
+            request.method === 'mergeDraftRead' ||
+            request.method === 'mergeDraftSave' ||
+            request.method === 'mergeDraftList'
+          ) {
+            return await providers.mergeDraft(
+              new MergeDrafts(app.getPath('userData'), electronSecretProtection(safeStorage)),
+              request,
+            );
+          }
           if (
             request.method === 'pullDraftRead' ||
             request.method === 'pullDraftSave' ||
@@ -1537,6 +1551,9 @@ export function startDesktop(
           request.method === 'providerBitbucketWorkspaces' ||
           request.method === 'providerBitbucketRepositories' ||
           request.method === 'providerRepositories' ||
+          request.method === 'mergeDraftRead' ||
+          request.method === 'mergeDraftSave' ||
+          request.method === 'mergeDraftList' ||
           request.method === 'pullDraftRead' ||
           request.method === 'pullDraftSave' ||
           request.method === 'pullDraftList' ||
@@ -1599,6 +1616,7 @@ export function startDesktop(
           'reviewDraftSave',
           'issueDraftSave',
           'pullDraftSave',
+          'mergeDraftSave',
           'nativeDraftWrite',
           'nativeDraftDismiss',
           'workingDraftWrite',
