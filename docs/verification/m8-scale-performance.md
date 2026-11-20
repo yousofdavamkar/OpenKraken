@@ -2,6 +2,19 @@
 
 The Linux x64 synthetic scale gates pass after removing a duplicate index fingerprint from working-state reads. **M8 remains incomplete:** the separate 50,000-ref first-paint gate still fails, and cross-platform/release acceptance remains open. All measurements below are retained in [m8-scale-performance.json](m8-scale-performance.json).
 
+## Native desktop CI gates
+
+The scale job now runs separately on Ubuntu x64, Ubuntu ARM64, macOS and Windows. Each runner opens the synthetic checkout, the three synthetic 50,000-ref distributions, full Linux history and full Linux history with 50,000 distinct ref targets. Each opening gate uses three fresh profiles and checks the initial 2,000 commits, displayed reference count, three appends and scrolling. Each runner also compares every page of both full Linux fixtures and the synthetic checkout with native Git. Job artifacts use the runner label so a failed measurement can be inspected independently.
+
+Local Linux x64 verification used Git 2.53.0, fresh profiles and retained OS caches. The fixture generator created a new bare repository with 50,000 distinct targets over full Linux history at `46fec1c3029b552ec63b2d01af9d43a386f043ea`.
+
+| Full Linux history      | First paint, three runs (ms) | Nine 5,000-commit appends (ms) | Graph frame p95 (ms) |
+| ----------------------- | ---------------------------- | ------------------------------ | -------------------- |
+| One ref                 | 324.2, 344.5, 333.8          | 155.2–233.5                    | 16.8                 |
+| 50,000 distinct targets | 710.8, 741.1, 724.7          | 178.1–232.9                    | 16.7–16.8            |
+
+The one-ref gate passed. All three distinct-target runs failed the 500 ms first-paint assertion and retained their phase timings. The 302-page traversal matched every ordered ID and parent list across 1,505,199 commits. Across three status runs on the 100,000-file checkout, all 30 clean and dirty reads met 300 ms (174.0–223.3 ms). External edits appeared in 855.2–868.2 ms. The workflow passed actionlint locally. Hosted runner execution and native measurements on ARM64, macOS and Windows remain open. [Per-run graph timings](m8-opening-experiments.csv)
+
 ## Fixture and measurement boundaries
 
 The disposable fixture has **2,000,000 reachable commits, 100,000 tracked files, 1,999 genuine merges and two branch tips**, with a complete checkout and native commit graph. HEAD is `606403fd8ea711764e0ca26ada7fc10bbbde974a`. HEAD alone reaches 1,999,999 commits; the final topic tip supplies the remaining commit and is included in the app's history roots. The graph harness records the HEAD-only count, while the generator manifest records `--all`.

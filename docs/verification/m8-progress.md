@@ -2,6 +2,10 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest three runs. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Cross-platform performance gates
+
+CI now measures the same scale fixtures independently on Linux x64, Linux ARM64, macOS and Windows, including 50,000 distinct targets over full Linux history. On Linux x64 the new distinct-target gate failed all three first paints (710.8–741.1 ms). Its nine appends passed, and 302 pages matched native Git through the final commit. The other platforms still require native execution. [Scale gates and measured results](m8-scale-performance.md#native-desktop-ci-gates)
+
 ## Wide history graphs on Linux x64
 
 The Canvas now clips vertical passages once per visible 500-row bucket. Paging retains the completed buckets, including when an uncommitted change shifts the page boundary by a row. On a synthetic graph with 50,000 simultaneous lanes, median draw time fell from 51.2 to 1.6 ms with matching pixels. The packaged app passed graph drawing, two appends, repository search and keyboard navigation.
