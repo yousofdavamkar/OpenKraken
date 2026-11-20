@@ -54,6 +54,8 @@ M6 is in progress as of 2026-11-02, at implementation checkpoint `8a4c9a5`. M0â€
 
 ## Verification
 
+The Bitbucket build and merge check increment passed 1,170 unit and native tests on Linux x64 with nine skips. Eight focused Electron scenarios passed across Bitbucket, GitLab and GitHub. The Bitbucket fixtures covered status paging, retries, advisory and blocking failures, and scheduled refresh after a Git conflict cleared. The Linux x64 package from `febd048` passed the Canvas, history paging, search and keyboard smoke tests. Live Bitbucket acceptance remains open.
+
 | Check                                                                | Result                                                      |
 | -------------------------------------------------------------------- | ----------------------------------------------------------- |
 | Full Vitest suite                                                    | 504 tests passed across 67 files                            |
