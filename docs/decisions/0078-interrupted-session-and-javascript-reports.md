@@ -27,3 +27,9 @@ Linux desktop tests use a temporary HTTPS receiver. They exercise a marker chang
 The primary instance registers its exception monitor and Electron child-process listener immediately after starting the reporter. An observed failure can arrive before the profile read completes. The reporter remembers the current consent generation and waits for that read and startup validation. It sends only if the saved consent applies to the configured destination and the generation still matches. A first opt-in cannot authorize an earlier failure. Closing or revoking during the read keeps reporting disabled.
 
 The Linux Electron fixture throws a main-process exception on the first tick after loading the real entry point. A second fixture emits Electron’s GPU termination notification at the same point. Each exercises a fresh profile, a restart after opt-in, and a restart after opt-out against a local HTTPS receiver. Failures before monitor registration, and process death before either delivery or session-marker creation, remain outside this coverage.
+
+## Sandboxed preload exceptions
+
+Electron can notify the main process when a preload script throws before the renderer can use its bridge. The primary window registers a `preload-error` listener before loading the document. It records the existing renderer exception category in local diagnostics and passes only that category to the consent-checked reporter. The script path and exception object stay outside both records.
+
+The Electron test registers a sandboxed preload script that throws during window startup. The loopback HTTPS receiver gets one renderer exception summary on an opted-in restart and none on a fresh profile or after revocation. The test checks the envelope for private strings from the script path and exception.

@@ -18,11 +18,11 @@ The listing review binds the canonical project identity, origin, default branch 
 
 ## Desktop behavior and verification
 
-The shared creation composer uses provider-specific IPC and labels. Reviewed fields are disabled until editing resumes. Changed branches preserve the draft, successful creation refreshes the list, and an uncertain result offers bounded read-only list inspection followed by an explicit return to the draft. Closing an unsent draft requires keep/discard; cancellation retires pending requests and does not close the parent browser. No creation draft is persisted across restart yet.
+The shared creation composer uses provider-specific IPC and labels. Reviewed fields are disabled until editing resumes. Changed branches preserve the draft, successful creation refreshes the list, and an uncertain result offers bounded read-only list inspection followed by an explicit return to the draft. Closing an unsent draft requires keep/discard; cancellation retires pending requests and does not close the parent browser. The composer now supports [recovery across restart](0129-pull-creation-drafts.md).
 
 ProviderService/MSW tests cover self-managed fork endpoints, same-project creation, exact native payloads, project/tip/draft changes, archive/equal-tip refusal, asynchronous empty fields, rejected and uncertain results, cancellation before/after dispatch, template limits, malformed selections and stale listings. Strict IPC separates these operations from the private Git service. Electron acceptance exercises template preview/replacement, frozen review, changed-commit refusal, preserved text, exact fork creation, uncertain-result inspection, cancellation and draft discard alongside the existing GitHub creation flow.
 
-Live GitLab writes, inherited-template behavior on a live server and server-specific permission configurations remain unverified. Rule administration, branch creation/suggestions and durable drafts are separate work.
+Live GitLab writes, inherited-template behavior on a live server and server-specific permission configurations remain unverified. Rule administration and branch creation/suggestions remain separate work.
 
 ## Public references
 
