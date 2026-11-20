@@ -1,6 +1,27 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest run. The shared-HEAD 50,000-ref fixture meets the opening budget intermittently. The distinct-target and nested annotated-tag fixtures still exceed it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+M8 remains in progress. On Linux x64, full Linux history with one ref and with 49,999 aliases on the first row met the 500 ms opening and 300 ms paging budgets in the latest runs. The 50,000-distinct-target fixture still exceeds the opening budget. Native Windows/macOS and ARM64 acceptance, the production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+
+## Fresh-profile graph opening with annotated refs
+
+Each profile opened the first 2,000 commits, appended three pages of 5,000, and scrolled the graph with 12,000 commits loaded. Runs on Linux x64 used Git 2.53.0 and populated OS caches. The table retains every run of these four fixtures from this verification. [Per-run timing and phase data](m8-opening-experiments.csv)
+
+| Full Linux history                                         | First paint in run order | 5,000-commit appends | Graph frame interval p95 |
+| ---------------------------------------------------------- | -----------------------: | -------------------: | -----------------------: |
+| One ref                                                    |                 320.1 ms |       200.6–236.3 ms |                  16.8 ms |
+| 49,999 aliases of a nested tag on the first row, plus HEAD | 493.0 / 481.8 / 481.8 ms |       173.6–227.4 ms |             16.7–16.8 ms |
+| 50,000 distinct targets with one annotated tag             | 721.2 / 721.7 / 707.1 ms |       181.7–235.2 ms |                  16.7 ms |
+| 50,000 distinct ordinary refs                              |               1,052.3 ms |       190.8–198.3 ms |                  16.8 ms |
+
+All three nested-tag profiles selected the first row with Home, opened its badge with Enter, found the last canonical alias and restored focus on closing. The generated root is one second newer than HEAD. An earlier generator placed that root below the opening viewport. Its three timings (735.0, 729.7 and 718.9 ms) remain in the CSV under `nested-aliases-older-root`.
+
+Both Git 2.38.0 and 2.53.0 matched the desktop's ordered commits and parent lists through page 302 on the corrected nested-tag fixture. It has 1,505,199 commits from HEAD and 1,505,200 from all refs. SHA-256 for all reachable history was `53036597ef19355b858697c70931d94813290d6b133674f4bc50408734603d14`. The distinct-target fixture with one annotation also matched Git 2.53.0 on all 302 pages, with 1,505,199 commits and the digest below. [Fixture and sampling comparisons](m8-reference-performance.md#resolving-annotated-objects-before-enumerating-refs)
+
+When a branch tracked an annotated tag, Shift+H paged to the end of history while the graph selection stayed at HEAD. The shortcut now selects the commit behind the tag. The desktop regression crosses the 2,000-row boundary on Git 2.38.0 and 2.53.0. The graph model also checks hidden tracking tips and upstreams pointing to trees and blobs. [Keyboard navigation](../decisions/0004-m1-history-and-interaction.md)
+
+After restarting with a verified 17,000-commit window on disk, the three nested-alias profiles painted in 497.0, 473.0 and 478.0 ms. The distinct-target fixture with one annotation took 669.8, 673.6 and 712.7 ms. All 18 appends met 300 ms. A further nested-alias run checked that all four persisted pages shared a cache key and painted in 480.1 ms. With Git replacement handling disabled by the environment, the app skips disk caching and the benchmark correctly rejected the warm profile before measuring. [Restart methodology](m8-scale-performance.md)
+
+The Linux x64 native and unit suite passed 1,135 tests with nine skips. The 39 Electron graph, sidebar, ref-dialog, history-cache and snapshot-transfer tests passed, including all six visual goldens. Git 2.38.0 passed the focused native reference and history suite (69 passed, 12 skipped). Unsigned DEB, RPM and AppImage payloads from clean commit `f03876d` passed the packaged graph, two appends, repository search, keyboard and renderer-isolation checks. The annotated-upstream shortcut was subsequently verified in the development build on both Git versions.
 
 ## Ordered history and graph shortcuts on Linux
 
