@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Commit } from '@openkraken/ipc-contract';
+import type { Commit, Ref } from '@openkraken/ipc-contract';
 import { rawHistoryStream } from './parsers.js';
 import { GitError, runGit } from './runner.js';
 
@@ -14,7 +14,10 @@ export interface HistorySeed {
 }
 export class HistoryCursor {
   readonly id = randomUUID();
-  readonly starts: string[];
+  private roots: readonly string[];
+  get starts() {
+    return this.roots;
+  }
   private buffer: Commit[] = [];
   private bufferedBytes = 0;
   private size(commit: Commit) {
@@ -49,7 +52,7 @@ export class HistoryCursor {
     prefetchUnreplaced?: number,
   ) {
     if (prefetchUnreplaced) this.demand = prefetchUnreplaced + 1;
-    this.starts = [...starts];
+    this.roots = [...starts];
     if (seed) {
       this.cached = [...seed.commits];
       this.cachedMore = seed.hasMore;
@@ -153,6 +156,31 @@ export class HistoryCursor {
       .finally(() => {
         this.changed?.();
       });
+  }
+  /** Git peels annotated tips before walking. Confirm the same ordered commits before adoption. */
+  confirmRoots(ordered: readonly string[], refs: readonly Ref[]) {
+    if (this.roots.length < ordered.length) return false;
+    if (
+      this.roots.length === ordered.length &&
+      ordered.every((oid, index) => oid === this.roots[index])
+    )
+      return true;
+    const peeled = new Map<string, string>();
+    for (const ref of refs) {
+      if (ref.objectType === 'tag' && ref.peeledType === 'commit' && ref.peeled)
+        peeled.set(ref.target, ref.peeled);
+    }
+    if (!peeled.size) return false;
+    const seen = new Set<string>();
+    for (const root of this.roots) {
+      const commit = peeled.get(root) ?? root;
+      if (seen.has(commit)) continue;
+      if (ordered[seen.size] !== commit) return false;
+      seen.add(commit);
+    }
+    if (seen.size !== ordered.length) return false;
+    this.roots = [...ordered];
+    return true;
   }
   async page(expectedOffset: number, count: number, signal?: AbortSignal) {
     if (this.reading) throw new GitError('PAGE_BUSY', 'A history page is already loading');

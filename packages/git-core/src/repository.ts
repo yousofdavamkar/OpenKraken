@@ -640,8 +640,7 @@ export class RepositoryService {
         !seed &&
         !hasStash &&
         !refs.some((ref) => ref.name.startsWith('refs/replace/')) &&
-        candidate.starts.length === ordered.length &&
-        ordered.every((oid, i) => candidate.starts[i] === oid) &&
+        candidate.confirmRoots(ordered, refs) &&
         !(await exists(join(repository.commonDir, 'shallow'))) &&
         !(await exists(join(repository.commonDir, 'info/grafts')))
       ) {
@@ -687,7 +686,7 @@ export class RepositoryService {
   }
   private async searchMessagesAndAuthors(
     path: string,
-    starts: string[],
+    starts: readonly string[],
     query: string,
     signal?: AbortSignal,
   ) {

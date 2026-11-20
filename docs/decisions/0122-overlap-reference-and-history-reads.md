@@ -19,3 +19,9 @@ On an unfiltered open, if at least 32 sampled packed refs all point to the objec
 ## Packed annotated tags
 
 When the bounded packed-ref sample shows repeated targets and a peeled record, an unfiltered cold open asks Git for the direct object IDs of the first 128 refs. Git resolves the distinct IDs to commits in ref order with `rev-list --no-walk=unsorted --stdin` and replacement objects disabled. This lets the early walk start from the same commit IDs that the full enumeration will later use for nested annotations. The service compares every ordered root before adopting the cursor. A later independent ref, an incomplete sample, or an unavailable speculative result can require the ordinary walk. Both paths retain the original first-page and append deadlines.
+
+## Validating walks started from tag objects
+
+A native unfiltered or filtered probe can capture an annotated tag's object ID before the full ref scan resolves its commit. When the raw root list differs, map captured tag IDs through the full enumeration's verified commit targets, retain first occurrences, and compare every ordered commit with the authoritative root list. A matching cursor records those commit IDs for subsequent search. An unknown target, tree/blob tag, missing commit or different order fails the comparison. The cache, stash, replacement, graft and shallow checks still apply.
+
+The native regressions cover two different annotations of one independent commit, a nested annotation, a moved annotation, and a tree tag. They compare the first and appended pages with a new native walk and verify that searching the independent tip recognizes the captured commit directly.

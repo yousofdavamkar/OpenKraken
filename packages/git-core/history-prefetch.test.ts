@@ -51,6 +51,9 @@ test.each([
   'reordered',
   'replace',
   'annotated',
+  'nested annotations',
+  'moved annotation',
+  'tree annotation',
   'failed walk',
 ] as const)(
   'the first and appended pages match a normal native walk with %s roots',
@@ -62,6 +65,13 @@ test.each([
     if (kind === 'detached') fixtureGit(path, ['update-ref', '--no-deref', 'HEAD', orphan]);
     if (kind === 'replace') fixtureGit(path, ['replace', 'HEAD~2050', orphan]);
     if (kind === 'annotated') fixtureGit(path, ['tag', '-a', 'annotation', '-m', 'Annotation']);
+    if (kind === 'tree annotation') fixtureGit(path, ['tag', '-a', 'tree', tree, '-m', 'Tree']);
+    if (kind === 'nested annotations' || kind === 'moved annotation') {
+      fixtureGit(path, ['tag', '-a', 'inner', orphan, '-m', 'Inner']);
+      fixtureGit(path, ['tag', '-a', 'outer', 'inner', '-m', 'Outer']);
+      fixtureGit(path, ['tag', '-a', 'other', orphan, '-m', 'Same commit, different tag']);
+      fixtureGit(path, ['tag', '-d', 'inner']);
+    }
     if (kind === 'reordered') {
       fixtureGit(path, ['update-ref', 'refs/heads/a', 'HEAD~2']);
       fixtureGit(path, ['update-ref', 'refs/heads/b', orphan]);
@@ -85,6 +95,10 @@ test.each([
     const snapshot = service.snapshot(repo.id, undefined, false);
     try {
       await vi.waitFor(() => expect(early).toHaveBeenCalledOnce(), { timeout: 5000 });
+      if (kind === 'moved annotation') {
+        fixtureGit(path, ['tag', '-f', 'outer', 'HEAD~2']);
+        fixtureGit(path, ['tag', '-d', 'other']);
+      }
       if (kind === 'moved') fixtureGit(path, ['update-ref', 'refs/heads/new', orphan]);
       if (kind === 'reordered') {
         fixtureGit(path, ['update-ref', 'refs/heads/a', orphan]);
@@ -93,12 +107,23 @@ test.each([
       full.resolve();
       const first = await snapshot;
       expect(ordinary).toHaveBeenCalledTimes(
-        ['unchanged', 'loose', 'detached'].includes(kind) ? 0 : 1,
+        ['unchanged', 'loose', 'detached', 'annotated', 'nested annotations'].includes(kind)
+          ? 0
+          : 1,
       );
       const tail = await service.page(repo.id, first.cursor, 2000, 5000);
       expect(first.commits).toHaveLength(2000);
       expect(tail.offset).toBe(2000);
       expect(tail.hasMore).toBe(false);
+      if (kind === 'nested annotations') {
+        const match = await service.search(repo.id, first.cursor, orphan);
+        expect(match.commits.map((commit) => commit.oid)).toEqual([orphan]);
+        expect(
+          run.mock.calls.some(
+            ([, args]) => args.includes('--max-count=1') && args[0] === 'rev-list',
+          ),
+        ).toBe(false);
+      }
       const reference = await service.snapshot(repo.id);
       expect(first.commits).toEqual(reference.commits);
       expect(tail.commits).toEqual(
