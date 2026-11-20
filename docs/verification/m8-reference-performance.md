@@ -2,6 +2,19 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Git object cache and snapshot transfer on November 20
+
+A Git trace of a fresh Electron profile on Linux x64 measured 889.1 ms from opening the repository to painting 2,000 commits. The native snapshot took 470.4 ms. Within that interval Git spent 287.7 ms enumerating the 50,000 refs and their types. The three subsequent 5,000-commit pages took 299.2, 256.6 and 228.6 ms. Scrolling measured 16.8 ms p95 for history and 16.7 ms for references. The fixture contains 1,505,199 Linux commits, distinct ref targets and one annotated tag.
+
+Two separate experiments alternated build order and used fresh Electron profiles with populated OS caches. The control and candidate each had one warm-up opening before the measured pairs. All measured openings exceeded 500 ms. [Individual measurements](m8-opening-experiments.csv)
+
+| Experiment                                                                   | Measured pairs | Median first paint, control → candidate | Other measurement, control → candidate   |
+| ---------------------------------------------------------------------------- | -------------: | --------------------------------------: | ---------------------------------------- |
+| Give Git a 256 MiB delta base cache during ref enumeration                   |              5 |                        807.8 → 815.5 ms | Native snapshot 436.8 → 436.6 ms         |
+| Send compact ref strings in one NUL-delimited field beside the snapshot JSON |              6 |                        729.8 → 748.1 ms | Renderer snapshot decoding 16.5 → 7.1 ms |
+
+In six isolated native trials per condition after warm-up, median ref enumeration with Git 2.53.0 took 182.6 ms with its default settings, 176.7 ms with the larger delta base cache, 191.4 ms with a 4 GiB packed window and 190.0 ms with a 16 MiB window. All outputs were byte-identical. The desktop keeps Git’s configured cache settings and the existing snapshot transfer format.
+
 ## Retained memory in a 50,000-ref sidebar
 
 The sidebar now indexes runs of adjacent references of the same kind. Five measured pairs compared the range index with the four-row arrays on Linux x64, using Git 2.53.0 and the 1,505,199-commit Linux fixture with 50,000 distinct ref targets and one annotation. Each experiment used a warm-up pair (pair zero), alternated build order and retained OS caches.
