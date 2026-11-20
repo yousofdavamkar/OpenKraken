@@ -43,11 +43,22 @@ async function powershell(script, args) {
   );
 }
 
-export const windowsAskpassArchivePath = 'dist/helpers/openkraken-askpass.exe';
-export const msiExecutables = [
-  'openkraken.exe',
-  'resources/app.asar.unpacked/' + windowsAskpassArchivePath,
-];
+const powerShellStartup = 'dist/shell-integration/powershell.ps1';
+export const windowsSignedArchivePaths = ['dist/helpers/openkraken-askpass.exe', powerShellStartup];
+
+export async function verifyWindowsArchiveSignatures(
+  resources,
+  identity,
+  options,
+  allowLegacy = false,
+) {
+  for (const name of windowsSignedArchivePaths) {
+    const present = await verifyAsarUnpackedFile(resources, name, {
+      allowMissing: allowLegacy && name === powerShellStartup,
+    });
+    if (present) await authenticode(join(resources, 'app.asar.unpacked', name), identity, options);
+  }
+}
 
 export function windowsIdentity(target, fingerprint) {
   if (fingerprint === undefined) return undefined;
@@ -355,9 +366,13 @@ export async function verifyMsi(source, manifest, identity, requireTimestamp = f
     const directory = dirname(executable);
     comparePayload(manifest.payload, await payloadManifest(directory));
     if (identity) {
-      for (const name of msiExecutables)
-        await authenticode(join(directory, name), identity, signatureOptions);
-      await verifyAsarUnpackedFile(join(directory, 'resources'), windowsAskpassArchivePath);
+      await authenticode(executable, identity, signatureOptions);
+      await verifyWindowsArchiveSignatures(
+        join(directory, 'resources'),
+        identity,
+        signatureOptions,
+        true,
+      );
     }
     await verifyFuses(executable);
     verifyPackagedApplication(directory, manifest.version, manifest.source ?? null);

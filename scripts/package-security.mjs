@@ -7,7 +7,7 @@ import { getCurrentFuseWire, FuseV1Options, FuseState } from '@electron/fuses';
 import { readWindowsPayloadAccess } from './windows-payload.mjs';
 
 const require = createRequire(import.meta.url);
-const { extractFile, statFile } = createRequire(require.resolve('@electron/packager'))(
+const { extractFile, listPackage, statFile } = createRequire(require.resolve('@electron/packager'))(
   '@electron/asar',
 );
 
@@ -55,10 +55,21 @@ export function verifyPackagedApplication(directory, version, claimedSource) {
   return source ? { commit: source.commit, dirty: source.dirty } : null;
 }
 
-export async function verifyAsarUnpackedFile(resources, name) {
-  const entry = statFile(join(resources, 'app.asar'), name);
+export async function verifyAsarUnpackedFile(resources, name, { allowMissing = false } = {}) {
+  const archive = join(resources, 'app.asar');
   const path = join(resources, 'app.asar.unpacked', name);
-  const info = await lstat(path);
+  const info = await lstat(path).catch((error) => {
+    if (allowMissing && error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (!info) {
+    const listed = listPackage(archive).some(
+      (entry) => entry.replaceAll('\\', '/').replace(/^\//, '') === name,
+    );
+    if (listed) throw new Error('Missing unpacked file listed in ASAR: ' + name);
+    return false;
+  }
+  const entry = statFile(archive, name);
   if (
     !entry.unpacked ||
     !info.isFile() ||
@@ -67,6 +78,7 @@ export async function verifyAsarUnpackedFile(resources, name) {
     entry.integrity.hash !== (await sha256(path))
   )
     throw new Error('Unpacked file differs from its ASAR integrity record: ' + name);
+  return true;
 }
 
 export const packageFuses = {

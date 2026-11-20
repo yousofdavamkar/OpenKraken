@@ -41,6 +41,13 @@ try {
         }
         throw "Expected Authenticode rejection: $Expected"
     }
+    $startup = Join-Path $fixture.FullName 'release/OpenKraken-win32-x64/resources/app.asar.unpacked/dist/shell-integration/powershell.ps1'
+    & "$PSScriptRoot/windows-authenticode.ps1" -Path $startup -Fingerprint $pin
+    $changedStartup = Join-Path $fixture.FullName 'changed-startup.ps1'
+    Copy-Item -LiteralPath $startup -Destination $changedStartup
+    $contents = [IO.File]::ReadAllText($changedStartup)
+    [IO.File]::WriteAllText($changedStartup, "# changed startup`r`n" + $contents)
+    Assert-Rejected $changedStartup $pin 'selected publisher'
     Assert-Rejected $file ('AB' * 32) 'selected publisher'
     Assert-Rejected $file $pin 'Missing Authenticode timestamp' -Timestamp
     $changed = Join-Path $fixture.FullName 'modified-helper.exe'

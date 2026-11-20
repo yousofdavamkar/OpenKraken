@@ -5,7 +5,6 @@ import {
   pinnedElectronRuntime,
   payloadManifest,
   verifyFuses,
-  verifyAsarUnpackedFile,
 } from './package-security.mjs';
 import { buildLinuxNative } from './linux-native.mjs';
 import { mkdir, readFile, writeFile, rm, lstat, readdir, chmod } from 'node:fs/promises';
@@ -13,7 +12,8 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
   authenticode,
-  windowsAskpassArchivePath,
+  verifyWindowsArchiveSignatures,
+  windowsSignedArchivePaths,
   windowsIdentity,
   windowsTimestamp,
 } from './msi.mjs';
@@ -55,11 +55,11 @@ execFileSync(process.execPath, [join(import.meta.dirname, 'build.mjs'), join(sta
 });
 await buildLinuxNative(staging);
 // Electron records unpacked file sizes and digests when it creates the ASAR.
-if (winIdentity)
-  await authenticode(join(staging, windowsAskpassArchivePath), winIdentity, {
-    sign: true,
-    timestampUrl,
-  });
+if (winIdentity) {
+  for (const name of windowsSignedArchivePaths) {
+    await authenticode(join(staging, name), winIdentity, { sign: true, timestampUrl });
+  }
+}
 await writeFile(
   join(staging, 'package.json'),
   JSON.stringify({
@@ -108,13 +108,9 @@ for (const output of outputs) {
     ...packageFuses,
   });
   if (winIdentity) {
-    const resources = join(output, 'resources');
-    await verifyAsarUnpackedFile(resources, windowsAskpassArchivePath);
-    await authenticode(
-      join(resources, 'app.asar.unpacked', windowsAskpassArchivePath),
-      winIdentity,
-      { requireTimestamp: !!timestampUrl },
-    );
+    await verifyWindowsArchiveSignatures(join(output, 'resources'), winIdentity, {
+      requireTimestamp: !!timestampUrl,
+    });
     await authenticode(binary, winIdentity, { sign: true, timestampUrl });
   }
   await verifyFuses(binary);

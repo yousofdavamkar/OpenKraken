@@ -8,10 +8,9 @@ import { saveSignedInstaller } from './signed-installer.mjs';
 import {
   authenticode,
   buildMsi,
-  msiExecutables,
+  verifyWindowsArchiveSignatures,
   readMsiMetadata,
   verifyMsiMetadata,
-  windowsAskpassArchivePath,
   windowsIdentity,
   windowsTimestamp,
 } from './msi.mjs';
@@ -23,7 +22,6 @@ import {
   payloadManifest,
   sha256,
   verifyFuses,
-  verifyAsarUnpackedFile,
   verifyPackagedApplication,
 } from './package-security.mjs';
 
@@ -132,11 +130,14 @@ try {
   let appdir;
   if (target === 'msi') {
     if (winIdentity) {
-      for (const name of msiExecutables)
-        await authenticode(join(prepackaged, name), winIdentity, {
-          requireTimestamp: !!timestampUrl,
-        });
-      await verifyAsarUnpackedFile(join(prepackaged, 'resources'), windowsAskpassArchivePath);
+      const options = { requireTimestamp: !!timestampUrl };
+      await authenticode(join(prepackaged, 'openkraken.exe'), winIdentity, options);
+      await verifyWindowsArchiveSignatures(
+        join(prepackaged, 'resources'),
+        winIdentity,
+        options,
+        true,
+      );
     }
     artifacts = await buildMsi({
       root,

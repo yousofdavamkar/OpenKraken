@@ -99,3 +99,32 @@ test('an unpacked helper must match the size and SHA-256 sealed in the ASAR', as
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('accepts an older archive without the PowerShell script and requires the exact bytes when listed', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-ps-script-'));
+  try {
+    const name = 'dist/shell-integration/powershell.ps1';
+    const source = join(root, 'source');
+    await mkdir(join(source, 'dist/shell-integration'), { recursive: true });
+    const archive = join(root, 'app.asar');
+    await createPackage(source, archive);
+    expect(await verifyAsarUnpackedFile(root, name, { allowMissing: true })).toBe(false);
+    await expect(verifyAsarUnpackedFile(root, name)).rejects.toThrow();
+    const modern = join(root, 'modern');
+    await mkdir(modern);
+    await writeFile(join(source, name), 'Write-Output 1');
+    await createPackageWithOptions(source, join(modern, 'app.asar'), { unpack: '**/*.ps1' });
+    const script = join(modern, 'app.asar.unpacked', name);
+    expect(await verifyAsarUnpackedFile(modern, name, { allowMissing: true })).toBe(true);
+    await writeFile(script, 'Write-Output 2');
+    await expect(verifyAsarUnpackedFile(modern, name, { allowMissing: true })).rejects.toThrow(
+      'ASAR integrity record',
+    );
+    await rm(script);
+    await expect(verifyAsarUnpackedFile(modern, name, { allowMissing: true })).rejects.toThrow(
+      'Missing unpacked file',
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
