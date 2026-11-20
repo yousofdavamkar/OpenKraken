@@ -564,3 +564,51 @@ test('completed pages release their stdout budget during a retained native walk'
     calls.mockRestore();
   }
 });
+
+test('closing a native walk releases stdout while the history cache is still reading', async () => {
+  const path = createFixture(join(root, 'delayed-cache-close'), 'linear', 2);
+  const oid = fixtureGit(path, ['rev-list', '--max-parents=0', 'HEAD']);
+  let finishRead!: () => void;
+  const pendingRead = new Promise<void>((resolve) => {
+    finishRead = resolve;
+  });
+  let received!: () => void;
+  const output = new Promise<void>((resolve) => {
+    received = resolve;
+  });
+  const native = runner.runGit;
+  const run = vi.spyOn(runner, 'runGit').mockImplementation((git, args, options) =>
+    native(git, args, {
+      ...options,
+      onStdout: (chunk) => {
+        received();
+        return options?.onStdout?.(chunk);
+      },
+    }),
+  );
+  const invalidate = vi.fn();
+  let appended: boolean | undefined;
+  const cursor = new HistoryCursor('git', path, [oid], [], {
+    commits: [],
+    hasMore: true,
+    invalidate,
+    continuation: async (append) => {
+      await pendingRead;
+      appended = append({ commits: [], hasMore: false });
+    },
+  });
+  try {
+    await output;
+    const closed = vi.fn();
+    void cursor.close().then(closed);
+    await vi.waitFor(() => expect(closed).toHaveBeenCalledOnce(), { timeout: 2000 });
+    expect(appended).toBeUndefined();
+    finishRead();
+    await vi.waitFor(() => expect(appended).toBe(false));
+    expect(invalidate).not.toHaveBeenCalled();
+  } finally {
+    finishRead();
+    await cursor.close();
+    run.mockRestore();
+  }
+});

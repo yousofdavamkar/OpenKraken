@@ -66,22 +66,30 @@ export class HistoryCursor {
       return error;
     };
     let validated = 0;
-    const cacheReady = seed
-      ?.continuation?.((tail) => {
-        if (!this.controller.signal.aborted) {
-          const bytes = tail.commits.reduce((n, c) => n + this.size(c), 0);
-          if (this.bufferedBytes + bytes <= 64 * 1024 * 1024) {
-            this.cached.push(...tail.commits);
-            this.buffer.push(...tail.commits);
-            this.bufferedBytes += bytes;
-            this.cachedMore = tail.hasMore;
-            this.changed?.();
-            return true;
-          }
+    const cacheRead = seed?.continuation?.((tail) => {
+      if (!this.controller.signal.aborted) {
+        const bytes = tail.commits.reduce((n, c) => n + this.size(c), 0);
+        if (this.bufferedBytes + bytes <= 64 * 1024 * 1024) {
+          this.cached.push(...tail.commits);
+          this.buffer.push(...tail.commits);
+          this.bufferedBytes += bytes;
+          this.cachedMore = tail.hasMore;
+          this.changed?.();
+          return true;
         }
-        return false;
-      })
-      .catch(() => {});
+      }
+      return false;
+    });
+    const cacheReady =
+      cacheRead &&
+      new Promise<void>((resolve) => {
+        const done = () => {
+          this.controller.signal.removeEventListener('abort', done);
+          resolve();
+        };
+        this.controller.signal.addEventListener('abort', done, { once: true });
+        void cacheRead.then(done, done);
+      });
     const byBase = new Map<string, Commit[]>();
     const stashIds = new Set(stashes.map((c) => c.oid));
     const emittedStashes = new Set<string>();
@@ -133,6 +141,7 @@ export class HistoryCursor {
               stdoutPages: { offset: () => this.offset, maxBytes: 1024 * 1024 * 1024 },
               onStdout: async (chunk) => {
                 await cacheReady;
+                if (this.controller.signal.aborted) return;
                 parser.push(chunk);
                 this.changed?.();
                 // Replaying cached records checks their topology without growing the buffer.
