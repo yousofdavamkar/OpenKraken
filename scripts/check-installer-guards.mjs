@@ -72,6 +72,23 @@ try {
     );
   }
   if (original.target === 'dmg') {
+    if (original.macBuildNumber !== undefined) {
+      await writeFile(
+        fixture,
+        JSON.stringify({ ...original, macBuildNumber: original.macBuildNumber === 1 ? 2 : 1 }),
+      );
+      await assert.rejects(
+        run(process.execPath, ['scripts/verify-installer.mjs', fixture]),
+        (error) => {
+          assert.match(
+            error.stderr,
+            /macOS bundle identity, version, executable or repository scheme differs/,
+          );
+          assert.doesNotMatch(error.stdout, /Packaged|verified/);
+          return true;
+        },
+      );
+    }
     const fingerprint = 'AB'.repeat(20);
     await writeFile(
       fixture,
