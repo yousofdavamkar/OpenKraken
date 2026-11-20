@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
@@ -1078,6 +1078,33 @@ describe('sparse annotated refs among distinct packed targets', () => {
       calls.filter((args) => args.includes('for-each-ref') && !args.includes('--')),
     ).toHaveLength(1);
     expect(calls[0]).toContain('refs/tags/最後');
+  });
+
+  test('ref enumeration rejects a missing object still recorded in the commit-graph', async () => {
+    const tree = fixtureGit(cwd, ['rev-parse', 'HEAD^{tree}']);
+    const id = fixtureGit(cwd, ['commit-tree', tree, '-m', 'Loose commit in the graph']);
+    const name = 'refs/heads/missing-object';
+    fixtureGit(cwd, ['update-ref', name, id]);
+    fixtureGit(cwd, ['commit-graph', 'write', '--reachable']);
+    const object = join(cwd, '.git', 'objects', id.slice(0, 2), id.slice(2));
+    const saved = join(root, 'saved-commit-object');
+    const reader = new ReferenceReader((args, options) => runGit(git.path, args, options));
+    try {
+      renameSync(object, saved);
+      try {
+        await expect(nativeRefs(cwd)).rejects.toMatchObject({ code: 'GIT_FAILED' });
+        await expect(reader.read(cwd, undefined, sample)).rejects.toMatchObject({
+          code: 'GIT_FAILED',
+        });
+      } finally {
+        renameSync(saved, object);
+      }
+      expect(
+        (await reader.read(cwd, undefined, sample)).find((ref) => ref.name === name),
+      ).toMatchObject({ target: id, objectType: 'commit' });
+    } finally {
+      fixtureGit(cwd, ['update-ref', '-d', name]);
+    }
   });
 
   test('a packed name that moves after the probe cannot supply stale object fields', async () => {
