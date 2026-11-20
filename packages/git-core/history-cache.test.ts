@@ -470,6 +470,49 @@ test('an oversized commit stops a cache write before the next commit in the same
   }
 });
 
+test.each(['prefix', 'tail'])(
+  'keeps only pages before an oversized %s on later appends',
+  async (part) => {
+    const path = createFixture(join(root, 'oversized-range-' + part), 'linear', 8);
+    const profile = join(root, 'oversized-range-profile-' + part);
+    const service = new RepositoryService('git');
+    try {
+      const repo = await service.open(path);
+      const { commits } = await service.snapshot(repo.id);
+      const directory = join(profile, 'history', repo.id);
+      const old = new HistoryCache(profile, repo.id, 'old');
+      old.record(0, commits.slice(0, 2), true);
+      old.record(2, commits.slice(2), false);
+      await old.flush();
+      expect(await readdir(directory)).toContain('tail-0.json');
+      const cache = new HistoryCache(profile, repo.id, 'new');
+      const body = '\x01'.repeat(2 * 1024 * 1024);
+      const offset = part === 'prefix' ? 0 : 2;
+      if (offset) cache.record(0, commits.slice(0, offset), true);
+      cache.record(
+        offset,
+        commits.slice(offset, offset + 2).map((commit) => ({ ...commit, body })),
+        true,
+      );
+      await cache.flush();
+      cache.record(offset + 2, commits.slice(offset + 2), false);
+      await cache.flush();
+      expect(await readdir(directory)).toEqual(offset ? ['prefix.json'] : []);
+      const restarted = new HistoryCache(profile, repo.id, 'new');
+      const seed = await restarted.load();
+      expect(seed?.commits).toEqual(offset ? commits.slice(0, offset) : undefined);
+      if (seed) {
+        expect(seed.hasMore).toBe(true);
+        const append = vi.fn(() => true);
+        await seed.continuation?.(append);
+        expect(append).not.toHaveBeenCalled();
+      }
+    } finally {
+      await service.dispose();
+    }
+  },
+);
+
 test('appending rewrites only changed cache pages and repairs lost or edited prefixes', async () => {
   const path = createFixture(join(root, 'incremental'), 'linear', 10);
   const service = new RepositoryService('git');

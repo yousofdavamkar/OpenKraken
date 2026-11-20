@@ -81,6 +81,7 @@ function cacheDirectory(root: string, repoId: string) {
 /** One bounded immutable-history window per repository, entirely under the app profile. */
 export class HistoryCache {
   private records: Commit[] = [];
+  private recordLimit = 17000;
   private persisted = new Map<
     string,
     { offset: number; count: number; hasMore: boolean; stamp: string }
@@ -236,11 +237,11 @@ export class HistoryCache {
     this.ready = this.ready.then(() => {
       // A reopened page may begin in the disk prefix and finish in the live walk.
       const start = this.records.length - offset;
-      const end = Math.min(commits.length, 17000 - offset);
+      const end = Math.min(commits.length, this.recordLimit - offset);
       if (this.disabled || offset < 0 || start < 0 || start >= end) return;
       if (!this.firstCount) this.firstCount = commits.length;
       this.records.push(...commits.slice(start, end));
-      this.hasMore = hasMore || offset + commits.length > 17000;
+      this.hasMore = hasMore || offset + commits.length > this.recordLimit;
       this.dirty = true;
       clearTimeout(this.timer);
       this.timer = setTimeout(() => {
@@ -296,6 +297,7 @@ export class HistoryCache {
             ] as const;
           }),
         ] as const) {
+          if (offset >= this.recordLimit) break;
           const path = join(this.directory, name);
           // Records only grow at the end. Reuse a matching range while its file still exists intact.
           const previous = this.persisted.get(name);
@@ -341,8 +343,16 @@ export class HistoryCache {
           const footer = Buffer.from(`],"hasMore":${hasMore},"digest":"${checksum}"}`);
           size += footer.byteLength;
           if (size > limit) {
-            await rm(path, { force: true });
-            continue;
+            // Restart can replay only a contiguous prefix. This immutable page can
+            // only grow, so release it and retire every later file for this window.
+            for (const unreachable of cacheNames.slice(cacheNames.indexOf(name))) {
+              await rm(join(this.directory, unreachable), { force: true });
+              this.persisted.delete(unreachable);
+            }
+            this.recordLimit = offset;
+            this.records.length = offset;
+            this.hasMore = true;
+            break;
           }
           chunks.push(footer);
           const temp = `${path}.${randomUUID()}.tmp`;
