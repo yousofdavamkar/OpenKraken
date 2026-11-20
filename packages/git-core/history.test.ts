@@ -318,6 +318,54 @@ test('graph roots and search follow nested tags to commits, trees and blobs', as
   }
 });
 
+test('a failed history search stops its sibling scan and waits for it to close', async () => {
+  const path = createFixture(join(root, 'search-stop'), 'linear', 3);
+  const repo = await service.open(path);
+  const snapshot = await service.snapshot(repo.id);
+  let markStarted!: () => void, releaseScan!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    releaseScan = resolve;
+  });
+  const original = runner.runGit;
+  const failure = new runner.GitError('OUTPUT_LIMIT', 'Search output exceeded the limit');
+  let siblingSignal: AbortSignal | undefined;
+  const mock = vi.spyOn(runner, 'runGit').mockImplementation(async (git, args, options) => {
+    if (args.includes('--author=needle')) {
+      siblingSignal = options?.signal;
+      markStarted();
+      await released;
+      return { stdout: Buffer.alloc(0), stderr: '', exitCode: 0 };
+    }
+    if (args.includes('--grep=needle')) {
+      await started;
+      throw failure;
+    }
+    return original(git, args, options);
+  });
+  let settled = false;
+  const result = service
+    .search(repo.id, snapshot.cursor, 'needle')
+    .catch((error: unknown) => error)
+    .finally(() => {
+      settled = true;
+    });
+  try {
+    await started;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(siblingSignal?.aborted).toBe(true);
+    expect(settled).toBe(false);
+  } finally {
+    releaseScan();
+    await result;
+    mock.mockRestore();
+  }
+  expect(await result).toBe(failure);
+  expect((await service.search(repo.id, snapshot.cursor, 'needle')).commits).toEqual([]);
+});
+
 test('an ambiguous object prefix keeps literal search results and selects neither object', async () => {
   const path = createFixture(join(root, 'ambiguous-oid'), 'linear', 8);
   const tree = fixtureGit(path, ['mktree'], '');

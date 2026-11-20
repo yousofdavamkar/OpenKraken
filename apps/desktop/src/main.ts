@@ -284,7 +284,9 @@ function callService(request: ServiceRequest, signal?: AbortSignal): Promise<Ser
           kind: 'error',
           code: 'SERVICE_TIMEOUT',
           message:
-            'The Git service did not respond in time. The operation may have partially completed. Inspect the repository or remote before retrying.',
+            request.method === 'search'
+              ? 'Full-history search timed out.'
+              : 'The Git service did not respond in time. The operation may have partially completed. Inspect the repository or remote before retrying.',
         });
       },
       request.method === 'clone' || request.method === 'resolveConflict'
@@ -294,6 +296,7 @@ function callService(request: ServiceRequest, signal?: AbortSignal): Promise<Ser
           : [
                 'fetch',
                 'pushPreview',
+                'search',
                 'push',
                 'deleteRemote',
                 'deleteRemotePreview',

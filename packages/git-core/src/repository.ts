@@ -668,12 +668,18 @@ export class RepositoryService {
       [0, 1],
     );
   }
-  async search(id: string, cursor: string, query: string, signal?: AbortSignal) {
-    const history = this.history(id, cursor);
-    const repo = this.repositories.get(id)!;
+  private async searchMessagesAndAuthors(
+    path: string,
+    starts: string[],
+    query: string,
+    signal?: AbortSignal,
+  ) {
+    const stop = new AbortController();
+    const scanSignal = signal ? AbortSignal.any([signal, stop.signal]) : stop.signal;
+    const roots = starts.join('\n') + '\n';
     const find = async (filter: string) => {
       const { parser, formatArgs } = rawHistoryStream('log');
-      if (history.starts.length)
+      if (starts.length)
         await this.run(
           [
             'log',
@@ -686,18 +692,33 @@ export class RepositoryService {
             '--stdin',
           ],
           {
-            cwd: repo.path,
-            signal,
-            stdin: history.starts.join('\n') + '\n',
+            cwd: path,
+            signal: scanSignal,
+            timeoutMs: 120_000,
+            stdin: roots,
             onStdout: (b) => parser.push(b),
           },
         );
       return parser.finish();
     };
-    const [messages, authors] = await Promise.all([
-      find(`--grep=${query}`),
-      find(`--author=${query}`),
-    ]);
+    const scans = [find(`--grep=${query}`), find(`--author=${query}`)] as const;
+    try {
+      return await Promise.all(scans);
+    } catch (error) {
+      stop.abort();
+      await Promise.allSettled(scans);
+      throw error;
+    }
+  }
+  async search(id: string, cursor: string, query: string, signal?: AbortSignal) {
+    const history = this.history(id, cursor);
+    const repo = this.repositories.get(id)!;
+    const [messages, authors] = await this.searchMessagesAndAuthors(
+      repo.path,
+      history.starts,
+      query,
+      signal,
+    );
     const queryLower = query.toLocaleLowerCase();
     const stashes = history.stashes.filter((c) =>
       [c.body, c.author.name, c.author.email].some((value) =>
