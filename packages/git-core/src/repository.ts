@@ -42,7 +42,7 @@ import type {
 import { GitError, runGit, type RunOptions } from './runner.js';
 import { rawHistoryStream, StatusParser } from './parsers.js';
 import { samplePackedRefs, ReferenceReader, type PackedRefSample } from './reference-reader.js';
-import { HistoryCache, historyMetadataFingerprint } from './history-cache.js';
+import { HistoryCache, historyCacheKey, historyMetadataFingerprint } from './history-cache.js';
 import { RepositoryPreferences } from './preferences.js';
 import { HistoryCursor } from './history.js';
 import { Remotes, transportError } from './remotes.js';
@@ -621,27 +621,19 @@ export class RepositoryService {
     // The previous cache may be writing this prefix or trimming other repositories.
     await cacheFlush;
     if (signal.aborted) throw new GitError('CANCELLED', 'Snapshot loading cancelled');
+    const ordered = [...starts];
     let cache: HistoryCache | undefined;
     if (this.dataDir && cacheInputs.length && !cacheInputs.includes(undefined)) {
-      const [version, config, ...metadata] = cacheInputs;
-      const key = createHash('sha256')
-        .update(
-          JSON.stringify({
-            format: 2,
-            version,
-            config,
-            metadata,
-            starts: [...starts],
-            stashes: stashCommits.map((c) => c.oid),
-            replacements: refs.filter((r) => r.name.startsWith('refs/replace/')),
-          }),
-        )
-        .digest('hex');
+      const key = historyCacheKey(
+        cacheInputs,
+        ordered,
+        stashCommits.map((c) => c.oid),
+        refs.filter((r) => r.name.startsWith('refs/replace/')),
+      );
       cache = new HistoryCache(this.dataDir, repository.id, key);
     }
     const seed = await cache?.load(signal, earlyPrefix);
     if (signal.aborted) throw new GitError('CANCELLED', 'Snapshot loading cancelled');
-    const ordered = [...starts];
     if (candidate) {
       if (
         !seed &&

@@ -7,11 +7,58 @@ import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
 import { RepositoryService } from './src/repository.js';
-import { HistoryCache, historyMetadataFingerprint } from './src/history-cache.js';
+import { HistoryCache, historyCacheKey, historyMetadataFingerprint } from './src/history-cache.js';
 import { HistoryCursor } from './src/history.js';
 import * as runner from './src/runner.js';
 const root = await mkdtemp(join(tmpdir(), 'openkraken-history-cache-'));
 afterAll(() => rm(root, { recursive: true, force: true }));
+test.each([0, 1, 1023, 1024, 1025, 2048, 50000])(
+  'preserves the persisted format-2 key for %i ordered roots',
+  (count) => {
+    const version = 'git version 2.38.0';
+    const config = 'refs/heads/"猫"\n';
+    const metadata = ['absent', '', 'sha256:' + 'a'.repeat(64)];
+    const starts = Array.from({ length: count }, (_, index) =>
+      index.toString(16).padStart(index % 2 ? 64 : 40, '0'),
+    );
+    const stashes = ['b'.repeat(40)];
+    const replacementName = 'refs/replace/' + 'c'.repeat(40);
+    const replacements: Snapshot['refs'] = [
+      {
+        name: replacementName,
+        shortName: replacementName,
+        kind: 'other',
+        target: 'd'.repeat(40),
+        isHead: false,
+        objectType: 'commit',
+        peeledType: '',
+      },
+    ];
+    const previous = createHash('sha256')
+      .update(
+        JSON.stringify({
+          format: 2,
+          version,
+          config,
+          metadata,
+          starts,
+          stashes,
+          replacements,
+        }),
+      )
+      .digest('hex');
+    expect(historyCacheKey([version, config, ...metadata], starts, stashes, replacements)).toBe(
+      previous,
+    );
+    if (count > 1) {
+      [starts[0]!, starts[count - 1]!] = [starts[count - 1]!, starts[0]!];
+      expect(
+        historyCacheKey([version, config, ...metadata], starts, stashes, replacements),
+      ).not.toBe(previous);
+    }
+  },
+);
+
 test('cached windows paint without waiting for Git and join the real stream without duplicates', async () => {
   const path = createFixture(join(root, 'large'), 'linear', 19000),
     dataDir = join(root, 'profile');

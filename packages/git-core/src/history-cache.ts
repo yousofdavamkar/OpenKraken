@@ -4,7 +4,7 @@ import { mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setImmediate as yieldTurn } from 'node:timers/promises';
 import { z } from 'zod';
-import { commitSchema, type Commit } from '@openkraken/ipc-contract';
+import { commitSchema, type Commit, type Ref } from '@openkraken/ipc-contract';
 import { waitForHistoryCache, type HistorySeed } from './history.js';
 const tailNames = ['tail-0.json', 'tail-1.json', 'tail-2.json'];
 const prefixName = 'prefix.json';
@@ -53,6 +53,25 @@ export async function historyMetadataFingerprint(path: string, signal: AbortSign
   } finally {
     await file.close();
   }
+}
+/** Preserve the format-2 JSON digest while encoding at most 1,024 history roots at a time. */
+export function historyCacheKey(
+  inputs: readonly (string | undefined)[],
+  starts: readonly string[],
+  stashes: readonly string[],
+  replacements: readonly Ref[],
+) {
+  const [version, config, ...metadata] = inputs;
+  const hash = createHash('sha256');
+  const header = JSON.stringify({ format: 2, version, config, metadata });
+  hash.update(header.slice(0, -1) + ',"starts":[');
+  for (let index = 0; index < starts.length; index += 1024) {
+    if (index) hash.update(',');
+    const batch = JSON.stringify(starts.slice(index, index + 1024));
+    hash.update(batch.slice(1, -1));
+  }
+  const tail = JSON.stringify({ stashes, replacements });
+  return hash.update('],' + tail.slice(1)).digest('hex');
 }
 function cacheDirectory(root: string, repoId: string) {
   if (!/^[0-9a-f]{64}$/.test(repoId)) throw new Error('Invalid cache repository');
