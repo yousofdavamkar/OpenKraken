@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { setImmediate as yieldTurn } from 'node:timers/promises';
 import { z } from 'zod';
 import { commitSchema, type Commit } from '@openkraken/ipc-contract';
-import type { HistorySeed } from './history.js';
+import { waitForHistoryCache, type HistorySeed } from './history.js';
 const tailNames = ['tail-0.json', 'tail-1.json', 'tail-2.json'];
 const prefixName = 'prefix.json';
 const cacheNames = [prefixName, ...tailNames];
@@ -28,6 +28,7 @@ export class HistoryCache {
   >();
   private firstCount = 0;
   private hasMore = true;
+  private tailRead = new AbortController();
   private ready = Promise.resolve();
   private writes = Promise.resolve();
   private timer?: ReturnType<typeof setTimeout>;
@@ -48,16 +49,17 @@ export class HistoryCache {
     if (!/^[0-9a-f]{64}$/.test(repoId)) throw new Error('Invalid cache repository');
     this.directory = join(root, 'history', repoId);
   }
-  private async read(name: string, maxBytes: number) {
+  private async read(name: string, maxBytes: number, signal?: AbortSignal) {
     try {
       const path = join(this.directory, name);
       const file = await open(path, 'r');
       let stamp: string, content: string;
       try {
+        if (signal?.aborted) return;
         const metadata = await file.stat({ bigint: true });
         if (metadata.size > maxBytes) return;
         stamp = fileStamp(metadata);
-        content = await file.readFile('utf8');
+        content = await file.readFile({ encoding: 'utf8', signal });
       } finally {
         await file.close();
       }
@@ -71,6 +73,7 @@ export class HistoryCache {
       // Do not let validation of later disk pages monopolize the service while
       // the UI is requesting a prefix that has already been decoded.
       for (let i = 0; i < page.commits.length; i += 100) {
+        if (signal?.aborted) return;
         const batch = z.array(commitSchema).safeParse(page.commits.slice(i, i + 100));
         if (!batch.success) return;
         if (i) hash.update(',');
@@ -97,11 +100,13 @@ export class HistoryCache {
     this.firstCount = prefix.commits.length;
     this.hasMore = prefix.hasMore;
     const continuation: NonNullable<HistorySeed['continuation']> = (append) => {
-      this.ready = (async () => {
-        if (!prefix.hasMore) return;
+      const { signal } = this.tailRead;
+      const reading = (async () => {
+        if (!prefix.hasMore || signal.aborted) return;
         for (const name of tailNames) {
-          const tail = await this.read(name, 18 * 1024 * 1024);
+          const tail = await this.read(name, 18 * 1024 * 1024, signal);
           if (
+            signal.aborted ||
             !tail ||
             tail.offset !== this.records.length ||
             !tail.commits.length ||
@@ -120,6 +125,7 @@ export class HistoryCache {
           if (!tail.hasMore) return;
         }
       })();
+      this.ready = waitForHistoryCache(reading, signal);
       return this.ready;
     };
     return {
@@ -157,6 +163,9 @@ export class HistoryCache {
       );
     });
     await this.writes;
+  }
+  stopReadingTails() {
+    this.tailRead.abort();
   }
   async flush() {
     clearTimeout(this.timer);

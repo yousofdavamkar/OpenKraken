@@ -12,6 +12,18 @@ export interface HistorySeed {
   ) => Promise<void>;
   invalidate: () => void;
 }
+/** A late optional cache read may finish after its owner has moved on. */
+export function waitForHistoryCache(read: Promise<void>, signal: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    if (signal.aborted) done();
+    else signal.addEventListener('abort', done, { once: true });
+    void read.then(done, done);
+  });
+}
 export class HistoryCursor {
   readonly id = randomUUID();
   private roots: readonly string[];
@@ -80,16 +92,7 @@ export class HistoryCursor {
       }
       return false;
     });
-    const cacheReady =
-      cacheRead &&
-      new Promise<void>((resolve) => {
-        const done = () => {
-          this.controller.signal.removeEventListener('abort', done);
-          resolve();
-        };
-        this.controller.signal.addEventListener('abort', done, { once: true });
-        void cacheRead.then(done, done);
-      });
+    const cacheReady = cacheRead && waitForHistoryCache(cacheRead, this.controller.signal);
     const byBase = new Map<string, Commit[]>();
     const stashIds = new Set(stashes.map((c) => c.oid));
     const emittedStashes = new Set<string>();

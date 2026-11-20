@@ -346,6 +346,7 @@ export class RepositoryService {
     return this.queue(known.commonDir).run(
       false,
       async () => {
+        this.cache?.stopReadingTails();
         const [view, packedRefs] = await Promise.all([
           requestedView ?? this.preferences.load(id),
           samplePackedRefs(known.commonDir),
@@ -1384,6 +1385,7 @@ export class RepositoryService {
     return this.queue(work.repo.commonDir).run(true, () => work.undo(redo, signal), signal);
   }
   async dispose() {
+    this.cache?.stopReadingTails();
     this.worktreePrunes.clear();
     this.submoduleUpdates.clear();
     this.submoduleSyncPlans.clear();
