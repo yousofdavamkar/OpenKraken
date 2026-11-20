@@ -20,6 +20,12 @@ Initial history is capped at 2,000 commits plus a hasMore probe. Starts are visi
 
 The retained graph walk uses `rev-list --date-order --parents --no-abbrev-commit --format=… --stdin`. The first NUL terminates Git’s header, which contains the full commit ID and its ordered parent IDs. An empty second field keeps author, committer and message fields at the same offsets used by search and stash reads. Those reads use `git log` with explicit `%H` and `%P` fields. The public parser also accepts the earlier stream with both the header and the formatted IDs. The parser handles complete twelve-field records from each chunk and carries incomplete records across reads. [History stream measurements](../verification/m8-reference-performance.md#reading-ancestry-from-gits-traversal-header)
 
+## Raw author and committer dates
+
+Graph traversal, stash reflogs, commit search and exact-ID lookup ask Git for `%ad` and `%cd` with `--date=raw`. Each signature supplies a name, email and one field containing epoch seconds and the recorded numeric timezone. The parser keeps both offsets independently and decodes ten NUL-terminated fields per commit. These reads specify their date format even when the user has configured a different display preference. The existing twelve-field parser and its exported formats remain available for callers of the earlier protocol.
+
+Converting an epoch-zero timestamp to a calendar date west of UTC can make Git abort the entire walk. Raw dates preserve the seconds and offset for that commit. They also avoid sending a formatted date alongside an existing timestamp for every author and committer. [Git date formats](https://git-scm.com/docs/git-rev-list)
+
 ## Repository paths in native output
 
 Git emits a line feed after a repository path on POSIX. Repository discovery removes that one delimiter, preserving a carriage return in the directory name. Windows accepts CRLF output for both the individual and combined metadata queries. The POSIX regression opens two adjacent repositories distinguished by a final carriage return and checks the selected root, repository ID and first commit.

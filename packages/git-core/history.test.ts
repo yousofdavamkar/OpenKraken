@@ -50,6 +50,74 @@ test.each(['octopus', 'shallow', 'replacement'])(
     }
   },
 );
+test('history keeps independent author and committer offsets regardless of the saved date format', async () => {
+  const path = createFixture(join(root, 'timezones'), 'linear', 2);
+  fixtureGit(path, ['config', 'log.date', 'relative']);
+  const tree = fixtureGit(path, ['rev-parse', 'HEAD^{tree}']);
+  const parent = fixtureGit(path, ['rev-parse', 'HEAD']);
+  const commit = fixtureGit(
+    path,
+    ['hash-object', '-w', '-t', 'commit', '--stdin'],
+    [
+      `tree ${tree}`,
+      `parent ${parent}`,
+      'author First <author@example.test> 1700000000 +0545',
+      'committer Second <committer@example.test> 1700100000 -0330',
+      '',
+      'Two time zones',
+      '',
+    ].join('\n'),
+  );
+  const cursor = new HistoryCursor('git', path, [commit]);
+  try {
+    const page = await cursor.page(0, 1);
+    expect(page.commits[0]).toMatchObject({
+      oid: commit,
+      parents: [parent],
+      author: { name: 'First', time: 1700000000, tzOffsetMin: 345 },
+      committer: { name: 'Second', time: 1700100000, tzOffsetMin: -210 },
+    });
+    expect((await cursor.page(1, 1)).commits[0]?.oid).toBe(parent);
+  } finally {
+    await cursor.close();
+  }
+});
+test('epoch-zero history with a negative offset survives opening, stash projection and search', async () => {
+  const path = createFixture(join(root, 'epoch'), 'linear', 2);
+  const tree = fixtureGit(path, ['rev-parse', 'HEAD^{tree}']);
+  const parent = fixtureGit(path, ['rev-parse', 'HEAD']);
+  function commitAtEpoch(base: string, subject: string) {
+    return fixtureGit(
+      path,
+      ['hash-object', '-w', '-t', 'commit', '--stdin'],
+      [
+        `tree ${tree}`,
+        `parent ${base}`,
+        'author First <a@example.test> 0 -0330',
+        'committer Second <b@example.test> 1 -1200',
+        '',
+        subject,
+        '',
+      ].join('\n'),
+    );
+  }
+  const head = commitAtEpoch(parent, 'Epoch subject');
+  const stash = commitAtEpoch(head, 'Epoch stash');
+  fixtureGit(path, ['update-ref', 'HEAD', head]);
+  fixtureGit(path, ['update-ref', '--create-reflog', 'refs/stash', stash]);
+  const repo = await service.open(path);
+  const snapshot = await service.snapshot(repo.id);
+  const dates = {
+    author: { time: 0, tzOffsetMin: -210 },
+    committer: { time: 1, tzOffsetMin: -720 },
+  };
+  expect(snapshot.commits.find((c) => c.oid === head)).toMatchObject(dates);
+  expect(snapshot.commits.find((c) => c.oid === stash)).toMatchObject({ ...dates, isStash: true });
+  for (const query of ['Epoch subject', head.slice(0, 12)]) {
+    const result = await service.search(repo.id, snapshot.cursor, query);
+    expect(result.commits[0]).toMatchObject({ oid: head, ...dates });
+  }
+});
 test('same cursor pages match Git without duplicates, skips or moved-ref contamination', async () => {
   const path = createFixture(join(root, 'large'), 'linear', 7300);
   const expected = fixtureGit(path, ['rev-list', '--date-order', '--all']).split('\n');

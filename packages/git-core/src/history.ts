@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Commit } from '@openkraken/ipc-contract';
-import { HistoryParser, HISTORY_WALK_FORMAT } from './parsers.js';
+import { rawHistoryStream } from './parsers.js';
 import { GitError, runGit } from './runner.js';
 
 /** One retained rev-list, backpressured at page boundaries. No skip/refetch or full-history buffer. */
@@ -80,7 +80,7 @@ export class HistoryCursor {
       const base = stash.parents[0];
       if (base) byBase.set(base, [...(byBase.get(base) ?? []), stash]);
     }
-    const parser = new HistoryParser((commit) => {
+    const { parser, formatArgs } = rawHistoryStream('walk', (commit) => {
       // If a branch reaches a stash object, its real DAG takes precedence over the overlay.
       if (stashIds.has(commit.oid)) emittedStashes.add(commit.oid);
       const overlay = (byBase.get(commit.oid) ?? []).filter((c) => !emittedStashes.has(c.oid));
@@ -113,7 +113,7 @@ export class HistoryCursor {
               '--date-order',
               '--parents',
               '--no-abbrev-commit',
-              `--format=${HISTORY_WALK_FORMAT}`,
+              ...formatArgs,
               '--stdin',
             ],
             {

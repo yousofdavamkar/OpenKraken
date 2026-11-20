@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import fc from 'fast-check';
 import {
   HistoryParser,
+  rawHistoryStream,
   RefsParser,
   StatusParser,
   NulDecoder,
@@ -280,6 +281,43 @@ describe('stream parsers', () => {
     truncated.push(data.subarray(0, data.length - 2));
     expect(() => truncated.finish()).toThrow();
   });
+  test.each(['walk', 'log'] as const)(
+    'raw %s dates survive byte boundaries and reject incomplete offsets',
+    (source) => {
+      const parent = 'b'.repeat(40);
+      const record = (date: string) =>
+        Buffer.from(
+          [
+            source === 'walk' ? `commit ${hash} ${parent}\n` : hash,
+            source === 'walk' ? '' : parent,
+            'Zoë',
+            'a@example.test',
+            date,
+            'René',
+            'b@example.test',
+            '1 +0545',
+            'one\ntwo',
+            '',
+            '\n',
+          ].join('\0'),
+        );
+      const { parser } = rawHistoryStream(source);
+      expect(feed(parser, record('0 -0330'), 1)).toMatchObject([
+        {
+          oid: hash,
+          parents: [parent],
+          body: 'one\ntwo',
+          author: { name: 'Zoë', time: 0, tzOffsetMin: -210 },
+          committer: { name: 'René', time: 1, tzOffsetMin: 345 },
+        },
+      ]);
+      for (const malformed of ['0', '-0330', '0 -03', '0  +0545', '0 +05:45']) {
+        expect(() => feed(rawHistoryStream(source).parser, record(malformed), 3)).toThrow(
+          'Invalid commit timestamp',
+        );
+      }
+    },
+  );
   test('streamed history decodes invalid UTF-8 per field and enforces the message byte limit', () => {
     const prefix = Buffer.from(
       [

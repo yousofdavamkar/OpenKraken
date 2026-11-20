@@ -244,6 +244,16 @@ const historyDetails = '%an%x00%ae%x00%at%x00%ai%x00%cn%x00%ce%x00%ct%x00%ci%x00
 export const HISTORY_FORMAT = '%H%x00%P%x00' + historyDetails;
 // rev-list --parents supplies "commit <oid> <parents>\n" before this custom format.
 export const HISTORY_WALK_FORMAT = '%x00%x00' + historyDetails;
+// Git's raw dates contain epoch seconds and the recorded UTC offset, even
+// when applying that offset would place the local calendar date before 1970.
+export function rawHistoryStream(source: 'walk' | 'log', accept?: (commit: Commit) => void) {
+  const ids = source === 'walk' ? '%x00%x00' : '%H%x00%P%x00';
+  const details = '%an%x00%ae%x00%ad%x00%cn%x00%ce%x00%cd%x00%B%x00%x00';
+  return {
+    parser: new HistoryParser(accept, 'raw'),
+    formatArgs: ['--date=raw', `--format=${ids}${details}`],
+  };
+}
 function signature(name: string, email: string, time: string, date: string) {
   const zone = /([+-])(\d\d)(\d\d)$/.exec(date);
   if (!/^-?\d+$/.test(time) || !zone) throw new Error('Invalid commit timestamp');
@@ -255,7 +265,22 @@ function signature(name: string, email: string, time: string, date: string) {
   };
 }
 export class HistoryParser {
-  constructor(private accept?: (commit: Commit) => void) {}
+  private readonly signatureWidth: number;
+  constructor(
+    private accept?: (commit: Commit) => void,
+    dateFormat: 'iso' | 'raw' = 'iso',
+  ) {
+    this.signatureWidth = dateFormat === 'raw' ? 3 : 4;
+  }
+  private readSignature(fields: string[], start: number) {
+    const name = fields[start]!,
+      email = fields[start + 1]!,
+      value = fields[start + 2]!;
+    if (this.signatureWidth === 4) return signature(name, email, value, fields[start + 3]!);
+    const separator = value.length - 6;
+    if (separator < 1 || value[separator] !== ' ') throw new Error('Invalid commit timestamp');
+    return signature(name, email, value.slice(0, separator), value);
+  }
   readonly value: Commit[] = [];
   private pendingFields: string[] = [];
   private decoder = new TextNulFields();
@@ -272,24 +297,17 @@ export class HistoryParser {
       id = match[3] || match[1]!;
       if (!match[3]) parents = match[2]!.slice(1);
     }
-    if (fields[offset + 11] !== '') throw new Error('Malformed history record');
-    const body = fields[offset + 10]!;
+    const author = offset + 2;
+    const committer = author + this.signatureWidth;
+    const bodyOffset = committer + this.signatureWidth;
+    if (fields[bodyOffset + 1] !== '') throw new Error('Malformed history record');
+    const body = fields[bodyOffset]!;
     const newline = body.indexOf('\n');
     const commit: Commit = {
       oid: oid(id),
       parents: parents ? parents.split(' ').map(oid) : [],
-      author: signature(
-        fields[offset + 2]!,
-        fields[offset + 3]!,
-        fields[offset + 4]!,
-        fields[offset + 5]!,
-      ),
-      committer: signature(
-        fields[offset + 6]!,
-        fields[offset + 7]!,
-        fields[offset + 8]!,
-        fields[offset + 9]!,
-      ),
+      author: this.readSignature(fields, author),
+      committer: this.readSignature(fields, committer),
       summary: newline < 0 ? body : body.slice(0, newline),
       body,
       isStash: false,
@@ -301,7 +319,8 @@ export class HistoryParser {
     const batch = this.decoder.push(chunk);
     const fields = this.pendingFields.length ? this.pendingFields.concat(batch) : batch;
     let offset = 0;
-    for (; offset + 12 <= fields.length; offset += 12) this.append(fields, offset);
+    const width = 4 + 2 * this.signatureWidth;
+    for (; offset + width <= fields.length; offset += width) this.append(fields, offset);
     this.pendingFields = fields.slice(offset);
   }
   finish() {

@@ -39,7 +39,7 @@ import type {
   Snapshot,
 } from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
-import { HistoryParser, StatusParser, HISTORY_FORMAT } from './parsers.js';
+import { rawHistoryStream, StatusParser } from './parsers.js';
 import { samplePackedRefs, ReferenceReader, type PackedRefSample } from './reference-reader.js';
 import { HistoryCache } from './history-cache.js';
 import { RepositoryPreferences } from './preferences.js';
@@ -585,8 +585,8 @@ export class RepositoryService {
     // Walk stash bases with normal history, but hide index/untracked parents.
     let stashCommits: Commit[] = [];
     if (hasStash) {
-      const stashes = new HistoryParser();
-      await this.run(['log', '-g', '--max-count=200', `--format=${HISTORY_FORMAT}`, 'refs/stash'], {
+      const { parser: stashes, formatArgs } = rawHistoryStream('log');
+      await this.run(['log', '-g', '--max-count=200', ...formatArgs, 'refs/stash'], {
         cwd: repository.path,
         signal,
         onStdout: (b) => stashes.push(b),
@@ -672,7 +672,7 @@ export class RepositoryService {
     const history = this.history(id, cursor);
     const repo = this.repositories.get(id)!;
     const find = async (filter: string) => {
-      const parser = new HistoryParser();
+      const { parser, formatArgs } = rawHistoryStream('log');
       if (history.starts.length)
         await this.run(
           [
@@ -682,7 +682,7 @@ export class RepositoryService {
             '--regexp-ignore-case',
             '--fixed-strings',
             filter,
-            `--format=${HISTORY_FORMAT}`,
+            ...formatArgs,
             '--stdin',
           ],
           {
@@ -721,8 +721,8 @@ export class RepositoryService {
         reachable = remaining.stdout.length === 0;
       }
       if (reachable && !exact) {
-        const parser = new HistoryParser();
-        await this.run(['log', '-1', `--format=${HISTORY_FORMAT}`, resolved, '--'], {
+        const { parser, formatArgs } = rawHistoryStream('log');
+        await this.run(['log', '-1', ...formatArgs, resolved, '--'], {
           cwd: repo.path,
           signal,
           onStdout: (b) => parser.push(b),
