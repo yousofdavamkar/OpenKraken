@@ -2,6 +2,20 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Upstream fields on 50,000 local branches
+
+On Linux x64 with Git 2.53.0, a traced opening of the full-history fixture took 842 ms. The initial reference enumeration occupied 318 ms, and 135 ms elapsed between publication and paint. In six native comparisons on the fixture without configured upstreams, the median enumeration took 207 ms with both upstream fields, 177 ms with the upstream name alone and 147 ms with both fields empty. The product checks Git configuration before and after using the shorter format. [Query selection and compatibility](../decisions/0098-direct-first-reference-enumeration.md#packed-local-branches-without-tracking-configuration)
+
+Opening-only desktop runs compared the same builds in six alternating pairs after a warm-up pair. Each opening used a fresh profile, retained OS caches and displayed 2,000 commits and all 50,000 matching refs. The tracking control was a separate copy of the distinct-target fixture with a local upstream 11 commits behind its branch.
+
+| Fixture                                  | Median first paint before / after | Median native snapshot before / after |
+| ---------------------------------------- | --------------------------------: | ------------------------------------: |
+| Distinct targets                         |                  851.1 / 823.6 ms |                      441.8 / 451.3 ms |
+| Shared target                            |                  555.2 / 545.0 ms |                      212.4 / 211.7 ms |
+| Distinct targets with one tracked branch |                  791.8 / 790.2 ms |                      435.2 / 448.0 ms |
+
+A separate full benchmark ran three alternating pairs per untracked fixture and measured three appends of 5,000 commits per run. All 12 first paints exceeded 500 ms. With the change, first paint ranged from 786.6 to 2,750.9 ms on distinct targets and 593.0 to 723.1 ms on the shared target. Thirteen of 18 appends met the 300 ms budget, compared with 14 of 18 on the baseline. Two candidate runs measured graph frame intervals of about 50 ms p95. The native command improvement has yet to translate into reliable desktop acceptance. [Individual opening and paging samples](m8-opening-experiments.csv)
+
 ## Working-state fingerprint on 100,000 files
 
 Three alternating pairs of fresh Linux x64 Electron profiles measured the same two-million-commit checkout. Each run waited for the native watcher, warmed one status request, measured five clean requests, edited the fixture's tracked probe and measured five dirty requests. The harness restored the probe. Git was 2.53.0 and the OS caches stayed populated. A preceding baseline run exceeded 300 ms on one clean read at 316.8 ms.

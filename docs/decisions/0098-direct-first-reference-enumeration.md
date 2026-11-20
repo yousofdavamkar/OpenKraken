@@ -25,3 +25,9 @@ The reader checks each returned ID against its request and accepts Git's four ob
 ## Streaming UTF-8 validation
 
 The direct reader checks each stdout chunk for valid UTF-8 as it arrives. A chunk that starts or ends inside a multibyte character can fail this check even when the stream is valid. From the first such chunk, a fatal streaming decoder checks across subsequent chunk boundaries and flushes at end of input. The reader keeps its existing full native fallback when annotated refs require a second lookup and decoding would lose information. A literal U+FFFD in a valid ref name remains addressable. Neither path retains the original stdout buffers for a later concatenation.
+
+## Packed local branches without tracking configuration
+
+When the existing packed-refs sample contains at least 32 local branches, ask Git whether any branch has a configured merge source. Run `git config --includes --name-only --get-regexp '^branch\..*\.merge$'` in the current worktree. Git uses this setting to determine a branch's upstream. The query includes conditional configuration and returns key names only. [Git branch configuration](https://git-scm.com/docs/git-config#Documentation/git-config.txt-branchltnamegtmerge)
+
+Only an empty result with exit status 1 and empty stderr selects the shorter direct format. It retains the upstream and tracking field separators so the parser reads empty fields. After enumeration, repeat the configuration check. If a merge source appeared or Git cannot establish its absence, repeat the direct enumeration with the tracking fields enabled. Cancellation and the 30-second deadline cover the whole operation. As with the existing identity checks, an external Git writer can change the repository after the final observation.

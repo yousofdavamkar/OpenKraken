@@ -2,6 +2,12 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of the latest two fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Linux x64 reference enumeration
+
+At `0907524`, repositories with many packed local branches check whether Git has any upstreams to report. In six paired opening-only runs, the median first paint on 50,000 distinct refs went from 851.1 to 823.6 ms. The median on 50,000 refs sharing a target went from 555.2 to 545.0 ms. All twelve first paints in the separate paging benchmark exceeded 500 ms. [Measurements and native timings](m8-reference-performance.md#upstream-fields-on-50000-local-branches)
+
+The full suite passed 1,021 unit/native tests with 14 skips, and all 38 focused Electron cases passed. In an initial Git 2.38 run, a test missed the start of a reference read because it recognized only the tracking-enabled format. After it recognized both formats, 89 focused cases passed on Git 2.38 with 12 skips, and all 60 reference-reader and history-prefetch cases passed on Git 2.53. The build, lint, Linux x64 package fuse checks and packaged smoke passed. The packaged app opened the 50,000-distinct-ref fixture and appended three pages. All 17,000 ordered commit IDs and parent lists matched native Git.
+
 ## Linux desktop regression and large-repository checks
 
 The Linux x64 Electron suite passed 261 tests, including Gitea HTTPS/SSH, Git LFS, native shells, crash reporting, signed update checks and six Canvas image comparisons. The two opt-in scale tests ran separately. The standard 2,000-commit fixture painted in 257.1 ms. After the keyboard change, all 26 focused graph, reference and watcher tests passed. On 32,000 loaded rows, median synchronous End/Home dispatch took 0.10 ms in each of three runs. [Keyboard measurements](m8-reference-performance.md#keyboard-navigation-with-32000-loaded-commits)
