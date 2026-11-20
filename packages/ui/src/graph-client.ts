@@ -9,7 +9,17 @@ type Input = GraphRequest extends infer R
 function readReply(input: Input, reply: Exclude<WorkerResponse, { kind: 'error' }>): GraphResponse {
   if (reply.generation !== input.generation) throw new Error('Incomplete graph layout');
   if (reply.kind === 'matches' && input.method === 'search') return reply;
-  if (reply.kind !== 'packed-layout' || input.method === 'search')
+  if (
+    input.method === 'updateSearchDocument' &&
+    reply.kind === 'documentUpdated' &&
+    reply.oid === input.document.oid
+  )
+    return reply;
+  if (
+    reply.kind !== 'packed-layout' ||
+    input.method === 'search' ||
+    input.method === 'updateSearchDocument'
+  )
     throw new Error('Incomplete graph layout');
 
   const layout = unpackLayout(reply);
@@ -88,7 +98,8 @@ export class GraphClient {
       }, 30000);
       this.pending.set(id, { input, resolve, reject, timer });
       try {
-        if (input.method === 'search') this.worker.postMessage({ ...input, id });
+        if (input.method === 'search' || input.method === 'updateSearchDocument')
+          this.worker.postMessage({ ...input, id });
         else {
           const commits = input.commits.map(({ oid, parents, isStash, summary, body, author }) => ({
             oid,

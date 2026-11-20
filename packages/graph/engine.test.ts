@@ -482,3 +482,35 @@ test('search flushes any remaining cooperative indexing batches after a reset', 
     oids: [],
   });
 });
+
+test.each([false, true])(
+  'patches one pending or indexed search document and keeps the append frontier (indexed=%s)',
+  (indexed) => {
+    const engine = new GraphEngine(true);
+    const commits = documents(3);
+    const generation = 'current';
+    engine.handle({ id: 1, generation, method: 'reset', offset: 0, commits: commits.slice(0, 2) });
+    if (indexed) engine.indexPending();
+    const document = {
+      oid: '0',
+      summary: 'Tracked changes',
+      body: 'renamed-path',
+      author: { name: 'New author', email: '' },
+    };
+    const patch = { id: 2, generation, method: 'updateSearchDocument' as const, document };
+    expect(engine.handle({ ...patch, generation: 'expired' }).kind).toBe('error');
+    expect(engine.handle({ ...patch, document: { ...document, oid: 'missing' } }).kind).toBe(
+      'error',
+    );
+    expect(engine.handle(patch)).toMatchObject({ kind: 'documentUpdated', oid: '0' });
+    expect(engine.handle({ id: 3, generation, method: 'search', query: 'renamed' })).toMatchObject({
+      oids: ['0'],
+    });
+    expect(engine.handle({ id: 4, generation, method: 'search', query: 'Zoë' })).toMatchObject({
+      oids: ['1'],
+    });
+    expect(
+      engine.handle({ id: 5, generation, method: 'append', offset: 2, commits: commits.slice(2) }),
+    ).toMatchObject({ kind: 'layout', offset: 2 });
+  },
+);
