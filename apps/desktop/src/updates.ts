@@ -31,14 +31,15 @@ import {
   type UpdateRelease,
 } from './update-protocol.js';
 
-type UpdateError = NonNullable<UpdateState['error']>;
+import {
+  readUpdateEnvelope,
+  requestUpdateFile,
+  UpdateFailure,
+  verifyUpdateArtifact,
+} from './update-transfer.js';
+
 export const installTimeoutMs = 10 * 60_000;
 
-class UpdateFailure extends Error {
-  constructor(readonly code: UpdateError) {
-    super(code);
-  }
-}
 const digest = (raw: string) => createHash('sha256').update(raw).digest('hex');
 const watermarkSchema = z.strictObject({
   schemaVersion: z.literal(1),
@@ -554,24 +555,6 @@ export class Updates {
     })();
     return this.work;
   }
-  private async request(url: string, signal: AbortSignal) {
-    const response = await this.send(url, {
-      signal,
-      credentials: 'omit',
-      redirect: 'error',
-      referrerPolicy: 'no-referrer',
-      headers: { 'Accept-Encoding': 'identity' },
-    });
-    if (
-      response.status !== 200 ||
-      !response.body ||
-      ![null, 'identity'].includes(response.headers.get('content-encoding'))
-    ) {
-      await response.body?.cancel();
-      throw new UpdateFailure('network');
-    }
-    return response;
-  }
   check(automatic = false): Promise<UpdateState> {
     if (this.work || this.closed || !this.config || this.installation || this.abandonment)
       return this.read();
@@ -591,23 +574,11 @@ export class Updates {
       this.release = null;
       this.state = this.empty('checking');
       await this.removeOwned('artifact.ready', 2 * 1024 ** 3);
-      const response = await this.request(this.config!.feed, signal);
-      const chunks: Uint8Array[] = [];
-      let size = 0;
-      for await (const chunk of response.body!) {
-        signal.throwIfAborted();
-        size += chunk.byteLength;
-        if (size > updateEnvelopeLimit) throw new UpdateFailure('invalid-release');
-        chunks.push(chunk);
-      }
-      signal.throwIfAborted();
+      const body = await requestUpdateFile(this.send, this.config!.feed, signal);
+      const envelope = await readUpdateEnvelope(body, updateEnvelopeLimit, signal);
       let verified;
       try {
-        verified = verifyUpdateRelease(
-          Buffer.concat(chunks).toString('utf8'),
-          this.config!,
-          this.now(),
-        );
+        verified = verifyUpdateRelease(envelope, this.config!, this.now());
       } catch {
         throw new UpdateFailure('invalid-release');
       }
@@ -653,31 +624,23 @@ export class Updates {
       await this.removeOwned('artifact.ready', 2 * 1024 ** 3);
       let created = false;
       try {
-        const response = await this.request(new URL(artifact.name, this.config!.feed).href, signal);
-        const length = response.headers.get('content-length');
-        if (length !== null && (!/^\d+$/.test(length) || Number(length) !== artifact.size)) {
-          await response.body!.cancel();
-          throw new UpdateFailure('integrity');
-        }
+        const body = await requestUpdateFile(
+          this.send,
+          new URL(artifact.name, this.config!.feed).href,
+          signal,
+          artifact.size,
+        );
         const file = await open(this.file('artifact.part'), 'wx', 0o600).catch(() => {
           throw new UpdateFailure('storage');
         });
         created = true;
         try {
-          const hash = createHash('sha256');
-          for await (const chunk of response.body!) {
-            signal.throwIfAborted();
-            if (this.state.downloaded + chunk.byteLength > artifact.size)
-              throw new UpdateFailure('integrity');
+          await verifyUpdateArtifact(body, artifact, signal, async (chunk) => {
             await file.writeFile(chunk).catch(() => {
               throw new UpdateFailure('storage');
             });
-            hash.update(chunk);
             this.state.downloaded += chunk.byteLength;
-          }
-          signal.throwIfAborted();
-          if (this.state.downloaded !== artifact.size || hash.digest('hex') !== artifact.sha256)
-            throw new UpdateFailure('integrity');
+          });
           await file.sync().catch(() => {
             throw new UpdateFailure('storage');
           });
