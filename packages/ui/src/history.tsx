@@ -171,11 +171,10 @@ export function History() {
       state.setDetail(rows[focused]);
       return;
     }
+    if (event.key.length === 1 && (event.altKey || event.ctrlKey || event.metaKey)) return;
     let navigationKey = event.key;
-    if (!event.altKey && !event.ctrlKey && !event.metaKey) {
-      if (navigationKey.toLowerCase() === 'j') navigationKey = 'ArrowDown';
-      if (navigationKey.toLowerCase() === 'k') navigationKey = 'ArrowUp';
-    }
+    if (navigationKey.toLowerCase() === 'j') navigationKey = 'ArrowDown';
+    if (navigationKey.toLowerCase() === 'k') navigationKey = 'ArrowUp';
     if (
       navigationKey === 'ArrowDown' &&
       !event.shiftKey &&

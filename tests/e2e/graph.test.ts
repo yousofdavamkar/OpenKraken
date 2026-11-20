@@ -116,6 +116,23 @@ test('j and k move through graph rows and Shift follows ancestry', async () => {
     await grid.press('Home');
     await grid.press('j');
     await expect(selected).toHaveAttribute('aria-rowindex', '2');
+    // Dispatch to the grid without triggering the host OS shortcut (e.g. macOS Hide).
+    for (const modifier of ['ctrlKey', 'altKey', 'metaKey']) {
+      const unhandled = await grid.evaluate(
+        (element, modifier) =>
+          element.dispatchEvent(
+            new KeyboardEvent('keydown', {
+              key: 'h',
+              [modifier]: true,
+              bubbles: true,
+              cancelable: true,
+            }),
+          ),
+        modifier,
+      );
+      expect(unhandled).toBe(true);
+      await expect(selected).toHaveAttribute('aria-rowindex', '2');
+    }
     await grid.press('k');
     await expect(selected).toHaveAttribute('aria-rowindex', '1');
     await grid.press('Shift+J');
