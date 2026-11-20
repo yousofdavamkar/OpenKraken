@@ -2,6 +2,10 @@
 
 M7 remains in progress. Earlier implementation and packaging checkpoints are `0b97480` and `66ca2e2`. The remaining integration work is recorded in [M6 progress](m6-progress.md). React 19.3.1 and TypeScript 7.0.2 remain pinned.
 
+## Keyboard access to release settings and diagnostics
+
+An Electron check starts at Crash reporting and tabs through Activity, Diagnostics and Updates. It opens each dialog with Enter and Space, dismisses it with Close and Escape, and checks the focused toolbar button after every dismissal. The same check runs against packaged installers. Configured crash-reporting tests also toggle consent, apply it, close the dialog and inspect the saved choice after restart. A failed save leaves Apply focused when retry is available. [Release verification](m8-progress.md#keyboard-access-to-release-settings)
+
 ## Branches and changed files in the command palette
 
 An Electron fixture with 124 branches found an offscreen Unicode branch, selected its five commits, and then selected a remote branch by its full ref name while HEAD stayed on main. A local branch with the same short name was also present. A partially staged file opened distinct index and worktree diffs. Creating and deleting a file outside the app updated the open palette. On the 50,000-ref full Linux fixture, a separate desktop check opened the 10,001-branch category in 26.4 ms, mounted 50 results and found a late-listed branch in 34.4 ms. These are single observations including Playwright interaction time.

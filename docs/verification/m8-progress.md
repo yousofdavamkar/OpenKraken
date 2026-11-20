@@ -2,6 +2,22 @@
 
 M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. Full Linux history with one ref met both budgets in the latest three runs. The shared-target 50,000-ref fixture now meets it intermittently, and the distinct-target fixture still exceeds it. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
 
+## Keyboard access to release settings
+
+On Linux x64, the Updates and Crash reporting dialogs previously discarded the invoking button's focus. In the packaged build, pressing Space immediately after Close could also leave the dialog closed. The native dialog had already restored focus while React was still waiting for its close event. The default build and a build with a loopback crash receiver passed five consecutive keyboard traversals each after the fix.
+
+During an update download, Shift+Tab from Close now reaches Cancel transfer. The HTTPS fixture cancels a partial download by keyboard, verifies its removal and checks that the automatic-check checkbox retains focus after saving. [Keyboard behavior](../decisions/0085-opt-in-automatic-update-checks.md#keyboard-operation)
+
+The clean `3a02c45` build produced these Linux x64 test packages. The DEB and RPM ran from their extracted payloads. The AppImage launched through its embedded runtime. Each passed the toolbar keyboard check, renderer isolation, packaged helpers and native terminal smoke. The unpacked application also passed the Canvas graph, two appends, repository search and graph keyboard navigation.
+
+| Format   | Exported installer bytes | SHA-256                                                          |
+| -------- | -----------------------: | ---------------------------------------------------------------- |
+| DEB      |              115,432,776 | b984e8dd34273d11cd5451eed07c868eaa7f06360ba954fdaae2e9f03eee3e34 |
+| RPM      |               99,013,401 | 2337a0b14d55b04e86c4f1d142f1f58abce9f8b2d88e019dfffda161967a09a9 |
+| AppImage |              133,192,184 | 98b6afc5b3efcc4c797002fa19299ff444b25e42055c8d534e38656909c2e942 |
+
+Two concurrent runs using the shared temporary filesystem reported a DEB save error and an AppImage storage error. The underlying filesystem errors were unconfirmed. With separate disk-backed temporary directories, all three exported files matched their installer manifests. Each signed-feed run also passed cancellation, integrity rejection, restart and key migration with temporary credentials. The 31 distinct Electron tests for activity, diagnostics, crash reporting, updates and toolbar keyboard navigation passed. The Linux unit and native suite passed 1,105 tests with nine platform skips. Typechecking, lint and the production build passed.
+
 ## Opening and searching commits at the Unix epoch
 
 A commit at Unix time zero with a `-0330` offset previously caused Git to abort while opening its history. The graph, stash projection, message search and exact-ID lookup now read native raw dates. An Electron fixture opened the commit, selected it from the loaded search and showed its details after a full-history hash search. Git 2.38.0 passed all 55 focused parser, history and prefetch tests.
