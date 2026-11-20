@@ -398,6 +398,32 @@ export const providerBitbucketCommentsOptionsSchema = providerPullOptionsSchema
     page: providerRepositoryPageNumberSchema,
   })
   .strict();
+export const providerBitbucketStatusesOptionsSchema = providerBitbucketCommentsOptionsSchema.extend(
+  {
+    source: providerBitbucketEndpointSchema,
+  },
+);
+export const providerBitbucketStatusSchema = z
+  .object({
+    key: z.string().min(1).max(512),
+    state: z.enum(['INPROGRESS', 'SUCCESSFUL', 'FAILED', 'STOPPED']),
+    name: z.string().max(1024),
+    description: z.string().max(16384),
+    refname: z.string().max(1024).nullable(),
+    updatedAt: providerDateSchema.nullable(),
+  })
+  .strict();
+export const providerBitbucketStatusesPageSchema = z
+  .object({
+    statuses: z.array(providerBitbucketStatusSchema).max(100),
+    nextPage: providerRepositoryPageNumberSchema.nullable(),
+    limited: z.boolean(),
+  })
+  .strict();
+export type ProviderBitbucketStatusesOptions = z.infer<
+  typeof providerBitbucketStatusesOptionsSchema
+>;
+export type ProviderBitbucketStatusesPage = z.infer<typeof providerBitbucketStatusesPageSchema>;
 const providerBitbucketLineSchema = z
   .number()
   .int()

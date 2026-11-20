@@ -56,6 +56,8 @@ export * from './appearance.js';
 export * from './theme-colors.js';
 export * from './commands.js';
 import {
+  providerBitbucketStatusesOptionsSchema,
+  providerBitbucketStatusesPageSchema,
   providerBitbucketCommentsOptionsSchema,
   providerBitbucketCommentsPageSchema,
 } from './providers.js';
@@ -1761,6 +1763,14 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerBitbucketPullStatuses'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerBitbucketStatusesOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerBitbucketPullComments'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerBitbucketCommentsOptionsSchema,
@@ -2249,6 +2259,12 @@ export const resultSchema = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({ kind: z.literal('providerBitbucketPullDiff'), diff: providerBitbucketDiffSchema })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerBitbucketPullStatuses'),
+      page: providerBitbucketStatusesPageSchema,
+    })
     .strict(),
   z
     .object({

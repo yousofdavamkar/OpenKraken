@@ -4,6 +4,8 @@ import { DraftEncryptionUnavailable } from './protected-draft-files.js';
 import type { IssueDraftRequest, IssueDrafts } from './issue-drafts.js';
 import type { ReviewDraftRequest, ReviewDrafts } from './review-drafts.js';
 import {
+  providerBitbucketStatusesOptionsSchema,
+  type ProviderBitbucketStatusesOptions,
   providerBitbucketCommentsOptionsSchema,
   type ProviderBitbucketCommentsOptions,
 } from '@openkraken/ipc-contract';
@@ -515,6 +517,15 @@ export class ProviderService {
       if (account.provider !== 'bitbucket')
         throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
       return this.bitbucket.pullDiff(account.origin, token, options, signal);
+    });
+  }
+  bitbucketPullStatuses(id: string, input: ProviderBitbucketStatusesOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerBitbucketStatusesOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'bitbucket')
+        throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
+      return this.bitbucket.pullStatuses(account.origin, token, options, signal);
     });
   }
   bitbucketPullComments(id: string, input: ProviderBitbucketCommentsOptions, signal?: AbortSignal) {
