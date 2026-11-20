@@ -8,10 +8,13 @@ const pwsh = process.env.OPENKRAKEN_POWERSHELL ?? '/opt/microsoft/powershell/7/p
 
 for (const mode of ['custom', 'default', 'protected'] as const) {
   test(`PowerShell reports command outcomes and respects the ${mode} prompt`, async () => {
-    test.skip(
-      process.platform !== 'linux' || !existsSync(pwsh),
-      'Requires native PowerShell 7 on Linux',
-    );
+    test.skip(!existsSync(pwsh), 'Requires native PowerShell 7');
+    const windows = process.platform === 'win32';
+    test.skip(windows && mode !== 'default', 'Custom profile fixtures use POSIX XDG paths');
+    const exitWith = (code: number) =>
+      windows
+        ? `& "$PSHOME/pwsh.exe" -NoProfile -Command 'exit ${code}'`
+        : `/bin/sh -c 'exit ${code}'`;
     const root = mkdtempSync(join(tmpdir(), 'openkraken-terminal-pwsh-'));
     const repository = createFixture(join(root, 'repo'), 'linear', 3);
     const shellProfile = join(root, 'shell-profile');
@@ -32,7 +35,7 @@ for (const mode of ['custom', 'default', 'protected'] as const) {
       args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
       env: {
         ...process.env,
-        SHELL: pwsh,
+        ...(windows ? { ComSpec: pwsh, APPDATA: join(root, 'appdata') } : { SHELL: pwsh }),
         HOME: shellProfile,
         XDG_CONFIG_HOME: configDirectory,
         XDG_DATA_HOME: join(shellProfile, '.local/share'),
@@ -66,7 +69,7 @@ for (const mode of ['custom', 'default', 'protected'] as const) {
         return;
       }
       await expect(integration).toHaveText('Ready for command');
-      await command("Start-Sleep 1; /bin/sh -c 'exit 23'");
+      await command(`Start-Sleep 1; ${exitWith(23)}`);
       await expect(integration).toHaveText('Command running');
       await expect(integration).toHaveText('Ready for command · last exit 23');
       if (mode === 'custom') await expect(output).toContainText('custom-failed>');
@@ -75,7 +78,7 @@ for (const mode of ['custom', 'default', 'protected'] as const) {
       await expect(integration).toHaveText('Ready for command · last exit 0');
       await command('Write-Error oops');
       await expect(integration).toHaveText('Ready for command · last exit 1');
-      await command("$PSNativeCommandUseErrorActionPreference=$true; /bin/sh -c 'exit 7'");
+      await command(`$PSNativeCommandUseErrorActionPreference=$true; ${exitWith(7)}`);
       await expect(integration).toHaveText('Ready for command · last exit 7');
       await command('exit 5');
       await expect(panel.getByRole('status')).toHaveText('Exited with code 5');

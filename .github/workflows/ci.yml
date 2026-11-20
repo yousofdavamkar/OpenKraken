@@ -286,8 +286,11 @@ jobs:
         run: |
           fish --version
           zsh --version
-          pwsh --version
-          echo "OPENKRAKEN_POWERSHELL=$(command -v pwsh)" >> "$GITHUB_ENV"
+      - name: Locate the native PowerShell executable
+        shell: pwsh
+        run: |
+          $exe = (Get-Process -Id $PID).Path
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "OPENKRAKEN_POWERSHELL=$exe"
       - name: Verify native Git LFS prerequisite
         run: git lfs version
       - run: pnpm install --frozen-lockfile
