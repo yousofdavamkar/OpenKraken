@@ -80,3 +80,37 @@ test('grouped refs switch target every 100 refs, including a partial final group
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('nested aliases reach one independent commit and leave the source refs and objects intact', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-nested-refs-'));
+  try {
+    const { repository: source, head } = await createPerformanceFixture(join(root, 'source'), {
+      commits: 3,
+      files: 2,
+    });
+    const original = git(source, ['show-ref']);
+    const result = await createReferenceFixture(
+      source,
+      join(root, 'nested'),
+      'nested-aliases',
+      201,
+    );
+    const repo = result.repository;
+    expect(result).toMatchObject({ head, refs: 201, distinctTargets: 2 });
+    const tags = git(repo, ['for-each-ref', '--format=%(objectname)', 'refs/tags']).split('\n');
+    expect(tags).toHaveLength(200);
+    expect(new Set(tags).size).toBe(1);
+    let target = tags[0];
+    for (let level = 0; level < 3; level++) {
+      expect(git(repo, ['cat-file', '-t', target])).toBe('tag');
+      target = git(repo, ['cat-file', '-p', target]).split('\n')[0].slice('object '.length);
+    }
+    expect(result.annotation.commit).toBe(target);
+    expect(git(repo, ['rev-list', '--parents', target])).toBe(target);
+    expect(git(repo, ['rev-list', '--count', '--all'])).toBe('4');
+    expect(git(source, ['show-ref'])).toBe(original);
+    expect(() => git(source, ['cat-file', '-e', target])).toThrow();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
