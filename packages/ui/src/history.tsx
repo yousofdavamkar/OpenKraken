@@ -171,8 +171,13 @@ export function History() {
       state.setDetail(rows[focused]);
       return;
     }
+    let navigationKey = event.key;
+    if (!event.altKey && !event.ctrlKey && !event.metaKey) {
+      if (navigationKey.toLowerCase() === 'j') navigationKey = 'ArrowDown';
+      if (navigationKey.toLowerCase() === 'k') navigationKey = 'ArrowUp';
+    }
     if (
-      event.key === 'ArrowDown' &&
+      navigationKey === 'ArrowDown' &&
       !event.shiftKey &&
       snapshot.hasMore &&
       rows.length > 0 &&
@@ -186,7 +191,7 @@ export function History() {
     const target = navigationTarget(
       rows,
       focused,
-      event.key,
+      navigationKey,
       event.shiftKey,
       refs?.head,
       refs?.upstream,
