@@ -122,6 +122,25 @@ test('Bitbucket pull requests page, search, preserve native details and refresh 
             { headers: { 'Content-Type': 'text/plain' } },
           );
         }
+        if (url.pathname === '/2.0/repositories/team/project/pullrequests/101/statuses') {
+          const page = Number(url.searchParams.get('page'));
+          if (flags.bbFail) return new Response('pull-secret', { status: 503 });
+          return Response.json({
+            page,
+            values:
+              page === 1
+                ? [
+                    {
+                      key: 'lint',
+                      state: 'SUCCESSFUL',
+                      name: 'Lint',
+                      description: '<script>literal check</script>',
+                    },
+                  ]
+                : [{ key: 'package', state: 'INPROGRESS' }],
+            next: page === 1 ? url.origin + url.pathname + '?page=2' : null,
+          });
+        }
         if (url.pathname === '/2.0/repositories/team/project/pullrequests/101') {
           if (flags.bbBlock) {
             flags.bbStarted = true;
@@ -212,6 +231,23 @@ test('Bitbucket pull requests page, search, preserve native details and refresh 
     await expect(people.getByRole('option', { name: 'Reviewer 299', exact: true })).toContainText(
       'Changes requested',
     );
+    await details.getByRole('button', { name: 'Show build checks' }).press('Enter');
+    const checks = details.getByRole('region', { name: 'Bitbucket build checks' });
+    await expect(checks).toContainText('Successful');
+    await expect(checks).toContainText('<script>literal check</script>');
+    await expect(checks.locator('script')).toHaveCount(0);
+    await checks.getByRole('button', { name: 'Next checks' }).click();
+    await expect(checks).toContainText('package · In progress');
+    await app.evaluate(() => Object.assign(globalThis, { bbFail: true }));
+    await checks.getByRole('button', { name: 'Refresh checks' }).click();
+    await expect(checks.getByRole('alert')).toBeVisible();
+    await expect(checks).not.toContainText('pull-secret');
+    await expect(checks).not.toContainText('In progress');
+    await app.evaluate(() => Object.assign(globalThis, { bbFail: false }));
+    await checks.getByRole('button', { name: 'Retry checks' }).click();
+    await expect(checks).toContainText('In progress');
+    await checks.getByRole('button', { name: 'Previous checks' }).click();
+    await expect(checks).toContainText('Successful');
     await details.getByRole('button', { name: 'Show files', exact: true }).click();
     const files = details.getByRole('region', { name: 'Bitbucket changed files' });
     await expect(files.getByRole('status')).toHaveText('100 files loaded.');
