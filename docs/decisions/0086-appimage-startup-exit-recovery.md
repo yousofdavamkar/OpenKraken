@@ -33,3 +33,8 @@ The stable FUSE and beta extract-and-run Linux x64 fixtures compile a disposable
 ## Replacement with a missing desktop document
 
 The packaged `--missing-renderer-document` fixture removes the replacement's initial HTML file before building and signing that AppImage. The installed replacement reaches the real window load, displays the startup error and exits after dismissal. The native helper can then restore and relaunch the predecessor. The fixture checks the original image digest, boot order, signed release sequence, transaction cleanup and restored app's notice. Linux acceptance uses the same failure path with stable FUSE and beta extract-and-run launches. [Desktop startup behavior](0078-interrupted-session-and-javascript-reports.md#fatal-desktop-initialization-errors)
+
+
+## Replacement with a missing renderer module
+
+The `--missing-renderer-module` fixture reads the staged replacement's HTML, removes its referenced JavaScript asset, then builds and signs the image. The HTML still loads. The missing entry marker causes a fatal exit after the startup dialog is dismissed. Stable FUSE and beta extract-and-run launches both restored the exact predecessor, reopened the profile, retained the signed release sequence, removed the transaction and showed the restoration notice. Both used temporary signing keys and a loopback HTTPS feed. [Renderer startup check](0078-interrupted-session-and-javascript-reports.md#renderer-entry-evaluation)
