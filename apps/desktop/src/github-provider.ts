@@ -68,6 +68,7 @@ import {
   providerRepositoryPageSchema,
   providerRepositorySchema,
   type ProviderCreateRepository,
+  type PersonalRepositoryTarget,
   type ProviderRepository,
   providerRepositoryNameSchema,
   providerRepositoryPageNumberSchema,
@@ -88,6 +89,13 @@ import { ProviderPollingPolicy } from './provider-polling-policy.js';
 export { ProviderError } from './provider-error.js';
 import { loadPullTemplates, loadPullTemplate } from './github-templates.js';
 export interface ProviderDriver {
+  inspectRepository(
+    origin: string,
+    token: string,
+    userId: string,
+    target: PersonalRepositoryTarget,
+    signal?: AbortSignal,
+  ): Promise<ProviderRepository>;
   createRepository(
     origin: string,
     token: string,
@@ -311,6 +319,18 @@ export class GitHubProvider implements ProviderDriver {
       return { id: String(data.id), login: data.login };
     });
   }
+  inspectRepository(
+    origin: string,
+    token: string,
+    userId: string,
+    target: PersonalRepositoryTarget,
+    signal?: AbortSignal,
+  ) {
+    return this.request(origin, token, signal, async (client, headers) => {
+      const { data } = await client.repos.get({ headers, owner: target.owner, repo: target.name });
+      return personalRepository(origin, userId, target, data);
+    });
+  }
   async createRepository(
     origin: string,
     token: string,
@@ -327,24 +347,14 @@ export class GitHubProvider implements ProviderDriver {
           private: options.visibility === 'private',
           auto_init: options.readme,
         });
+        const repo = personalRepository(origin, userId, options, data);
         if (
           status !== 201 ||
-          String(data.owner.id) !== userId ||
-          data.owner.login.toLowerCase() !== options.owner.toLowerCase() ||
-          data.name.toLowerCase() !== options.name.toLowerCase() ||
-          data.private !== (options.visibility === 'private') ||
-          !Number.isSafeInteger(data.id)
+          repo.private !== (options.visibility === 'private') ||
+          (repo.visibility && repo.visibility !== options.visibility)
         )
           throw new Error('Unexpected repository acknowledgment');
-        return providerRepositorySchema.parse({
-          id: String(data.id),
-          owner: data.owner.login,
-          name: data.name,
-          archived: data.archived,
-          private: data.private,
-          description: data.description ?? '',
-          cloneUrl: `${origin}/${data.owner.login}/${data.name}.git`,
-        });
+        return repo;
       } catch (error) {
         const status =
           error && typeof error === 'object' && 'status' in error ? error.status : undefined;
@@ -1156,6 +1166,44 @@ export class GitHubProvider implements ProviderDriver {
   }
 }
 
+function personalRepository(
+  origin: string,
+  userId: string,
+  target: PersonalRepositoryTarget,
+  data: {
+    id: number;
+    owner: { id: number; login: string };
+    name: string;
+    private: boolean;
+    archived: boolean;
+    description: string | null;
+    visibility?: string;
+  },
+) {
+  if (
+    !Number.isSafeInteger(data?.id) ||
+    String(data.owner?.id) !== userId ||
+    data.owner.login?.toLowerCase() !== target.owner.toLowerCase() ||
+    data.name?.toLowerCase() !== target.name.toLowerCase()
+  )
+    throw new ProviderError(
+      'PROVIDER_RESPONSE',
+      'GitHub returned a different personal repository.',
+    );
+  const result = providerRepositorySchema.safeParse({
+    id: String(data.id),
+    owner: data.owner.login,
+    name: data.name,
+    description: data.description ?? '',
+    archived: data.archived,
+    private: data.private,
+    visibility: data.visibility,
+    cloneUrl: `${origin}/${data.owner.login}/${data.name}.git`,
+  });
+  if (!result.success)
+    throw new ProviderError('PROVIDER_RESPONSE', 'GitHub returned invalid repository details.');
+  return result.data;
+}
 type GitHubPullSummary = {
   number: unknown;
   title: unknown;

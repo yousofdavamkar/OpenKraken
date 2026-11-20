@@ -955,6 +955,7 @@ export function startDesktop(
           request.method === 'providerWriteMergeDiscussion' ||
           request.method === 'providerBitbucketWorkspaces' ||
           request.method === 'providerBitbucketRepositories' ||
+          request.method === 'providerInspectRepository' ||
           request.method === 'providerCreateRepository' ||
           request.method === 'providerRepositories' ||
           request.method === 'mergeDraftRead' ||
@@ -1439,6 +1440,15 @@ export function startDesktop(
                 controller.signal,
               ),
             });
+          if (request.method === 'providerInspectRepository')
+            return resultSchema.parse({
+              kind: 'providerRepositoryFound',
+              repository: await providers.inspectRepository(
+                request.accountId,
+                request.target,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerCreateRepository')
             return resultSchema.parse({
               kind: 'providerRepositoryCreated',
@@ -1622,6 +1632,7 @@ export function startDesktop(
           request.method === 'providerWriteMergeDiscussion' ||
           request.method === 'providerBitbucketWorkspaces' ||
           request.method === 'providerBitbucketRepositories' ||
+          request.method === 'providerInspectRepository' ||
           request.method === 'providerCreateRepository' ||
           request.method === 'providerRepositories' ||
           request.method === 'mergeDraftRead' ||

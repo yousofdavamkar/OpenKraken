@@ -17,7 +17,8 @@ export function CreateRemoteRepository({
   const [isPrivate, setPrivate] = useState(true);
   const [readme, setReadme] = useState(false);
   const [pending, setPending] = useState(false);
-  const [created, setCreated] = useState<ProviderRepository>();
+  const [receipt, setReceipt] = useState<{ repository: ProviderRepository; inspected: boolean }>();
+  const [uncertain, setUncertain] = useState(false);
   const [error, setError] = useState('');
   const active = useRef<string | undefined>(undefined);
   useEffect(
@@ -29,32 +30,51 @@ export function CreateRemoteRepository({
     [],
   );
   const validName = providerRepositoryNameSchema.safeParse(name).success;
-  async function create() {
+  async function submit() {
     if (active.current || !validName || disabled) return;
+    const inspect = uncertain;
     const id = crypto.randomUUID();
     active.current = id;
     setPending(true);
     setError('');
     try {
-      const result = await window.openkraken.request({
-        id,
-        method: 'providerCreateRepository',
-        accountId: account.id,
-        options: {
-          owner: account.login,
-          name,
-          description,
-          visibility: isPrivate ? 'private' : 'public',
-          readme,
-        },
-      });
+      const result = await window.openkraken.request(
+        inspect
+          ? {
+              id,
+              method: 'providerInspectRepository',
+              accountId: account.id,
+              target: { owner: account.login, name },
+            }
+          : {
+              id,
+              method: 'providerCreateRepository',
+              accountId: account.id,
+              options: {
+                owner: account.login,
+                name,
+                description,
+                visibility: isPrivate ? 'private' : 'public',
+                readme,
+              },
+            },
+      );
       if (active.current !== id) return;
-      if (result.kind === 'providerRepositoryCreated') setCreated(result.repository);
-      else if (result.kind === 'error') setError(result.message);
-      else setError('Check your provider repositories to see whether creation completed.');
+      if (result.kind === (inspect ? 'providerRepositoryFound' : 'providerRepositoryCreated')) {
+        setReceipt({ repository: result.repository, inspected: inspect });
+      } else if (result.kind === 'error') {
+        if (!inspect && result.code === 'PROVIDER_WRITE_UNCERTAIN') setUncertain(true);
+        setError(result.message);
+      } else throw new Error('Unexpected repository result');
     } catch {
-      if (active.current === id)
-        setError('Check your provider repositories to see whether creation completed.');
+      if (active.current === id) {
+        if (!inspect) setUncertain(true);
+        setError(
+          inspect
+            ? 'The repository lookup could not be completed.'
+            : 'The provider may have created the repository. Check its current state.',
+        );
+      }
     } finally {
       if (active.current === id) {
         active.current = undefined;
@@ -65,14 +85,16 @@ export function CreateRemoteRepository({
   return (
     <details>
       <summary>Create repository</summary>
-      {created ? (
+      {receipt ? (
         <section>
           <p role="status">
-            Created {created.owner}/{created.name}.
+            {receipt.inspected ? 'Found' : 'Created'} {receipt.repository.owner}/
+            {receipt.repository.name}. Visibility:{' '}
+            {receipt.repository.visibility ?? (receipt.repository.private ? 'private' : 'public')}.
           </p>
           <label>
             Clone URL
-            <input readOnly value={created.cloneUrl} />
+            <input readOnly value={receipt.repository.cloneUrl} />
           </label>
           <button
             type="button"
@@ -81,7 +103,8 @@ export function CreateRemoteRepository({
               setDescription('');
               setPrivate(true);
               setReadme(false);
-              setCreated(undefined);
+              setReceipt(undefined);
+              setUncertain(false);
             }}
           >
             Create another repository
@@ -92,10 +115,10 @@ export function CreateRemoteRepository({
           aria-label="Create personal repository"
           onSubmit={(event) => {
             event.preventDefault();
-            void create();
+            void submit();
           }}
         >
-          <fieldset disabled={disabled || pending}>
+          <fieldset disabled={disabled || pending || uncertain}>
             <legend>
               {account.origin}/{account.login}
             </legend>
@@ -140,11 +163,32 @@ export function CreateRemoteRepository({
               />{' '}
               Initialize with a README
             </label>
-            <button type="submit" disabled={!validName}>
-              Create {isPrivate ? 'private' : 'public'} repository
-            </button>
+            {!uncertain && (
+              <button type="submit" disabled={!validName}>
+                Create {isPrivate ? 'private' : 'public'} repository
+              </button>
+            )}
           </fieldset>
-          {pending && <p role="status">Creating repository…</p>}
+          {uncertain && (
+            <>
+              <button type="submit" disabled={pending || disabled}>
+                Check {account.login}/{name}
+              </button>
+              <button
+                type="button"
+                disabled={pending || disabled}
+                onClick={() => {
+                  setUncertain(false);
+                  setError('');
+                }}
+              >
+                Edit repository request
+              </button>
+            </>
+          )}
+          {pending && (
+            <p role="status">{uncertain ? 'Checking repository…' : 'Creating repository…'}</p>
+          )}
           {error && <p role="alert">{error}</p>}
         </form>
       )}

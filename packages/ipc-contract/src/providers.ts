@@ -152,6 +152,11 @@ export const providerCreateRepositorySchema = z.strictObject({
   visibility: z.enum(['private', 'public']),
   readme: z.boolean(),
 });
+export const personalRepositoryTargetSchema = providerCreateRepositorySchema.pick({
+  owner: true,
+  name: true,
+});
+export type PersonalRepositoryTarget = z.infer<typeof personalRepositoryTargetSchema>;
 export type ProviderCreateRepository = z.infer<typeof providerCreateRepositorySchema>;
 export const providerRepositoryPageNumberSchema = z.number().int().min(1).max(100);
 export const providerBitbucketWorkspaceSchema = z

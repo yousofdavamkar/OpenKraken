@@ -87,6 +87,8 @@ import {
   type ProviderPullTemplatesOptions,
   type ProviderPullTemplateOptions,
   providerPullSourceSchema,
+  personalRepositoryTargetSchema,
+  type PersonalRepositoryTarget,
   providerCreateRepositorySchema,
   type ProviderCreateRepository,
   providerCreatePullSchema,
@@ -448,15 +450,32 @@ export class ProviderService {
       return this.bitbucket.repositories(account.origin, token, options, signal);
     });
   }
+  private async personalAccount(id: string, owner: string, signal?: AbortSignal) {
+    const credentials = await this.authorize(id, signal);
+    if (owner !== credentials.account.login)
+      throw new ProviderError(
+        'PROVIDER_ACCOUNT',
+        'The account name has changed. Reopen Provider accounts.',
+      );
+    return credentials;
+  }
+  inspectRepository(id: string, input: PersonalRepositoryTarget, signal?: AbortSignal) {
+    return this.run(async () => {
+      const target = personalRepositoryTargetSchema.parse(input);
+      const { account, token } = await this.personalAccount(id, target.owner, signal);
+      return this.repositoryDriver(account).inspectRepository(
+        account.origin,
+        token,
+        account.providerUserId,
+        target,
+        signal,
+      );
+    });
+  }
   createRepository(id: string, input: ProviderCreateRepository, signal?: AbortSignal) {
     return this.run(async () => {
       const options = providerCreateRepositorySchema.parse(input);
-      const { account, token } = await this.authorize(id, signal);
-      if (options.owner !== account.login)
-        throw new ProviderError(
-          'PROVIDER_ACCOUNT',
-          'The account name has changed. Reopen Provider accounts before creating the repository.',
-        );
+      const { account, token } = await this.personalAccount(id, options.owner, signal);
       return this.repositoryDriver(account).createRepository(
         account.origin,
         token,

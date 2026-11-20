@@ -81,6 +81,31 @@ test.each(hosts)(
         );
       }),
     );
+    let lookupOwner = 'sam';
+    const lookupPath = github ? '/repos/sam/sample' : '/projects/sam%2Fsample';
+    server.use(
+      http.get(api + lookupPath, () =>
+        HttpResponse.json(
+          github
+            ? {
+                id: 41,
+                owner: { login: lookupOwner, id: 17 },
+                name: 'sample',
+                description: '',
+                private: false,
+                archived: false,
+              }
+            : {
+                id: 41,
+                path_with_namespace: lookupOwner + '/sample',
+                path: 'sample',
+                description: '',
+                visibility: 'public',
+                archived: false,
+              },
+        ),
+      ),
+    );
     try {
       const {
         accounts: [account],
@@ -97,6 +122,16 @@ test.each(hosts)(
           code: scenario === 'rejected' ? 'PROVIDER_WRITE_REJECTED' : 'PROVIDER_WRITE_UNCERTAIN',
         });
       }
+      const target = { owner: 'sam', name: 'sample' };
+      expect(await service.inspectRepository(account!.id, target)).toMatchObject({
+        id: '41',
+        private: false,
+        cloneUrl: origin + '/sam/sample.git',
+      });
+      lookupOwner = 'another';
+      await expect(service.inspectRepository(account!.id, target)).rejects.toMatchObject({
+        code: 'PROVIDER_RESPONSE',
+      });
       login = 'renamed';
       await expect(service.createRepository(account!.id, options)).rejects.toMatchObject({
         code: 'PROVIDER_ACCOUNT',

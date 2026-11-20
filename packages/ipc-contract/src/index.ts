@@ -149,6 +149,7 @@ import {
   providerRepositoryPageSchema,
   providerRepositorySchema,
   providerCreateRepositorySchema,
+  personalRepositoryTargetSchema,
   providerConnectSchema,
   gitlabStartSchema,
   gitlabChallengeSchema,
@@ -1862,6 +1863,12 @@ export const requestSchema = z.discriminatedUnion('method', [
     .strict(),
   z.strictObject({
     id: requestId,
+    method: z.literal('providerInspectRepository'),
+    accountId: z.string().regex(/^[0-9a-f]{64}$/),
+    target: personalRepositoryTargetSchema,
+  }),
+  z.strictObject({
+    id: requestId,
     method: z.literal('providerCreateRepository'),
     accountId: z.string().regex(/^[0-9a-f]{64}$/),
     options: providerCreateRepositorySchema,
@@ -2333,6 +2340,10 @@ export const resultSchema = z.discriminatedUnion('kind', [
       page: providerBitbucketWorkspacePageSchema,
     })
     .strict(),
+  z.strictObject({
+    kind: z.literal('providerRepositoryFound'),
+    repository: providerRepositorySchema,
+  }),
   z.strictObject({
     kind: z.literal('providerRepositoryCreated'),
     repository: providerRepositorySchema,

@@ -23,6 +23,7 @@ import {
   providerRepositoryPageSchema,
   providerRepositorySchema,
   type ProviderCreateRepository,
+  type PersonalRepositoryTarget,
   providerNamespaceSchema,
   providerRepositoryPathComponentSchema,
 } from '@openkraken/ipc-contract';
@@ -80,6 +81,25 @@ function projectRepository(host: string, project: z.infer<typeof projectSchema>)
     cloneUrl: `${host}/${owner}/${project.path}.git`,
   });
 }
+const personalProjectSchema = projectSchema.extend({
+  owner: z.object({ id: z.number().int().positive() }).nullish(),
+});
+function personalProject(
+  origin: string,
+  userId: string,
+  target: PersonalRepositoryTarget,
+  raw: unknown,
+) {
+  const project = personalProjectSchema.parse(raw);
+  const repo = projectRepository(origin, project);
+  if (
+    repo.owner.toLowerCase() !== target.owner.toLowerCase() ||
+    repo.name.toLowerCase() !== target.name.toLowerCase() ||
+    (project.owner && String(project.owner.id) !== userId)
+  )
+    throw new ProviderError('PROVIDER_RESPONSE', 'GitLab returned a different personal project.');
+  return repo;
+}
 /** Gitbeaker endpoints with a bounded, cancellable transport and no implicit retries. */
 export class GitLabProvider {
   private policy = new ProviderPollingPolicy();
@@ -108,6 +128,23 @@ export class GitLabProvider {
       'user',
     );
   }
+  inspectRepository(
+    origin: string,
+    token: string,
+    userId: string,
+    target: PersonalRepositoryTarget,
+    signal?: AbortSignal,
+  ) {
+    const path = `${target.owner}/${target.name}`;
+    return this.request(
+      origin,
+      token,
+      signal,
+      async (options) =>
+        personalProject(origin, userId, target, await new Projects(options).show(path)),
+      `projects/${encodeURIComponent(path)}`,
+    );
+  }
   async createRepository(
     origin: string,
     token: string,
@@ -127,16 +164,8 @@ export class GitLabProvider {
           visibility: input.visibility,
           initializeWithReadme: input.readme,
         });
-        const project = projectSchema
-          .extend({ owner: z.object({ id: z.number().int().positive() }).nullish() })
-          .parse(raw);
-        const repo = projectRepository(origin, project);
-        if (
-          repo.owner.toLowerCase() !== input.owner.toLowerCase() ||
-          repo.name.toLowerCase() !== input.name.toLowerCase() ||
-          repo.visibility !== input.visibility ||
-          (project.owner && String(project.owner.id) !== userId)
-        )
+        const repo = personalProject(origin, userId, input, raw);
+        if (repo.visibility !== input.visibility)
           throw new Error('Unexpected project acknowledgment');
         return repo;
       },
