@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { comparePayload, payloadManifest } from './package-security.mjs';
 import { verifyMacBundle } from './dmg.mjs';
+import { isMacCode, macIdentity, verifyDmgReceipt, verifyMacSignature } from './mac-signing.mjs';
 
 const run = promisify(execFile);
 const temporary = [];
@@ -125,3 +126,68 @@ test.skipIf(process.platform !== 'darwin').each([
     'macOS bundle identity, version, executable or repository scheme differs',
   );
 });
+
+test('a signed DMG receipt requires the same certificate selected independently', () => {
+  const key = 'ab'.repeat(20);
+  const identity = macIdentity('dmg', key);
+  expect(identity).toBe(key.toUpperCase());
+  const receipt = { signed: true, signingFingerprint: identity };
+  verifyDmgReceipt(receipt, identity);
+  verifyDmgReceipt({ signed: false }, undefined);
+  for (const value of ['', '-', 'Developer ID Application', key.slice(1), key + '0'])
+    expect(() => macIdentity('dmg', value)).toThrow('--mac-identity');
+  expect(() => macIdentity('msi', key)).toThrow('--mac-identity');
+  for (const [candidate, trusted] of [
+    [receipt, undefined],
+    [receipt, 'CD'.repeat(20)],
+    [{ signed: false }, identity],
+    [{ ...receipt, signed: false }, undefined],
+    [{ signed: true }, identity],
+    [{}, undefined],
+  ])
+    expect(() => verifyDmgReceipt(candidate, trusted)).toThrow('DMG signing receipt');
+});
+
+test('macOS signing selects Mach-O code and bundles and preserves binary resources', async () => {
+  const directory = await fixture();
+  const app = join(directory, 'OpenKraken.app');
+  await mkdir(app);
+  expect(isMacCode(app)).toBe(true);
+  expect(isMacCode(directory)).toBe(false);
+  for (const [filename, header, code] of [
+    ['askpass', 'cffaedfe', true],
+    ['pty.node', 'cafebabe', true],
+    ['app.asar', '04000000', false],
+    ['resource.pak', '05000000', false],
+    ['empty', '', false],
+  ]) {
+    const path = join(app, filename);
+    await writeFile(path, Buffer.from(header, 'hex'));
+    expect(isMacCode(path)).toBe(code);
+  }
+});
+
+test.skipIf(process.platform !== 'darwin')(
+  'ad-hoc code fails the Developer ID requirement',
+  async () => {
+    const directory = await fixture();
+    const path = join(directory, 'tool');
+    await cp('/usr/bin/true', path);
+    await run('/usr/bin/codesign', [
+      '--force',
+      '--sign',
+      '-',
+      '--identifier',
+      'org.openkraken.desktop',
+      path,
+    ]);
+    await run('/usr/bin/codesign', ['--verify', '--strict', path]);
+    await expect(
+      verifyMacSignature(path, 'AB'.repeat(20), 'org.openkraken.desktop'),
+    ).rejects.toMatchObject({
+      stderr: expect.stringMatching(
+        /failed to satisfy specified code requirement|does not satisfy its designated Requirement/i,
+      ),
+    });
+  },
+);

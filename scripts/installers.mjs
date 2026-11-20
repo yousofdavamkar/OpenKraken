@@ -1,3 +1,4 @@
+import { macIdentity, signMacBundle } from './mac-signing.mjs';
 import { authenticateRpm } from './rpm-signature.mjs';
 import { verifyLinuxPackage } from './linux-package.mjs';
 import { build, Platform, Arch } from 'electron-builder';
@@ -22,10 +23,12 @@ const { values } = parseArgs({
     target: { type: 'string', default: { darwin: 'dmg', win32: 'msi' }[process.platform] ?? 'deb' },
     'test-metadata': { type: 'boolean', default: false },
     metadata: { type: 'string' },
+    'mac-identity': { type: 'string' },
     'rpm-key': { type: 'string' },
   },
 });
 const target = values.target;
+const identity = macIdentity(target, values['mac-identity']);
 const rpmKey = values['rpm-key'];
 if (rpmKey !== undefined && (!rpmKey || target !== 'rpm'))
   throw new Error('--rpm-key requires an RPM target and a public certificate file');
@@ -79,10 +82,11 @@ const executableName = target === 'msi' ? 'openkraken.exe' : 'openkraken';
 await verifyFuses(target === 'dmg' ? source : join(source, executableName));
 const { version } = JSON.parse(await readFile('package.json', 'utf8'));
 if (target === 'dmg') await verifyMacBundle(source, version);
+const signed = Boolean(identity || rpmKey);
 const output = join(
   root,
   `release/installers/${process.platform}-${process.arch}`,
-  testMetadata ? (rpmKey ? 'test-signed' : 'test') : rpmKey ? 'signed' : 'unsigned',
+  testMetadata ? (signed ? 'test-signed' : 'test') : signed ? 'signed' : 'unsigned',
   target,
 );
 await mkdir(output, { recursive: true });
@@ -92,17 +96,25 @@ try {
   await cp(source, prepackaged, { recursive: true, verbatimSymlinks: true });
   comparePayload(original, await payloadManifest(prepackaged));
   const buildSource = verifyPackagedApplication(prepackaged, version);
+  let expectedPayload = original;
   let artifacts;
   let appdir;
   if (target === 'msi') {
     artifacts = await buildMsi({ root, prepackaged, work, version, metadata, testMetadata });
   } else if (target === 'dmg') {
+    if (identity) {
+      await signMacBundle(prepackaged, identity);
+      expectedPayload = await payloadManifest(prepackaged);
+      const archive = 'Contents/Resources/app.asar';
+      comparePayload(original[archive], expectedPayload[archive]);
+    }
     artifacts = [
       await buildDmg(
         prepackaged,
         work,
-        `OpenKraken-${version}-darwin-${process.arch}${testMetadata ? '-TEST-ONLY' : '-unsigned'}.dmg`,
+        `OpenKraken-${version}-darwin-${process.arch}${testMetadata ? '-TEST-ONLY' : identity ? '' : '-unsigned'}.dmg`,
         version,
+        identity,
       ),
     ];
   } else if (target === 'AppImage') {
@@ -187,7 +199,7 @@ try {
   if (appdir) {
     comparePayload(original, await payloadManifest(join(appdir, 'usr/lib/openkraken')));
   } else if (target === 'dmg' || target === 'msi') {
-    comparePayload(original, payload);
+    comparePayload(expectedPayload, payload);
   } else {
     // FPM adds this profile for Ubuntu's user namespace policy. Nothing else may
     // change, particularly the ASAR, fuses, native modules or helper permissions.
@@ -203,7 +215,7 @@ try {
   const artifact = artifacts[0];
   const signer = rpmKey
     ? await authenticateRpm(artifact, resolve(rpmKey), work, { sign: true })
-    : undefined;
+    : identity;
   if (target === 'msi') verifyMsiMetadata(await readMsiMetadata(artifact), { version, metadata });
   const nativePackageVersion =
     target === 'deb' || target === 'rpm'
@@ -234,7 +246,7 @@ try {
     `${signer ? 'Signed' : 'Unsigned'} ${testMetadata ? 'TEST-ONLY ' : ''}installer: ${join(output, basename(artifact))}`,
   );
   console.log(
-    `Verify and smoke-test with: node scripts/verify-installer.mjs ${join(output, 'manifest.json')}${signer ? ' --rpm-key <trusted-certificate-file>' : ''}`,
+    `Verify and smoke-test with: node scripts/verify-installer.mjs ${join(output, 'manifest.json')}${identity ? ' --mac-identity <trusted-fingerprint>' : rpmKey ? ' --rpm-key <trusted-certificate-file>' : ''}`,
   );
 } finally {
   await rm(work, { recursive: true, force: true });

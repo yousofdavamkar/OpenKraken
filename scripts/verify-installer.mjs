@@ -11,6 +11,7 @@ import {
   verifyFuses,
   verifyPackagedApplication,
 } from './package-security.mjs';
+import { macIdentity, verifyDmgReceipt } from './mac-signing.mjs';
 import { verifyDmg } from './dmg.mjs';
 import { verifyMsi } from './msi.mjs';
 
@@ -22,7 +23,7 @@ process.umask(0o022);
 // SHA-256 detects corruption; this adjacent manifest is not a release signature.
 const { positionals, values } = parseArgs({
   allowPositionals: true,
-  options: { 'rpm-key': { type: 'string' } },
+  options: { 'mac-identity': { type: 'string' }, 'rpm-key': { type: 'string' } },
 });
 if (positionals.length !== 1) throw new Error('Provide one installer manifest');
 const rpmKey = values['rpm-key'];
@@ -44,6 +45,8 @@ if (
   !manifest.artifact.file.endsWith(`.${manifest.target}`)
 )
   throw new Error('Expected a native platform installer manifest');
+const identity = macIdentity(manifest.target, values['mac-identity']);
+if (manifest.target === 'dmg') verifyDmgReceipt(manifest, identity);
 if (rpmKey !== undefined && (!rpmKey || manifest.target !== 'rpm'))
   throw new Error('--rpm-key requires an RPM target and a public certificate file');
 if (
@@ -59,9 +62,9 @@ async function verifyChecksum(file) {
     throw new Error('Installer checksum or size mismatch');
 }
 const source = join(dirname(manifestPath), manifest.artifact.file);
-if (!rpmKey) await verifyChecksum(source);
+if (!rpmKey && manifest.target !== 'dmg') await verifyChecksum(source);
 if (manifest.target === 'dmg') {
-  await verifyDmg(source, manifest);
+  await verifyDmg(source, manifest, identity);
 } else if (manifest.target === 'msi') {
   await verifyMsi(source, manifest);
 } else {

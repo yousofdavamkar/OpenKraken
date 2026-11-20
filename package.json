@@ -28,6 +28,7 @@
     "@babel/eslint-parser": "latest",
     "@babel/plugin-syntax-typescript": "latest",
     "@electron/fuses": "latest",
+    "@electron/osx-sign": "2.7.2",
     "@electron/packager": "20.3.0",
     "@eslint/js": "latest",
     "@playwright/test": "latest",
