@@ -1,0 +1,92 @@
+name: Release
+# Builds unsigned installers natively on each platform and publishes them to the
+# GitHub release for the pushed tag. Production signing is not configured.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and publish, for example v0.1.0
+        required: true
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, label: linux-x64, targets: 'deb rpm AppImage' }
+          - { os: ubuntu-24.04-arm, label: linux-arm64, targets: 'deb rpm AppImage' }
+          - { os: macos-latest, label: macos-arm64, targets: dmg }
+          - { os: macos-15-intel, label: macos-x64, targets: dmg }
+          - { os: windows-latest, label: windows-x64, targets: msi }
+          # The MSI pipeline supports Windows x64 only; arm64 ships the packaged bundle as a ZIP.
+          - { os: windows-11-arm, label: windows-arm64, targets: zip }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential rpm libarchive-tools
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm package
+      - name: Build installers
+        run: |
+          set -euo pipefail
+          version=$(node -p 'require("./package.json").version')
+          mkdir -p dist-release
+          for target in ${{ matrix.targets }}; do
+            if [[ "$target" == zip ]]; then
+              bundle=$(ls -d release/OpenKraken-win32-*)
+              pwsh -NoProfile -Command "Compress-Archive -Path '$bundle' -DestinationPath 'dist-release/OpenKraken-$version-${{ matrix.label }}.zip'"
+              continue
+            fi
+            pnpm installer --metadata build-resources/release-metadata.json --target "$target"
+            manifest=$(ls release/installers/*/unsigned/"$target"/manifest.json)
+            file=$(node -p 'require("./" + process.argv[1]).artifact.file' "$manifest")
+            extension="${file##*.}"
+            cp "$(dirname "$manifest")/$file" "dist-release/OpenKraken-$version-${{ matrix.label }}.$extension"
+          done
+          ls -l dist-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.label }}
+          path: dist-release/*
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist-release
+          merge-multiple: true
+      - name: Upload to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd dist-release
+          sha256sum OpenKraken-* > SHA256SUMS-ci.txt
+          if ! gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --title "OpenKraken $TAG" --notes "Unsigned builds for Linux, macOS and Windows on x64 and arm64."
+          fi
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber OpenKraken-* SHA256SUMS-ci.txt
