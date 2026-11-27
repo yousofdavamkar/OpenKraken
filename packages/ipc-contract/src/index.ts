@@ -12,6 +12,8 @@ import { repositoryLinkRequests, repositoryLinkSchema } from './repository-links
 export type { RepositoryLink } from './repository-links.js';
 export * from './crash-reports.js';
 import { activityRequests, activityStateSchema, activityEventSchema } from './activity.js';
+import { repositoryTabRequests, repositoryTabsStateSchema } from './repository-tabs.js';
+export * from './repository-tabs.js';
 import { commitDraftRequests, commitDraftStateSchema } from './commit-drafts.js';
 export * from './commit-drafts.js';
 export * from './issue-drafts.js';
@@ -1435,6 +1437,7 @@ export const requestSchema = z.discriminatedUnion('method', [
     })
     .strict(),
   ...activityRequests,
+  ...repositoryTabRequests,
   worktreeAddRequest,
   ...terminalRequests,
   z
@@ -2078,6 +2081,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   ...pullDraftResults,
   z.object({ kind: z.literal('commitDraft'), state: commitDraftStateSchema }).strict(),
   z.object({ kind: z.literal('activity'), state: activityStateSchema }).strict(),
+  z.object({ kind: z.literal('repositoryTabs'), state: repositoryTabsStateSchema }).strict(),
   z
     .object({ kind: z.literal('worktreePrunePreview'), preview: worktreePrunePreviewSchema })
     .strict(),

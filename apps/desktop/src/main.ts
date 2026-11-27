@@ -20,6 +20,7 @@ import { CommitDrafts } from './commit-drafts.js';
 import { CommandMenu } from './command-menu.js';
 import { TerminalHost } from './terminal-host.js';
 import { AppSettings } from './app-settings.js';
+import { RepositoryTabStore } from './repository-tabs.js';
 import { CrashReports } from './crash-reports.js';
 import { BitbucketProvider } from './bitbucket-provider.js';
 import {
@@ -125,6 +126,18 @@ function nativeEditorDrafts() {
 let workingFileDrafts: WorkingFileDrafts | undefined;
 const draftRepositories = new Map<string, Repository>();
 const openedRepositories = new Map<string, string>();
+let repositoryTabs: RepositoryTabStore | undefined;
+// Only requests that open a repository add or activate a tab; later snapshots do not.
+const tabMethods = new Set<string>([
+  'open',
+  'init',
+  'clone',
+  'openSubmodule',
+  'openWorktree',
+  'repositoryLinkOpen',
+  'reopenRepository',
+]);
+const tabStore = () => (repositoryTabs ??= new RepositoryTabStore(app.getPath('userData')));
 let activeAppearance: AppearancePreferences = {
   revision: 0,
   mode: 'dark',
@@ -763,6 +776,10 @@ else {
             };
           }
         }
+        if (request.method === 'repositoryTabsRead')
+          return { kind: 'repositoryTabs', state: await tabStore().read() };
+        if (request.method === 'repositoryTabClose')
+          return { kind: 'repositoryTabs', state: await tabStore().close(request.repoId) };
         if (request.method === 'activityRead' || request.method === 'activityClear')
           return {
             kind: 'activity',
@@ -1444,7 +1461,9 @@ else {
           return await callService({ id: request.id, method: 'open', path });
         }
         if (request.method === 'reopenRepository') {
-          const path = openedRepositories.get(request.repoId);
+          // A saved tab from an earlier session may be reopened; the main process owns its path.
+          const path =
+            openedRepositories.get(request.repoId) ?? (await tabStore().pathOf(request.repoId));
           if (!path) throw new Error('This repository tab is no longer available.');
           return await callService({ id: request.id, method: 'open', path });
         }
@@ -1671,6 +1690,9 @@ else {
           openedRepositories.set(result.snapshot.repository.id, result.snapshot.repository.path);
           if (openedRepositories.size > 64)
             openedRepositories.delete(openedRepositories.keys().next().value!);
+          // Saving tabs is best effort; a failure is reported through the tab state warning.
+          if (tabMethods.has(request.method))
+            void tabStore().opened(result.snapshot.repository.path);
         }
         // Serialize after validation and before both renderer IPC and isolated-world copying.
         if (format === 'history-page' && result.kind === 'page') return encodeHistoryPage(result);
@@ -1751,6 +1773,7 @@ else {
       !service &&
       !providers &&
       !appSettings &&
+      !repositoryTabs &&
       !commitDrafts &&
       !nativeDrafts &&
       !workingFileDrafts &&
@@ -1769,6 +1792,7 @@ else {
       stopped,
       providers?.idle(),
       appSettings?.idle(),
+      repositoryTabs?.idle(),
       crashReports?.idle(),
       diagnostics?.idle(),
       commitDrafts?.idle(),

@@ -15,7 +15,7 @@ pnpm install --frozen-lockfile
 pnpm start
 ```
 
-Open a repository with the toolbar or initialize an empty folder. External changes refresh automatically, with polling fallback and configurable refresh on focus. Cancel aborts pending Git work. `OPENKRAKEN_GIT` optionally selects a Git executable; system Git is the fallback. The working-tree panel supports file/hunk/line staging, commit/amend, reviewed discard, and persistent undo/redo.
+Open a repository with the toolbar or initialize an empty folder. **+** in the tab strip opens another repository in a new tab. Up to 16 tabs are saved in the profile and listed again after a restart; select a tab to reopen its repository. A repository that was moved or deleted stays as a tab until you close it. See [ADR 0134](docs/decisions/0134-restored-repository-tabs.md). External changes refresh automatically, with polling fallback and configurable refresh on focus. Cancel aborts pending Git work. `OPENKRAKEN_GIT` optionally selects a Git executable; system Git is the fallback. The working-tree panel supports file/hunk/line staging, commit/amend, reviewed discard, and persistent undo/redo.
 
 React and React DOM are pinned to **19.3.1**, TypeScript to **7.0.2**, and Electron to **45.2.1**. TypeScript 7 checks all runtime packages, tests and tool configurations through project references.
 

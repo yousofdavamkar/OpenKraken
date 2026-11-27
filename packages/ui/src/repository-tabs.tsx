@@ -1,19 +1,51 @@
 import { useEffect, useState } from 'react';
+import type { RepositoryTab, RepositoryTabsState } from '@openkraken/ipc-contract';
 import { useRepository } from './store.js';
 
-type Tab = { repoId: string; name: string; path: string };
-
 const nameOf = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+const warnings: Record<NonNullable<RepositoryTabsState['warning']>, string> = {
+  unreadable: 'Saved tabs could not be read. Tabs from this session will not be restored.',
+  corrupt: 'Saved tabs were damaged and have been reset. A copy is kept in the profile.',
+  unsaved: 'Tabs could not be saved. They may not be restored after a restart.',
+};
 
 /**
- * One tab per repository opened in this window. Switching reopens the repository
- * through the main process, which accepts only repositories it opened itself.
+ * One tab per repository opened in this window. The main process records each opened
+ * repository and lists the saved tabs again after a restart; selecting a tab reopens its
+ * repository by id only, so the renderer never supplies a path.
  */
 export function RepositoryTabs({ busy, openNew }: { busy: boolean; openNew: () => void }) {
   const { snapshot, run } = useRepository();
-  const [tabs, setTabs] = useState<Tab[]>([]);
+  const [tabs, setTabs] = useState<RepositoryTab[]>([]);
+  const [warning, setWarning] = useState<RepositoryTabsState['warning']>(null);
   const active = snapshot?.repository.id;
   const activePath = snapshot?.repository.path;
+  const select = (repoId: string) => {
+    if (repoId === useRepository.getState().snapshot?.repository.id) return;
+    if (useRepository.getState().busy) return;
+    void run({ id: crypto.randomUUID(), method: 'reopenRepository', repoId });
+  };
+  useEffect(() => {
+    let current = true;
+    void window.openkraken
+      .request({ id: crypto.randomUUID(), method: 'repositoryTabsRead' })
+      .then((result) => {
+        if (!current || result.kind !== 'repositoryTabs') return;
+        const { state } = result;
+        setWarning(state.warning);
+        setTabs((opened) => [
+          ...state.tabs,
+          ...opened.filter((tab) => !state.tabs.some((saved) => saved.repoId === tab.repoId)),
+        ]);
+        // Saved tabs are listed but not opened: a click reopens one (ADR 0134).
+      })
+      .catch(() => {
+        if (current) setWarning('unreadable');
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
   useEffect(() => {
     if (!active || !activePath) return;
     setTabs((current) =>
@@ -22,17 +54,23 @@ export function RepositoryTabs({ busy, openNew }: { busy: boolean; openNew: () =
         : [...current, { repoId: active, name: nameOf(activePath), path: activePath }],
     );
   }, [active, activePath]);
-  const select = (repoId: string) => {
-    if (repoId === active || busy) return;
-    void run({ id: crypto.randomUUID(), method: 'reopenRepository', repoId });
-  };
-  const close = (repoId: string) => {
+  const close = async (repoId: string) => {
     const index = tabs.findIndex((tab) => tab.repoId === repoId);
     const remaining = tabs.filter((tab) => tab.repoId !== repoId);
     setTabs(remaining);
     if (repoId === active) {
       const next = remaining[Math.min(index, remaining.length - 1)];
       if (next) select(next.repoId);
+    }
+    try {
+      const result = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'repositoryTabClose',
+        repoId,
+      });
+      if (result.kind === 'repositoryTabs') setWarning(result.state.warning);
+    } catch {
+      setWarning('unsaved');
     }
   };
   return (
@@ -59,7 +97,7 @@ export function RepositoryTabs({ busy, openNew }: { busy: boolean; openNew: () =
                 className="repo-tab-close"
                 aria-label={`Close tab ${tab.name}`}
                 disabled={busy}
-                onClick={() => close(tab.repoId)}
+                onClick={() => void close(tab.repoId)}
               >
                 ×
               </button>
@@ -77,6 +115,12 @@ export function RepositoryTabs({ busy, openNew }: { busy: boolean; openNew: () =
       >
         +
       </button>
+      {warning && (
+        <span className="repo-tabs-warning" role="status" title={warnings[warning]}>
+          <span aria-hidden="true">!</span>
+          <span className="sr-only">{warnings[warning]}</span>
+        </span>
+      )}
     </nav>
   );
 }

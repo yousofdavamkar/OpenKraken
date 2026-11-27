@@ -2,6 +2,12 @@
 
 M7 remains in progress. Earlier implementation and packaging checkpoints are `0b97480` and `66ca2e2`. The remaining integration work is recorded in [M6 progress](m6-progress.md). React 19.3.1 and TypeScript 7.0.2 remain pinned.
 
+## Repository tabs restored after a restart
+
+Parity row 1.5 is now partly met. The main process saves up to 16 repository tabs and the active tab to `repository-tabs.json` in the profile, using atomic 0600 writes. After a restart the saved tabs are listed again with the welcome screen. Selecting a tab reopens its repository by id, and the Git service revalidates the saved path. Saved tabs are not opened automatically at launch. [Restored repository tabs](../decisions/0134-restored-repository-tabs.md)
+
+Five store unit tests cover order, the active tab, closing, eviction at the bound, damaged files and external changes. An Electron test opens three fixtures, closes one and switches tabs. It then quits and relaunches with the same profile. After the relaunch the two remaining tabs are listed in order, no repository is open, and selecting a tab opens it. When a repository is deleted after the restart, selecting its tab shows an open error, and the tab can still be closed. On Linux x64 the full unit run passed 991 tests with 45 skipped. The full Electron suite passed 228 tests, skipped 27 and failed one: the large reference sidebar test, which waits for a hover-revealed tag action. That test also failed five of six runs without this change, so it is a pre-existing intermittent failure; its cause was not established. An earlier version reopened the active tab at launch. In a partial run it failed eight tests in the activity, avatar, commit-draft and conflict-draft files, which restart and expect the welcome screen, so launch reopening was dropped.
+
 ## Branches and changed files in the command palette
 
 An Electron fixture with 124 branches found an offscreen Unicode branch, selected its five commits, and then selected a remote branch by its full ref name while HEAD stayed on main. A local branch with the same short name was also present. A partially staged file opened distinct index and worktree diffs. Creating and deleting a file outside the app updated the open palette. On the 50,000-ref full Linux fixture, a separate desktop check opened the 10,001-branch category in 26.4 ms, mounted 50 results and found a late-listed branch in 34.4 ms. These are single observations including Playwright interaction time.
