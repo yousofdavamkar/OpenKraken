@@ -14,8 +14,93 @@ import { useRepository } from './store.js';
 import { useTheme } from './theme.js';
 import { CommitBadges, CommitReferencesDialog } from './commit-references.js';
 import type { Ref } from '@openkraken/ipc-contract';
+import {
+  clampColumn,
+  columnLabels,
+  columnLimits,
+  columnStep,
+  defaultColumnWidths,
+  gridColumns,
+  loadColumnWidths,
+  saveColumnWidths,
+  totalColumnsWidth,
+  type ColumnKey,
+  type ColumnWidths,
+} from './history-columns.js';
 const noRefs: Ref[] = [];
-const REFS_WIDTH = 130;
+const storage = () => {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+};
+
+/** A vertical separator that resizes the column before it, by pointer or keyboard. */
+function ColumnResizer({
+  column,
+  width,
+  onResize,
+  onCommit,
+}: {
+  column: ColumnKey;
+  width: number;
+  onResize: (width: number) => void;
+  onCommit: () => void;
+}) {
+  const drag = useRef<{ x: number; width: number }>(undefined);
+  const { min, max } = columnLimits[column];
+  return (
+    <span
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={`Resize ${columnLabels[column]} column`}
+      aria-valuenow={width}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      tabIndex={0}
+      className="column-resizer"
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        drag.current = { x: event.clientX, width };
+      }}
+      onPointerMove={(event) => {
+        if (drag.current) onResize(drag.current.width + event.clientX - drag.current.x);
+      }}
+      onPointerUp={() => {
+        if (!drag.current) return;
+        drag.current = undefined;
+        onCommit();
+      }}
+      onLostPointerCapture={() => {
+        if (!drag.current) return;
+        drag.current = undefined;
+        onCommit();
+      }}
+      onDoubleClick={() => {
+        onResize(defaultColumnWidths[column]);
+        onCommit();
+      }}
+      onKeyDown={(event) => {
+        const step = event.shiftKey ? columnStep * 5 : columnStep;
+        const next =
+          event.key === 'ArrowLeft'
+            ? width - step
+            : event.key === 'ArrowRight'
+              ? width + step
+              : event.key === 'Home'
+                ? defaultColumnWidths[column]
+                : undefined;
+        if (next === undefined) return;
+        event.preventDefault();
+        onResize(next);
+        onCommit();
+      }}
+    />
+  );
+}
 const dateFormatter = new Intl.DateTimeFormat();
 export function History() {
   const theme = useTheme();
@@ -70,9 +155,24 @@ export function History() {
     if (references?.opener.isConnected) references.opener.focus({ preventScroll: true });
     else viewport.current?.focus({ preventScroll: true });
   };
+  const repoId = snapshot?.repository.id;
+  const [widths, setWidths] = useState<ColumnWidths>(defaultColumnWidths);
+  const widthsRef = useRef(widths);
+  widthsRef.current = widths;
+  useLayoutEffect(() => {
+    const store = storage();
+    setWidths(repoId && store ? loadColumnWidths(repoId, store) : defaultColumnWidths);
+  }, [repoId]);
+  const resize = (column: ColumnKey, width: number) =>
+    setWidths((current) => ({ ...current, [column]: clampColumn(column, width) }));
+  const commitWidths = () => {
+    const store = storage();
+    if (repoId && store) saveColumnWidths(repoId, widthsRef.current, store);
+  };
+  const REFS_WIDTH = widths.refs;
   const graphWidth = Math.max(80, maxColumns * LANE_WIDTH + GRAPH_PADDING * 2);
-  const totalWidth = REFS_WIDTH + graphWidth + 470;
-  const columns = `${REFS_WIDTH}px ${graphWidth}px 80px minmax(160px, 1fr) 130px 90px`;
+  const totalWidth = totalColumnsWidth(widths, graphWidth);
+  const columns = gridColumns(widths, graphWidth);
   // The Canvas covers only the graph column, which starts after the reference column.
   const graphScroll = Math.max(0, scroll.left - REFS_WIDTH);
   const canvasLeft = Math.max(0, REFS_WIDTH - scroll.left);
@@ -273,12 +373,28 @@ export function History() {
           transform: `translateX(${-scroll.left}px)`,
         }}
       >
-        <span>BRANCH / TAG</span>
-        <span>GRAPH</span>
-        <span>COMMIT</span>
-        <span>COMMIT MESSAGE</span>
-        <span>AUTHOR</span>
-        <span>DATE</span>
+        {(
+          [
+            ['refs', 'BRANCH / TAG'],
+            [undefined, 'GRAPH'],
+            ['commit', 'COMMIT'],
+            [undefined, 'COMMIT MESSAGE'],
+            ['author', 'AUTHOR'],
+            ['date', 'DATE'],
+          ] as const
+        ).map(([column, label]) => (
+          <span key={label} className="column-title">
+            {label}
+            {column && (
+              <ColumnResizer
+                column={column}
+                width={widths[column]}
+                onResize={(width) => resize(column, width)}
+                onCommit={commitWidths}
+              />
+            )}
+          </span>
+        ))}
       </div>
       <div className="graph-viewport">
         <canvas
