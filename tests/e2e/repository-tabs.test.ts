@@ -127,3 +127,40 @@ test('repository tabs are restored after a restart and reopen on selection', asy
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('many repository tabs scroll without covering the title bar tools', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-tabs-overflow-'));
+  const names = Array.from({ length: 6 }, (_, i) => `repository-with-a-long-name-${i}`);
+  const paths = names.map((name) => createFixture(join(root, name), 'linear', 2));
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    const tabs = page.getByRole('navigation', { name: 'Repository tabs' });
+    for (const [index, path] of paths.entries()) {
+      await app.evaluate(({ dialog }, selected) => {
+        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] });
+      }, path);
+      await (
+        index === 0
+          ? page.getByRole('button', { name: 'Open a repository', exact: true })
+          : tabs.getByRole('button', { name: 'New tab', exact: true })
+      ).click();
+      await expect(page.getByRole('heading', { name: names[index], exact: true })).toBeVisible();
+    }
+    // Every title bar control must still receive pointer input.
+    const tools = page.locator('.titlebar-tools button:visible');
+    for (const button of await tools.all()) await button.click({ trial: true, timeout: 2000 });
+    const strip = await tabs.boundingBox();
+    const toolsBox = await page.locator('.titlebar-tools').boundingBox();
+    expect(strip!.x + strip!.width).toBeLessThanOrEqual(toolsBox!.x + 1);
+    // The active tab is scrolled into view.
+    await expect(
+      tabs.getByRole('button', { name: `Repository tab ${names[5]}`, exact: true }),
+    ).toBeInViewport();
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
