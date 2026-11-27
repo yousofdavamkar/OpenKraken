@@ -61,3 +61,25 @@ test('sidebar positions, headings and focus follow group order across noncontigu
     expect(list.focusedBlock('refs/missing')).toBe(-1);
   }
 });
+
+test('a collapsed section keeps one heading block and leaves list positions to expanded ones', () => {
+  const local = [reference('local', 'a'), reference('local', 'b')];
+  const tags = Array.from({ length: 6 }, (_, i) => reference('tag', 'v' + i));
+  const remote = reference('remote', 'main');
+  const refs = [...local, tags[0]!, remote, ...tags.slice(1)];
+  const list = groupReferences(refs, '', new Set(['tag']));
+  const spans = Array.from({ length: list.blocks }, (_, i) => list.section(i)!);
+  expect(spans.map((span) => [span.kind, span.title, span.collapsed ?? false])).toEqual([
+    ['local', 'Branches', false],
+    ['remote', 'Remotes', false],
+    ['tag', 'Tags', true],
+  ]);
+  const tagSpan = spans[2]!;
+  expect(blockLength(tagSpan, 2)).toBe(0);
+  expect(tagSpan.total).toBe(6);
+  expect(list.count).toBe(9);
+  expect(list.listed).toBe(3);
+  expect(list.focusedBlock(tags[3]!.name)).toBe(-1);
+  expect(list.focusedBlock(remote.name)).toBe(1);
+  expect(groupReferences(refs, 'absent', new Set(['tag'])).blocks).toBe(0);
+});

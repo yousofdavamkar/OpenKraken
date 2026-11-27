@@ -20,6 +20,7 @@ const outcomes: Record<ActivityEntry['outcome'], string> = {
 const quietSuccesses = new Set<ActivityAction>([
   'open',
   'repositoryLinkOpen',
+  'reopenRepository',
   'openWorktree',
   'openSubmodule',
   'files',

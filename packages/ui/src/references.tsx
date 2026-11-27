@@ -261,6 +261,7 @@ export function ReferenceActions({
         <button
           disabled={!!busy || reference.isHead || snapshot.repository.isBare}
           aria-label={`Switch to ${reference.shortName}`}
+          title={reference.isHead ? 'Current branch' : 'Switch'}
           onClick={() => {
             setError(undefined);
             void executeReference(snapshot.repository.id, {
@@ -277,6 +278,7 @@ export function ReferenceActions({
         <button
           disabled={!!busy}
           aria-label={`Rename branch ${reference.shortName}`}
+          title="Rename"
           data-review-action="renameBranch"
           onClick={() => onReview({ action: 'renameBranch', reference })}
         >
@@ -285,6 +287,7 @@ export function ReferenceActions({
         <button
           disabled={!!busy}
           aria-label={`Set upstream ${reference.shortName}`}
+          title="Upstream"
           data-review-action="setUpstream"
           onClick={() => onReview({ action: 'setUpstream', reference })}
         >
@@ -293,6 +296,7 @@ export function ReferenceActions({
         <button
           disabled={!!busy || reference.isHead}
           aria-label={`Delete branch ${reference.shortName}`}
+          title="Delete"
           data-review-action="deleteBranch"
           onClick={() => onReview({ action: 'deleteBranch', reference })}
         >
@@ -310,6 +314,7 @@ export function ReferenceActions({
     <button
       disabled={!!busy}
       aria-label={`Delete tag ${reference.shortName}`}
+      title="Delete"
       data-review-action="deleteTag"
       onClick={() => onReview({ action: 'deleteTag', reference })}
     >

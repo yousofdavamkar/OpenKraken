@@ -14,6 +14,8 @@ import { repositoryLinkRequests, repositoryLinkSchema } from './repository-links
 export type { RepositoryLink } from './repository-links.js';
 export * from './crash-reports.js';
 import { activityRequests, activityStateSchema, activityEventSchema } from './activity.js';
+import { repositoryTabRequests, repositoryTabsStateSchema } from './repository-tabs.js';
+export * from './repository-tabs.js';
 import { commitDraftRequests, commitDraftStateSchema } from './commit-drafts.js';
 export * from './commit-drafts.js';
 export * from './issue-drafts.js';
@@ -1445,6 +1447,7 @@ export const requestSchema = z.discriminatedUnion('method', [
     })
     .strict(),
   ...activityRequests,
+  ...repositoryTabRequests,
   worktreeAddRequest,
   ...terminalRequests,
   z
@@ -1984,6 +1987,14 @@ export const requestSchema = z.discriminatedUnion('method', [
     .strict(),
   ...historyRequests,
   z.object({ id: requestId, method: z.literal('open') }).strict(),
+  // Reopens a repository this session already opened; the main process owns its path.
+  z
+    .object({
+      id: requestId,
+      method: z.literal('reopenRepository'),
+      repoId: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict(),
   z
     .object({ id: requestId, method: z.literal('init'), branch: z.string().min(1).max(200) })
     .strict(),
@@ -2109,6 +2120,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   ...mergeDraftResults,
   z.object({ kind: z.literal('commitDraft'), state: commitDraftStateSchema }).strict(),
   z.object({ kind: z.literal('activity'), state: activityStateSchema }).strict(),
+  z.object({ kind: z.literal('repositoryTabs'), state: repositoryTabsStateSchema }).strict(),
   z
     .object({ kind: z.literal('worktreePrunePreview'), preview: worktreePrunePreviewSchema })
     .strict(),
@@ -2589,6 +2601,7 @@ const snapshotMethods = [
   'openSubmodule',
   'openWorktree',
   'repositoryLinkOpen',
+  'reopenRepository',
   'refresh',
 ] as const;
 export function validateResponseFormat(format: unknown, method: string): void {

@@ -4,6 +4,7 @@ import { z } from 'zod';
 export const activityActions = {
   open: 'Open repository',
   repositoryLinkOpen: 'Open linked repository',
+  reopenRepository: 'Switch repository tab',
   init: 'Initialize repository',
   clone: 'Clone repository',
   openWorktree: 'Open worktree',

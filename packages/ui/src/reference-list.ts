@@ -17,6 +17,10 @@ type Span = {
   firstBlock: number;
   endBlock: number;
   firstPosition: number;
+  /** Matching references of this kind, including those in a collapsed section. */
+  total: number;
+  /** A collapsed section is one heading-only block with no references. */
+  collapsed?: true;
 };
 
 export function blockStart(span: Span, block: number) {
@@ -24,10 +28,15 @@ export function blockStart(span: Span, block: number) {
 }
 
 export function blockLength(span: Span, block: number) {
+  if (span.collapsed) return 0;
   return Math.min(refsPerBlock, span.end - blockStart(span, block));
 }
 
-export function groupReferences(source: readonly Ref[], query: string) {
+export function groupReferences(
+  source: readonly Ref[],
+  query: string,
+  collapsed: ReadonlySet<Ref['kind']> = new Set(),
+) {
   const search = query.trim().toLocaleLowerCase();
   const refs = search
     ? source.filter((ref) => ref.name.toLocaleLowerCase().includes(search))
@@ -49,6 +58,24 @@ export function groupReferences(source: readonly Ref[], query: string) {
   let position = 1;
   for (const [kind, title] of referenceGroups) {
     const ranges = runs.get(kind)!;
+    const total = ranges.reduce((sum, range) => sum + range.end - range.from, 0);
+    if (total && collapsed.has(kind)) {
+      // Keep the heading so the section can be expanded again.
+      const from = ranges[0]!.from;
+      spans.push({
+        kind,
+        title,
+        from,
+        end: from,
+        firstPosition: position,
+        firstBlock: blocks,
+        endBlock: blocks + 1,
+        total,
+        collapsed: true,
+      });
+      blocks++;
+      continue;
+    }
     for (const range of ranges) {
       const endBlock = blocks + Math.ceil((range.end - range.from) / refsPerBlock);
       spans.push({
@@ -58,6 +85,7 @@ export function groupReferences(source: readonly Ref[], query: string) {
         firstPosition: position,
         firstBlock: blocks,
         endBlock,
+        total,
       });
       position += range.end - range.from;
       blocks = endBlock;
@@ -66,6 +94,8 @@ export function groupReferences(source: readonly Ref[], query: string) {
   return {
     refs,
     count: refs.length,
+    /** References shown in expanded sections, for list positions. */
+    listed: position - 1,
     blocks,
     section(block: number) {
       if (block < 0 || block >= blocks) return undefined;
@@ -81,7 +111,8 @@ export function groupReferences(source: readonly Ref[], query: string) {
     focusedBlock(name: string) {
       const index = refs.findIndex((ref) => ref.name === name);
       if (index < 0) return -1;
-      const span = spans.find((item) => index >= item.from && index < item.end)!;
+      const span = spans.find((item) => index >= item.from && index < item.end);
+      if (!span) return -1;
       return span.firstBlock + Math.floor((index - span.from) / refsPerBlock);
     },
   };

@@ -7,8 +7,11 @@ import { referenceDragProps } from './reference-drop.js';
 import { blockStart, blockLength, groupReferences, referenceGroups } from './reference-list.js';
 import { useRepository } from './store.js';
 
-const headingHeightEstimate = 48;
+// Estimates match the one-line rows and collapsible headings; measured heights replace them.
+const headingHeightEstimate = 28;
+const rowHeightEstimate = 26;
 type ReviewHandler = (review: ReferenceReview) => void;
+type Collapse = { collapsed: ReadonlySet<Ref['kind']>; toggle: (kind: Ref['kind']) => void };
 
 function ReferenceRow({
   reference,
@@ -41,9 +44,37 @@ function ReferenceRow({
           </small>
         )}
       </div>
-      <RefControls reference={reference} />
-      <ReferenceActions reference={reference} onReview={onReview} />
+      <div className="ref-actions">
+        <RefControls reference={reference} />
+        <ReferenceActions reference={reference} onReview={onReview} />
+      </div>
     </div>
+  );
+}
+
+function SectionHeading({
+  kind,
+  title,
+  count,
+  collapse,
+}: {
+  kind: Ref['kind'];
+  title: string;
+  count: number;
+  collapse: Collapse;
+}) {
+  // The heading is named by its title; the toggle also reads out the count.
+  return (
+    <h3 className="ref-section-heading" aria-label={title}>
+      <button
+        type="button"
+        aria-expanded={!collapse.collapsed.has(kind)}
+        onClick={() => collapse.toggle(kind)}
+      >
+        {title}
+        <span className="ref-section-count">{count.toLocaleString()}</span>
+      </button>
+    </h3>
   );
 }
 
@@ -53,21 +84,31 @@ function VirtualReferences({
   reviewedName,
   onFilterFocus,
   onReview,
+  collapse,
 }: {
   snapshot: Snapshot;
   busy: boolean;
   reviewedName?: string;
   onFilterFocus: () => void;
   onReview: ReviewHandler;
+  collapse: Collapse;
 }) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState<string>();
   const scroll = useRef<HTMLDivElement>(null);
-  const list = useMemo(() => groupReferences(snapshot.refs, query), [snapshot.refs, query]);
+  const list = useMemo(
+    () => groupReferences(snapshot.refs, query, collapse.collapsed),
+    [snapshot.refs, query, collapse.collapsed],
+  );
   const retain = reviewedName ?? focused;
   const focusedBlock = useMemo(() => (retain ? list.focusedBlock(retain) : -1), [list, retain]);
   const getItemKey = useCallback(
-    (index: number) => list.refs[blockStart(list.section(index)!, index)]!.name,
+    (index: number) => {
+      const section = list.section(index)!;
+      return section.collapsed
+        ? `section:${section.kind}`
+        : list.refs[blockStart(section, index)]!.name;
+    },
     [list],
   );
   const estimatedHeights = useRef(new Map<Ref['kind'], number>());
@@ -79,7 +120,8 @@ function VirtualReferences({
       const section = list.section(index)!;
       return (
         (index === section.firstBlock && section.title ? headingHeightEstimate : 0) +
-        blockLength(section, index) * (estimatedHeights.current.get(section.kind) ?? 120)
+        blockLength(section, index) *
+          (estimatedHeights.current.get(section.kind) ?? rowHeightEstimate)
       );
     },
     measureElement: (element, entry, instance) => {
@@ -89,7 +131,8 @@ function VirtualReferences({
       if (section && height > 0) {
         const heading = index === section.firstBlock && section.title ? headingHeightEstimate : 0;
         const refHeight = (height - heading) / blockLength(section, index);
-        if (refHeight > 0) estimatedHeights.current.set(section.kind, refHeight);
+        if (!section.collapsed && refHeight > 0)
+          estimatedHeights.current.set(section.kind, refHeight);
       }
       return height;
     },
@@ -123,7 +166,12 @@ function VirtualReferences({
     if (item.index === section.firstBlock && section.title)
       cells.push(
         <div key={section.title} style={{ gridRow: track++ }}>
-          <h3>{section.title}</h3>
+          <SectionHeading
+            kind={section.kind}
+            title={section.title}
+            count={section.total}
+            collapse={collapse}
+          />
         </div>,
       );
     for (let index = start; index < end; index++) {
@@ -134,7 +182,7 @@ function VirtualReferences({
           style={{ gridRow: track++ }}
           role="listitem"
           aria-posinset={section.firstPosition + index - section.from}
-          aria-setsize={list.count}
+          aria-setsize={list.listed}
         >
           <ReferenceRow reference={reference} snapshot={snapshot} busy={busy} onReview={onReview} />
         </div>,
@@ -229,6 +277,16 @@ function RepositorySidebar({ snapshot, busy }: { snapshot: Snapshot; busy: boole
     }
     setReview(undefined);
   }
+  const [collapsed, setCollapsed] = useState<ReadonlySet<Ref['kind']>>(new Set());
+  const collapse: Collapse = {
+    collapsed,
+    toggle: (kind) =>
+      setCollapsed((current) => {
+        const next = new Set(current);
+        if (!next.delete(kind)) next.add(kind);
+        return next;
+      }),
+  };
   // Once the user enters the filter, keep it available across ref refreshes.
   const [filterUsed, setFilterUsed] = useState(false);
   const large = snapshot.refs.length >= 100 || filterUsed;
@@ -261,22 +319,25 @@ function RepositorySidebar({ snapshot, busy }: { snapshot: Snapshot; busy: boole
           reviewedName={review?.reference.name}
           onFilterFocus={() => setFilterUsed(true)}
           onReview={setReview}
+          collapse={collapse}
         />
       ) : (
         referenceGroups.map(([kind, title]) => {
           const refs = snapshot.refs.filter((ref) => ref.kind === kind);
           return refs.length ? (
             <section key={kind}>
-              <h3>{title}</h3>
-              {refs.map((reference) => (
-                <ReferenceRow
-                  key={reference.name}
-                  reference={reference}
-                  snapshot={snapshot}
-                  busy={busy}
-                  onReview={setReview}
-                />
-              ))}
+              <SectionHeading kind={kind} title={title} count={refs.length} collapse={collapse} />
+              <div hidden={collapsed.has(kind)}>
+                {refs.map((reference) => (
+                  <ReferenceRow
+                    key={reference.name}
+                    reference={reference}
+                    snapshot={snapshot}
+                    busy={busy}
+                    onReview={setReview}
+                  />
+                ))}
+              </div>
             </section>
           ) : null;
         })

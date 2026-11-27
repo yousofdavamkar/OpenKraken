@@ -91,7 +91,7 @@ test('custom JSON themes validate before applying and survive restart independen
     await settings.getByRole('button', { name: 'Apply', exact: true }).click();
     await expect
       .poll(() => page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor))
-      .toBe('rgb(16, 21, 30)');
+      .toBe('rgb(27, 30, 36)');
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

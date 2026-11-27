@@ -323,6 +323,7 @@ export function CommandButton({
     <button
       {...props}
       ref={button}
+      data-command={command}
       disabled={
         disabled ||
         ((!registry.ready || !registry.nativeReady) &&

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
+import type { CSSProperties, KeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { paintGraph, ROW_HEIGHT, LANE_WIDTH, GRAPH_PADDING } from '@openkraken/graph/canvas';
 import {
@@ -15,6 +15,7 @@ import { useTheme } from './theme.js';
 import { CommitBadges, CommitReferencesDialog } from './commit-references.js';
 import type { Ref } from '@openkraken/ipc-contract';
 const noRefs: Ref[] = [];
+const REFS_WIDTH = 130;
 const dateFormatter = new Intl.DateTimeFormat();
 export function History() {
   const theme = useTheme();
@@ -70,7 +71,15 @@ export function History() {
     else viewport.current?.focus({ preventScroll: true });
   };
   const graphWidth = Math.max(80, maxColumns * LANE_WIDTH + GRAPH_PADDING * 2);
-  const totalWidth = graphWidth + 500;
+  const totalWidth = REFS_WIDTH + graphWidth + 470;
+  const columns = `${REFS_WIDTH}px ${graphWidth}px 80px minmax(160px, 1fr) 130px 90px`;
+  // The Canvas covers only the graph column, which starts after the reference column.
+  const graphScroll = Math.max(0, scroll.left - REFS_WIDTH);
+  const canvasLeft = Math.max(0, REFS_WIDTH - scroll.left);
+  const canvasWidth = Math.min(
+    Math.max(0, bounds.width - canvasLeft),
+    Math.max(0, graphWidth - graphScroll),
+  );
   const virtual = useVirtualizer({
     count: rows.length,
     getScrollElement: () => viewport.current,
@@ -97,10 +106,10 @@ export function History() {
     const ctx = canvas.current?.getContext('2d');
     if (!ctx) return;
     paintGraph(ctx, layout, {
-      width: Math.min(bounds.width, Math.max(0, graphWidth - scroll.left)),
+      width: canvasWidth,
       height: bounds.height,
       scrollTop: scroll.top,
-      scrollLeft: scroll.left,
+      scrollLeft: graphScroll,
       dpr: devicePixelRatio,
       matches: matching,
       selected,
@@ -112,8 +121,9 @@ export function History() {
   }, [
     layout,
     bounds,
-    graphWidth,
-    scroll,
+    canvasWidth,
+    graphScroll,
+    scroll.top,
     matching,
     selected,
     rows,
@@ -258,14 +268,15 @@ export function History() {
       <div
         className="column-head graph-columns"
         style={{
-          gridTemplateColumns: `${graphWidth}px 80px minmax(160px, 1fr) 130px 90px`,
+          gridTemplateColumns: columns,
           minWidth: totalWidth,
           transform: `translateX(${-scroll.left}px)`,
         }}
       >
+        <span>BRANCH / TAG</span>
         <span>GRAPH</span>
         <span>COMMIT</span>
-        <span>MESSAGE / REFS</span>
+        <span>COMMIT MESSAGE</span>
         <span>AUTHOR</span>
         <span>DATE</span>
       </div>
@@ -275,10 +286,7 @@ export function History() {
           data-testid="commit-graph"
           aria-hidden="true"
           className="graph-canvas"
-          style={{
-            width: Math.min(bounds.width, Math.max(0, graphWidth - scroll.left)),
-            height: bounds.height,
-          }}
+          style={{ left: canvasLeft, width: canvasWidth, height: bounds.height }}
         />
         <div
           id="commit-history"
@@ -289,7 +297,7 @@ export function History() {
           tabIndex={0}
           aria-describedby="history-commit-count"
           aria-rowcount={snapshot?.hasMore ? -1 : rows.length}
-          aria-colcount={5}
+          aria-colcount={6}
           aria-multiselectable="true"
           aria-activedescendant={activeVisible ? `commit-row-${focused}` : undefined}
           onKeyDown={keyDown}
@@ -312,6 +320,9 @@ export function History() {
           >
             {virtual.getVirtualItems().map((item) => {
               const commit = rows[item.index]!;
+              const rowRefs = commitRefs?.get(commit.oid) ?? noRefs;
+              const lane = layout[item.index];
+              const connected = !!lane && (rowRefs.length > 0 || commit.isStash);
               return (
                 <div
                   id={`commit-row-${item.index}`}
@@ -322,10 +333,15 @@ export function History() {
                   aria-rowindex={item.index + 1}
                   data-oid={commit.oid}
                   data-column={layout[item.index]?.column}
-                  style={{
-                    transform: `translateY(${item.start}px)`,
-                    gridTemplateColumns: `${graphWidth}px 80px minmax(160px, 1fr) 130px 90px`,
-                  }}
+                  style={
+                    {
+                      transform: `translateY(${item.start}px)`,
+                      gridTemplateColumns: columns,
+                      '--lane': lane
+                        ? graphColors[lane.colorIndex % graphColors.length]
+                        : undefined,
+                    } as CSSProperties
+                  }
                   onClick={(event) => {
                     state.select(
                       commit.oid,
@@ -340,7 +356,32 @@ export function History() {
                   }}
                   onDoubleClick={() => state.setDetail(commit)}
                 >
+                  <span role="gridcell" className="commit-refs">
+                    <CommitBadges
+                      refs={rowRefs}
+                      oid={commit.oid}
+                      open={(opener) => {
+                        if (snapshot)
+                          setReferences({
+                            repoId: snapshot.repository.id,
+                            oid: commit.oid,
+                            opener,
+                          });
+                      }}
+                    />
+                    {commit.isStash && <b className="badge">stash</b>}
+                  </span>
                   <span role="gridcell" className="graph-description">
+                    {connected && (
+                      <span
+                        className="ref-connector"
+                        aria-hidden="true"
+                        style={{
+                          left: REFS_WIDTH - 6,
+                          width: 6 + GRAPH_PADDING + lane.column * LANE_WIDTH,
+                        }}
+                      />
+                    )}
                     <span className="sr-only">
                       {commit.kind !== 'commit'
                         ? commit.kind
@@ -355,19 +396,6 @@ export function History() {
                     {commit.kind === 'commit' ? commit.oid.slice(0, 8) : commit.kind.toUpperCase()}
                   </code>
                   <span role="gridcell" className="commit-subject" title={commit.body}>
-                    <CommitBadges
-                      refs={commitRefs?.get(commit.oid) ?? noRefs}
-                      oid={commit.oid}
-                      open={(opener) => {
-                        if (snapshot)
-                          setReferences({
-                            repoId: snapshot.repository.id,
-                            oid: commit.oid,
-                            opener,
-                          });
-                      }}
-                    />
-                    {commit.isStash && <b className="badge">stash</b>}
                     {commit.summary || '(empty message)'}
                   </span>
                   <span role="gridcell" className="author" title={commit.author.email}>
