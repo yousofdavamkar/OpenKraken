@@ -40,6 +40,31 @@ export const commandCatalog = {
     category: 'Settings',
     keywords: 'keymap keybindings customize JSON settings',
   },
+  'tabs.new': {
+    label: 'New tab',
+    category: 'Tabs',
+    keywords: 'open another repository tab',
+  },
+  'tabs.close': {
+    label: 'Close tab',
+    category: 'Tabs',
+    keywords: 'close current repository tab',
+  },
+  'tabs.next': {
+    label: 'Next tab',
+    category: 'Tabs',
+    keywords: 'switch following repository tab',
+  },
+  'tabs.previous': {
+    label: 'Previous tab',
+    category: 'Tabs',
+    keywords: 'switch preceding repository tab',
+  },
+  'tabs.reopen': {
+    label: 'Reopen closed tab',
+    category: 'Tabs',
+    keywords: 'restore last closed repository tab',
+  },
   'repository.open': {
     label: 'Open repository',
     category: 'Repository',
@@ -149,6 +174,12 @@ export const defaultBindings: Bindings = {
   'repository.open': 'Mod+O',
   'repository.refresh': 'F5',
   'history.search': 'Mod+F',
+  'tabs.new': 'Mod+T',
+  // Mod+W stays with the native window close.
+  'tabs.close': 'Ctrl+F4',
+  'tabs.next': 'Ctrl+Tab',
+  'tabs.previous': 'Ctrl+Shift+Tab',
+  'tabs.reopen': 'Mod+Shift+T',
 };
 export const emptyKeymap = JSON.stringify({ version: 1, bindings: {} }, null, 2);
 const modifiers = ['Mod', 'Ctrl', 'Alt', 'Shift', 'Meta'];
@@ -162,6 +193,7 @@ const namedKeys = new Set([
   'Minus',
   'Equal',
   'Backquote',
+  'Tab',
 ]);
 export function shortcutStroke(value: string, mac: boolean) {
   const parts = value.split('+');
@@ -188,6 +220,8 @@ export function shortcutStroke(value: string, mac: boolean) {
     ((ctrl || meta) && !alt && /^Key[ACVXZQWRHM]$/.test(code)) ||
     ((ctrl || meta) && shift && /^Key[IJ]$/.test(code)) ||
     (alt && code === 'F4') ||
+    // Tab keeps focus navigation and the system window switcher.
+    (code === 'Tab' && (alt || !(ctrl || meta))) ||
     code === 'F12'
   )
     throw new Error('This shortcut is reserved for editing or a native application action.');

@@ -1,3 +1,4 @@
+import { pressShortcut } from '../electron-shortcut.js';
 import { _electron as electron, expect, test } from '@playwright/test';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -159,6 +160,95 @@ test('many repository tabs scroll without covering the title bar tools', async (
     await expect(
       tabs.getByRole('button', { name: `Repository tab ${names[5]}`, exact: true }),
     ).toBeInViewport();
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('tab shortcuts cycle, close and reopen tabs, including a tab saved before a restart', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-tab-shortcuts-'));
+  const names = ['alpha', 'beta', 'gamma'];
+  const paths = names.map((name) => createFixture(join(root, name), 'linear', 2));
+  const profile = join(root, 'profile');
+  const launch = () =>
+    electron.launch({ args: [resolve('apps/desktop'), `--user-data-dir=${profile}`] });
+  let app = await launch();
+  try {
+    let page = await app.firstWindow();
+    let tabs = page.getByRole('navigation', { name: 'Repository tabs' });
+    const heading = (name: string) => page.getByRole('heading', { name, exact: true });
+    for (const [index, path] of paths.entries()) {
+      await app.evaluate(({ dialog }, selected) => {
+        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] });
+      }, path);
+      if (index === 0)
+        await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+      else {
+        await expect(tabs.getByRole('button', { name: 'New tab', exact: true })).toBeEnabled();
+        await pressShortcut(app, 'Control+T');
+      }
+      await expect(heading(names[index]!)).toBeVisible();
+    }
+    const menu = await app.evaluate(({ Menu }) =>
+      ['tabs.new', 'tabs.close', 'tabs.next', 'tabs.previous', 'tabs.reopen'].map(
+        (id) => Menu.getApplicationMenu()?.getMenuItemById(`command.${id}`)?.accelerator,
+      ),
+    );
+    expect(menu).toEqual([
+      'Control+T',
+      'Control+F4',
+      'Control+Tab',
+      'Control+Shift+Tab',
+      'Control+Shift+T',
+    ]);
+    await pressShortcut(app, 'Control+Tab');
+    await expect(heading('alpha')).toBeVisible();
+    await pressShortcut(app, 'Control+Shift+Tab');
+    await expect(heading('gamma')).toBeVisible();
+    await pressShortcut(app, 'Control+Shift+Tab');
+    await expect(heading('beta')).toBeVisible();
+    await pressShortcut(app, 'Control+F4');
+    await expect(heading('gamma')).toBeVisible();
+    await expect(tabs.getByRole('button', { name: /^Repository tab / })).toHaveText([
+      'alpha',
+      'gamma',
+    ]);
+    await pressShortcut(app, 'Control+Shift+T');
+    await expect(heading('beta')).toBeVisible();
+    await expect(tabs.getByRole('button', { name: /^Repository tab / })).toHaveText([
+      'alpha',
+      'gamma',
+      'beta',
+    ]);
+    await app.close();
+
+    // A tab restored from the saved list and closed before it was opened can be reopened.
+    app = await launch();
+    page = await app.firstWindow();
+    tabs = page.getByRole('navigation', { name: 'Repository tabs' });
+    await expect(tabs.getByRole('button', { name: /^Repository tab / })).toHaveText([
+      'alpha',
+      'gamma',
+      'beta',
+    ]);
+    await tabs.getByRole('button', { name: 'Repository tab gamma', exact: true }).click();
+    await expect(heading('gamma')).toBeVisible();
+    await tabs.getByRole('button', { name: 'Close tab alpha', exact: true }).click();
+    await expect(tabs.getByRole('button', { name: /^Repository tab / })).toHaveText([
+      'gamma',
+      'beta',
+    ]);
+    await expect(page.locator('[data-command="tabs.reopen"]')).toBeEnabled();
+    await pressShortcut(app, 'Control+Shift+T');
+    await expect(heading('alpha')).toBeVisible();
+    // A single remaining tab cannot be closed by shortcut either.
+    for (const name of ['gamma', 'beta'])
+      await tabs.getByRole('button', { name: `Close tab ${name}`, exact: true }).click();
+    await expect(tabs.getByRole('button', { name: /^Repository tab / })).toHaveText(['alpha']);
+    await expect(page.locator('[data-command="tabs.close"]')).toBeDisabled();
+    await pressShortcut(app, 'Control+F4');
+    await expect(heading('alpha')).toBeVisible();
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

@@ -16,5 +16,11 @@ The file stores absolute local repository paths only. It holds no repository con
 
 - Parity row 1.5 is met only in part: the selected tab is saved but not opened at launch.
 - One window. Inactive tabs keep no in-memory repository state; switching reopens the repository through the existing history cache. The "switching takes < 100 ms" acceptance target was not measured.
-- Reopening the last closed tab, reordering tabs, tab groups and tab keyboard shortcuts are not implemented.
+- Reordering tabs, tab groups and selecting a tab by number are not implemented.
+
+## Tab commands
+
+New tab, Close tab, Next tab, Previous tab and Reopen closed tab are palette commands with native accelerators. The defaults are Mod+T, Ctrl+F4, Ctrl+Tab, Ctrl+Shift+Tab and Mod+Shift+T. Mod+W stays the native window close. A Tab shortcut needs Ctrl or Meta and cannot use Alt, so plain Tab focus navigation and the system window switcher are unaffected.
+
+Close tab and the cycling commands are unavailable while only one tab is open, matching the tab strip. Reopen closed tab restores up to 16 tabs closed in this session, most recent first. If a saved tab is closed before it is opened, the main process keeps its saved path for the rest of the session, so the tab can still be reopened.
 - Verified on Linux x64 only.
