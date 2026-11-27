@@ -50,6 +50,74 @@ test.each(['octopus', 'shallow', 'replacement'])(
     }
   },
 );
+test('history keeps independent author and committer offsets regardless of the saved date format', async () => {
+  const path = createFixture(join(root, 'timezones'), 'linear', 2);
+  fixtureGit(path, ['config', 'log.date', 'relative']);
+  const tree = fixtureGit(path, ['rev-parse', 'HEAD^{tree}']);
+  const parent = fixtureGit(path, ['rev-parse', 'HEAD']);
+  const commit = fixtureGit(
+    path,
+    ['hash-object', '-w', '-t', 'commit', '--stdin'],
+    [
+      `tree ${tree}`,
+      `parent ${parent}`,
+      'author First <author@example.test> 1700000000 +0545',
+      'committer Second <committer@example.test> 1700100000 -0330',
+      '',
+      'Two time zones',
+      '',
+    ].join('\n'),
+  );
+  const cursor = new HistoryCursor('git', path, [commit]);
+  try {
+    const page = await cursor.page(0, 1);
+    expect(page.commits[0]).toMatchObject({
+      oid: commit,
+      parents: [parent],
+      author: { name: 'First', time: 1700000000, tzOffsetMin: 345 },
+      committer: { name: 'Second', time: 1700100000, tzOffsetMin: -210 },
+    });
+    expect((await cursor.page(1, 1)).commits[0]?.oid).toBe(parent);
+  } finally {
+    await cursor.close();
+  }
+});
+test('epoch-zero history with a negative offset survives opening, stash projection and search', async () => {
+  const path = createFixture(join(root, 'epoch'), 'linear', 2);
+  const tree = fixtureGit(path, ['rev-parse', 'HEAD^{tree}']);
+  const parent = fixtureGit(path, ['rev-parse', 'HEAD']);
+  function commitAtEpoch(base: string, subject: string) {
+    return fixtureGit(
+      path,
+      ['hash-object', '-w', '-t', 'commit', '--stdin'],
+      [
+        `tree ${tree}`,
+        `parent ${base}`,
+        'author First <a@example.test> 0 -0330',
+        'committer Second <b@example.test> 1 -1200',
+        '',
+        subject,
+        '',
+      ].join('\n'),
+    );
+  }
+  const head = commitAtEpoch(parent, 'Epoch subject');
+  const stash = commitAtEpoch(head, 'Epoch stash');
+  fixtureGit(path, ['update-ref', 'HEAD', head]);
+  fixtureGit(path, ['update-ref', '--create-reflog', 'refs/stash', stash]);
+  const repo = await service.open(path);
+  const snapshot = await service.snapshot(repo.id);
+  const dates = {
+    author: { time: 0, tzOffsetMin: -210 },
+    committer: { time: 1, tzOffsetMin: -720 },
+  };
+  expect(snapshot.commits.find((c) => c.oid === head)).toMatchObject(dates);
+  expect(snapshot.commits.find((c) => c.oid === stash)).toMatchObject({ ...dates, isStash: true });
+  for (const query of ['Epoch subject', head.slice(0, 12)]) {
+    const result = await service.search(repo.id, snapshot.cursor, query);
+    expect(result.commits[0]).toMatchObject({ oid: head, ...dates });
+  }
+});
 test('same cursor pages match Git without duplicates, skips or moved-ref contamination', async () => {
   const path = createFixture(join(root, 'large'), 'linear', 7300);
   const expected = fixtureGit(path, ['rev-list', '--date-order', '--all']).split('\n');
@@ -209,6 +277,95 @@ test('hexadecimal ref names cannot impersonate or shadow a commit ID in history 
   expect(await lookup(tag.slice(0, 12))).toEqual([taggedCommit]);
 });
 
+test('graph roots and search follow nested tags to commits, trees and blobs', async () => {
+  const path = createFixture(join(root, 'nested-tags'), 'linear', 3);
+  const git = (...args: string[]) => fixtureGit(path, args);
+  const tree = git('rev-parse', 'HEAD^{tree}');
+  const commit = git('commit-tree', tree, '-m', 'Reachable only through the tag chain');
+  const blob = git('rev-parse', 'HEAD:tracked.txt');
+  for (const [name, oid] of [
+    ['commit', commit],
+    ['tree', tree],
+    ['blob', blob],
+  ] as const) {
+    git('tag', '-a', 'inner', '-m', 'Inner', oid);
+    git('-c', 'advice.nestedTag=false', 'tag', '-a', 'middle', '-m', 'Middle', 'inner');
+    git('-c', 'advice.nestedTag=false', 'tag', '-a', name + '-chain', '-m', 'Outer', 'middle');
+    git('tag', '-d', 'inner', 'middle');
+  }
+  const repo = await service.open(path);
+  const opened = await service.snapshot(repo.id);
+  expect(opened.commits.map((row) => row.oid)).toContain(commit);
+  for (const [type, peeled] of [
+    ['commit', commit],
+    ['tree', tree],
+    ['blob', blob],
+  ] as const) {
+    const name = 'refs/tags/' + type + '-chain';
+    expect(opened.refs.find((ref) => ref.name === name)).toMatchObject({
+      target: git('rev-parse', name),
+      objectType: 'tag',
+      peeled,
+      peeledType: type,
+    });
+    const solo = await service.snapshot(repo.id, undefined, true, {
+      hiddenRefs: [],
+      soloRef: name,
+    });
+    expect(solo.commits.map((row) => row.oid)).toEqual(type === 'commit' ? [commit] : []);
+    const search = await service.search(repo.id, solo.cursor, 'Reachable only');
+    expect(search.commits.map((row) => row.oid)).toEqual(type === 'commit' ? [commit] : []);
+  }
+});
+
+test('a failed history search stops its sibling scan and waits for it to close', async () => {
+  const path = createFixture(join(root, 'search-stop'), 'linear', 3);
+  const repo = await service.open(path);
+  const snapshot = await service.snapshot(repo.id);
+  let markStarted!: () => void, releaseScan!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    releaseScan = resolve;
+  });
+  const original = runner.runGit;
+  const failure = new runner.GitError('OUTPUT_LIMIT', 'Search output exceeded the limit');
+  let siblingSignal: AbortSignal | undefined;
+  const mock = vi.spyOn(runner, 'runGit').mockImplementation(async (git, args, options) => {
+    if (args.includes('--author=needle')) {
+      siblingSignal = options?.signal;
+      markStarted();
+      await released;
+      return { stdout: Buffer.alloc(0), stderr: '', exitCode: 0 };
+    }
+    if (args.includes('--grep=needle')) {
+      await started;
+      throw failure;
+    }
+    return original(git, args, options);
+  });
+  let settled = false;
+  const result = service
+    .search(repo.id, snapshot.cursor, 'needle')
+    .catch((error: unknown) => error)
+    .finally(() => {
+      settled = true;
+    });
+  try {
+    await started;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(siblingSignal?.aborted).toBe(true);
+    expect(settled).toBe(false);
+  } finally {
+    releaseScan();
+    await result;
+    mock.mockRestore();
+  }
+  expect(await result).toBe(failure);
+  expect((await service.search(repo.id, snapshot.cursor, 'needle')).commits).toEqual([]);
+});
+
 test('an ambiguous object prefix keeps literal search results and selects neither object', async () => {
   const path = createFixture(join(root, 'ambiguous-oid'), 'linear', 8);
   const tree = fixtureGit(path, ['mktree'], '');
@@ -365,4 +522,93 @@ test('stash filters remove overlay nodes and detached HEAD remains an independen
     hiddenRefs: hidden.refs.map((r) => r.name),
   });
   expect(detached.commits[0]?.oid).toBe(repo.head.oid);
+});
+
+test('completed pages release their stdout budget during a retained native walk', async () => {
+  const path = createFixture(join(root, 'long-stream'), 'linear', 14000);
+  const oid = fixtureGit(path, ['rev-parse', 'HEAD']);
+  const expected = fixtureGit(path, ['rev-list', '--date-order', '--parents', oid]).split('\n');
+  const maxBytes = 2 * 1024 * 1024;
+  const native = runner.runGit;
+  let walks = 0;
+  let bytes = 0;
+  const calls = vi.spyOn(runner, 'runGit').mockImplementation((git, args, options) => {
+    if (args[0] !== 'rev-list') return native(git, args, options);
+    walks++;
+    return native(git, args, {
+      ...options,
+      maxBytes,
+      stdoutPages: options?.stdoutPages && { ...options.stdoutPages, maxBytes },
+      onStdout(chunk) {
+        bytes += chunk.length;
+        return options!.onStdout!(chunk);
+      },
+    });
+  });
+  const cursor = new HistoryCursor('git', path, [oid]);
+  try {
+    let offset = 0;
+    for (;;) {
+      const page = await cursor.page(offset, offset === 0 ? 2000 : 5000);
+      const records = page.commits.map((commit) => [commit.oid, ...commit.parents].join(' '));
+      expect(records).toEqual(expected.slice(offset, offset + records.length));
+      offset += records.length;
+      if (!page.hasMore) break;
+      expect(records.length).toBeGreaterThan(0);
+    }
+    expect(offset).toBe(expected.length);
+    expect(bytes).toBeGreaterThan(maxBytes);
+    expect(walks).toBe(1);
+  } finally {
+    await cursor.close();
+    calls.mockRestore();
+  }
+});
+
+test('closing a native walk releases stdout while the history cache is still reading', async () => {
+  const path = createFixture(join(root, 'delayed-cache-close'), 'linear', 2);
+  const oid = fixtureGit(path, ['rev-list', '--max-parents=0', 'HEAD']);
+  let finishRead!: () => void;
+  const pendingRead = new Promise<void>((resolve) => {
+    finishRead = resolve;
+  });
+  let received!: () => void;
+  const output = new Promise<void>((resolve) => {
+    received = resolve;
+  });
+  const native = runner.runGit;
+  const run = vi.spyOn(runner, 'runGit').mockImplementation((git, args, options) =>
+    native(git, args, {
+      ...options,
+      onStdout: (chunk) => {
+        received();
+        return options?.onStdout?.(chunk);
+      },
+    }),
+  );
+  const invalidate = vi.fn();
+  let appended: boolean | undefined;
+  const cursor = new HistoryCursor('git', path, [oid], [], {
+    commits: [],
+    hasMore: true,
+    invalidate,
+    continuation: async (append) => {
+      await pendingRead;
+      appended = append({ commits: [], hasMore: false });
+    },
+  });
+  try {
+    await output;
+    const closed = vi.fn();
+    void cursor.close().then(closed);
+    await vi.waitFor(() => expect(closed).toHaveBeenCalledOnce(), { timeout: 2000 });
+    expect(appended).toBeUndefined();
+    finishRead();
+    await vi.waitFor(() => expect(appended).toBe(false));
+    expect(invalidate).not.toHaveBeenCalled();
+  } finally {
+    finishRead();
+    await cursor.close();
+    run.mockRestore();
+  }
 });

@@ -13,6 +13,46 @@ async function setup(name: string) {
   const service = new RepositoryService('git');
   return { path, repo: await service.open(path) };
 }
+test('a refreshed ref list is reconciled when Git returns to the last watcher fingerprint', async () => {
+  const path = createFixture(join(root, 'recreated-ref'));
+  const service = new RepositoryService('git');
+  const repo = await service.open(path);
+  fixtureGit(path, ['branch', 'reviewed']);
+  const events: string[][] = [];
+  const watch = new RepositoryWatcher('git', repo, (event) => events.push(event.domains));
+  try {
+    await watch.primeObservedSnapshot(() => service.observeInitialSnapshot(repo.id));
+    await watch.check();
+    expect(events).toEqual([]);
+    // Keep native reads outside the intermediate Git state, independent of host speed.
+    watch.pause();
+    fixtureGit(path, ['branch', '-D', 'reviewed']);
+    const displayed = await service.snapshot(repo.id, undefined, true);
+    watch.observeRefSnapshot(displayed.refs);
+    fixtureGit(path, ['branch', 'reviewed']);
+    watch.resume();
+    await watch.check();
+    expect(events).toEqual([['refs']]);
+    watch.observeRefSnapshot(displayed.refs);
+    await watch.check();
+    expect(events).toHaveLength(1);
+
+    watch.pause();
+    const current = await service.snapshot(repo.id, undefined, true);
+    watch.observeRefSnapshot(current.refs);
+    fixtureGit(path, ['update-ref', 'refs/heads/reviewed', 'HEAD^']);
+    const moved = await service.snapshot(repo.id, undefined, true);
+    watch.observeRefSnapshot(moved.refs);
+    fixtureGit(path, ['update-ref', 'refs/heads/reviewed', 'HEAD']);
+    watch.resume();
+    await watch.check();
+    expect(events).toEqual([['refs'], ['refs']]);
+  } finally {
+    await watch.close();
+    await service.dispose();
+  }
+});
+
 test('initial watcher baseline reuses snapshot refs and agrees with a fresh native fingerprint', async () => {
   const path = createFixture(join(root, 'snapshot-baseline'));
   fixtureGit(path, ['tag', '-d', 'annotated']);

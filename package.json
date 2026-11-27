@@ -1,6 +1,7 @@
 {
   "name": "openkraken",
   "version": "0.1.0",
+  "macBuildNumber": 1,
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.25.0",
@@ -28,6 +29,7 @@
     "@babel/eslint-parser": "latest",
     "@babel/plugin-syntax-typescript": "latest",
     "@electron/fuses": "latest",
+    "@electron/osx-sign": "2.7.2",
     "@electron/packager": "20.3.0",
     "@eslint/js": "latest",
     "@playwright/test": "latest",

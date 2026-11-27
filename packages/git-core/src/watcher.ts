@@ -123,6 +123,9 @@ export class RepositoryWatcher {
   private paused = 0;
   private closed = false;
   private baseline?: Record<RefreshDomain, string>;
+  private refreshedRefs?: string;
+  private checkedRefs?: string;
+  private refRefreshRequested = false;
   private initialBaseline?: () => Record<RefreshDomain, string>;
   private checking?: Promise<void>;
   private starting?: Promise<void>;
@@ -310,7 +313,14 @@ export class RepositoryWatcher {
     ]);
     return { head, operation, config, shallow, fetch };
   }
-  private async fingerprint(): Promise<Record<RefreshDomain, string>> {
+  observeRefSnapshot(refs: readonly Ref[]) {
+    if (this.closed) return;
+    const displayed = referenceHashes(snapshotReferenceLines(refs)).all;
+    if (displayed !== this.refreshedRefs) this.refRefreshRequested = false;
+    this.refreshedRefs = displayed;
+    if (displayed !== this.checkedRefs && !this.refRefreshRequested) this.schedule(120);
+  }
+  private async fingerprint() {
     const [refs, metadata, statusHash, worktrees] = await Promise.all([
       this.run(
         ['for-each-ref', '--format=%(refname)%00%(objectname)%00%(upstream)%00%(upstream:track)'],
@@ -324,12 +334,13 @@ export class RepositoryWatcher {
       this.readStatusHash(),
       this.readWorktrees(),
     ]);
-    return this.hashes(
-      referenceHashes(refs.stdout.toString().split('\n'), refs.stdout),
-      metadata,
-      statusHash,
-      worktrees,
-    );
+    const text = refs.stdout.toString();
+    const refsHash = referenceHashes(text.split('\n'), refs.stdout);
+    return {
+      domains: this.hashes(refsHash, metadata, statusHash, worktrees),
+      // A displayed name is UTF-8 text. The native change detector still uses raw bytes.
+      displayRefs: text.includes('\uFFFD') ? digest(text) : refsHash.all,
+    };
   }
   private hashes(
     refs: ReturnType<typeof referenceHashes>,
@@ -481,7 +492,8 @@ export class RepositoryWatcher {
           this.baseline = this.initialBaseline();
           this.initialBaseline = undefined;
         }
-        const next = await this.fingerprint();
+        const displayed = this.refreshedRefs;
+        const { domains: next, displayRefs } = await this.fingerprint();
         if (this.closed || this.paused) return;
         await this.syncCheckouts();
         if (this.closed || this.paused) return;
@@ -490,6 +502,15 @@ export class RepositoryWatcher {
               (key) => next[key] !== this.baseline![key],
             )
           : [];
+        if (displayRefs !== this.checkedRefs) this.refRefreshRequested = false;
+        this.checkedRefs = displayRefs;
+        // A refresh can display an intermediate ref list even when two watcher reads agree.
+        // Only compare a snapshot that was already displayed when this read started.
+        if (displayed !== this.refreshedRefs) this.again = true;
+        else if (displayed && displayed !== displayRefs && !this.refRefreshRequested) {
+          if (!changed.includes('refs')) changed.push('refs');
+          this.refRefreshRequested = true;
+        }
         this.baseline = next;
         if (changed.length) this.emit(changed);
       } catch {

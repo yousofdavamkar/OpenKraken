@@ -1,18 +1,15 @@
-import { _electron as electron, expect, test } from '@playwright/test';
+import { verifyMergeRecovery } from './merge-recovery.js';
+import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fixtureProtection } from './provider-fixtures.js';
 import { githubPullFixture } from '../../packages/test-fixtures/src/provider.js';
 
-test('PR merge rechecks tips and methods, confirms once, and checks an uncertain result without another write', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'openkraken-pr-merge-ui-'));
-  const app = await electron.launch({
-    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
-  });
-  try {
-    await fixtureProtection(app);
-    await app.evaluate(({ session }, fixture) => {
+async function configure(app: ElectronApplication, enterprise = false) {
+  await fixtureProtection(app);
+  await app.evaluate(
+    ({ session }, { fixture, enterprise }) => {
       const state = {
         number: 1,
         head: '1'.repeat(40),
@@ -40,10 +37,14 @@ test('PR merge rechecks tips and methods, confirms once, and checks an uncertain
       session.fromPartition('openkraken-providers').fetch = async (input, init) => {
         const url = new URL(String(input));
         if (
-          url.origin !== 'https://api.github.com' ||
+          url.origin !== (enterprise ? 'https://git.example.test' : 'https://api.github.com') ||
           new Headers(init?.headers).get('authorization') !== 'token fixture-pat'
         )
           throw new Error('Unexpected provider request');
+        if (enterprise) {
+          if (!url.pathname.startsWith('/api/v3/')) throw Error('Unexpected API path');
+          url.pathname = url.pathname.slice(7);
+        }
         if (url.pathname === '/user') return json({ id: 321, login: 'fixture-user' });
         if (url.pathname === '/user/repos')
           return json([
@@ -89,30 +90,53 @@ test('PR merge rechecks tips and methods, confirms once, and checks an uncertain
         }
         throw new Error('Unexpected endpoint');
       };
-    }, githubPullFixture());
-    const page = await app.firstWindow();
-    expect(
-      (
-        await page.evaluate(() =>
+    },
+    { fixture: githubPullFixture(), enterprise },
+  );
+}
+async function openMerge(app: ElectronApplication, enterprise = false) {
+  const page = await app.firstWindow();
+  expect(
+    (
+      await page.evaluate(
+        (enterprise) =>
           window.openkraken.request({
             id: crypto.randomUUID(),
             method: 'providerConnect',
-            options: { provider: 'github', origin: 'https://github.com', token: 'fixture-pat' },
+            options: {
+              provider: 'github',
+              origin: enterprise ? 'https://git.example.test' : 'https://github.com',
+              token: 'fixture-pat',
+            },
           }),
-        )
-      ).kind,
-    ).toBe('providerAccounts');
-    await page.getByRole('button', { name: 'Pull requests', exact: true }).click();
-    const browser = page.getByRole('dialog', { name: 'Browse pull requests' });
-    await browser.getByRole('option', { name: 'Select team/project', exact: true }).click();
-    const list = browser.getByRole('listbox', { name: 'Pull requests', exact: true });
-    await list.getByRole('option').click();
-    const details = browser.getByRole('region', { name: 'Pull-request details' });
-    await details.getByRole('button', { name: 'Review PR merge' }).click();
-    const merge = page.getByRole('dialog', { name: 'Merge pull request', exact: true });
+        enterprise,
+      )
+    ).kind,
+  ).toBe('providerAccounts');
+  await page.getByRole('button', { name: 'Pull requests', exact: true }).click();
+  const browser = page.getByRole('dialog', { name: 'Browse pull requests' });
+  await browser.getByRole('option', { name: 'Select team/project', exact: true }).click();
+  const list = browser.getByRole('listbox', { name: 'Pull requests', exact: true });
+  await list.getByRole('option').click();
+  const details = browser.getByRole('region', { name: 'Pull-request details' });
+  await details.getByRole('button', { name: 'Review PR merge' }).click();
+  const merge = page.getByRole('dialog', { name: 'Merge pull request', exact: true });
+  return { page, browser, merge, details, list };
+}
+test('PR merge rechecks tips and methods, confirms once, and checks an uncertain result without another write', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-pr-merge-ui-'));
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    await configure(app);
+    const { page, browser, merge, details, list } = await openMerge(app);
     await expect(merge.getByRole('combobox', { name: 'Merge method' })).toHaveValue('merge');
     await expect(merge.getByRole('option')).toHaveCount(2);
     await merge.getByRole('combobox', { name: 'Merge method' }).selectOption('squash');
+    await merge.getByRole('button', { name: 'Close merge' }).click();
+    await merge.getByRole('button', { name: 'Keep editing' }).click();
+    await expect(merge.getByRole('combobox', { name: 'Merge method' })).toHaveValue('squash');
     await merge.getByLabel('Use provider default commit message').uncheck();
     await merge
       .getByRole('textbox', { name: 'Merge commit title', exact: true })
@@ -164,7 +188,7 @@ test('PR merge rechecks tips and methods, confirms once, and checks an uncertain
     await expect(merge).not.toContainText('fixture-pat');
     expect(await writes()).toHaveLength(1);
     await merge.getByRole('button', { name: 'Close merge' }).click();
-    await expect(merge.getByRole('region', { name: 'Discard merge message' })).toBeVisible();
+    await expect(merge.getByRole('region', { name: 'Discard merge draft' })).toBeVisible();
     await merge.getByRole('button', { name: 'Keep editing' }).click();
     await app.evaluate(() => {
       (globalThis as typeof globalThis & { mergeFixture: { mode: string } }).mergeFixture.mode =
@@ -244,6 +268,144 @@ test('PR merge rechecks tips and methods, confirms once, and checks an uncertain
     });
     await merge.getByRole('button', { name: 'Close merge' }).click();
     await browser.getByRole('button', { name: 'Close', exact: true }).click();
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const provider of ['github', 'enterprise'] as const)
+  test(
+    provider + ' recovers saved merge text and an interrupted merge after process death',
+    async () => {
+      await verifyMergeRecovery(
+        provider,
+        (app) => configure(app, provider === 'enterprise'),
+        async (app) => (await openMerge(app, provider === 'enterprise')).merge,
+      );
+    },
+  );
+
+test('a cancelled recovery write or a stale merge draft cannot dispatch a merge', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ok-merge-cancel-'));
+  const app = await electron.launch({ args: [resolve('apps/desktop'), '--user-data-dir=' + root] });
+  try {
+    await configure(app);
+    const { page, merge } = await openMerge(app);
+    await merge.getByLabel('Merge method').selectOption('squash');
+    await expect(merge.getByText('Draft saved locally')).toBeVisible();
+    await app.evaluate(({ safeStorage }) => {
+      const encrypt = safeStorage.encryptStringAsync.bind(safeStorage);
+      safeStorage.encryptStringAsync = async (text) => {
+        if (JSON.parse(text).draft?.uncertain) {
+          safeStorage.encryptStringAsync = encrypt;
+          await new Promise<void>((resolve) =>
+            Object.assign(globalThis, { releaseMergeDraft: resolve }),
+          );
+        }
+        return encrypt(text);
+      };
+    });
+    const review = merge.getByRole('button', { name: 'Review selected merge' });
+    const submit = merge.getByRole('button', { name: 'Merge confirmed PR' });
+    const writes = () =>
+      app.evaluate(
+        () =>
+          (globalThis as typeof globalThis & { mergeFixture: { writes: unknown[] } }).mergeFixture
+            .writes.length,
+      );
+    await review.click();
+    await submit.click();
+    await expect.poll(() => app.evaluate(() => 'releaseMergeDraft' in globalThis)).toBe(true);
+    await merge.getByRole('button', { name: 'Cancel request', exact: true }).click();
+    await app.evaluate(() =>
+      (globalThis as typeof globalThis & { releaseMergeDraft: () => void }).releaseMergeDraft(),
+    );
+    await expect(merge.getByRole('alert')).toContainText('cancelled before submission');
+    expect(await writes()).toBe(0);
+
+    await page.evaluate(async () => {
+      const accounts = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'providerAccounts',
+      });
+      if (accounts.kind !== 'providerAccounts') throw Error('Account missing');
+      const scope = {
+        accountId: accounts.state.accounts[0]!.id,
+        repository: { owner: 'team', name: 'project' },
+        number: 1,
+      };
+      const read = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'mergeDraftRead',
+        scope,
+      });
+      if (read.kind !== 'mergeDraft' || read.draft?.provider !== 'github' || read.draft.uncertain)
+        throw Error('Missing editable draft');
+      const saved = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'mergeDraftSave',
+        scope,
+        revision: read.revision,
+        draft: { ...read.draft, title: 'Other window' },
+      });
+      if (saved.kind !== 'mergeDraft') throw Error('Competing save failed');
+    });
+    await review.click();
+    await submit.click();
+    await expect(merge.getByText(/merge draft could not be accessed or changed/)).toBeVisible();
+    await expect(merge.getByRole('button', { name: 'Merge without crash recovery' })).toHaveCount(
+      0,
+    );
+    expect(await writes()).toBe(0);
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('merging without a protected record requires an explicit confirmation and clears the saved draft', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ok-merge-no-keychain-'));
+  const app = await electron.launch({ args: [resolve('apps/desktop'), '--user-data-dir=' + root] });
+  try {
+    await configure(app);
+    const { merge, page } = await openMerge(app);
+    await merge.getByLabel('Merge method').selectOption('squash');
+    await expect(merge.getByText('Draft saved locally')).toBeVisible();
+    await app.evaluate(({ safeStorage }) => {
+      const encrypt = safeStorage.encryptStringAsync.bind(safeStorage);
+      safeStorage.encryptStringAsync = async (text) => {
+        if (JSON.parse(text).draft?.uncertain) throw Error('Device encryption unavailable');
+        return encrypt(text);
+      };
+    });
+    const count = () =>
+      app.evaluate(
+        () =>
+          (globalThis as typeof globalThis & { mergeFixture: { writes: unknown[] } }).mergeFixture
+            .writes.length,
+      );
+    await merge.getByRole('button', { name: 'Review selected merge' }).click();
+    await merge.getByRole('button', { name: 'Merge confirmed PR' }).click();
+    await expect(merge.getByText(/could not be recorded locally/)).toBeVisible();
+    expect(await count()).toBe(0);
+    await merge.getByRole('button', { name: 'Merge without crash recovery' }).click();
+    await expect(merge.getByText(/Merged\. Resulting commit/)).toBeVisible();
+    expect(await count()).toBe(1);
+    await merge.getByRole('button', { name: 'Close merge' }).click();
+    const inventory = await page.evaluate(async () => {
+      const accounts = await window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'providerAccounts',
+      });
+      if (accounts.kind !== 'providerAccounts') throw Error('Account missing');
+      return window.openkraken.request({
+        id: crypto.randomUUID(),
+        method: 'mergeDraftList',
+        scope: { accountId: accounts.state.accounts[0]!.id },
+      });
+    });
+    expect(inventory).toMatchObject({ kind: 'mergeDraftList', entries: [] });
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

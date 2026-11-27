@@ -12,6 +12,7 @@ import {
   providerPullPageSchema,
   providerRepositoryPathComponentSchema,
   type ProviderPullListOptions,
+  type ProviderBitbucketPullDetails,
   type ProviderPullOptions,
 } from '@openkraken/ipc-contract';
 import { ProviderError } from './provider-error.js';
@@ -201,4 +202,34 @@ export async function loadBitbucketPull(read: BitbucketRead, input: ProviderPull
         })) ?? null,
     });
   });
+}
+
+type Endpoint = ProviderBitbucketPullDetails['source'];
+function sameEndpoint(a: Endpoint, b: Endpoint) {
+  return (
+    a.repository?.id === b.repository?.id &&
+    a.repository?.owner === b.repository?.owner &&
+    a.repository?.name === b.repository?.name &&
+    a.branch === b.branch &&
+    a.commit === b.commit
+  );
+}
+export async function checkBitbucketPullRevision(
+  read: BitbucketRead,
+  options: ProviderPullOptions & { repositoryId: string; source: Endpoint; destination?: Endpoint },
+) {
+  const pull = await loadBitbucketPull(read, {
+    repository: options.repository,
+    number: options.number,
+  });
+  if (
+    pull.repositoryId !== options.repositoryId ||
+    !sameEndpoint(pull.source, options.source) ||
+    (options.destination && !sameEndpoint(pull.destination, options.destination))
+  ) {
+    throw new ProviderError(
+      'STALE_PROVIDER_MERGE',
+      'The pull-request comparison changed. Refresh the pull-request details.',
+    );
+  }
 }

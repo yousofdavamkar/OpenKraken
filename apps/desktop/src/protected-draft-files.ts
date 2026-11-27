@@ -14,12 +14,13 @@ export class ProtectedDraftFiles<T extends { scope: { accountId: string } }> {
     private protection: SecretProtection,
     private schema: z.ZodType<T>,
     private identity: (record: T) => string[],
+    maxBytes = 1024 * 1024,
   ) {
     this.files = new LocalDraftFiles(
       profile,
       join(folder, accountId),
       z.string().base64(),
-      1024 * 1024,
+      maxBytes,
     );
   }
   private async decode(encoded: string, name: string) {

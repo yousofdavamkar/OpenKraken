@@ -38,9 +38,30 @@ try {
     $removedRegistry = if ($tables -contains 'RemoveRegistry') {
         @(Read-Rows 'SELECT `RemoveRegistry` FROM `RemoveRegistry`' @('id'))
     } else { @() }
+    $betaPolicy = $null
+    if ($tables -contains 'RegLocator') {
+        $locators = @(Read-Rows 'SELECT `Signature_`, `Root`, `Key`, `Name`, `Type` FROM `RegLocator`' @('id','root','key','name','type') | Where-Object { $_.id -eq 'OpenKrakenBetaSearch' })
+        if ($locators.Count -eq 1) {
+            $bindings = @(Read-Rows 'SELECT `Property`, `Signature_` FROM `AppSearch`' @('property','signature') | Where-Object { $_.signature -eq 'OpenKrakenBetaSearch' })
+            $ranges = @(Read-Rows 'SELECT `UpgradeCode`, `VersionMin`, `VersionMax`, `Language`, `Attributes`, `ActionProperty` FROM `Upgrade`' @('code','min','max','language','attributes','property') | Where-Object { $_.property -eq 'OPENKRAKEN_SAME_CORE' })
+            if ($bindings.Count -ne 1 -or $ranges.Count -ne 1) { throw 'Ambiguous MSI beta policy' }
+            $betaPolicy = @{ registrySearch = $locators[0]; sameVersion = $ranges[0]; searchProperty = $bindings[0].property }
+            foreach ($table in @('InstallExecuteSequence', 'InstallUISequence')) {
+                $actions = @{}
+                $query = 'SELECT `Action`, `Sequence`, `Condition` FROM `{0}`' -f $table
+                foreach ($row in (Read-Rows $query @('action','number','condition'))) {
+                    if ($row.action -in @('FindRelatedProducts','AppSearch','LaunchConditions') -and -not $row.condition) {
+                        $actions[$row.action] = $row.number
+                    }
+                }
+                $betaPolicy[$table] = $actions
+            }
+        }
+    }
     $summary = $database.SummaryInformation(0)
     @{
         properties = $properties
+        betaPolicy = $betaPolicy
         summary = @{ template = [string]$summary.Property(7); wordCount = [int]$summary.Property(15) }
         customActions = @($customActions)
         removedRegistry = @($removedRegistry)

@@ -15,3 +15,9 @@ Controller tests use real preference files and signed metadata with an injected 
 Startup exit recovery is defined separately in [ADR 0086](0086-appimage-startup-exit-recovery.md). Recovery of unconfirmed running applications, production publishing, code signing and native installation for the other package formats remain open. Same-account attackers can modify the private profile; this preference is not a security boundary against that attacker. Filesystem permissions and runtime behavior outside the existing Linux acceptance require native platform verification.
 
 A trusted replacement build can now declare its preceding feed and key. Consent for that predecessor is cleared when the profile opens, and automatic checking starts disabled for the new destination. [Migration of a configured feed or key](0082-signed-update-release-protocol.md#moving-a-feed-or-rotating-a-release-key)
+
+## Keyboard operation
+
+Starting a transfer action moves focus to Close because the action button can disappear when the transfer changes phase. During a cancellable download, Shift+Tab from Close reaches Cancel transfer. The automatic-check preference keeps focus while its save is pending and ignores repeated activation until the save finishes.
+
+Updates, Diagnostics and Crash reporting close the native modal before removing it from the renderer. Native focus restoration returns the user to the opener. Completing both steps during dismissal also allows an immediate second activation. Crash reporting keeps its opener and Apply focusable during a pending request. Its save guard still prevents dismissal or a duplicate submission while consent is being written.

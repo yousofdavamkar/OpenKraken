@@ -35,3 +35,9 @@ The renderer also checks each reply against its pending request. Reset and appen
 ## Sending commits to the worker
 
 Reset, append and refresh send each commit’s ID, ordered parents, stash marker, summary, body, author name and author email. The renderer keeps the display metadata, including the committer and timestamps. On a replay of the same real history through the Electron renderer and graph worker, median round-trip time fell from 20.4 to 17.9 ms for 2,000 commits and from 50.0 to 45.2 ms for a 5,000-commit append. Both paths produced identical graph rows, edges and passages. [Desktop measurements](../verification/m8-reference-performance.md#filtered-history-and-graph-worker-input)
+
+## Drawing and appending wide histories
+
+The renderer keeps one passage index for the published graph. An append indexes only the new spans. It copies the outer array and any existing bucket touched by the page, including a bucket split by a page boundary. A refresh reads each old span from its starting bucket once before clipping it around the changed interval. A full replacement builds an index from the new layout.
+
+During a draw, the renderer filters each visible 500-row bucket once against the canvas bounds, including the two-pixel stroke margin. Diagonal edges still use both endpoints for clipping. The allocator counts occupied columns as it updates its target map. It can extend a full frontier directly. If holes exist, it searches from the preferred column and wraps to the left as before.

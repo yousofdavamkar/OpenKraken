@@ -1,4 +1,5 @@
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test';
+import { loadHistory, warmHistoryProfile } from '../history-profile.js';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { RepositoryPreferences } from '../../packages/git-core/src/preferences.js';
@@ -21,20 +22,6 @@ async function scrollP95(element: HTMLElement | SVGElement) {
   }
   const frames = samples.slice(2).sort((a, b) => a - b);
   return frames[Math.floor(frames.length * 0.95)]!;
-}
-
-async function loadHistory(app: ElectronApplication, path: string) {
-  const page = await app.firstWindow();
-  await app.evaluate(({ dialog }, folder) => {
-    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
-  }, path);
-  await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
-  const count = page.getByTestId('commit-count');
-  await expect(count).toHaveText('2,000 commits · more available', { timeout: 60000 });
-  for (const loaded of [7000, 12000, 17000]) {
-    await page.getByRole('button', { name: 'Load more commits', exact: true }).click();
-    await expect(count).toHaveText(`${loaded.toLocaleString('en-US')} commits · more available`);
-  }
 }
 
 // Opt-in benchmark: no Git writes. The observer creates/removes its private self-test probe.
@@ -70,12 +57,8 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       const id = createHash('sha256').update(realpathSync(path)).digest('hex');
       await new RepositoryPreferences(profile).save(id, { hiddenRefs: hiddenTags, soloRef });
     }
+    const persistedCommits = warm ? await warmHistoryProfile(profile, path) : undefined;
     app = await electron.launch({ args });
-    if (warm) {
-      await loadHistory(app, path);
-      await app.close();
-      app = await electron.launch({ args });
-    }
     const fromRepository = process.env.OPENKRAKEN_BENCH_FROM_REPO;
     if (fromRepository) {
       const source = realpathSync(fromRepository);
@@ -130,6 +113,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
           mark('repository-painted').startTime - mark('repository-state-published').startTime,
       };
     });
+    await expect(page.getByTestId('commit-count')).toHaveText('2,000 commits · more available');
     const grid = page.getByRole('grid'),
       pages: number[] = [];
     for (const loaded of [7000, 12000]) {
@@ -175,12 +159,36 @@ test('real-repository first paint, paging and scrolling budgets', async ({
         element.scrollTop = 0;
       });
     }
+    await page.screenshot({ path: testInfo.outputPath('real-repository.png') });
+    let firstLiveAppendMs: number | undefined;
+    if (persistedCommits !== undefined) {
+      await grid.press('End');
+      const selected = grid.getByRole('row', { selected: true });
+      await expect
+        .poll(async () => Number(await selected.getAttribute('aria-rowindex')))
+        .toBeGreaterThanOrEqual(persistedCommits);
+      const index = Number(await selected.getAttribute('aria-rowindex'));
+      const oid = await selected.getAttribute('data-oid');
+      const measuresBefore = await page.evaluate(
+        () => performance.getEntriesByName('history-page').length,
+      );
+      await grid.press('ArrowDown');
+      await expect(selected).toHaveAttribute('aria-rowindex', String(index + 1));
+      const timings = await page.evaluate(() =>
+        performance.getEntriesByName('history-page').map((entry) => entry.duration),
+      );
+      expect(timings).toHaveLength(measuresBefore + 1);
+      firstLiveAppendMs = timings.at(-1)!;
+      await grid.press('ArrowUp');
+      await expect(selected).toHaveAttribute('data-oid', oid!);
+    }
     const git = (...args: string[]) =>
       execFileSync('git', args, { cwd: path, encoding: 'utf8', timeout: 30000 }).trim();
     const measurement = {
       repository: path,
       head: git('rev-parse', 'HEAD'),
       commits: Number(git('rev-list', '--count', 'HEAD')),
+      commitsFromAllRefs: Number(git('rev-list', '--count', '--all')),
       refs: git('for-each-ref', '--format=.').split('\n').filter(Boolean).length,
       shallow: git('rev-parse', '--is-shallow-repository'),
       git: git('--version'),
@@ -192,6 +200,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       firstPaintMs,
       firstPaintPhases,
       page5000Ms: pages,
+      firstLiveAppendMs,
       pagingPhases,
       scrollingRows: 12000,
       p95FrameMs,
@@ -201,6 +210,7 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       electronMemory: memory,
       cache: {
         os: 'Not cleared',
+        persistedCommits,
         profile: warm
           ? 'Reopened after caching 17,000 commits and a complete app restart'
           : 'Fresh profile',
@@ -225,7 +235,26 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       path: metricsPath,
       contentType: 'application/json',
     });
-    await page.screenshot({ path: testInfo.outputPath('real-repository.png') });
+    const alias = process.env.OPENKRAKEN_BENCH_ALIAS_REF;
+    if (alias) {
+      const commit = git('rev-parse', '--verify', alias + '^{commit}');
+      const object = git('rev-parse', '--verify', alias);
+      const count = git('for-each-ref', '--format=.', '--points-at=' + object).split('\n').length;
+      await grid.press('Home');
+      const first = grid.getByRole('row', { selected: true });
+      await expect(first).toHaveAttribute('aria-rowindex', '1');
+      await expect(first).toHaveAttribute('data-oid', commit);
+      const opener = first.getByRole('button', {
+        name: `Show all ${count.toLocaleString()} references for commit ${commit.slice(0, 8)}`,
+        exact: true,
+      });
+      await opener.press('Enter');
+      const dialog = page.getByRole('dialog', { name: 'Commit references' });
+      await dialog.getByRole('textbox', { name: 'Filter commit references' }).fill(alias);
+      await expect(dialog.getByRole('listitem')).toHaveText(alias);
+      await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+      await expect(opener).toBeFocused();
+    }
     if (hiddenTags.length) {
       // Check the saved view after taking timings and the screenshot.
       const name = hiddenTags[0]!;
@@ -239,10 +268,16 @@ test('real-repository first paint, paging and scrolling budgets', async ({
       await expect(page.getByLabel('Active graph view', { exact: true })).toContainText(
         `Solo: ${soloRef}`,
       );
+    await expect(
+      page.getByRole('heading', { name: `References ${measurement.refs}`, exact: true }),
+    ).toBeVisible();
+    expect(mountedRows).toBeGreaterThan(0);
+    if (measurement.refs) expect(mountedReferences).toBeGreaterThan(0);
     expect(mountedRows).toBeLessThan(100);
     expect.soft(mountedReferences).toBeLessThan(100);
     expect.soft(firstPaintMs).toBeLessThan(500);
     for (const pageMs of pages) expect.soft(pageMs).toBeLessThan(300);
+    if (firstLiveAppendMs !== undefined) expect.soft(firstLiveAppendMs).toBeLessThan(300);
     // 60 Hz is ~16.67 ms; allow 2 ms scheduling jitter in the headless runner.
     expect.soft(p95FrameMs).toBeLessThan(18.7);
   } finally {

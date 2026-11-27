@@ -1,3 +1,5 @@
+import { CreateRemoteRepository } from './create-remote-repository.js';
+import { SavedMergeDrafts } from './saved-merge-drafts.js';
 import { SavedPullDrafts } from './saved-pull-drafts.js';
 import { SavedIssueDrafts } from './saved-issue-drafts.js';
 import { SavedReviewDrafts } from './saved-review-drafts.js';
@@ -73,8 +75,16 @@ function AccountsDialog({ close }: { close: () => void }) {
                 : 'GitHub'}{' '}
             · {account.origin}
           </p>
+          {account.provider !== 'bitbucket' && (
+            <CreateRemoteRepository
+              key={account.login}
+              account={account}
+              disabled={!state.keychainAvailable || pending || deviceBusy}
+            />
+          )}
           {account.provider !== 'bitbucket' && <SavedIssueDrafts account={account} />}
           {account.provider !== 'bitbucket' && <SavedPullDrafts account={account} />}
+          {account.provider !== 'bitbucket' && <SavedMergeDrafts account={account} />}
           {account.provider === 'github' && <SavedReviewDrafts scope={{ accountId: account.id }} />}
           <button
             disabled={pending || deviceBusy}

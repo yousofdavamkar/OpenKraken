@@ -2,6 +2,403 @@
 
 The sidebar now mounts a bounded set of reference controls on large repositories. **The 50,000-reference first-paint gate remains failing.** No budget was changed. Raw measurements, including the initial full-Linux outlier and all five later samples, are retained in [m8-reference-performance.json](m8-reference-performance.json).
 
+## Restarting after a branch update on 50,000 refs
+
+On Linux x64, Electron saved 17,000 rows from a bare mirror of Linux with 50,000 refs. Advancing its checked-out branch by one commit left the ref count unchanged. A second profile saved the same four pages after the change. Each launch received a separate copy of one saved window with its timestamps preserved. Each pair opened the same repository with both builds in alternating order, displayed 2,000 commits, appended 5,000 and selected the last row using End. The visible tip and selected final row matched Git. A full Electron traversal using a copy of the older saved window matched Git on all 50,000 refs and 1,505,200 commit IDs and their ordered parents across 302 pages.
+
+| Saved window            | Median first paint, before → after | Median native snapshot, before → after | Median first append, before → after |
+| ----------------------- | ---------------------------------: | -------------------------------------: | ----------------------------------: |
+| Before the branch moved |               1,116.7 → 1,011.5 ms |                       732.6 → 608.5 ms |                    258.5 → 251.2 ms |
+| After the branch moved  |                 968.6 → 1,026.6 ms |                       562.0 → 591.8 ms |                    313.2 → 282.3 ms |
+
+The baseline was `832475a` and the candidate was `3fe9557`. Medians exclude one warm-up pair and include five measured pairs per profile. The changed-tip opening improved in all five pairs. The current-tip opening slowed in all five. An earlier build that only changed live-walk scheduling showed the same direction for both medians. [Individual paired measurements](m8-opening-experiments.csv)
+
+An independent run opened the original 1,505,199-commit fixture with three fresh profiles in 942.7, 992.6 and 959.9 ms. All missed the 500 ms budget. Seven of nine page appends met 300 ms. The two misses took 346.1 and 366.5 ms in the third profile, where graph scrolling also exceeded the 18.7 ms p95 budget at 33.4 ms. The first two profiles measured 16.8 ms p95 for graph scrolling.
+
+After rebuilding, a second fresh-profile run measured 1,042.8, 784.0 and 755.9 ms to first paint. All nine appends met 300 ms at 185.7–277.1 ms. Graph scrolling measured 16.8 ms p95 in all three profiles. The [saved-window traversal](m8-scale-performance.md#comparing-a-restarted-graph-with-native-git) repeated the full native comparison using the pre-update profile and confirmed all 302 pages.
+
+## Large commit messages in the saved history window
+
+Two Linux x64 bare histories contained the same 80 consecutive commits with 256 KiB message bodies. On the 4,800-commit tip the large messages appeared within the first 2,000 rows. On the 9,600-commit tip they appeared in the next 5,000 rows. Fresh and restarted service runs matched every displayed commit ID and ordered parent with native Git, including all 80 messages. Four Electron launches opened the first page, appended through the root and selected the root with End. The first repository saved no cache pages. The second retained its 2,000-commit opening page.
+
+A separate cache-writer experiment used fresh Node processes, a warm-up pair and five measured pairs with alternating build order. With 100 records sharing a 600 KiB body, the previous writer encoded the full batch before discovering that it exceeded 8 MiB. Stopping at the first record that exceeded the remaining budget reduced median flush time from 212.0 to 21.5 ms and peak resident memory growth from 118.6 to 8.5 MiB. An ordinary 2,000-commit prefix took 13.2 and 14.4 ms respectively and produced identical file bytes.
+
+In three fresh Node processes per build, four successive pages supplied 17,000 distinct 4.5 KiB bodies. Each process flushed after every page and forced GC before sampling retained JS heap. After the final page, median heap growth fell from 82.28 MiB to 0.10 MiB when the writer released the unreachable records. On ordinary 17,000-commit windows with Unicode and escaped characters, all four file digests matched across all six runs. [Cache behavior](../decisions/0008-bounded-history-cache.md#oversized-commit-messages)
+
+## Ref fields and concurrent Git probes
+
+A baseline opening of the 50,000-distinct-target Linux fixture painted in 855.7 ms. Two experiments used five alternating pairs after warm-up with fresh Electron profiles and populated OS caches. Each run displayed 2,000 commits and 50,000 refs, checked the same first ten mounted IDs and badge labels, and appended 5,000 commits.
+
+| Experiment                                                 | Median first paint, before → after | Median native snapshot, before → after |
+| ---------------------------------------------------------- | ---------------------------------: | -------------------------------------: |
+| Omit two empty fields when Git confirms no tracking config |                   721.7 → 746.9 ms |                       410.1 → 424.9 ms |
+| Read tracking config while resolving sampled tag objects   |                   741.8 → 814.5 ms |                       435.7 → 425.4 ms |
+
+The shipping reader retains the six-field direct format and resolves sampled objects before checking tracking configuration. The independent final gate painted in 762.6, 869.4 and 740.4 ms against the 500 ms budget. All nine 5,000-commit appends met 300 ms, taking 199.4–257.9 ms. [Paired measurements](m8-opening-experiments.csv)
+
+## Hashing ordered history roots
+
+The Git service hashes roots in batches of 1,024 and shares the ordered root array with the history cursor. Six pairs of fresh Node processes followed a warm-up pair on Linux x64. Each process loaded the roots, ran GC, and measured elapsed time and memory growth through producing the cache key and cursor inputs. The 50,000-root input came from the full Linux fixture. The 250,000-root input added synthetic IDs. All paired digests matched.
+
+|   Roots | Median time, before → after | Median resident memory growth | Median JS heap growth |
+| ------: | --------------------------: | ----------------------------: | --------------------: |
+|  50,000 |               13.8 → 8.9 ms |               4.81 → 0.75 MiB |       2.94 → 3.15 MiB |
+| 250,000 |             115.9 → 93.9 ms |             30.18 → 12.44 MiB |     24.87 → 25.80 MiB |
+
+On each 50,000-ref fixture, Electron at `fb13733` saved four contiguous pages containing 17,000 commits. The new service reopened that profile, navigated into the live page and back across the cache boundary, and matched the selected commit IDs with Git. After quitting, the cache files retained their content digests, inode numbers and modification times. An independent restarted traversal compared all 50,000 refs and all 302 pages with native Git on both fixtures.
+
+In five alternating fresh-profile pairs after warm-up, median first paint on distinct targets changed from 743.5 to 735.9 ms, with median native snapshot time changing from 418.6 to 413.0 ms. The nested-tag fixture changed from 525.6 to 501.0 ms, with native snapshot time changing from 186.7 to 186.5 ms. [Individual desktop measurements](m8-opening-experiments.csv) · [Cache key format](../decisions/0117-history-cache-inputs.md#hashing-large-ordered-root-lists)
+
+The independent Linux x64 gates used Git 2.53.0 with the OS cache retained. Each series used three profiles. The nested fixture also verified the first-row dialog for 49,999 aliases. All 78 measured page appends across the full Linux and synthetic fixtures, including the six live pages immediately after the restarted cache windows, took 109.9–287.3 ms.
+
+| Fixture                                    | Fresh first paint, series one | Fresh first paint, final series | First paint after restart |
+| ------------------------------------------ | ----------------------------: | ------------------------------: | ------------------------: |
+| Full Linux, one ref                        |                             — |                  335.9–369.3 ms |                         — |
+| Full Linux, nested tag aliases             |                497.3–540.8 ms |                  470.7–504.1 ms |            442.4–476.6 ms |
+| Full Linux, distinct targets               |                749.3–897.9 ms |                  726.7–865.7 ms |            648.2–690.9 ms |
+| Two million commits, 100,000 tracked files |                             — |        1,117.7, 302.0, 339.6 ms |                         — |
+
+The slow first opening on the synthetic checkout spent 950.8 ms in the native snapshot. The later three-profile diagnostic run with Git tracing painted in 312.4–333.1 ms, with native snapshots of 139.5–167.1 ms. It did not reproduce the slow opening. The watcher-warm status benchmark on that checkout passed all 30 clean and dirty requests in 185.5–245.3 ms and reported all three external edits within 861.2 ms.
+
+## Checking object existence on the first page
+
+On the 50,000-distinct-target fixture with one annotated tag, a prototype combined a revision walk for commit IDs with the existing sparse tag lookup and native ref enumeration. Across five alternating fresh desktop pairs the median first paint changed from 752.2 to 715.3 ms. A separate fixture revealed that the prototype accepted a ref to a missing loose commit that was still present in the commit-graph. Native Git’s typed ref query rejected the missing object. The regression failed with the prototype and passed with the shipping reader.
+
+In six isolated native trials after warm-up, the revision walk took 122.1 ms at the median. Running it with `core.commitGraph=false` rejected the missing object and took 799.0 ms in the separate verification series. Checking captured IDs with `cat-file --batch-check=%(objectname)` took 125.3 ms by itself and reported the absent ID as missing. The shipped reader continues to ask Git for object types. [Individual desktop measurements](m8-opening-experiments.csv) · [Missing-object regression](../decisions/0098-direct-first-reference-enumeration.md#missing-objects-in-a-commit-graph)
+
+## Reusing validated object IDs
+
+On Linux x64, five paired parser runs compared `4e20003` and `c6b8c9a` on native output from 50,000 refs. Each run started a new Node process, streamed the same bytes in 64 KiB chunks, and measured retained heap after GC. All four streams produced identical digests for every record across builds. The full format includes peeled fields. The direct format omits them.
+
+| Native stream            | Median parse time, before → after | Median retained heap, before → after |
+| ------------------------ | --------------------------------: | -----------------------------------: |
+| Full, nested aliases     |                    73.6 → 58.8 ms |        21,491,416 → 18,264,968 bytes |
+| Direct, nested aliases   |                    47.9 → 32.9 ms |        12,922,640 → 11,340,488 bytes |
+| Full, distinct targets   |                    62.3 → 56.0 ms |        14,686,008 → 14,687,392 bytes |
+| Direct, distinct targets |                    60.1 → 58.5 ms |        14,584,008 → 14,585,024 bytes |
+
+Five fresh-profile Electron pairs after warm-up used the same renderer and alternated Git-service build order. With nested tags, median first paint changed from 531.2 to 525.2 ms and native snapshot time from 214.8 to 196.5 ms. With distinct targets, median first paint changed from 749.1 to 735.4 ms and native snapshot time from 429.5 to 427.0 ms.
+
+The independent acceptance runs used Git 2.53.0, retained OS caches and three profiles per condition. The restart cases reopened a profile after persisting 17,000 commits. Every nested-tag run exercised the first-row overflow dialog.
+
+| Complete Linux history                         | First paint, fresh profile | First paint, restarted profile |
+| ---------------------------------------------- | -------------------------: | -----------------------------: |
+| One ref                                        |             332.2–340.0 ms |                              — |
+| 49,999 aliases of a three-level annotated tag  |             493.8–495.0 ms |                 437.6–487.9 ms |
+| 50,000 distinct targets with one annotated tag |             738.2–823.0 ms |                 688.6–705.1 ms |
+
+All 45 appends through 17,000 commits met 300 ms. After restart, keyboard navigation triggered six more appends past the persisted window, taking 200.3–244.9 ms. The distinct-target first paint exceeded 500 ms on every run. [Individual desktop measurements](m8-opening-experiments.csv) · [Parser decision](../decisions/0002-git-protocol.md#repeated-object-ids-in-reference-streams)
+
+## Commit badge lookups by object ID prefix
+
+On Linux x64, five pairs of fresh Electron profiles compared eager indexing with resolving groups of target IDs as their commit rows mounted. Each pair alternated renderer build order after a warm-up pair. Both builds used the same Git utility and fixture, displayed 2,000 commits and 50,000 matching refs, and matched on the first ten mounted rows’ commit IDs, badge labels and tooltips. A renderer GC after the paint measurement preceded the heap sample and the first 5,000-commit append.
+
+| Median across five pairs         | 50,000 distinct targets, eager → deferred | Nested tag aliases, eager → deferred |
+| -------------------------------- | ----------------------------------------: | -----------------------------------: |
+| Renderer heap after GC           |             28,894,072 → 26,227,452 bytes |        21,331,576 → 21,440,712 bytes |
+| Store publication to first paint |                          117.5 → 102.7 ms |                       88.4 → 89.3 ms |
+| Full first paint                 |                          781.4 → 740.7 ms |                     802.2 → 784.0 ms |
+| First page append                |                          252.9 → 250.2 ms |                     255.7 → 246.7 ms |
+
+The distinct-target fixture retained 2.54 MiB less renderer heap at the median. Both fixtures still exceeded the 500 ms first-paint budget in every measured pair. [All samples including warm-up](m8-commit-badge-index-samples.csv) · [Lookup and ordering rules](../decisions/0113-visible-commit-badges-and-reference-row-heights.md#looking-up-badges-on-large-sets-of-distinct-commits)
+
+The separate three-profile acceptance run painted the one-ref Linux fixture in 337.2–359.3 ms. Distinct targets took 750.0–811.9 ms and nested tag aliases took 716.8–770.9 ms. All 27 appends took 169.4–279.4 ms.
+
+### First-row annotated tag aliases in the packaged app
+
+The nested-tag repository used for the paired badge-index measurements places the independent tagged commit below the first page. Regenerating the fixture from full Linux history with the current CI generator places that commit first. In the Linux x64 package, its badge opened a dialog reporting 49,999 refs. Filtering found the first, middle and last names from native Git. On the freshly generated distinct-target fixture, the package matched Git on all 207 mounted-row badge checks across seven scroll positions after loading 17,000 commits.
+
+The acceptance benchmark on the regenerated nested-tag fixture exercised the first-row alias dialog in all three fresh profiles. First paints were 560.3, 503.5 and 511.3 ms. The regenerated distinct-target fixture took 838.2, 745.1 and 734.4 ms. All 18 appends met 300 ms, ranging from 175.2 to 263.5 ms. Both fixtures exceeded 500 ms in each run.
+
+A separate CSS experiment isolated layout in the reference list and history scroll containers. Across five paired openings of each regenerated fixture, Canvas pixel hashes and sampled row and viewport bounds matched. Median first paint changed from 502.6 to 491.6 ms with first-row aliases and from 739.0 to 730.6 ms with distinct targets. In the independent acceptance runs all three alias openings still exceeded 500 ms, and one third-page append took 848.9 ms. That append spent 503.3 ms waiting for the service, 249.3 ms in the worker phase and 96.3 ms in publication. The release retains the existing scroll CSS.
+
+## Memory used to locate sparse annotated tags
+
+On the Linux history fixture with 50,000 distinct ref targets and one annotation, the packed-ref file occupied 3,410,078 bytes. Reading it to locate sparse annotated tags previously grew Node's array-buffer usage by 3,672,382 bytes. Reusing the 256 KiB prefix buffer reduced growth to 262,304 bytes. On a separate 7,800,100-byte packed-ref input with a Unicode tag near the end, growth fell from 7,996,724–8,062,404 bytes to 262,304 bytes. Each measurement used a fresh Node process, forced GC before the read and compared buffer usage immediately afterward. All three runs per build and input recovered the same tag.
+
+To repeat the buffer measurement, set `REPO` to the bare repository produced by the `one-annotation` fixture. Run this from each checkout with its dependencies installed. The baseline is `8b47f33`. Commit `932ec89` introduces the bounded scan and `5cb1751` adds the 8 KiB initial allocation for repeated targets.
+
+```sh
+node --expose-gc --import tsx --input-type=module - "$REPO" <<'JS'
+import { samplePackedRefs } from './packages/git-core/src/reference-reader.ts';
+global.gc();
+const before = process.memoryUsage().arrayBuffers;
+const sample = await samplePackedRefs(process.argv[2]);
+console.log(process.memoryUsage().arrayBuffers - before, sample.annotationNames);
+JS
+```
+
+Three fresh Electron profiles opened the 50,000-ref Linux fixture in 738.4, 706.5 and 738.1 ms against the 500 ms budget. The nine 5,000-commit appends took 189.2–250.2 ms, and both scroll views measured at most 16.8 ms p95. An earlier batch overlapped the native reference tests in its first run. That opening took 996 ms and one append took 312.9 ms. The other two openings in that batch took 790.1 and 738.1 ms. These runs establish the buffer reduction and the outstanding opening gate. [Reader and boundary checks](../decisions/0098-direct-first-reference-enumeration.md#bounded-annotation-sampling)
+
+On the fixture with 49,999 aliases of a nested annotated tag, the reader can stop after its first 8 KiB read. Allocating only that preview reduced measured array-buffer growth from 262,304 to 160 bytes in three fresh processes per build. Node's buffer pool supplied the small allocation in these runs. The native tests check individual allocation limits directly for both this case and the larger scan.
+
+The final build exercised three more fresh profiles per distribution. The distinct-target fixture painted in 699.2, 794.4 and 923.0 ms. The nested-tag fixture painted in 1,282.2, 741.6 and 768.1 ms. All six openings exceeded the 500 ms budget. All 18 appends took 180.1–245.1 ms and both scroll views stayed within 16.8 ms p95. Independent 302-page traversals matched native Git through all 1,505,199 and 1,505,200 commits respectively, including every parent in order.
+
+## Git object cache and snapshot transfer on November 20
+
+A Git trace of a fresh Electron profile on Linux x64 measured 889.1 ms from opening the repository to painting 2,000 commits. The native snapshot took 470.4 ms. Within that interval Git spent 287.7 ms enumerating the 50,000 refs and their types. The three subsequent 5,000-commit pages took 299.2, 256.6 and 228.6 ms. Scrolling measured 16.8 ms p95 for history and 16.7 ms for references. The fixture contains 1,505,199 Linux commits, distinct ref targets and one annotated tag.
+
+Two separate experiments alternated build order and used fresh Electron profiles with populated OS caches. The control and candidate each had one warm-up opening before the measured pairs. All measured openings exceeded 500 ms. [Individual measurements](m8-opening-experiments.csv)
+
+| Experiment                                                                   | Measured pairs | Median first paint, control → candidate | Other measurement, control → candidate   |
+| ---------------------------------------------------------------------------- | -------------: | --------------------------------------: | ---------------------------------------- |
+| Give Git a 256 MiB delta base cache during ref enumeration                   |              5 |                        807.8 → 815.5 ms | Native snapshot 436.8 → 436.6 ms         |
+| Send compact ref strings in one NUL-delimited field beside the snapshot JSON |              6 |                        729.8 → 748.1 ms | Renderer snapshot decoding 16.5 → 7.1 ms |
+
+In six isolated native trials per condition after warm-up, median ref enumeration with Git 2.53.0 took 182.6 ms with its default settings, 176.7 ms with the larger delta base cache, 191.4 ms with a 4 GiB packed window and 190.0 ms with a 16 MiB window. All outputs were byte-identical. The desktop keeps Git’s configured cache settings and the existing snapshot transfer format.
+
+## Retained memory in a 50,000-ref sidebar
+
+The sidebar now indexes runs of adjacent references of the same kind. Five measured pairs compared the range index with the four-row arrays on Linux x64, using Git 2.53.0 and the 1,505,199-commit Linux fixture with 50,000 distinct ref targets and one annotation. Each experiment used a warm-up pair (pair zero), alternated build order and retained OS caches.
+
+| Median across five pairs                          |  Four-row arrays |   Section ranges |
+| ------------------------------------------------- | ---------------: | ---------------: |
+| Renderer heap after first paint and forced GC     | 29,435,408 bytes | 27,860,012 bytes |
+| Isolated grouping heap increase after forced GC   |  1,808,296 bytes |     87,632 bytes |
+| Isolated grouping time                            |          4.54 ms |          1.59 ms |
+| First paint after replaying the snapshot response |         838.0 ms |         776.0 ms |
+| First paint including repository opening          |         873.8 ms |         934.7 ms |
+
+The post-GC renderer heap fell in each pair. The isolated Node test built the grouping index on frozen records from native Git and verified the displayed order of all 50,000 names by SHA-256. The replay timed the app with a fresh profile after the test main process captured a real opening response, then checked the renderer asset and the visible commit and ref counts. Replay improved in four pairs. Full opening improved in two pairs and exceeded 500 ms in all five. The change is retained for the memory reduction. All 15 measured appends of 5,000 commits on the range build met 300 ms. [Heap, isolated grouping and replay samples](m8-reference-range-samples.csv)
+
+Two preliminary builds used offsets into copied per-kind arrays. That alone moved median full paint from 787.7 to 784.7 ms. Preparing commit badge data during worker layout on top of that build moved median paint from 840.2 to 848.0 ms. Each comparison used five pairs after a warm-up. The release uses the range index and initializes badge data on demand. [Full opening, paging and scrolling measurements](m8-opening-experiments.csv)
+
+On the subsequent Linux acceptance run at `116fc5b`, the 50,000-ref fixture took 1,210.6 ms to paint, including 817.2 ms in the native snapshot. Its three appends took 268.0, 255.6 and 248.3 ms. The graph scrolled at 16.8 ms p95 and the sidebar at 16.7 ms p95. The separate standard fixture painted in 355.9 ms and appended in 214.1 ms. The packaged app also compared the mounted names and their accessible positions against native Git at five offsets throughout the 50,000-ref list. It painted in 1,184.4 ms, filtered to the last tag, selected HEAD by keyboard and appended to 7,000 commits.
+
+## Switching back to a cached repository with 50,000 refs
+
+A Linux x64 Electron profile first saved 17,000 commits from the 50,000-distinct-target fixture and restarted. It opened single-ref Linux history, loaded 17,000 commits there, then switched back to the saved fixture. Four measured pairs alternated build order after a warm-up pair. Both builds waited for the outgoing cache write and checked the destination’s current graph fingerprint. The prototype also read the destination’s first cache page during the outgoing write and rechecked the file stamp afterward.
+
+Median first paint was 845 ms for the control and 850 ms for the prototype. The prototype was faster in two pairs and slower in two. All 24 measured appends of 5,000 commits met 300 ms. Every measured opening exceeded 500 ms. The shipping implementation keeps the early read on initial process startup. [Individual timings](m8-opening-experiments.csv)
+
+## Reading the cached first page during ref enumeration
+
+Each Linux x64 run opened the full Linux fixture with 50,000 distinct ref targets, persisted 17,000 commits, then restarted Electron. The timed launch displayed 2,000 commits and all 50,000 refs. Both builds used Git 2.53.0, the same renderer and retained OS caches. Five measured pairs alternated build order after a warm-up pair. The control read the first cache page after computing the graph fingerprint. The candidate read and validated that page during Git’s ref enumeration and checked the final fingerprint and file stamp before using it.
+
+| Median across five restarts |  Control | Early cache read |
+| --------------------------- | -------: | ---------------: |
+| Native snapshot             | 461.9 ms |         368.2 ms |
+| First Canvas paint          | 870.4 ms |         733.8 ms |
+
+First paint improved in all five measured pairs. Every opening exceeded 500 ms. Fourteen of the 15 measured candidate appends met 300 ms, with one taking 305.3 ms. All five candidate appends beyond the restored window took 202.6–258.6 ms. A 321.0 ms candidate append occurred in the warm-up pair. [Individual measurements, including warm-up](m8-opening-experiments.csv)
+
+## Testing three ways to open 50,000 distinct refs
+
+The first fresh-profile control painted in 992.7 ms, with 681.5 ms in the native snapshot. Subsequent paired runs used the same 1,505,199-commit Linux fixture, 50,000 refs, Git 2.53.0 and populated OS caches on Linux x64. Each pair included a fresh profile for each build, and the order alternated. The measurements below preceded the cache cancellation fix. [Per-run timings](m8-opening-experiments.csv)
+
+| Experiment                                                                            | Pairs | Median first paint, control → prototype | Median snapshot, control → prototype |
+| ------------------------------------------------------------------------------------- | ----: | --------------------------------------: | -----------------------------------: |
+| Resolve direct commit types separately while reading ref names and tracking fields    |     4 |                        711.7 → 749.6 ms |                     397.7 → 431.5 ms |
+| Compare equally sized root lists by position after peeling annotations                |     5 |                        704.9 → 749.2 ms |                     401.2 → 410.0 ms |
+| Send the compact ref list to main as one JSON string and validate its decoded records |     4 |                        713.5 → 721.4 ms |                     404.9 → 395.4 ms |
+
+In a separate native probe, omitting object types reduced the Git ref query from 139–143 ms to 36–40 ms in three of four trials. In the desktop experiment, a second Git process had to recover those types and the utility had to associate them with the authoritative records. All four resulting openings took longer. The equal-length comparison also took longer end to end in each pair. The JSON transfer improved first paint in one of four pairs. The shipping app retains the original reader, root comparison and transfer. All 78 paired page appends took at most 235.2 ms.
+
+## Resolving annotated objects before enumerating refs
+
+On the 50,000-ref nested-tag fixture, the first 128 native rows contain both direct targets. Git resolves their object types and peeled commits before enumerating every name and its current tracking fields. The full enumeration checks coverage by object ID. A second change lets history start from the commits in the same sample. For a repository with distinct targets and just one annotation, a bounded packed-ref scan identifies candidate names. Git resolves the names before its authoritative direct read. [Reader behavior and fallbacks](../decisions/0098-direct-first-reference-enumeration.md#sampling-annotated-objects-before-reading-all-ref-names)
+
+Five measured pairs per comparison alternated builds on Linux x64 with Git 2.53.0. Each fresh profile opened the full Linux fixture, verified the 50,000-ref heading and appended from 2,000 to 17,000 commits. OS caches were populated. Pair zero was a warm-up. The table reports medians.
+
+| Change                                        | Fixture                          | First paint before | First paint after | Snapshot before | Snapshot after |
+| --------------------------------------------- | -------------------------------- | -----------------: | ----------------: | --------------: | -------------: |
+| Resolve the repeated objects first            | Nested tag aliases               |           576.3 ms |          504.8 ms |        270.4 ms |       199.7 ms |
+| Share the object sample with the opening walk | Nested tag aliases               |           501.7 ms |          493.8 ms |        197.9 ms |       188.2 ms |
+| Resolve sparse annotated names first          | Distinct targets, one annotation |           841.0 ms |          697.5 ms |        459.5 ms |       387.9 ms |
+| Same builds, ordinary refs only               | Distinct targets                 |           691.0 ms |          679.6 ms |        370.9 ms |       376.3 ms |
+
+Four of five candidate openings in the shared-sample comparison met 500 ms. The fifth took 511.9 ms. Two appends in the earlier comparison took 903.4 and 823.4 ms in one profile. All 15 appends in the subsequent shared-sample comparison took at most 230.3 ms. The cause of the two earlier delays is unconfirmed. All measured distinct-target openings exceeded 500 ms. [Per-run timings, including warm-ups](m8-opening-experiments.csv)
+
+## Opening 50,000 distinct refs with one annotated tag
+
+The mixed fixture replaces the lightweight tag `benchmark-10000` with an annotation of the same commit in a shared-object mirror. It retains 50,000 refs and 1,505,199 reachable commits. Git 2.38.0 and 2.53.0 matched all application ref records and the first 17,000 ordered commit IDs and parent lists. SHA-256 for the displayed history prefix was `539be6736e0fe82c65494612f950a6f55601967a237c6c4875777895a1f50965`. Both versions also matched the prefix on the nested-annotation fixture. On a separate 950-commit DAG, substituting peeled commit IDs for tag object IDs preserved the native date-order and parent stream for 120 root lists on each Git version.
+
+Recreate this distribution from a full Linux repository with `node scripts/create-reference-performance-fixture.mjs SOURCE NEW_DIRECTORY one-annotation`. It writes the annotation in the new bare repository and records its full name and peeled commit in `fixture.json`. The source supplies the existing Git objects.
+
+Each row shows the median of five alternating fresh-profile pairs after a warm-up pair on Linux x64, Git 2.53.0, with populated OS caches. Each run opened 2,000 commits and appended three pages to reach 17,000.
+
+| Change                                             | Fixture          | First paint before | First paint after | Snapshot before | Snapshot after |
+| -------------------------------------------------- | ---------------- | -----------------: | ----------------: | --------------: | -------------: |
+| Verify tracking fields after peeling               | Nested aliases   |           604.1 ms |          570.0 ms |        297.4 ms |       271.4 ms |
+| Verify tracking fields after peeling               | One annotation   |         1,089.3 ms |        1,045.3 ms |        766.3 ms |       733.1 ms |
+| Same builds, ordinary refs only                    | Distinct targets |           707.7 ms |          754.6 ms |        382.0 ms |       403.2 ms |
+| Reuse the walk after checking ordered peeled roots | One annotation   |         1,032.5 ms |          877.9 ms |        716.4 ms |       538.1 ms |
+
+The ordinary-refs run used one direct enumeration in both builds. A prototype that reread object types to hash both complete streams raised median first paint from 1,102.8 to 1,247.2 ms on the mixed fixture. Comparing text fields on the grouped alias path raised the median from 569.7 to 598.3 ms. The shipped reader hashes grouped streams and compares direct fields for distinct targets. All 60 measured candidate appends in the table took less than 269 ms. Every candidate first paint exceeded 500 ms. [Individual runs, including warm-ups and discarded variants](m8-opening-experiments.csv) · [Reference recheck](../decisions/0098-direct-first-reference-enumeration.md#rechecking-tracking-counts-after-tag-reads) · [Ordered history roots](../decisions/0122-overlap-reference-and-history-reads.md#validating-walks-started-from-tag-objects)
+
+## Nested annotated tags on full Linux history
+
+A shared-object bare clone of the one-ref Linux fixture retained its original branch at `46fec1c3029b552ec63b2d01af9d43a386f043ea`. The fixture added a parentless commit and a three-level annotated tag chain pointing to it. After the intermediate tag names were removed, 49,999 packed tag names pointed to the outer annotation. Native Git counted 50,000 refs and 1,505,200 reachable commits. The earlier 50,000-distinct-target fixture has a different distribution and remains a separate gate.
+
+Git 2.38.0 originally omitted the parentless commit from the application graph. With recursive peeling, both Git 2.38.0 and 2.53.0 returned all 50,000 ref records with every field matching Git 2.53.0's full ref enumeration. On both versions, the first 17,000 displayed IDs and parent lists matched native traversal byte for byte (SHA-256 `06f2b482653f92d39961da5c7a2853af13de640ec0fc4885ee08825a6d22d110`). A solo view of the last tag found the parentless commit by its message. An unfiltered message search during concurrent verification reached the 30-second native deadline. A subsequent search found that commit in 24.5 seconds.
+
+The table gives medians from alternating fresh-profile Electron runs on Linux x64 with populated OS caches. The first two comparisons include the compatibility fix in both builds. The third comparison includes native batch peeling in both builds and changes the utility-to-main transfer. Each run opened 2,000 commits, appended three 5,000-commit pages, and scrolled the 12,000-row graph.
+
+| Change                       | Git    | Pairs | First paint before | First paint after | Native snapshot before | Native snapshot after |
+| ---------------------------- | ------ | ----: | -----------------: | ----------------: | ---------------------: | --------------------: |
+| Peel each shared object once | 2.53.0 |     3 |         1,560.2 ms |          978.9 ms |               965.4 ms |              394.0 ms |
+| Peel each shared object once | 2.38.0 |     3 |         2,408.4 ms |        1,031.3 ms |             1,750.1 ms |              438.3 ms |
+| Stage repeated tag names     | 2.53.0 |     5 |         1,018.1 ms |          894.9 ms |               403.6 ms |              412.2 ms |
+
+Staging the aliases reduced median time from the open request to receipt in the renderer from 806.5 to 658.8 ms. All 15 appends with the staged transfer took 182.0–226.8 ms. Graph frame intervals were at most 16.8 ms p95. Every first paint in the table exceeded 500 ms. [Per-run timings](m8-opening-experiments.csv)
+
+### Keeping validated tag aliases compact through the renderer bridge
+
+Five alternating pairs followed one warm-up pair (pair 0) on the same 50,000-ref annotated fixture. Each Linux x64 Electron run used a fresh profile, Git 2.53.0 and populated OS caches. Each opened 2,000 commits, checked the displayed ref count and appended to 17,000 commits. Median first paint fell from 893.0 to 709.5 ms. Median time to receive the opening response fell from 656.3 to 525.8 ms. Parsing the renderer metadata took 10.6 ms at the median, down from 47.5 ms. Reconstructing the tag aliases in the renderer took 6.5 ms at the median.
+
+All five candidate openings exceeded 500 ms (688.0–817.1 ms). All 15 candidate page appends took less than 300 ms (186.0–272.2 ms). This comparison measured opening and paging only. The existing distinct-target fixture uses a different ref format. [Per-run measurements](m8-opening-experiments.csv) · [Transfer format](../decisions/0116-validated-snapshot-references.md#consecutive-names-for-annotated-tags)
+
+### Starting the history walk from annotated refs
+
+The earlier speculative walk received the direct tag object ID. The complete enumeration returned the peeled commit, so opening this repository started a second walk. Git now peels a bounded sample before the first walk starts. A native regression follows nested annotations through the first page, an append and exact-ID search. A second case puts an independent commit outside the sample and verifies that the service discards the tentative walk and returns all of Git's ordered commits and parents.
+
+Five alternating fresh-profile pairs followed one warm-up pair on the same annotated fixture. Both builds used compact renderer aliases. Median first paint fell from 708.0 to 582.1 ms and native snapshot time fell from 408.2 to 288.9 ms. All five candidate first paints exceeded 500 ms (576.9–644.5 ms), and all 15 appends took less than 239 ms. [Individual measurements](m8-opening-experiments.csv) · [Cursor adoption checks](../decisions/0122-overlap-reference-and-history-reads.md#packed-annotated-tags)
+
+## Raw Git dates in the history stream
+
+On full Linux history, Git returned 21,207,090 bytes for 17,000 commits using the original author and committer dates. With raw dates it returned 20,527,090 bytes. All parsed fields matched on Git 2.53.0 and 2.38.0. The raw format also reads an epoch-zero commit whose negative timezone caused the original Git command to abort. [Format and compatibility](../decisions/0002-git-protocol.md#raw-author-and-committer-dates)
+
+A second comparison traversed all 1,505,199 commits from the 50,000 refs on Git 2.53.0. Each parser streamed complete ordered commit objects into SHA-256, including parent lists, author and committer records, summaries and bodies. Both digests were `a8d8aa93f10d02879da75d613294f7c6fb12db04dd35c2ba46655efd861762fa`. Native output fell from 1,319,948,216 to 1,259,740,256 bytes. On a separate set of 42 timestamp and timezone combinations, both Git versions returned all raw dates and refused six calendar dates near the epoch.
+
+Three pairs per fixture alternated Git utility bundles on Linux x64 under X11. Each opening used a fresh profile, loaded the first 2,000 commits and appended three 5,000-commit pages. The Linux checkout contained 1,505,199 commits. OS caches stayed populated.
+
+| Fixture                 | Median first paint, original | Median first paint, raw dates | Median append, original | Median append, raw dates |
+| ----------------------- | ---------------------------: | ----------------------------: | ----------------------: | -----------------------: |
+| One ref                 |                     328.2 ms |                      318.7 ms |                200.3 ms |                 203.9 ms |
+| 50,000 distinct targets |                     688.8 ms |                      697.9 ms |                212.5 ms |                 209.4 ms |
+
+With raw dates, the three distinct-target openings took 731.8, 665.7 and 697.9 ms. All 18 candidate appends met 300 ms and graph frame intervals were 16.7–16.8 ms p95. The reduced stream size and the epoch fix held independently of the timing variation. First paint on distinct targets still exceeds 500 ms. [Individual measurements](m8-opening-experiments.csv)
+
+A separate prototype piped the starting IDs into the history walk while Git enumerated refs. Across nine alternating native pairs after warm-up, median time to read the first 2,001 commits fell from 166.6 to 155.8 ms with identical output. In six alternating fresh-profile Electron pairs after warm-up, median native snapshot time fell from 368.0 to 352.8 ms while first paint rose from 682.4 to 689.9 ms. The shipping utility keeps the existing root enumeration.
+
+## Commit type and renderer scheduling experiments
+
+On full Linux history with 50,000 distinct targets, a diagnostic utility ran a name and tracking read alongside `git --no-replace-objects rev-list --no-walk=unsorted --all`. It accepted commit types only for targets that appeared in the latter output and used the full native query if any target was unresolved or the repository used replacement refs. In a separate mixed-object repository, Git's no-walk command returned the commit ID and omitted the direct IDs of the annotated tag, tree and blob. Across six alternating fresh-profile pairs after warm-up on the large fixture, median native snapshot time rose from 374.9 to 399.7 ms and first paint rose from 713.5 to 737.5 ms.
+
+A second diagnostic build dispatched graph layout before expanding compact reference records. Across six more alternating pairs on the same fixture, median time from receiving the snapshot to first paint rose from 184.4 to 199.0 ms. Median end-to-end first paint was 723.8 ms with the original renderer and 747.1 ms with early dispatch. Both comparisons opened all 2,000 commits and showed all 50,000 references. The shipping implementation retains its existing read and layout order. [Individual measurements](m8-opening-experiments.csv)
+
+## Streaming object-type lookup
+
+On the pinned full Linux fixture with 50,000 distinct targets, a native probe piped the ref name, target and tracking fields from `for-each-ref` into `cat-file --batch-check`. The second command looked up the type of each object and returned the other fields using `%(rest)`. Across eight alternating pairs after warm-up, the median command time with empty upstream fields fell from 163.9 to 140.4 ms. With both upstream fields requested, it fell from 216.3 to 169.8 ms. The direct and piped commands returned byte-identical output in all runs on this fixture.
+
+A separate diagnostic Git utility passed the identity stream between two supervised Git processes and parsed the returned records. Both builds opened the same fixture, displayed 2,000 commits and reported all 50,000 matching refs. After one warm-up pair, six alternating fresh-profile pairs measured median snapshot time of 383.2 ms with the existing reader and 404.0 ms with the pipeline. Median first paint was 724.1 and 730.9 ms, respectively. The shipping reader retains the single direct enumeration for this case.
+
+## Wide graph drawing and append-only passage indexing
+
+A Linux x64 Electron Canvas probe drew a 400 × 560 CSS-pixel viewport straddling rows 499 and 500 at device pixel ratio 1. It alternated between the first lane and the middle of the graph. Each case included a diagonal crossing the viewport, dashed passages and two warm-up draws. Both builds produced identical RGBA hashes at both horizontal positions for each case.
+
+| Concurrent vertical passages | Previous median draw | Median with viewport clipping |
+| ---------------------------: | -------------------: | ----------------------------: |
+|                            1 |               0.1 ms |                        0.1 ms |
+|                          100 |               0.5 ms |                        0.5 ms |
+|                        5,000 |               6.5 ms |                        0.4 ms |
+|                       50,000 |              51.2 ms |                        1.6 ms |
+
+Each median covers ten calls to the painter. A separate compact allocator comparison with 100, 5,000 and 50,000 parents returned identical serialized rows, lane checkpoints and passages before and after the full-frontier change. A native Git fixture in Electron verifies both lane pixels across graph rows 2,000 and 2,001, where an uncommitted working-tree row shifts the page boundary, and follows the surviving lane below the merge's ancestor. [Graph layout decision](../decisions/0006-compact-graph-passages.md#drawing-and-appending-wide-histories)
+
+At `8022374`, five fresh-profile desktop runs opened 2,000 commits and appended three pages of 5,000 commits from full Linux history. Git was 2.53.0 and OS caches stayed populated. First paint took 324.3 ms with one ref and 487.4 ms with 50,000 refs sharing HEAD. With 50,000 distinct targets it took 666.6, 724.1 and 752.9 ms, exceeding the 500 ms budget in every run. All fifteen appends took 179.6–238.3 ms. Graph scrolling measured 16.7–16.8 ms p95. [Individual runs and phase timings](m8-opening-experiments.csv)
+
+## Reading tentative history roots from packed refs
+
+On the pinned full Linux fixture with 50,000 distinct targets, a scratch service read the 3.4 MB packed-refs file directly to start a speculative history walk. The complete native enumeration still decided whether the ordered roots matched before the walk could be used. After one warm-up pair, five alternating fresh-profile pairs measured median first paint of 699.4 ms with the existing Git query and 722.0 ms with the file read. The corresponding native snapshot medians were 381.3 and 387.5 ms. The shipped service retains the Git query.
+
+Three subsequent full benchmarks of the shipped code at `2c44546` painted in 699.2, 686.8 and 696.5 ms. All exceeded 500 ms. All nine 5,000-commit appends took 152.4–259.7 ms. Graph scroll p95 was 16.7–16.8 ms. These Linux x64 runs used Git 2.53.0, fresh application profiles and retained OS caches. [Individual runs](m8-opening-experiments.csv)
+
+## Preparing the snapshot during graph layout
+
+At `d1e8346`, the renderer freezes the validated repository snapshot and display rows while the graph worker lays out the first page. Both revisions used the same native Git service and Electron build. Each opening used a fresh profile on Linux x64 with Git 2.53.0 and retained OS caches. Build order alternated in each series.
+
+| Fixture and measurement                                              | Baseline | With preparation during layout |
+| -------------------------------------------------------------------- | -------: | -----------------------------: |
+| Shared target, median first paint across five full benchmarks        | 495.2 ms |                       493.6 ms |
+| Shared target, first paints below 500 ms                             |      3/5 |                            5/5 |
+| Shared target, median time from layout reply to store publication    |  29.7 ms |                         7.0 ms |
+| Distinct targets, median first paint across three full benchmarks    | 727.8 ms |                       705.5 ms |
+| Distinct targets, median time from layout reply to store publication |  21.1 ms |                         8.3 ms |
+| Single ref, first paint in one full benchmark                        | 343.6 ms |                       335.5 ms |
+
+All 27 candidate appends met 300 ms. The distinct-target candidate painted in 705.5, 894.6 and 700.6 ms. In a separate series of six opening-only pairs on the shared-target fixture, the median interval from receiving the snapshot to publication fell from 99.0 to 82.4 ms. Five of the six candidate first paints met 500 ms. The worker round-trip includes any overlapping renderer preparation. [Individual full-benchmark runs](m8-opening-experiments.csv)
+
+Two further experiments used the distinct-target fixture. Looking up object types in three parallel Git processes reduced the median time for an isolated enumeration and record comparison from 159.4 to 139.7 ms. Every field matched a direct enumeration in each run. In seven fresh-profile desktop pairs, that approach increased median native snapshot time from 375.1 to 445.9 ms and median first paint from 706.5 to 752.2 ms. In a second experiment, sending the staged refs to main as one JSON string took 502.3 ms to deliver the opening response, compared with 497.2 ms using the existing transfer, across six pairs. The shipped build uses the direct native enumeration and staged ref array.
+
+A separate instrumented development build recorded four openings with 50,000 distinct targets. The median interval from starting the reference read to having the refs, worktrees and cache inputs ready was 268.4 ms. Sending the staged ref array took a further 24.8 ms in the utility. From sending the completed snapshot to the renderer receiving its response took 84.7 ms. That final interval included main-process validation (14.1 ms median), response encoding (17.8 ms) and delivery after encoding (26.1 ms). These are wall-clock measurements from a diagnostic build.
+
+## Starting history from a shared HEAD
+
+With Git 2.53.0, a traced Linux x64 opening of full Linux history painted in 342.5 ms with one ref and 672.3 ms with 50,000 distinct refs. On the distinct fixture, five native runs took a median 133.4 ms to enumerate ref names, IDs, object types and HEAD markers. Asking Git to omit object types took 35.0 ms. Looking up the missing types in a separate batch took another 99.1 ms. These native timings exclude parsing and IPC. The app continues to resolve every ref's type.
+
+On the 50,000-ref fixture where every ref pointed to HEAD, the old opening path also asked Git to print all 50,000 tentative roots. The new path starts its optional walk from the opened HEAD when the sampled packed refs agree. It still checks every root before accepting that walk. The native regressions compare every displayed ID and parent on both initial and appended pages when an independent tip exists outside the sample. [Cursor adoption rules](../decisions/0122-overlap-reference-and-history-reads.md#packed-refs-sharing-the-opened-head)
+
+Both builds used the same renderer and Git 2.53.0 on Linux x64, with fresh application profiles and retained OS caches. Six opening-only pairs followed one warm-up pair. Five more pairs used the full paging benchmark. Build order alternated within each series.
+
+| Shared-target fixture                     | Baseline | With sampled HEAD |
+| ----------------------------------------- | -------: | ----------------: |
+| Median native snapshot, opening-only      | 211.7 ms |          184.9 ms |
+| Median first paint, opening-only          | 522.5 ms |          496.8 ms |
+| First paints below 500 ms, opening-only   |      0/6 |               5/6 |
+| Median first paint, full benchmark        | 536.0 ms |          489.7 ms |
+| First paints below 500 ms, full benchmark |      0/5 |               3/5 |
+| 5,000-commit appends below 300 ms         |    15/15 |             14/15 |
+
+The third candidate run recorded a 713.4 ms append and 33.3 ms p95 graph frame interval. That append spent 419.8 ms in the service phase, 192.3 ms in the worker phase and 101.3 ms in publication. The next two candidate runs met both paging and scroll budgets. The cause of the outlier is undetermined. A final one-ref opening painted in 336.7 ms, and the distinct-target fixture took 734.4 ms. All six of their appends met 300 ms. [Individual runs](m8-opening-experiments.csv)
+
+## Upstream fields on 50,000 local branches
+
+On Linux x64 with Git 2.53.0, a traced opening of the full-history fixture took 842 ms. The initial reference enumeration occupied 318 ms, and 135 ms elapsed between publication and paint. In six native comparisons on the fixture without configured upstreams, the median enumeration took 207 ms with both upstream fields, 177 ms with the upstream name alone and 147 ms with both fields empty. The product checks Git configuration before and after using the shorter format. [Query selection and compatibility](../decisions/0098-direct-first-reference-enumeration.md#packed-local-branches-without-tracking-configuration)
+
+Opening-only desktop runs compared the same builds in six alternating pairs after a warm-up pair. Each opening used a fresh profile, retained OS caches and displayed 2,000 commits and all 50,000 matching refs. The tracking control was a separate copy of the distinct-target fixture with a local upstream 11 commits behind its branch.
+
+| Fixture                                  | Median first paint before / after | Median native snapshot before / after |
+| ---------------------------------------- | --------------------------------: | ------------------------------------: |
+| Distinct targets                         |                  851.1 / 823.6 ms |                      441.8 / 451.3 ms |
+| Shared target                            |                  555.2 / 545.0 ms |                      212.4 / 211.7 ms |
+| Distinct targets with one tracked branch |                  791.8 / 790.2 ms |                      435.2 / 448.0 ms |
+
+A separate full benchmark ran three alternating pairs per untracked fixture and measured three appends of 5,000 commits per run. All 12 first paints exceeded 500 ms. With the change, first paint ranged from 786.6 to 2,750.9 ms on distinct targets and 593.0 to 723.1 ms on the shared target. Thirteen of 18 appends met the 300 ms budget, compared with 14 of 18 on the baseline. Two candidate runs measured graph frame intervals of about 50 ms p95. The native command improvement has yet to translate into reliable desktop acceptance. [Individual opening and paging samples](m8-opening-experiments.csv)
+
+## Working-state fingerprint on 100,000 files
+
+Three alternating pairs of fresh Linux x64 Electron profiles measured the same two-million-commit checkout. Each run waited for the native watcher, warmed one status request, measured five clean requests, edited the fixture's tracked probe and measured five dirty requests. The harness restored the probe. Git was 2.53.0 and the OS caches stayed populated. A preceding baseline run exceeded 300 ms on one clean read at 316.8 ms.
+
+| Status reads                            | Buffered index | Streamed index |
+| --------------------------------------- | -------------: | -------------: |
+| Median clean, 15 reads                  |       249.3 ms |       228.8 ms |
+| Median dirty, 15 reads                  |       260.7 ms |       214.6 ms |
+| Maximum across clean and dirty reads    |       410.3 ms |       314.1 ms |
+| Reads below 300 ms                      |          28/30 |          29/30 |
+| Edit visible in UI, range across 3 runs | 859.9–877.0 ms | 855.9–880.6 ms |
+
+Each of the three paired runs had a lower median for both clean and dirty reads after streaming. The first streamed run missed the status budget on one dirty read. The other two passed every status check. All six external edits became visible within 1,500 ms. [Fingerprint compatibility](../decisions/0101-one-fingerprint-per-working-state.md#streaming-the-index-listing)
+
+## Keyboard navigation with 32,000 loaded commits
+
+On full Linux history, three alternating pairs compared `6933166` with `c8a5ec9` using fresh profiles. Each run loaded 32,000 commits. The first End/Home cycle warmed the handler, followed by ten measured cycles. Holding the scroll position fixed avoided prefetch during timing. The driver checked that End moved the selection offscreen and Home returned it to the first visible row.
+
+| Key  | Baseline medians by pair | New medians by pair |
+| ---- | -----------------------: | ------------------: |
+| End  |      2.70, 2.60, 2.65 ms | 0.10, 0.10, 0.10 ms |
+| Home |      1.40, 1.40, 1.45 ms | 0.10, 0.10, 0.10 ms |
+
+These timings cover synchronous key dispatch. The separate 12,000-row Electron regression checked the visible selection and scroll behavior. The row-access regression at position 32,000 checks that Home and PageUp read no row objects and that Shift+Up inspects only the parent and its immediately preceding child in that fixture.
+
+## Opening a bare repository with 50,000 distinct refs
+
+On the 1,505,199-commit Linux fixture, a Git process trace captured a 517 ms cached diff against the entire HEAD tree despite the absence of an index. A separate trace showed two full watcher ref scans during startup. The updated app skips the diff when the bare index is absent, coalesces the initial ref checks when subscription completes promptly, and resolves HEAD while reading repository metadata. A trace of the resulting opening recorded one watcher scan and zero cached diffs.
+
+| Isolated comparison                                | Measured pairs | Median before | Median after |
+| -------------------------------------------------- | -------------: | ------------: | -----------: |
+| Working state in the bare repository               |              7 |      324.4 ms |      12.6 ms |
+| Repository metadata in the bare repository         |             12 |       61.8 ms |      43.6 ms |
+| Repository metadata in a working checkout          |             12 |       87.1 ms |      55.5 ms |
+| Desktop first paint with the watcher change alone  |              6 |      869.8 ms |     809.0 ms |
+| Desktop first paint with the metadata change alone |              6 |      911.6 ms |     895.2 ms |
+
+The opening-only desktop runs alternated build order after one warm-up pair, used a fresh profile each time and checked the first 2,000 commits and the sidebar count. The watcher change improved four of six pairs and the metadata change improved five of six. In the separate paging benchmark, the bare-index change alone improved the first append in all three pairs. All nine appends on that build met 300 ms.
+
+The full benchmark compared all three changes at `d88934f` with `39a186d`. First paints increased in every pair, from 1,600.9, 850.1 and 869.5 ms to 2,212.7, 1,017.5 and 1,035.5 ms. The first 5,000-commit append improved in every pair, from 584.2, 357.0 and 323.9 ms to 471.0, 250.4 and 262.9 ms. Six of nine appends met 300 ms. The single-ref control painted in 857.2 ms and all three appends met budget. These runs shared the host with other development processes and retained the OS cache. Every first paint exceeded the 500 ms gate. [Individual opening and paging samples](m8-opening-experiments.csv)
+
+After the suites finished, three further fresh-profile runs on each fixture measured the final app. The two-million-commit, 100,000-file checkout painted in 1,146.5, 470.9 and 383.6 ms. All nine appends met 300 ms. The 50,000-distinct-ref fixture painted in 805.1, 900.2 and 805.4 ms. Eight of its nine appends met budget, with one at 356.2 ms. Both fixtures scrolled at 16.7–16.8 ms p95. All 17,000 persisted commit IDs and parent lists also matched native Git in a separate packaged run on the distinct-ref fixture. [Final control samples](m8-opening-experiments.csv)
+
 ## Extending a persisted window from 12,000 to 17,000 commits
 
 A Linux x64 replay used the first 17,000 commits of the full Linux fixture. Their order and parents matched native Git. Each run flushed the first 12,000 records, appended the final 5,000 and timed that second flush. The reopen variant created a new cache instance and accepted the persisted pages before the timed append. Each variant ran six measured pairs in alternating build order after one warm-up pair. Every final cache file matched the previous writer byte for byte. [Individual timings and bytes replaced](m8-history-cache-append-samples.csv)

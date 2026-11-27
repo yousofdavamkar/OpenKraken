@@ -11,3 +11,17 @@ For a saved hidden-ref view, Git enumerates tentative object IDs and canonical n
 Refreshes, known shallow repositories, explicit graft/shallow/replacement-namespace settings and existing disk prefixes use the ordinary path. A stale disk prefix can therefore suppress this optimization for one open. Loose-only repositories and repositories using an alternative ref backend can use the ordinary path regardless of ref count.
 
 [Desktop scale measurements](../verification/m8-reference-performance.md#overlapping-reference-enumeration-and-history)
+
+## Packed refs sharing the opened HEAD
+
+On an unfiltered open, if at least 32 sampled packed refs all point to the object Git reported for HEAD, the optional walk starts from that HEAD immediately. Enumerating all tentative roots would transfer the same object ID repeatedly on repositories with many aliases. The complete native ref enumeration still runs. The app adopts the early cursor only when its ordered roots exactly match those computed from the complete refs and worktrees, and the existing cache, stash, replacement, graft and shallow-history checks pass. A loose ref or a packed ref beyond the sample can introduce a different tip. In that case the service closes the early cursor and starts the ordinary walk before displaying any rows.
+
+## Packed annotated tags
+
+When the bounded packed-ref sample shows repeated targets and a peeled record, the reference reader supplies replacement-free object metadata for the first 128 refs. An unfiltered cold open takes commit targets and peeled commits from that same sample in native ref order. Tree and blob targets do not enter the walk. This lets the early walk start from the same commit IDs that the full enumeration will later use for nested annotations. The service compares every ordered root before adopting the cursor. A later independent ref, an incomplete sample, or an unavailable speculative result can require the ordinary walk. Both paths retain the original first-page and append deadlines.
+
+## Validating walks started from tag objects
+
+A native unfiltered or filtered probe can capture an annotated tag's object ID before the full ref scan resolves its commit. When the raw root list differs, map captured tag IDs through the full enumeration's verified commit targets, retain first occurrences, and compare every ordered commit with the authoritative root list. A matching cursor records those commit IDs for subsequent search. An unknown target, tree/blob tag, missing commit or different order fails the comparison. The cache, stash, replacement, graft and shallow checks still apply.
+
+The native regressions cover two different annotations of one independent commit, a nested annotation, a moved annotation, and a tree tag. They compare the first and appended pages with a new native walk and verify that searching the independent tip recognizes the captured commit directly.

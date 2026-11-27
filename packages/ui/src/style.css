@@ -64,7 +64,9 @@ button {
 button:hover {
   background: var(--controlHover);
 }
-button:disabled {
+button:disabled,
+button[aria-disabled='true'],
+input[aria-disabled='true'] {
   cursor: wait;
   opacity: 0.5;
 }

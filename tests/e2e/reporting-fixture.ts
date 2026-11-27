@@ -49,7 +49,7 @@ export const reportingTest = test.extend<{ receiver: ReportingFixture }>({
       // Build a fixture entry point with a fixed test destination. Production has
       // no environment/runtime override and its default compiled destination is null.
       await build({
-        entryPoints: ['apps/desktop/src/main.ts'],
+        entryPoints: ['apps/desktop/src/bootstrap.ts'],
         bundle: true,
         platform: 'node',
         format: 'cjs',

@@ -1,3 +1,5 @@
+import { useMergeDraft } from './merge-draft.js';
+import { MergeDraftClose } from './merge-draft-close.js';
 import { useEffect, useRef, useState } from 'react';
 import {
   providerMergePullSchema,
@@ -17,28 +19,48 @@ const methodNames: Record<ProviderMergeMethod, string> = {
   squash: 'Squash and merge',
   rebase: 'Rebase and merge',
 };
-function MergeDialog({ target, close }: { target: Target; close: (changed: boolean) => void }) {
+export function GitHubMergeDialog({
+  target,
+  close,
+}: {
+  target: Target;
+  close: (changed: boolean) => void;
+}) {
   const dialog = useRef<HTMLDialogElement>(null),
     request = useRef<string | undefined>(undefined);
   const [preview, setPreview] = useState<ProviderMergePreview>();
-  const [attempt, setAttempt] = useState(0),
-    [method, setMethod] = useState<ProviderMergeMethod>('merge');
-  const [defaults, setDefaults] = useState(true),
-    [title, setTitle] = useState(''),
-    [message, setMessage] = useState('');
-  const [dirty, setDirty] = useState(false),
-    [discard, setDiscard] = useState(false);
+  const recovery = useMergeDraft(
+    { accountId: target.accountId, repository: target.repository, number: target.number },
+    (draft) => draft.provider === 'github',
+    {
+      provider: 'github',
+      method: 'merge',
+      defaults: true,
+      title: '',
+      message: '',
+      uncertain: false,
+    },
+  );
+  const { fields, dirty } = recovery;
+  const { title, message, defaults, uncertain } = fields;
+  const cancelled = useRef(false);
+  const method =
+    preview?.methods.length && !preview.methods.includes(fields.method)
+      ? preview.methods[0]!
+      : fields.method;
+  const [attempt, setAttempt] = useState(0);
+  const [discard, setDiscard] = useState(false);
   const [busy, setBusy] = useState(true),
     [confirmed, setConfirmed] = useState(false),
     [mustRefresh, setMustRefresh] = useState(false);
-  const [error, setError] = useState(''),
-    [uncertain, setUncertain] = useState(false);
+  const [error, setError] = useState('');
   const [sha, setSha] = useState<string>();
   const [observed, setObserved] = useState<ProviderPullDetails>();
   const [changed, setChanged] = useState(false);
   useEffect(() => {
     dialog.current?.showModal();
     return () => {
+      cancelled.current = true;
       if (request.current) void window.openkraken.cancel(request.current);
     };
   }, []);
@@ -62,11 +84,6 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
         if (!alive) return;
         if (response.kind === 'providerMergePreview') {
           setPreview(response.preview);
-          setMethod((current) =>
-            response.preview.methods.includes(current)
-              ? current
-              : (response.preview.methods[0] ?? 'merge'),
-          );
         } else if (response.kind === 'error') setError(response.message);
         else if (response.kind === 'cancelled') setError('Merge preview cancelled.');
       })
@@ -119,24 +136,33 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
                     ? 'Resolve merge conflicts before merging this pull request.'
                     : '';
   const ready =
+    recovery.ready &&
     !!preview &&
     !reason &&
     preview.methods.includes(method) &&
     providerMergePullSchema.safeParse(options).success &&
     !mustRefresh;
   const leave = () => {
-    if (busy) return;
+    if (busy || !recovery.ready) return;
     if (dirty && !sha && !observed?.merged) setDiscard(true);
     else close(changed);
   };
   const merge = async () => {
     const parsed = providerMergePullSchema.safeParse(options);
-    if (!parsed.success || !ready) return;
+    if (request.current || !confirmed || uncertain || !parsed.success || !ready) return;
+    cancelled.current = false;
     const id = crypto.randomUUID();
     request.current = id;
     setBusy(true);
     setError('');
     try {
+      if (!(await recovery.beforeMerge({ ...fields, method }))) return;
+      if (cancelled.current) {
+        await recovery.finish('rejected');
+        setConfirmed(false);
+        setError('Merge cancelled before submission.');
+        return;
+      }
       const response = await window.openkraken.request({
         id,
         method: 'providerMergePull',
@@ -146,20 +172,24 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
       if (response.kind === 'providerPullMerged') {
         setSha(response.merge.sha);
         setChanged(true);
+        await recovery.finish('merged');
       } else if (response.kind === 'error') {
         setError(response.message);
         setConfirmed(false);
         setMustRefresh(true);
-        setUncertain(response.code === 'PROVIDER_WRITE_UNCERTAIN');
+        await recovery.finish(
+          response.code === 'PROVIDER_WRITE_UNCERTAIN' ? 'uncertain' : 'rejected',
+        );
         if (response.code === 'PROVIDER_WRITE_UNCERTAIN') setChanged(true);
       } else if (response.kind === 'cancelled') {
+        await recovery.finish('rejected');
         setError('Merge cancelled before submission.');
         setConfirmed(false);
         setMustRefresh(true);
-      }
+      } else throw new Error('Unexpected merge result');
     } catch {
       setError('The merge result is unknown. Check the current merge status before trying again.');
-      setUncertain(true);
+      await recovery.finish('uncertain');
       setConfirmed(false);
       setMustRefresh(true);
       setChanged(true);
@@ -182,7 +212,10 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
       });
       if (response.kind === 'providerPullRequest') {
         setObserved(response.pullRequest);
-        if (response.pullRequest.merged) setChanged(true);
+        if (response.pullRequest.merged) {
+          setChanged(true);
+          await recovery.finish('merged');
+        }
       } else if (response.kind === 'error') setError(response.message);
     } catch {
       setError('The merge status could not be checked.');
@@ -206,7 +239,7 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
       <p>
         {target.origin}/{target.repository.owner}/{target.repository.name}
       </p>
-      {busy && <p role="status">Waiting for provider…</p>}
+      {busy && !sha && !observed && <p role="status">Waiting for provider…</p>}
       {current && (
         <>
           <h3>{current.title}</h3>
@@ -229,7 +262,7 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
             </p>
           )}
           {reason && <p role="alert">{reason}</p>}
-          <fieldset disabled={busy || confirmed || !!sha || uncertain}>
+          <fieldset disabled={!recovery.ready || busy || confirmed || !!sha || uncertain}>
             <legend>Merge method and message</legend>
             <label>
               Merge method
@@ -237,8 +270,9 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
                 value={method}
                 onChange={(event) => {
                   const value = event.target.value;
-                  if (value === 'merge' || value === 'squash' || value === 'rebase')
-                    setMethod(value);
+                  if (value === 'merge' || value === 'squash' || value === 'rebase') {
+                    recovery.edit({ method: value });
+                  }
                 }}
               >
                 {preview?.methods.map((value) => (
@@ -257,8 +291,7 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
                     type="checkbox"
                     checked={defaults}
                     onChange={(event) => {
-                      setDefaults(event.target.checked);
-                      setDirty(true);
+                      recovery.edit({ method, defaults: event.target.checked });
                     }}
                   />
                   Use provider default commit message
@@ -271,8 +304,7 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
                         maxLength={256}
                         value={title}
                         onChange={(event) => {
-                          setTitle(event.target.value);
-                          setDirty(true);
+                          recovery.edit({ method, title: event.target.value });
                         }}
                       />
                     </label>
@@ -283,8 +315,7 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
                         maxLength={65536}
                         value={message}
                         onChange={(event) => {
-                          setMessage(event.target.value);
-                          setDirty(true);
+                          recovery.edit({ method, message: event.target.value });
                         }}
                       />
                     </label>
@@ -311,6 +342,13 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
           {method !== 'rebase' && !defaults && <pre>{message}</pre>}
         </section>
       )}
+      {recovery.status && <p aria-live="polite">{recovery.status}</p>}
+      {recovery.withoutRecovery && (
+        <p role="alert">
+          The merge could not be recorded locally. Copy your message before merging without crash
+          recovery.
+        </p>
+      )}
       {error && <p role="alert">{error}</p>}
       {sha && (
         <p role="status">
@@ -319,6 +357,9 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
       )}
       {uncertain && (
         <section aria-label="Uncertain merge result">
+          <p>
+            The previous merge may have reached the provider. Check the current pull request status.
+          </p>
           <button disabled={busy} onClick={() => void check()}>
             Check merge status
           </button>
@@ -337,10 +378,17 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
               {!observed.merged && observed.state === 'open' && (
                 <button
                   disabled={busy}
-                  onClick={() => {
-                    setUncertain(false);
-                    setObserved(undefined);
-                    setAttempt((value) => value + 1);
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      await recovery.resume();
+                      setObserved(undefined);
+                      setAttempt((value) => value + 1);
+                    } catch {
+                      setError('Reopen the saved merge draft before reviewing again.');
+                    } finally {
+                      setBusy(false);
+                    }
                   }}
                 >
                   I checked; load a fresh merge preview
@@ -351,19 +399,24 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
         </section>
       )}
       {discard ? (
-        <section aria-label="Discard merge message">
-          <p>Discard the unsent custom merge message?</p>
-          <button onClick={() => setDiscard(false)}>Keep editing</button>
-          <button onClick={() => close(changed)}>Discard message</button>
+        <section aria-label="Discard merge draft">
+          <p>Discard your unsent merge options and message?</p>
+          <MergeDraftClose
+            keepEditing={() => setDiscard(false)}
+            close={() => close(changed)}
+            save={recovery.save}
+            discard={recovery.discard}
+          />
         </section>
       ) : (
         <div className="dialog-actions">
-          <button disabled={busy} onClick={leave}>
+          <button disabled={busy || !recovery.ready} onClick={leave}>
             Close merge
           </button>
           {busy && (
             <button
               onClick={() => {
+                cancelled.current = true;
                 if (request.current) void window.openkraken.cancel(request.current);
               }}
             >
@@ -377,11 +430,19 @@ function MergeDialog({ target, close }: { target: Target; close: (changed: boole
               </button>
               {confirmed ? (
                 <>
-                  <button disabled={busy} onClick={() => setConfirmed(false)}>
+                  <button
+                    disabled={busy}
+                    onClick={() => {
+                      recovery.resetConsent();
+                      setConfirmed(false);
+                    }}
+                  >
                     Edit merge
                   </button>
                   <button className="danger" disabled={busy || !ready} onClick={() => void merge()}>
-                    Merge confirmed PR
+                    {recovery.withoutRecovery
+                      ? 'Merge without crash recovery'
+                      : 'Merge confirmed PR'}
                   </button>
                 </>
               ) : (
@@ -415,7 +476,7 @@ export function MergePullRequest({
         Review PR merge
       </button>
       {opened && (
-        <MergeDialog
+        <GitHubMergeDialog
           target={{ ...target, number: detail.number }}
           close={(changed) => {
             setOpened(false);

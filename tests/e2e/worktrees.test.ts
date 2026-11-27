@@ -104,7 +104,8 @@ test('worktree rows arrive with their parent page without moving prior graph lan
     await search.fill('page-anchored-checkout');
     await expect(page.getByText('0 loaded matches', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Load more commits', exact: true }).click();
-    await expect(page.getByTestId('commit-count')).toHaveText('2,200 commits');
+    await expect(grid).toHaveAccessibleDescription('2,200 commits');
+    await expect(grid).toHaveAttribute('aria-rowcount', '2201');
     expect(
       await grid
         .getByRole('row')

@@ -21,6 +21,9 @@ import {
   providerOriginSchema,
   providerRepositoryPageNumberSchema,
   providerRepositoryPageSchema,
+  providerRepositorySchema,
+  type ProviderCreateRepository,
+  type PersonalRepositoryTarget,
   providerNamespaceSchema,
   providerRepositoryPathComponentSchema,
 } from '@openkraken/ipc-contract';
@@ -62,6 +65,41 @@ const projectSchema = z.object({
   visibility: z.enum(['public', 'internal', 'private']),
   archived: z.boolean(),
 });
+function projectRepository(host: string, project: z.infer<typeof projectSchema>) {
+  const parts = project.path_with_namespace.split('/');
+  const owner = providerNamespaceSchema.parse(parts.slice(0, -1).join('/'));
+  if (parts.at(-1) !== project.path)
+    throw new ProviderError('PROVIDER_RESPONSE', 'GitLab returned an invalid repository path.');
+  return providerRepositorySchema.parse({
+    id: String(project.id),
+    owner,
+    name: project.path,
+    description: project.description ?? '',
+    private: project.visibility !== 'public',
+    visibility: project.visibility,
+    archived: project.archived,
+    cloneUrl: `${host}/${owner}/${project.path}.git`,
+  });
+}
+const personalProjectSchema = projectSchema.extend({
+  owner: z.object({ id: z.number().int().positive() }).nullish(),
+});
+function personalProject(
+  origin: string,
+  userId: string,
+  target: PersonalRepositoryTarget,
+  raw: unknown,
+) {
+  const project = personalProjectSchema.parse(raw);
+  const repo = projectRepository(origin, project);
+  if (
+    repo.owner.toLowerCase() !== target.owner.toLowerCase() ||
+    repo.name.toLowerCase() !== target.name.toLowerCase() ||
+    (project.owner && String(project.owner.id) !== userId)
+  )
+    throw new ProviderError('PROVIDER_RESPONSE', 'GitLab returned a different personal project.');
+  return repo;
+}
 /** Gitbeaker endpoints with a bounded, cancellable transport and no implicit retries. */
 export class GitLabProvider {
   private policy = new ProviderPollingPolicy();
@@ -90,6 +128,51 @@ export class GitLabProvider {
       'user',
     );
   }
+  inspectRepository(
+    origin: string,
+    token: string,
+    userId: string,
+    target: PersonalRepositoryTarget,
+    signal?: AbortSignal,
+  ) {
+    const path = `${target.owner}/${target.name}`;
+    return this.request(
+      origin,
+      token,
+      signal,
+      async (options) =>
+        personalProject(origin, userId, target, await new Projects(options).show(path)),
+      `projects/${encodeURIComponent(path)}`,
+    );
+  }
+  async createRepository(
+    origin: string,
+    token: string,
+    userId: string,
+    input: ProviderCreateRepository,
+    signal?: AbortSignal,
+  ) {
+    return this.request(
+      origin,
+      token,
+      signal,
+      async (options) => {
+        const raw = await new Projects(options).create({
+          name: input.name,
+          path: input.name,
+          description: input.description,
+          visibility: input.visibility,
+          initializeWithReadme: input.readme,
+        });
+        const repo = personalProject(origin, userId, input, raw);
+        if (repo.visibility !== input.visibility)
+          throw new Error('Unexpected project acknowledgment');
+        return repo;
+      },
+      'projects',
+      'POST',
+    );
+  }
   async repositories(origin: string, token: string, page: number, signal?: AbortSignal) {
     providerRepositoryPageNumberSchema.parse(page);
     const host = providerOriginSchema.parse(origin);
@@ -113,25 +196,7 @@ export class GitLabProvider {
             }),
           );
         return providerRepositoryPageSchema.parse({
-          repositories: data.map((project) => {
-            const parts = project.path_with_namespace.split('/');
-            const owner = providerNamespaceSchema.parse(parts.slice(0, -1).join('/'));
-            if (parts.at(-1) !== project.path)
-              throw new ProviderError(
-                'PROVIDER_RESPONSE',
-                'GitLab returned an invalid repository path.',
-              );
-            return {
-              id: String(project.id),
-              owner,
-              name: project.path,
-              description: project.description ?? '',
-              private: project.visibility !== 'public',
-              visibility: project.visibility,
-              archived: project.archived,
-              cloneUrl: `${host}/${owner}/${project.path}.git`,
-            };
-          }),
+          repositories: data.map((project) => projectRepository(host, project)),
           nextPage: data.length === 100 && page < 100 ? page + 1 : null,
           limited: data.length === 100 && page === 100,
         });

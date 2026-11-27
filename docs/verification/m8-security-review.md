@@ -22,6 +22,8 @@ The initial full pnpm audit reported two moderate development advisories: [minim
 
 On November 3, the production audit reported zero advisories. The full audit still reported minimatch 3.1.5 and 5.1.9. On November 4 the reviewed advisory narrowed the affected range to `>=7.0.0 <11.0.1`, excluding both legacy versions. The lockfile resolves its modern branch to 11.0.1. On November 15 the full and production pnpm audits both exited zero with empty advisory lists for the same lockfile. The evidence file includes both responses and the lockfile SHA-256. [Reviewed advisory](https://github.com/advisories/GHSA-g3hv-75wg-m249) · [Audit results](m8-dependency-audit.json)
 
+On November 19, both `pnpm audit --json` and `pnpm audit --prod --json` exited zero for the lockfile including the direct macOS signing dependency (SHA-256 `31476baeb206b45fd80279447460f906cd6ca934a12441b83692262502f0a122`). The registry returned empty advisory lists for 655 total dependencies and 134 production dependencies.
+
 ## Verification record
 
 The update native suite passed **43 tests in seven files in 130.54 seconds** before dependency replacement. Go vet passed for `apps/askpass`. After replacement, the frozen install, typecheck/build, full ESLint/Prettier, Linux x64 packaging/fuse verification and packaged desktop smoke passed. Packaged smoke includes native Bash/PTY keyboard delivery, repository picker, askpass/editor helpers, renderer isolation and cold/resident URI consent.

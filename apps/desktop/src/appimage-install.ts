@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
 import { link, lstat, mkdir, open, readdir, rename, rmdir, unlink } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, normalize } from 'node:path';
+import { syncDirectory } from './update-transfer.js';
 import { releaseVersionSchema } from './update-protocol.js';
 import { z } from 'zod';
 
@@ -46,14 +47,6 @@ async function directory(path: string, privateOnly = false) {
   )
     fail();
   return info;
-}
-async function syncDirectory(path: string) {
-  const file = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-  try {
-    await file.sync();
-  } finally {
-    await file.close();
-  }
 }
 async function ownedFile(path: string, limit: number, links = 1, privateOnly = false) {
   const info = await lstat(path);
@@ -128,6 +121,24 @@ async function readTransaction(target: string) {
     await file.close();
   }
 }
+/** Identifies the installed transaction for the slow-start dialog. Recovery verifies the images. */
+export async function pendingAppImageStartup(target: string, version: string) {
+  try {
+    const transaction = await readTransaction(target);
+    if (transaction.version !== version || transaction.arch !== process.arch) return false;
+    const files = await readdir(targetPath(target), { withFileTypes: true });
+    return (
+      files.length === 2 &&
+      files.every(
+        (entry) => entry.isFile() && ['transaction.json', 'previous.AppImage'].includes(entry.name),
+      )
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 async function exists(path: string) {
   try {
     await lstat(path);

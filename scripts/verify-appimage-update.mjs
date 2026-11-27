@@ -6,11 +6,12 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { buildAppImage } from './appimage.mjs';
 import { sha256 } from './package-security.mjs';
 import { stat } from 'node:fs/promises';
-import {
-  stageAppImageUpdate,
-  recoverAppImageUpdate,
-  rollbackAppImageUpdate,
-} from '../apps/desktop/src/appimage-install.ts';
+import { tsImport } from 'tsx/esm/api';
+
+const { stageAppImageUpdate, recoverAppImageUpdate, rollbackAppImageUpdate } = await tsImport(
+  '../apps/desktop/src/appimage-install.ts',
+  import.meta.url,
+);
 
 if (process.platform !== 'linux') throw new Error('This acceptance check requires Linux');
 await mkdir('release', { recursive: true });

@@ -68,7 +68,7 @@ export function updateConfiguration(raw: unknown) {
 
 export type UpdateConfiguration = NonNullable<ReturnType<typeof updateConfiguration>>;
 
-const artifactSchema = z
+export const updateArtifactSchema = z
   .strictObject({
     platform: z.enum(['linux', 'darwin', 'win32']),
     arch: z.enum(['x64', 'arm64']),
@@ -110,7 +110,7 @@ const releaseSchema = z
     version: releaseVersionSchema,
     issuedAt: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
     expiresAt: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-    artifacts: z.array(artifactSchema).min(1).max(16),
+    artifacts: z.array(updateArtifactSchema).min(1).max(16),
   })
   .refine((release) => {
     if ((release.channel === 'beta') !== release.version.includes('-beta.')) return false;

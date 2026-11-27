@@ -1,4 +1,5 @@
 import { packager } from '@electron/packager';
+import { macPackagerOptions } from './mac-bundle-versions.mjs';
 import { flipFuses, FuseVersion } from '@electron/fuses';
 import {
   packageFuses,
@@ -9,6 +10,14 @@ import {
 import { buildLinuxNative } from './linux-native.mjs';
 import { mkdir, readFile, writeFile, rm, lstat, readdir, chmod } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
+import {
+  authenticode,
+  verifyWindowsArchiveSignatures,
+  windowsSignedArchivePaths,
+  windowsIdentity,
+  windowsTimestamp,
+} from './msi.mjs';
 import { execFileSync } from 'node:child_process';
 const workspace = resolve(import.meta.dirname, '..');
 function readBuildSource() {
@@ -28,9 +37,19 @@ function readBuildSource() {
     return null;
   }
 }
+const { values } = parseArgs({
+  options: { 'win-identity': { type: 'string' }, 'win-timestamp-url': { type: 'string' } },
+});
+const winIdentity = windowsIdentity(
+  process.platform === 'win32' && process.arch === 'x64' ? 'msi' : process.platform,
+  values['win-identity'],
+);
+const timestampUrl = windowsTimestamp(winIdentity, values['win-timestamp-url']);
 const source = readBuildSource();
 const staging = resolve('release/staging');
-const { version } = JSON.parse(await readFile('package.json', 'utf8'));
+const release = JSON.parse(await readFile('package.json', 'utf8'));
+const { version } = release;
+const macOptions = process.platform === 'darwin' ? macPackagerOptions(release) : {};
 await rm(staging, { recursive: true, force: true });
 await mkdir(staging, { recursive: true });
 execFileSync(process.execPath, [join(import.meta.dirname, 'build.mjs'), join(staging, 'dist')], {
@@ -38,6 +57,12 @@ execFileSync(process.execPath, [join(import.meta.dirname, 'build.mjs'), join(sta
   stdio: 'inherit',
 });
 await buildLinuxNative(staging);
+// Electron records unpacked file sizes and digests when it creates the ASAR.
+if (winIdentity) {
+  for (const name of windowsSignedArchivePaths) {
+    await authenticode(join(staging, name), winIdentity, { sign: true, timestampUrl });
+  }
+}
 await writeFile(
   join(staging, 'package.json'),
   JSON.stringify({
@@ -56,6 +81,7 @@ const outputs = await packager({
   appBundleId: 'org.openkraken.desktop',
   executableName: 'openkraken',
   ...pinnedElectronRuntime(),
+  ...macOptions,
   protocols: [{ name: 'OpenKraken repository links', schemes: ['openkraken'] }],
   asar: {
     unpack: '**/*.node',
@@ -85,6 +111,12 @@ for (const output of outputs) {
     resetAdHocDarwinSignature: process.platform === 'darwin',
     ...packageFuses,
   });
+  if (winIdentity) {
+    await verifyWindowsArchiveSignatures(join(output, 'resources'), winIdentity, {
+      requireTimestamp: !!timestampUrl,
+    });
+    await authenticode(binary, winIdentity, { sign: true, timestampUrl });
+  }
   await verifyFuses(binary);
   if (process.platform === 'win32') await payloadManifest(output);
   console.log(`Packaged and verified fuses: ${output}`);

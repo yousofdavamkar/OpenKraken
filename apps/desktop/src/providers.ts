@@ -1,8 +1,13 @@
+import type { MergeDrafts, MergeDraftRequest } from './merge-drafts.js';
 import { PullDrafts, type PullDraftRequest } from './pull-drafts.js';
 import { DraftEncryptionUnavailable } from './protected-draft-files.js';
 import type { IssueDraftRequest, IssueDrafts } from './issue-drafts.js';
 import type { ReviewDraftRequest, ReviewDrafts } from './review-drafts.js';
 import {
+  providerBitbucketMergeabilityOptionsSchema,
+  type ProviderBitbucketMergeabilityOptions,
+  providerBitbucketStatusesOptionsSchema,
+  type ProviderBitbucketStatusesOptions,
   providerBitbucketCommentsOptionsSchema,
   type ProviderBitbucketCommentsOptions,
 } from '@openkraken/ipc-contract';
@@ -82,6 +87,10 @@ import {
   type ProviderPullTemplatesOptions,
   type ProviderPullTemplateOptions,
   providerPullSourceSchema,
+  personalRepositoryTargetSchema,
+  type PersonalRepositoryTarget,
+  providerCreateRepositorySchema,
+  type ProviderCreateRepository,
   providerCreatePullSchema,
   type ProviderPullSource,
   type ProviderCreatePull,
@@ -351,12 +360,26 @@ export class ProviderService {
       store.request(request),
     );
   }
-  private connectedDraft<T>(accountId: string, kind: string, action: () => Promise<T>) {
+  mergeDraft(store: MergeDrafts, request: MergeDraftRequest) {
+    return this.connectedDraft(
+      request.scope.accountId,
+      'merge',
+      () => store.request(request),
+      request.method === 'mergeDraftSave' ? request.draft?.provider : undefined,
+    );
+  }
+  private connectedDraft<T>(
+    accountId: string,
+    kind: string,
+    action: () => Promise<T>,
+    provider?: 'github' | 'gitlab',
+  ) {
     return this.run(async () => {
       if (
         !(await this.load()).some(
           (account) =>
             account.id === accountId &&
+            (!provider || account.provider === provider) &&
             (account.provider === 'github' || account.provider === 'gitlab'),
         )
       )
@@ -425,6 +448,41 @@ export class ProviderService {
       if (account.provider !== 'bitbucket')
         throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
       return this.bitbucket.repositories(account.origin, token, options, signal);
+    });
+  }
+  private async personalAccount(id: string, owner: string, signal?: AbortSignal) {
+    const credentials = await this.authorize(id, signal);
+    if (owner !== credentials.account.login)
+      throw new ProviderError(
+        'PROVIDER_ACCOUNT',
+        'The account name has changed. Reopen Provider accounts.',
+      );
+    return credentials;
+  }
+  inspectRepository(id: string, input: PersonalRepositoryTarget, signal?: AbortSignal) {
+    return this.run(async () => {
+      const target = personalRepositoryTargetSchema.parse(input);
+      const { account, token } = await this.personalAccount(id, target.owner, signal);
+      return this.repositoryDriver(account).inspectRepository(
+        account.origin,
+        token,
+        account.providerUserId,
+        target,
+        signal,
+      );
+    });
+  }
+  createRepository(id: string, input: ProviderCreateRepository, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerCreateRepositorySchema.parse(input);
+      const { account, token } = await this.personalAccount(id, options.owner, signal);
+      return this.repositoryDriver(account).createRepository(
+        account.origin,
+        token,
+        account.providerUserId,
+        options,
+        signal,
+      );
     });
   }
   repositories(id: string, page: number, signal?: AbortSignal) {
@@ -500,6 +558,28 @@ export class ProviderService {
       if (account.provider !== 'bitbucket')
         throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
       return this.bitbucket.pullDiff(account.origin, token, options, signal);
+    });
+  }
+  bitbucketPullMergeability(
+    id: string,
+    input: ProviderBitbucketMergeabilityOptions,
+    signal?: AbortSignal,
+  ) {
+    return this.run(async () => {
+      const options = providerBitbucketMergeabilityOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'bitbucket')
+        throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
+      return this.bitbucket.pullMergeability(account.origin, token, options, signal);
+    });
+  }
+  bitbucketPullStatuses(id: string, input: ProviderBitbucketStatusesOptions, signal?: AbortSignal) {
+    return this.run(async () => {
+      const options = providerBitbucketStatusesOptionsSchema.parse(input);
+      const { account, token } = await this.authorize(id, signal);
+      if (account.provider !== 'bitbucket')
+        throw new ProviderError('PROVIDER_UNSUPPORTED', 'Choose a Bitbucket Cloud account.');
+      return this.bitbucket.pullStatuses(account.origin, token, options, signal);
     });
   }
   bitbucketPullComments(id: string, input: ProviderBitbucketCommentsOptions, signal?: AbortSignal) {

@@ -11,6 +11,7 @@ export const updatesStateSchema = z.strictObject({
     'unsupported',
     'available',
     'downloading',
+    'verifying',
     'verified',
     'saving',
     'saved',
@@ -62,6 +63,8 @@ export const updatesStateSchema = z.strictObject({
       'installation',
       'unchanged-image',
       'save',
+      'save-unconfirmed',
+      'download-unconfirmed',
     ])
     .nullable(),
 });

@@ -53,8 +53,7 @@ export function PullCreationDialog({
   const [recovered, setRecovered] = useState(false);
   const [unprotected, setUnprotected] = useState(false);
   const [closeFailed, setCloseFailed] = useState(false);
-  const [dirty, setDirty] = useState(false),
-    [discard, setDiscard] = useState(false);
+  const [discard, setDiscard] = useState(false);
   const [revision, setRevision] = useState<ProviderPullRevision | ProviderMergeCreationPreview>();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
@@ -69,30 +68,36 @@ export function PullCreationDialog({
   const [templateAttempt, setTemplateAttempt] = useState(0),
     [templatePath, setTemplatePath] = useState('');
   const [templateBody, setTemplateBody] = useState<string>();
-  const baseEdited = useRef(false);
+  // A provider reply and an input event can both arrive before React paints either edit.
+  const draftState = useRef({ fields, dirty: false, baseEdited: false });
+  const replaceFields = (next: typeof fields) => {
+    draftState.current.fields = next;
+    setFields(next);
+  };
   const storage = usePullDraft(
     { accountId: target.accountId, repository: target.repository },
     ({ uncertain, ...saved }) => {
-      baseEdited.current = true;
-      setFields(saved);
+      draftState.current.baseEdited = true;
+      replaceFields(saved);
       setRecovered(true);
-      setDirty(true);
+      draftState.current.dirty = true;
       setUncertain(uncertain);
       protectedSubmission.current = uncertain;
     },
   );
   const edit = (patch: Partial<typeof fields>) => {
-    const next = { ...fields, ...patch };
-    if (patch.base !== undefined) baseEdited.current = true;
-    setFields(next);
-    setDirty(true);
+    const next = { ...draftState.current.fields, ...patch };
+    if (patch.base !== undefined) draftState.current.baseEdited = true;
+    replaceFields(next);
+    draftState.current.dirty = true;
     storage.change({ ...next, uncertain: false });
   };
   const applyDefaultBase = useEffectEvent((branch: string | null) => {
-    if (!branch || base || baseEdited.current) return;
-    const next = { ...fields, base: branch };
-    setFields(next);
-    if (dirty) storage.change({ ...next, uncertain: false });
+    const current = draftState.current;
+    if (!branch || current.fields.base || current.baseEdited) return;
+    const next = { ...current.fields, base: branch };
+    replaceFields(next);
+    if (current.dirty) storage.change({ ...next, uncertain: false });
   });
   const perform = async (request: BridgeRequest) => {
     requests.current.add(request.id);
@@ -166,7 +171,7 @@ export function PullCreationDialog({
   const locked = busy || !!revision || !!result || !storage.ready;
   const leave = () => {
     if (busy || !storage.ready) return;
-    if (dirty && !result) setDiscard(true);
+    if (draftState.current.dirty && !result) setDiscard(true);
     else close();
   };
   const prepare = async () => {
@@ -286,7 +291,7 @@ export function PullCreationDialog({
     setBusy(true);
     setError('');
     try {
-      await storage.write(keep ? { ...fields, uncertain } : null);
+      await storage.write(keep ? { ...draftState.current.fields, uncertain } : null);
       close();
     } catch {
       setCloseFailed(true);
@@ -305,7 +310,7 @@ export function PullCreationDialog({
       protectedSubmission.current = false;
       setUncertain(false);
       setChecked(false);
-      setDirty(true);
+      draftState.current.dirty = true;
     } catch {
       setError(
         'The submission marker could not be cleared. Reopen the saved copy before reviewing again.',

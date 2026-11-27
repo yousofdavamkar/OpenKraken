@@ -1,6 +1,469 @@
 # M8 progress — hardening and release
 
-M8 remains in progress. Full Linux history still shows intermittent misses against the 300 ms paging and 500 ms first-paint budgets. The 50,000-ref repositories still exceed the 500 ms first-paint target, and the two-million-commit checkout missed it in one of three fresh runs. Native Windows/macOS acceptance, production release gates and remaining [M6](m6-progress.md)/[M7](m7-progress.md) work are open.
+M8 remains in progress. On Linux x64, the full Linux history with one ref passed the opening budget in all three fresh profiles. Fresh openings with 49,999 nested tag aliases passed three of six times across two runs, and all three restarted profiles passed. All six fresh and all three restarted profiles with distinct targets exceeded 500 ms. Native Windows, macOS and ARM64 acceptance, production release gates, and remaining [M6](m6-progress.md) and [M7](m7-progress.md) work are open.
+
+## Rechecking and saving release installers
+
+The Linux x64 desktop revalidated previously downloaded bytes after an app restart and after another check in the running app. Each check of the same release fetched one signed manifest and issued a fresh approval ID. A new release, a damaged file and a different format with the same size all exercised the download path. A simulated POSIX directory-sync failure after publishing the cached installer withheld approval. A failed sync after export left the complete file at the chosen path and allowed another save. [Download recovery](../decisions/0082-signed-update-release-protocol.md#rechecking-a-downloaded-installer) · [Export confirmation](../decisions/0121-save-verified-installers.md#confirming-the-destination)
+
+Fedora 43 DNF rejected a 99,019,021-byte Linux x64 RPM with an unrelated key. With the disposable signing certificate it installed and reinstalled the package, then removed it with the fixture user's data intact. Electron saved the RPM from a signed loopback HTTPS feed with the digest recorded in the build receipt. The packaged app in that RPM passed Canvas, paging, keyboard, search and terminal smoke tests. On Linux, the shared DMG, MSI and RPM publication tests covered a truncated copy, a same-size content change, a receipt size mismatch and concurrent saves. [Signed package publication](../decisions/0088-native-rpm-lifecycle-and-release-version.md#retaining-signed-builds)
+
+In an AppImage extract-and-run trial, the host temporary volume reached its per-user quota. The replacement exited before mounting the desktop and the helper restored the predecessor. Using a disk-backed temporary directory, the packaged app then completed recovery of the signed download, cancelled an unapproved restart, installed the accepted version and acknowledged startup. The packaged update also passed under FUSE. The small native AppImage fixture separately exercised replacement, rollback and retry in both modes.
+
+The full Linux x64 suite passed 1,223 tests with ten skips. The Electron signed-feed fixture exercised both the 115,440,864-byte DEB and the signed RPM, including retry after a cache or destination directory sync failed. Typechecking, build and lint passed.
+
+## Restarting after a branch update
+
+On Linux x64, the desktop reopened a 17,000-row saved window after its branch moved. All 50,000 refs and all 1,505,200 commit IDs with their ordered parents matched Git across 302 pages. In five paired openings, median first paint improved from 1,116.7 to 1,011.5 ms after the branch moved. When the saved window was already current, median first paint increased from 968.6 to 1,026.6 ms. The reader also recovers from an unexpected named pipe in place of a cache file on Linux.
+
+Three independent fresh openings on the original 50,000-distinct-target fixture missed the 500 ms budget. Seven of nine appends met 300 ms. On a second run, opening took 755.9–1,042.8 ms and all nine appends met budget. The Linux x64 suite passed 1,209 unit and native tests with ten skips. All 31 graph and history-cache desktop tests passed, and the Linux package passed its Canvas, search, paging and keyboard smoke checks. [Desktop timings and measurements](m8-reference-performance.md#restarting-after-a-branch-update-on-50000-refs)
+
+## Paging and restarting with large commit messages
+
+The history cache now stops encoding at the first oversized record and releases the part of the window that a restart cannot use. On a 17,000-commit cache-writer fixture with large messages, median retained heap growth after the last append fell from 82.28 MiB to 0.10 MiB. Ordinary prefixes and tails remained byte-compatible. Both fresh and restarted Electron profiles opened histories with large messages, paged to the root and selected it from the keyboard. Native verification compared all 4,800 and 9,600 commit IDs and their ordered parents with Git. [Measurements and fixtures](m8-reference-performance.md#large-commit-messages-in-the-saved-history-window)
+
+On the 50,000-distinct-target fixture, two changes to ref enumeration increased median first paint in paired tests. Both experiments were set aside. The final build painted in 740.4–869.4 ms and all nine appends met the 300 ms budget. The full Linux x64 unit and native suite passed 1,203 tests with ten skips. All 31 graph and history-cache Electron tests passed, including six Canvas goldens. [Opening experiments](m8-reference-performance.md#ref-fields-and-concurrent-git-probes)
+
+## macOS beta release identity
+
+On Linux x64, Electron Packager 20.3.0 produced Intel and Apple silicon metadata fixtures from the checksum-verified Electron 45.2.1 archives. With the previous options the app and four helper plists contained `0.2.0-beta.1` in both native version fields. Setting just the numeric short version also changed the embedded application version to `0.2.0`. The corrected packaging hook preserved the following values on both architectures.
+
+| Version inside app.asar | Native short version | Native build number |
+| ----------------------- | -------------------- | ------------------- |
+| 0.2.0-beta.1            | 0.2.0                | 2                   |
+| 0.2.0-beta.2            | 0.2.0                | 3                   |
+| 0.2.0                   | 0.2.0                | 4                   |
+
+The macOS verification matrix includes Intel and Apple silicon runners. On each, CI builds a beta DMG, checks that a stale bundle with matching plist versions cannot be issued as the final release, and compares the running app's startup version with the receipt after copy-install. It also exercises signed-feed download and export. Native Mac launch, image mounting, signature verification and notarization remain open. [macOS beta packaging](../decisions/0089-native-dmg-payload-and-copy-install.md#macos-beta-and-stable-versions)
+
+On Linux x64, a newly built `0.2.0-beta.1` package rejected a smoke check expecting the final version and passed with the exact beta version. The packaged app passed Canvas, paging, search, keyboard and terminal checks. Electron recovered, saved and verified the corresponding 115,440,444-byte beta DEB through local HTTPS. The full unit and native suite passed 1,200 tests with ten skips. Typechecking, lint, the build and workflow validation passed.
+
+## Signing a release from installer build receipts
+
+The release signer checks the exact version, platform, format, filename, size and digest from each build receipt against the release descriptor, the supported installer formats and the installer bytes. A local HTTPS feed served three Linux x64 test packages for version `0.1.0`. Feed verification checked the DEB (115,440,864 bytes), RPM (99,010,373 bytes) and AppImage (133,212,664 bytes) and recorded the public key fingerprint, signed payload digest and validity period. [Release protocol](../decisions/0082-signed-update-release-protocol.md)
+
+Three Electron runs exercised cancellation, restart recovery, saving and feed verification with a stable AppImage, a stable RPM and a `0.2.0-beta.1` DEB. The saved installers matched the build receipts, and the saved AppImage ran. The desktop suite used temporary keys and loopback HTTPS. The Linux x64 unit and native suite passed 1,198 tests with nine skips. Typechecking, lint, build and workflow validation passed.
+
+The beta guide now covers first-download checksum verification on macOS and Windows. Its shell and PowerShell commands accepted fixture files with matching digests and rejected changed bytes on Linux. Native DMG and MSI acceptance, production signing and participant feedback remain open. [Beta guide](../beta.md)
+
+## Reusing saved history after an upgrade
+
+The Git service now hashes the ordered history roots in batches while preserving the format-2 key. On 50,000 roots, median key construction time fell from 13.8 to 8.9 ms and resident memory growth fell from 4.81 to 0.75 MiB. On both large-ref fixtures, the new build reused all four files written by the previous build, loaded the first live page, and matched Git through 302 pages on restart. Moving a root after the first batch invalidated the cache with the root count unchanged. [Measurements and compatibility checks](m8-reference-performance.md#hashing-ordered-history-roots)
+
+Across the full Linux and two-million-commit synthetic fixtures, all 78 measured appends took 109.9–287.3 ms. The synthetic checkout missed the 500 ms first-paint budget once in three fresh profiles. All 30 watcher-warm status reads on its 100,000 tracked files took 185.5–245.3 ms.
+
+A native regression verifies that reference enumeration fails when a loose commit disappears but remains listed in the commit-graph. The unit and native suite passed 1,197 tests with nine skips. All 36 targeted desktop tests passed, including the cache restart, graph navigation and six Canvas goldens. Typechecking, lint, build, Linux x64 packaging and packaged history smoke tests passed. [Object lookup experiment](m8-reference-performance.md#checking-object-existence-on-the-first-page)
+
+## Reference parsing and graph restarts
+
+Reusing validated object IDs reduced retained parser heap by 3.08 MiB on the full nested-tag stream and 1.51 MiB on the direct stream. All six nested-tag acceptance runs passed. First paints took 493.8–495.0 ms on fresh profiles and 437.6–487.9 ms after restart. Distinct targets took 738.2–823.0 ms fresh and 688.6–705.1 ms after restart. All 51 measured appends met 300 ms, including the first live page after each restart. [Measurements and protocol](m8-reference-performance.md#reusing-validated-object-ids)
+
+After restarting from 17,000 persisted commits, the desktop returned every ref and matched Git’s IDs and ordered parents through all 302 pages on both fixtures. The tag fixture contained 1,505,200 commits and the distinct-target fixture contained 1,505,199. The reference reader also matched native Git across all 50,000 records on Git 2.38.0 and 2.53.0. On both Git versions, a separate desktop fixture covered diverged and gone upstreams, nested tags, Unicode names, and tags ending at trees and blobs. [Traversal procedure](m8-scale-performance.md#comparing-a-restarted-graph-with-native-git)
+
+On Linux x64, 1,189 unit and native tests passed with nine skips. All 35 graph, commit-reference, sidebar and history-cache desktop tests passed, including six Canvas goldens. Typechecking, lint, build and packaging passed. The unsigned package verified the first-row list of 49,999 aliases, checked 207 mounted-row badges on the distinct-target fixture, and passed its history, search and keyboard smoke test.
+
+## Commit badges on large histories
+
+The graph now resolves groups of target IDs as their commit rows appear. On the 50,000-distinct-target fixture, median renderer heap after first paint fell by 2.54 MiB across five paired openings, and median time from store publication to paint fell from 117.5 to 102.7 ms. An Electron test with over 10,000 refs verified the complete badge dialog after a ref deletion and the annotated root badge after paging. The separate three-profile acceptance run painted the one-ref Linux fixture in 337.2–359.3 ms. Distinct targets took 750.0–811.9 ms and nested tag aliases took 716.8–770.9 ms. All 27 appends took 169.4–279.4 ms. [Measurements and fixture details](m8-reference-performance.md#commit-badge-lookups-by-object-id-prefix)
+
+On freshly generated CI fixtures, the Linux x64 package verified badges at seven scroll positions after paging to 17,000 commits and opened the first-row list of 49,999 tag aliases. With that aliased commit on the first row, three fresh Electron profiles took 503.5–560.3 ms to paint. All 34 graph and reference desktop tests passed, including six Canvas visual goldens. The unit and native suite passed 1,187 tests with nine skips. Typechecking, lint, packaging and the packaged history smoke test passed. [First-row alias results](m8-reference-performance.md#first-row-annotated-tag-aliases-in-the-packaged-app)
+
+## Packed-ref memory and history verification
+
+The sparse-annotation scan now reuses a 256 KiB buffer. On Linux history with 50,000 distinct ref targets and one annotation, array-buffer growth during sampling fell from 3,672,382 to 262,304 bytes. On the final build, three fresh profiles painted in 699.2–923.0 ms on that fixture and 741.6–1,282.2 ms on the nested-tag fixture. All 18 appends met 300 ms. On both fixtures the desktop matched native Git’s ordered IDs and parent lists through all 302 pages. The distinct targets reached 1,505,199 commits, and the nested tag added one independent commit. [Memory and desktop measurements](m8-reference-performance.md#memory-used-to-locate-sparse-annotated-tags)
+
+## Installed DEB upgrades on Debian and Ubuntu
+
+On November 20, Debian 13 and Ubuntu 24.04.5 LTS each passed the Linux x64 install, reinstall, upgrade, remove and purge sequence. APT advanced the disposable packages from `0.1.0` through `0.2.0~beta.1` to `0.2.0`. The first installed app saved the Light theme. Both upgraded versions restored it, and removal and purge preserved the final settings file byte for byte.
+
+An ordinary user ran the installed app on all three versions in each distribution. The checks exercised the Canvas graph, two page appends, history search, keyboard navigation, the repository terminal and repository reopening after a Git change. GIO delivered a repository link through the registered desktop entry, and the running app opened it after user approval. The CI workflow now runs both distributions in its Linux installer jobs. Local results cover x64 under rootless Podman and Xvfb. Ubuntu's AppArmor profile passed offline compilation. [Fixture and reproduction commands](../decisions/0093-debian-version-upgrade-acceptance.md#installed-desktop-and-profile-continuity)
+
+## Retaining reference searches and bounding cache-key memory
+
+An external branch deletion used to remove the focused search field when a repository dropped from 100 references to 99. The sidebar now keeps the query and keyboard focus through deletions and additions. Opening a different repository resets the filter. Electron and the packaged Linux x64 app exercised the change. [Sidebar behavior](../decisions/0094-bounded-reference-sidebar.md)
+
+The Git service now fingerprints large shallow, graft and alternates files in 64 KiB chunks. A 32.8 MB input increased the process high-water mark by 124–256 KiB in three fresh runs. The earlier implementation added 160,620–161,796 KiB. Native tests verified that an unreadable input preserves the saved cache, and that changing a graft beyond the first chunk changes displayed parentage on restart. [Cache compatibility and measurements](../decisions/0117-history-cache-inputs.md#reading-graph-metadata-within-a-fixed-memory-budget)
+
+Linux x64 verification passed 1,177 unit and native tests with nine skips. All 37 focused Electron checks passed, including six graph visual goldens. A restart with 17,000 persisted commits matched native Git’s ordered IDs and parents over 302 pages and 1,505,199 commits. Typechecking, lint, the build and the unsigned Linux package smoke passed. The packaged app exercised native folder opening, search, Canvas rendering, keyboard navigation and paging to the root after a cached repository changed.
+
+The standard fixture painted its first 2,000 commits in 228.5 ms. On the 50,000-distinct-target Linux fixture the same first page took 746.7 ms against the 500 ms budget. The native snapshot took 409.6 ms. The three subsequent pages took 211.7, 211.8 and 193.1 ms against the 300 ms budget. Graph and sidebar frame intervals were 16.7 and 16.8 ms p95. Two experiments improved isolated measurements without improving median desktop opening time. [Per-run results and experimental conditions](m8-reference-performance.md#git-object-cache-and-snapshot-transfer-on-november-20)
+
+## Reference sidebar memory and recovery after external ref changes
+
+On Linux x64, the range index reduced median post-GC renderer heap by 1,575,396 bytes while displaying 2,000 commits and 50,000 distinct ref targets. Median full opening time rose from 873.8 to 934.7 ms in that comparison. A subsequent full-suite run painted the standard fixture in 355.9 ms and the distinct-target fixture in 1,210.6 ms. Its native snapshot alone took 817.2 ms. All three large-fixture appends met 300 ms. [Individual timings and memory samples](m8-reference-performance.md#retained-memory-in-a-50000-ref-sidebar)
+
+Adding the 100th ref used to discard a rename draft when the sidebar switched layouts. The draft and keyboard focus now survive both transitions. Cancelling restores focus to the replacement button. Removing the reviewed ref dismisses the dialog, and moving its tip causes Git to reject the stale rename. [Reference review lifetime](../decisions/0094-bounded-reference-sidebar.md#keeping-a-review-open-across-layout-changes)
+
+The desktop also sometimes kept showing 99 refs after a branch was recreated at the same tip. A native regression reproduced this when Git restored the branch between watcher reads. The service now reconciles the ref list returned by a refresh against Git. All eight consecutive desktop repetitions on Git 2.38.0 passed after the change, as did all 18 watcher tests on Git 2.38.0 and 2.53.0. In a disposable copy of full Linux history, the packaged app kept the original reviewed object ID and the draft after an external branch move, observed the list shrink to 49,999 and return to 50,000, and paged to 7,000 commits. [Watcher reconciliation](../decisions/0104-snapshot-reference-watcher-baseline.md#reconciling-refs-returned-by-a-refresh)
+
+The Linux x64 DEB, RPM and AppImage from clean commit `9fa9d41` passed the packaged reference filter, draft retention, Canvas, two appends, all-history search, keyboard navigation, terminal and cache-reopen checks. Each format rejected mismatched archive, helper and version information. Debian 13 installed and reinstalled the DEB, upgraded from 0.1.0 to the 0.2.0 fixture, removed and purged the app, and retained user data. Fedora 43 installed, reinstalled and removed the RPM while retaining user data. The real HTTPS update fixture verified the rebuilt DEB with a temporary signing key. Both dependency audits reported zero advisories on November 20.
+
+With Git LFS enabled, 1,173 unit and native tests passed across 125 files, with nine skips. The full Linux Electron run at `116fc5b` enabled the scale, Gitea and native-shell fixtures. Of 288 tests, 287 passed. The single failure was the distinct-target first paint. All 302 pages matched native Git through 1,505,199 commits. On the separate two-million-commit checkout, ten clean and dirty status reads over 100,000 files took 217.2–252.1 ms. Typechecking, build and lint passed.
+
+An earlier desktop run reached the sixth of seven launches in the signed-update scenario before its 90-second overall deadline expired. Both fixture sizes now use the existing 180-second packaged-fixture deadline. The ordinary signed-update scenario passed in the complete run, and the real DEB passed separately. The graph's first-paint limit remains 500 ms.
+
+| Linux x64 test installer |       Bytes | SHA-256                                                            |
+| ------------------------ | ----------: | ------------------------------------------------------------------ |
+| DEB                      | 115,441,196 | `4a45ce2d256417ea0a06efed622b564368c43afd386388e1ae0d060006dde0e2` |
+| RPM                      |  99,010,373 | `d86e6c76153146a5ab304ad796db452dc6fdb8c9fde1e6357e9b0fb1c23018df` |
+| AppImage                 | 133,212,664 | `2c5cb3500e70f4d421c8323735ebfca00a9aefc057bd2c6be9badfb643406975` |
+
+## PowerShell in the Linux packages
+
+The Linux x64 DEB, RPM and AppImage produced from clean commit `529e472` each opened a repository terminal using PowerShell 7.6.9. The packaged app recognized the prompt, received native Ctrl+P input, reported a failed command and exited the shell cleanly. The same runs exercised the Canvas graph, append-only paging, search and keyboard navigation, then switched back to a repository with a changed tip and paged to the root. Verification ran from extracted DEB/RPM payloads and through the AppImage’s embedded runtime.
+
+The Linux suite passed 1,171 unit and native tests with nine skips, plus all 23 terminal Electron scenarios. Archive tests covered intact, absent, removed and modified PowerShell startup scripts. The Windows signing fixture checks the packaged script against its publisher and rejects a modified copy. Native Authenticode execution and macOS/Windows terminal results remain outstanding. [PowerShell integration](../decisions/0132-powershell-terminal-integration.md)
+
+## Cancelling a switch while the old repository writes its cache
+
+The Linux regression held the original repository’s cache write open during a switch. Before the fix, cancellation still had not returned after two seconds. A cancelled switch and an unavailable destination now release the request while the write is pending. The original graph loads its remaining commits, and the next successful switch persists both the 2,000-commit prefix and the three-commit tail. [Cache handoff behavior](../decisions/0008-bounded-history-cache.md#leaving-a-pending-cache-read)
+
+A separate desktop run loaded 17,000 commits from the two-million-commit synthetic checkout and switched to a saved 17,000-commit window of full Linux history with 50,000 distinct ref targets. The destination path and all 302 pages matched Git through 1,505,199 commits, including their ordered parents. In four paired desktop comparisons, reading the destination’s prefix during the outgoing write helped two openings and slowed two. The shipping read order had a median switch paint of 845 ms. All 12 measured appends with that build met 300 ms. [Switch measurements](m8-reference-performance.md#switching-back-to-a-cached-repository-with-50000-refs)
+
+All three Linux x64 test formats from clean commit `335213c` reopened a changed repository through a second process. The fixture verified the saved first page on disk, committed a new tip while another checkout was open, selected the new tip in the graph, then paged through 7,004 commits to the root. Debian 13 installed, reinstalled, upgraded from 0.1.0 to 0.2.0, removed and purged the application while retaining user data. Fedora 43 installed, reinstalled and removed the RPM while retaining user data. AppImage acceptance launched the embedded runtime and also ran in extract-and-run mode.
+
+| Linux x64 test installer |       Bytes | SHA-256                                                            |
+| ------------------------ | ----------: | ------------------------------------------------------------------ |
+| DEB                      | 115,149,232 | `9bf7a026ba9c469056ce5a63e2f7fc94138a49b131d30ed84bc40c9377c7c0a0` |
+| RPM                      |  99,011,281 | `448471470c4e262214d617539d328d84395608df2822f84d399f85237a9b4fa8` |
+| AppImage                 | 133,208,568 | `e3b14afb009344a7896fe32a01ee0f866813960cf1b62f4782d05bc6acd2f094` |
+
+The DEB check also reproduced a Chromium singleton socket path exceeding the Linux limit under a long temporary profile. The smoke launcher now puts its Linux runtime sockets in a short private directory and removes it after exit. The DEB and extract-and-run AppImage checks passed with the original long staging path. Linux CI runs the latter check with a long profile path. These are local test artifacts. Production signing, hosted cross-platform acceptance and the large-reference opening budget remain open.
+
+The full Linux suite passed 1,160 unit and native tests with nine skips. All 91 focused Git 2.38.0 checks and 34 focused desktop graph, cache, repository and reference tests passed. The standard 2,000-commit fixture painted in 261.0 ms. A 5,000-commit append took 157.8 ms and scrolling at 12,000 rows measured 16.8 ms p95. Typechecking, lint and local workflow validation passed.
+
+## Reading saved graph history during a restart
+
+On Linux x64, starting the saved-page read during ref enumeration reduced median restarted first paint from 870.4 to 733.8 ms across five alternating pairs on full Linux history with 50,000 distinct ref targets. The app checks the current Git fingerprint and cache file identity before displaying a commit. An integration test held ref enumeration open after an external commit and verified that the displayed history included the new tip. Other tests replaced and removed the saved file, cancelled an incomplete first open and opened another repository. [Cache acceptance rules](../decisions/0008-bounded-history-cache.md#restarting-with-a-saved-first-page)
+
+The final build painted the standard 2,000-commit fixture in 240.8 ms. Its 5,000-commit append took 176.3 ms and scrolling measured 16.7 ms p95. On the 50,000-ref fixture, a separate fresh profile painted in 808.5 ms and a restarted profile in 639.1 ms. All six appends in those two runs met 300 ms. The 500 ms large-ref opening gate remains open. In the paired comparison, one measured candidate append also missed 300 ms at 305.3 ms. [Paired and final-run measurements](m8-reference-performance.md#reading-the-cached-first-page-during-ref-enumeration)
+
+After restarting with 17,000 saved commits, every ordered ID and parent matched native Git through all 302 pages and 1,505,199 commits. The full Linux suite passed 1,158 unit and native tests with nine skips. All 89 focused repository and history tests passed with Git 2.38.0. The 32 Electron graph, cache and repository-opening checks passed, as did the Linux x64 package smoke on clean commit `2fdca4f`, the build, lint and local workflow validation. The scale CI matrix now checks both restarted opening time and full traversal for this distinct-target fixture. The local three-profile CI command failed its first-paint assertion at 738.7, 683.8 and 739.0 ms. Its nine appends took 182.3–270.8 ms. Hosted results remain outstanding.
+
+## Page Up and Page Down across graph pages
+
+On a Linux desktop showing nine whole rows, Page Down from row 1 used to select row 21. It now selects row 10. Resizing the window changes the distance for both page keys. With 2,000 commits loaded and three still on disk, one Page Down from row 2,000 appends the remaining commits and selects row 2,003. The packaged Linux x64 build from `fd4063a` also passed the viewport-sized navigation check, Canvas rendering, two appends, repository search and renderer isolation. [Graph navigation decision](../decisions/0004-m1-history-and-interaction.md)
+
+On Linux x64, 1,155 unit and native tests passed with nine skips. All 38 targeted Electron cases passed, including graph goldens, repository opening, history cache, reference badges and submodule refresh. The standard 2,000-commit fixture painted in 288.0 ms. Appending 5,000 commits took 165.3 ms and scrolling at 12,000 rows measured 16.7 ms p95.
+
+Two separate runs on the 1,505,199-commit fixture with 50,000 distinct reference targets exceeded the 500 ms opening budget. A fresh profile painted in 1,380.7 ms and a restarted profile in 914.3 ms. The six 5,000-commit appends took 231.5–293.2 ms. The first live append beyond the restored window took 226.7 ms. Scrolling measured 16.7 and 16.8 ms p95 respectively. The OS cache was left in place. [Scale benchmark methodology](m8-reference-performance.md)
+
+## Switching repositories while the history cache is reading
+
+A slow cache file could keep an old Git walk open, delay shutdown or prevent a cancelled repository open from returning. The Linux regression held the next cache page's file open request after the first 2,000 commits were visible. The desktop service now switches repositories and shuts down while that request is still pending. When the destination fails, paging the original cursor returns the remaining commits in native Git order. Cancelling a separate open while it waits for its first cache file also preserves the displayed cursor. The late file handle closes when the operating system returns it. [Cache handoff and write behavior](../decisions/0008-bounded-history-cache.md#leaving-a-pending-cache-read)
+
+The restarted traversal now runs from the checked-in test harness. Both Linux x64 profiles persisted 17,000 commits before relaunch. Git 2.53.0 matched every ordered ID and parent through 302 pages of the distinct-target fixture with one annotated tag (1,505,199 commits). Git 2.38.0 matched all 302 pages of the nested-tag fixture, including its independent root (1,505,200 commits). The minimum-Git native history and cache suites passed all 70 tests. [Repeat the restarted traversal](m8-scale-performance.md#comparing-a-restarted-graph-with-native-git)
+
+On the standard 2,000-commit fixture, three fresh profiles painted in 222.8, 222.2 and 226.3 ms. With the same build, the 50,000-distinct-target fixture painted in 708.2 ms from a fresh profile and 698.0 ms after a cache restart. Both exceeded the 500 ms opening budget. All six 5,000-commit appends took 173.7–235.7 ms. The first live append beyond the restored window took 206.3 ms, and scrolling at 12,000 rows measured 16.8 ms p95 in both runs. Three separate opening prototypes were measured and discarded. [Paired comparisons and timings](m8-reference-performance.md#testing-three-ways-to-open-50000-distinct-refs)
+
+The full unit and native suite passed 1,151 tests with nine skips. All 39 focused Electron graph, sidebar, cache and transfer cases passed. The Linux x64 package from clean commit `33ccd5b` passed the Canvas, two appends, repository search, keyboard and renderer-isolation checks. Typechecking, lint and local workflow validation passed.
+
+## Recovering a Linux installer download after process exit
+
+A complete download used to disappear when OpenKraken restarted. The next launch now keeps it until the user checks the signed release and selects a format. If the saved file matches the signed size and SHA-256, the app issues a new save or install approval without downloading it again. An interrupted transfer starts from the beginning. Saving a verified AppImage now grants the owner execute permission so they can launch the exported file directly. [Signed update protocol](../decisions/0082-signed-update-release-protocol.md)
+
+On Linux x64, Electron was forcibly stopped after a complete transfer and after three bytes of a stalled transfer. For each format, restarting reused the complete download with exactly one new HTTPS manifest request. Restarting after the partial transfer removed the scratch file before contacting the server. The exported files matched the SHA-256 in their installer receipts. The exported AppImage also ran its embedded runtime directly.
+
+| Test installer from clean commit `192f3b3` | Saved bytes | SHA-256                                                            |
+| ------------------------------------------ | ----------: | ------------------------------------------------------------------ |
+| DEB                                        | 115,434,204 | `656b86c5af15f9bb4ed258e70c95069d1854c88ac06aaa806e0b44eea73bb350` |
+| RPM                                        |  99,000,597 | `5641657fcd322e14f4d83b4d5374f0cdef4b5f9582fe96dea7d3c8a227e4a1b3` |
+| AppImage                                   | 133,212,664 | `26587d963566a6596ff0166eb6d8b8b3be3ff72956845b771d15ec7fd81462c5` |
+
+Two packaged AppImage runs exercised **Install and restart** after recovery. The stable FUSE run upgraded from `0.1.0` to `0.2.0`. The beta extract-and-run fixture upgraded from `0.2.0-beta.2` to `0.2.0-beta.10`. Both rejected the original install approval, respected the unsaved-work cancellation, then launched the replacement with the expected digest and signed release sequence. Both used disposable signing keys and loopback HTTPS. [Packaged restart fixture](../../scripts/verify-update-restart.mjs)
+
+The unit and native suite passed 1,145 tests with nine skips. The six Electron update cases passed across the three installer formats. Each package passed its Canvas, append, repository search, keyboard and renderer-isolation smoke checks.
+
+## Graph keyboard shortcuts on Linux
+
+With the second commit selected, Ctrl+H moved focus to HEAD. The grid now leaves H, J and K combinations with Ctrl, Alt or Meta available to other handlers. H still selects HEAD and Shift+H selects the upstream. All 32 focused Electron graph, reference and history-cache cases passed, including six visual goldens. The 2,000-commit fixture painted in 231.3, 227.4 and 228.8 ms across three fresh profiles. On the paging fixture, appending 5,000 commits took 157.7 ms and the 12,000-row scroll frame interval was 16.8 ms at p95. The 50,000-distinct-ref opening budget remains open. [Graph interaction](../decisions/0004-m1-history-and-interaction.md)
+
+## Crossing from cached history into live Git pages
+
+With cached rows left to display, the retained Git walk could pause before verifying later commit IDs and parent lists. In a 7,009-commit regression, the opening 2,000 rows appeared immediately, but the reader missed a disagreement at the end of the cached window until more pages were requested. The walk now compares those rows while the user reads the opening page. Once it detects a changed or extra commit, the cursor immediately rejects further page requests as stale, including requests received while the Git process is exiting. [History cache behavior](../decisions/0008-bounded-history-cache.md)
+
+Each restarted Electron profile verified a contiguous 17,000-commit cache on disk, displayed its three 5,000-commit pages, and selected the last loaded row. One ArrowDown loaded the first live page and selected the adjacent row. ArrowUp restored the previous commit. All measured live appends met 300 ms. These are consecutive cohorts with populated OS caches on Linux x64 and Git 2.53.0. [Opening and cached-page timings](m8-opening-experiments.csv)
+
+| 50,000-ref fixture               | Reader                 |       First paint, ms | First live append, ms |
+| -------------------------------- | ---------------------- | --------------------: | --------------------: |
+| Nested tag aliases               | Previous               | 491.9 / 470.3 / 477.3 | 202.1 / 208.8 / 203.1 |
+| Nested tag aliases               | Verify cached tails    | 469.9 / 509.5 / 476.9 | 209.3 / 192.6 / 208.9 |
+| Nested tag aliases               | Final stale-page check |                 498.1 |                 186.9 |
+| Distinct targets, one annotation | Previous               | 718.8 / 682.2 / 723.6 | 192.0 / 203.1 / 213.0 |
+| Distinct targets, one annotation | Verify cached tails    | 706.4 / 727.3 / 735.0 | 217.9 / 189.0 / 197.5 |
+| Distinct targets, one annotation | Final stale-page check |                 746.2 |                 198.6 |
+
+At `b8e7583`, a desktop restart followed by a complete traversal matched native Git through page 302 on both fixtures. The nested-alias fixture on Git 2.53.0 included 1,505,200 commits. The distinct-target fixture with one annotation on Git 2.38.0 included 1,505,199. Each run first verified that all 17,000 commits had been persisted. The resulting hashes matched the fresh-profile traversals below.
+
+The full Linux unit and native suite passed 1,137 tests with nine skips. All 39 focused Electron tests passed, including the six graph visual goldens, keyboard navigation, cache recovery and snapshot transfer. The focused Git 2.38.0 history, cache, reference-reader and prefetch suites passed 105 with twelve skips. Typechecking, build, lint and workflow validation passed. Unsigned Linux x64 DEB, RPM and AppImage packages built from clean `b8e7583` each passed the packaged Canvas, two appends, repository search and keyboard smoke.
+
+## Fresh-profile graph opening with annotated refs
+
+Each profile opened the first 2,000 commits, appended three pages of 5,000, and scrolled the graph with 12,000 commits loaded. Runs on Linux x64 used Git 2.53.0 and populated OS caches. The table retains every run of these four fixtures from this verification. [Per-run timing and phase data](m8-opening-experiments.csv)
+
+| Full Linux history                                         | First paint in run order | 5,000-commit appends | Graph frame interval p95 |
+| ---------------------------------------------------------- | -----------------------: | -------------------: | -----------------------: |
+| One ref                                                    |                 320.1 ms |       200.6–236.3 ms |                  16.8 ms |
+| 49,999 aliases of a nested tag on the first row, plus HEAD | 493.0 / 481.8 / 481.8 ms |       173.6–227.4 ms |             16.7–16.8 ms |
+| 50,000 distinct targets with one annotated tag             | 721.2 / 721.7 / 707.1 ms |       181.7–235.2 ms |                  16.7 ms |
+| 50,000 distinct ordinary refs                              |               1,052.3 ms |       190.8–198.3 ms |                  16.8 ms |
+
+All three nested-tag profiles selected the first row with Home, opened its badge with Enter, found the last canonical alias and restored focus on closing. The generated root is one second newer than HEAD. An earlier generator placed that root below the opening viewport. Its three timings (735.0, 729.7 and 718.9 ms) remain in the CSV under `nested-aliases-older-root`.
+
+Both Git 2.38.0 and 2.53.0 matched the desktop's ordered commits and parent lists through page 302 on the corrected nested-tag fixture. It has 1,505,199 commits from HEAD and 1,505,200 from all refs. SHA-256 for all reachable history was `53036597ef19355b858697c70931d94813290d6b133674f4bc50408734603d14`. The distinct-target fixture with one annotation also matched Git 2.53.0 on all 302 pages, with 1,505,199 commits and the digest below. [Fixture and sampling comparisons](m8-reference-performance.md#resolving-annotated-objects-before-enumerating-refs)
+
+When a branch tracked an annotated tag, Shift+H paged to the end of history while the graph selection stayed at HEAD. The shortcut now selects the commit behind the tag. The desktop regression crosses the 2,000-row boundary on Git 2.38.0 and 2.53.0. The graph model also checks hidden tracking tips and upstreams pointing to trees and blobs. [Keyboard navigation](../decisions/0004-m1-history-and-interaction.md)
+
+After restarting with a verified 17,000-commit window on disk, the three nested-alias profiles painted in 497.0, 473.0 and 478.0 ms. The distinct-target fixture with one annotation took 669.8, 673.6 and 712.7 ms. All 18 appends met 300 ms. A further nested-alias run checked that all four persisted pages shared a cache key and painted in 480.1 ms. With Git replacement handling disabled by the environment, the app skips disk caching and the benchmark correctly rejected the warm profile before measuring. [Restart methodology](m8-scale-performance.md)
+
+The Linux x64 native and unit suite passed 1,135 tests with nine skips. The 39 Electron graph, sidebar, ref-dialog, history-cache and snapshot-transfer tests passed, including all six visual goldens. Git 2.38.0 passed the focused native reference and history suite (69 passed, 12 skipped). Unsigned DEB, RPM and AppImage payloads from clean commit `f03876d` passed the packaged graph, two appends, repository search, keyboard and renderer-isolation checks. The annotated-upstream shortcut was subsequently verified in the development build on both Git versions.
+
+## Ordered history and graph shortcuts on Linux
+
+The desktop compared all 1,505,199 commits and their ordered parents with native Git 2.53.0 on a bare Linux fixture with 50,000 distinct refs and one annotated tag. All 302 pages used the initial cursor and returned the expected offsets, including the final partial page. Both streams produced SHA-256 `eaab85397038b87b505b45e66e7e53b612d3a56a395ad1d5a1a386d7ece5e14f`. Reusing a walk after confirming the order of its peeled roots reduced median first paint on this fixture from 1,032.5 to 877.9 ms. The 500 ms opening budget remains open. [Benchmark data and methodology](m8-reference-performance.md#opening-50000-distinct-refs-with-one-annotated-tag)
+
+A shallow-boundary change during tag enumeration could leave a tracked branch showing zero commits behind when Git reported one. The reader now checks tracking counts after resolving annotated refs. Two separate renderer regressions covered failed cancellation after editing a search or replacing a repository. These failures formerly triggered an unhandled rejection. The earlier request's result and cancellation failure now stay out of the active view. Explicit cancellation can still report errors and retry.
+
+The graph accepts j and k for row navigation and Shift+J and Shift+K for ancestry. Electron tests used the merge fixture, text input and a 2,003-commit repository to verify the shortcuts and a single-key transition across the first page boundary. [Graph keyboard behavior](../decisions/0004-m1-history-and-interaction.md)
+
+With Git 2.38.0, the same 302 pages produced the same digest. A second full traversal on that version covered all 1,505,200 commits of the nested-alias fixture, including its independent root (SHA-256 `14265a4f6a6e292ae639a6f7d4fb71a016aff71c7e97bf7a9d1581ccaf6a049c`). The checked-in generator reproduced the 50,000-distinct-ref distribution with a single annotation. Its full desktop traversal matched the mixed fixture digest on Git 2.53.0.
+
+The final unit and native suite passed 1,126 tests with nine skips. The broad Electron run at `6bc9069` passed 267 of 280 tests. Its 13 opt-in Gitea, fish and zsh tests all passed in a separate run with their dependencies enabled. Two added graph shortcut tests and the existing ArrowDown boundary test passed against the updated renderer. Typechecking, lint and the production build passed.
+
+On the two-million-commit, 100,000-file fixture, ten watcher-warm clean and dirty status reads took 204.0–248.1 ms. An external edit appeared in 859.6 ms. The final six fresh-profile graph benchmarks on Git 2.53.0 produced the following results. OS caches were populated. [Individual phase and page timings](m8-opening-experiments.csv)
+
+| Full Linux history                                       |    First paint | 5,000-commit appends | Graph frame interval p95 |
+| -------------------------------------------------------- | -------------: | -------------------: | -----------------------: |
+| One ref                                                  |       329.2 ms |       168.4–215.3 ms |                  16.8 ms |
+| 50,000 distinct refs with one annotation, three profiles | 760.9–866.3 ms |       164.7–247.8 ms |                  16.8 ms |
+| 50,000 refs with nested tag aliases                      |       592.3 ms |       191.7–254.6 ms |                  16.7 ms |
+| 50,000 distinct ordinary refs                            |     1,097.0 ms |       190.2–209.6 ms |                  16.8 ms |
+
+The unsigned Linux x64 DEB, RPM and AppImage from clean commit `f8a4d51` each launched the packaged Canvas, preserved the first ten rows across two appends, found an unloaded commit, and selected it by keyboard after loading 7,003 rows. Debian 13 and Fedora 43 disposable containers installed and reinstalled these 0.1.0 packages, upgraded through the existing 0.2.0-beta.1 and 0.2.0 fixtures and retained a user draft through removal. The Debian check also verified purge. [Installer acceptance](../decisions/0074-linux-installer-payload-verification.md)
+
+## Cancelling, retrying and paging during full-history search
+
+On Linux x64, a controlled Git scan delayed by 65 seconds reproduced the previous desktop timeout at 30.5 seconds. The updated desktop returned the expected commit in 65.3 seconds. Each message or author scan now has a 120-second deadline. The service drains both scans if either fails. The main process allows 210 seconds for the full search, including queueing and object lookup. [Search and cancellation](../decisions/0004-m1-history-and-interaction.md)
+
+The Electron regression holds both native scans, appends a page, activates Cancel search using Enter and observes both child processes exit. The same focused button starts the query again. Store regressions cover late replies during a same-query retry, a failed cancellation, and searches queued behind a background refresh.
+
+On the 50,000-ref repository with 49,999 aliases of a nested annotated tag, forwarding aliases to the renderer reduced median first paint from 893.0 to 709.5 ms. In a second five-pair comparison, reusing the walk from sampled, peeled tag targets reduced it from 708.0 to 582.1 ms. Every candidate page append in both comparisons met the 300 ms budget. [Measurements and cursor checks](m8-reference-performance.md#starting-the-history-walk-from-annotated-refs)
+
+Four full benchmarks at `fd84fad` painted in 296.2 ms with one ref, 755.8 ms with 50,000 distinct targets, 620.6 ms with the annotated aliases and 665.3 ms with those aliases on Git 2.38.0. All 12 page appends took 158.4–230.2 ms and graph frame intervals were 16.7 ms p95 in all four runs. The three large-ref openings exceeded 500 ms. [Individual benchmark runs](m8-opening-experiments.csv)
+
+On the final Linux x64 package at `58e8d17`, one full-history search was cancelled after two appends. Its retry found the expected tagged commit in 28.6 seconds while the graph appended to 17,000 commits. Git 2.38.0 and 2.53.0 both matched every ref and the first 17,000 commits and parent lists from the native traversal. The full unit and native suite passed 1,119 tests with nine skips. Typechecking, lint, the production build, package fuse verification and packaged history smoke passed.
+
+All 35 graph, sidebar, history-cache, reference and serialized-IPC Electron tests passed in isolation. With build and test jobs running concurrently, one 5,000-commit page took 519.4 ms. On the isolated rerun it took 141.0 ms and scrolling measured 16.8 ms p95. The 300 ms paging threshold remains in force.
+
+## History reachable through nested release tags
+
+Git 2.38.0 previously omitted commits reachable only through nested annotated tags. The graph now labels those commits, and selecting a tag as the sole history root shows the same commits as Git. A packaged Linux x64 desktop opened 50,000 refs on Git 2.38.0, appended to 7,000 commits, filtered to the last release tag, selected its commit by keyboard and found it through repository-wide message search.
+
+On full Linux history with 49,999 aliases for one annotation, batch peeling reduced median first paint from 2,408.4 to 1,031.3 ms on Git 2.38.0, and from 1,560.2 to 978.9 ms on Git 2.53.0. Staging consecutive alias names reduced the Git 2.53.0 median to 894.9 ms in a separate five-pair comparison. All 50,000 refs and 17,000 commit IDs and parent lists matched native Git on both versions. [Measurements and fixture](m8-reference-performance.md#nested-annotated-tags-on-full-linux-history)
+
+The final single-ref Linux fixture painted in 337.8–343.8 ms. The 50,000-distinct-target fixture took 714.9–1,089.9 ms. The annotated fixture on Git 2.38.0 took 914.8–933.6 ms. All 27 page appends in those nine runs met 300 ms, and the p95 graph frame interval stayed at or below 16.8 ms in every run. One unfiltered message search timed out under load and completed in 24.5 seconds on a later run.
+
+On Linux x64, 1,109 unit and native tests passed with nine skips. All 34 graph, sidebar, history-cache and snapshot-transfer Electron tests passed. The focused Git 2.38.0 native suite passed 90 tests with 12 skips, and both nested-tag and bridge tests passed in Electron on that version. Typechecking, lint, production build, packaging and packaged history smoke passed.
+
+## Keyboard access to release settings
+
+On Linux x64, the Updates and Crash reporting dialogs previously discarded the invoking button's focus. In the packaged build, pressing Space immediately after Close could also leave the dialog closed. The native dialog had already restored focus while React was still waiting for its close event. The default build and a build with a loopback crash receiver passed five consecutive keyboard traversals each after the fix.
+
+During an update download, Shift+Tab from Close now reaches Cancel transfer. The HTTPS fixture cancels a partial download by keyboard, verifies its removal and checks that the automatic-check checkbox retains focus after saving. [Keyboard behavior](../decisions/0085-opt-in-automatic-update-checks.md#keyboard-operation)
+
+The clean `3a02c45` build produced these Linux x64 test packages. The DEB and RPM ran from their extracted payloads. The AppImage launched through its embedded runtime. Each passed the toolbar keyboard check, renderer isolation, packaged helpers and native terminal smoke. The unpacked application also passed the Canvas graph, two appends, repository search and graph keyboard navigation.
+
+| Format   | Exported installer bytes | SHA-256                                                          |
+| -------- | -----------------------: | ---------------------------------------------------------------- |
+| DEB      |              115,432,776 | b984e8dd34273d11cd5451eed07c868eaa7f06360ba954fdaae2e9f03eee3e34 |
+| RPM      |               99,013,401 | 2337a0b14d55b04e86c4f1d142f1f58abce9f8b2d88e019dfffda161967a09a9 |
+| AppImage |              133,192,184 | 98b6afc5b3efcc4c797002fa19299ff444b25e42055c8d534e38656909c2e942 |
+
+Two concurrent runs using the shared temporary filesystem reported a DEB save error and an AppImage storage error. The underlying filesystem errors were unconfirmed. With separate disk-backed temporary directories, all three exported files matched their installer manifests. Each signed-feed run also passed cancellation, integrity rejection, restart and key migration with temporary credentials. The 31 distinct Electron tests for activity, diagnostics, crash reporting, updates and toolbar keyboard navigation passed. The Linux unit and native suite passed 1,105 tests with nine platform skips. Typechecking, lint and the production build passed.
+
+## Opening and searching commits at the Unix epoch
+
+A commit at Unix time zero with a `-0330` offset previously caused Git to abort while opening its history. The graph, stash projection, message search and exact-ID lookup now read native raw dates. An Electron fixture opened the commit, selected it from the loaded search and showed its details after a full-history hash search. Git 2.38.0 passed all 55 focused parser, history and prefetch tests.
+
+Across the 1,505,199-commit Linux history, the ordered digest of every decoded field matched the original format and the Git stream was 60,207,960 bytes smaller. All 18 candidate appends met 300 ms. The one-ref fixture painted in 312.6–348.7 ms. With 50,000 distinct targets, all three openings exceeded 500 ms. [Paired runs and complete traversal](m8-reference-performance.md#raw-git-dates-in-the-history-stream)
+
+On Linux x64, 1,105 unit and native tests passed with nine skips. Typechecking, lint, the production build and packaged desktop smoke passed. During concurrent verification, one synthetic 5,000-commit append took 347.1 ms against a 300 ms budget. All 24 graph and history-cache Electron tests passed in isolation, with the same append taking 145.6 ms.
+
+## Verifying a hosted update feed
+
+The release check compares the hosted signed manifest with the approved candidate, streams every installer through the desktop download checks and reads the manifest again. A loopback feed failed the check for a missing, short, redirected or corrupted Windows installer after the Linux installer passed. A different signed payload for the same version and sequence failed both before download and when the feed changed during download. An invalid signature and an untrusted TLS certificate each stopped the check before any installer request. [Release-owner command and Caddy configuration](../decisions/0082-signed-update-release-protocol.md#serving-and-checking-a-release)
+
+On Linux x64, Caddy 2.6.2 served the existing 0.1.0 test DEB (115,433,232 bytes), RPM (99,006,721 bytes) and AppImage (133,192,184 bytes). All three matched a manifest signed with a temporary Ed25519 key. Removing the AppImage from the web root failed the release check and identified the missing file.
+
+Caddy obtained a certificate for a loopback hostname from Pebble 2.6.0 using a real TLS-ALPN-01 challenge. With a 50-second test certificate and a two-second renewal check interval, the running server renewed and presented a different leaf certificate. The client trusted the fixture CA and verified the same signed manifest and all three installers before and after renewal. An earlier fixture run using Pebble's optional HTTP-date retry hints stopped during order finalization with Caddy 2.6.2. The successful runs used Pebble's default retry settings. The public configuration passed Caddy validation. Production DNS, public CA issuance and participant distribution still require a publisher-controlled host. [Pebble test authority](https://github.com/letsencrypt/pebble)
+
+The Linux suite passed 1,101 unit and native tests with nine skips. Typechecking, lint, the production build and packaged Canvas, search, paging and keyboard smoke passed. The Electron update test downloaded and exported the DEB and RPM, rejected a changed digest and checked a release after feed and key migration. The DEB check saved a sequence-9 receipt whose digest matched the installer inventory. The native installer CI jobs now retain that receipt alongside their test output.
+
+## Search after a working-tree rename
+
+With 7,000 commits loaded, the Electron graph kept the same history page after an external stage and rename. The active search for the old filename dropped to zero matches, and the new name matched the working row. The worker received a single-document update. Store tests also cover open details, selection, lane and passage reuse, and a rename before the page containing HEAD arrives.
+
+A Linux x64 worker benchmark compared a full refresh at `7ad1822` with the single-document update. Each sample indexed the history, searched for the original filename, cloned and processed the update, then searched for the new name. Each pair ran in fresh Node processes. The table gives medians from five alternating pairs after one warm-up pair. Message size uses V8 serialization. Timings cover the clone, worker and active query and exclude Electron rendering and Git.
+
+| Loaded commits | Full refresh size | Single update size | Full refresh and search | Single update and search |
+| -------------: | ----------------: | -----------------: | ----------------------: | -----------------------: |
+|          7,000 |   1,335,039 bytes |          175 bytes |               117.21 ms |                  0.43 ms |
+|         32,000 |   6,154,041 bytes |          175 bytes |               485.57 ms |                  0.45 ms |
+
+On the 1,505,199-commit Linux fixture, the first 2,000 commits painted in 336.9–344.7 ms with one ref. With 50,000 distinct targets, first paint took 1,074.1, 713.7 and 684.1 ms, each above the 500 ms budget. All 18 appends took 176.5–229.6 ms. Each run used Git 2.53.0, a fresh profile and retained OS caches. [Per-run timings](m8-opening-experiments.csv)
+
+Typechecking, lint, the build and packaged history smoke passed on Linux x64. The unit/native suite passed 1,092 tests with nine skips. All 31 graph and worktree Electron tests passed on X11, including six Canvas goldens. The search shortcut and watcher rename also passed on Git 2.38.0. In a mixed-display run, Xvfb inherited the host Wayland session and the native Ctrl+F assertion missed focus. The same assertion failed in four isolated repeats with that environment. The explicit X11 checks above exercised the virtual display.
+
+## Windows publisher signatures
+
+Windows x64 packaging can sign the native askpass helper before ASAR creation, the application executable after its fuses are set, and the MSI after WiX builds it. The release owner selects the certificate by its DER SHA-256 fingerprint and can request RFC 3161 timestamps. Verification authenticates the private MSI copy before extraction and checks the two executable signatures and ASAR helper digest before launch. [Publisher setup and verification commands](../../README.md) · [Signing policy](../decisions/0091-native-msi-and-installer-owned-protocol.md#authenticode-signing)
+
+On Linux x64, osslsigncode 2.13 signed the WiX beta fixture MSI and the Windows PE askpass helper with temporary certificates and a local timestamp authority. Both signatures and timestamps verified against the fixture root and expected leaf fingerprint. A different fingerprint failed on both files. Changing one byte in the helper or the MSI’s embedded cabinet failed digest verification. Packing the signed helper into an Electron ASAR preserved its recorded size, hash and valid signature after unpacking.
+
+PowerShell tests exercise the publisher and timestamp checks with supplied signature records. The disposable Windows CI step builds a fresh signed bundle and MSI, verifies the extracted desktop and tests rejection of a changed helper, a wrong signer, an unsigned MSI and a missing timestamp. The Linux suite passed 1,088 tests with nine platform skips. The rebuilt Linux package passed its Canvas, two-page append, search, keyboard, native picker and terminal smoke checks. Native SignTool, Windows trust, production credentials, timestamp service and SmartScreen acceptance still require release-host evidence.
+
+## Windows beta installer ordering
+
+The pinned WiX compiler and linker built three small x64 MSI fixtures with the production project hook. Strict compilation caught a lowercase upgrade GUID. Commit `4cddb83` fixes its spelling and adds a PowerShell regression. The linked databases contained the expected 64-bit registry search, exact-version upgrade range and uninstallable beta component. Both installation sequences ran related-product detection at 25, registry search at 26 and launch conditions at 27.
+
+Wine 10 installed beta.9, upgraded to beta.10 and promoted it to stable. Reinstalling beta.9 over beta.10 and reinstalling beta.10 over stable both failed at the launch condition. The fixture checked the installed file and registry revision after every attempt, then uninstalled stable and checked file removal. Wine normalized the default `ALLUSERS=2` to machine scope and the package refused installation. For the ordering run only, the fixture copies cleared that default to select per-user scope, including during nested uninstall. These runs used synthetic payloads and skipped WiX ICE validation. The hosted Windows job exercises the actual application and shipping defaults, repair, OS URI dispatch and profile retention. Its result and Windows signing remain outstanding. [MSI version policy](../decisions/0091-native-msi-and-installer-owned-protocol.md) · [Native acceptance](../decisions/0092-disposable-msi-lifecycle-acceptance.md)
+
+## Navigating deep history on Linux x64
+
+Keyboard navigation, pointer selection and range selection reuse row positions after checking the commit ID. The regression at row 32,000 traverses zero preceding commit IDs when positions match and still finds the correct endpoints after a working row shifts the history. On a 560-pixel Canvas viewport that straddled two partial rows, the painter inspected 21 row kinds. Its fill colors matched the original set-based painter for every visible node.
+
+At clean application commit `6a62fed`, three fresh-profile openings of the full 1,505,199-commit Linux history with one ref painted in 330.0–368.4 ms. With 50,000 distinct targets, first paint took 712.1, 818.9 and 742.3 ms. The 500 ms gate remains open. All 18 appends of 5,000 commits took 160.8–231.3 ms, and graph scrolling measured 16.7–16.8 ms p95. Two experimental opening paths took longer in paired desktop runs. [Reference experiments](m8-reference-performance.md#commit-type-and-renderer-scheduling-experiments) · [Individual timings](m8-opening-experiments.csv)
+
+The packaged Linux app drew the graph, appended two pages, searched the repository, navigated among deep rows and opened their details. The first test run encountered an X11 `BadWindow` during native picker discovery after the graph checks passed. The smoke now retries the window lookup. One run with an injected transient X11 error and a second with the real driver both passed through native folder selection and terminal input.
+
+The full unit/native suite passed 1,063 tests with nine platform skips. All 30 graph and worktree Electron tests passed, including the six Canvas goldens. An additional regression added and removed a working-tree row above a selection at the end of a 2,200-commit repository. Enter opened the intended commit after the insertion, and Shift-click selected the intended range after removal. It passed twice with Git 2.53.0 and again with Git 2.38.0. The minimum-Git three-page upstream jump, typecheck, lint, production build and Linux x64 package fuse verification also passed.
+
+## macOS release signing and notarization
+
+The native DMG builder now accepts a Developer ID Application certificate fingerprint and an optional Apple notarization keychain profile. The verifier requires an independent fingerprint for signed images and can require a validated stapled ticket before mounting. Concurrent builds keep each signed image available under its own digest. Linux tests exercised receipt validation, concurrent saves and the command sequence with simulated Apple responses. A real signed and notarized image, a quarantined download and native acceptance still require a macOS release host and publisher credentials. [Release commands](../../README.md) · [DMG signing decision](../decisions/0089-native-dmg-payload-and-copy-install.md#developer-id-signing)
+
+The Linux x64 unit/native run passed 1,061 tests with nine platform skips. A subsequent focused run including the concurrent-save regression passed 20 tests with five macOS-only skips. The production build, typecheck and lint passed. The existing Linux DEB passed extraction and launch verification. The existing Linux app bundle also passed a separate Canvas, two-page append, repository-search and keyboard smoke run.
+
+## Cross-platform performance gates
+
+CI now measures the same scale fixtures independently on Linux x64, Linux ARM64, macOS and Windows, including 50,000 distinct targets over full Linux history. On Linux x64 the new distinct-target gate failed all three first paints (710.8–741.1 ms). Its nine appends passed, and 302 pages matched native Git through the final commit. The other platforms still require native execution. [Scale gates and measured results](m8-scale-performance.md#native-desktop-ci-gates)
+
+## Wide history graphs on Linux x64
+
+The Canvas now clips vertical passages once per visible 500-row bucket. Paging retains the completed buckets, including when an uncommitted change shifts the page boundary by a row. On a synthetic graph with 50,000 simultaneous lanes, median draw time fell from 51.2 to 1.6 ms with matching pixels. The packaged app passed graph drawing, two appends, repository search and keyboard navigation.
+
+Full Linux history painted in 324.3 ms with one ref and 487.4 ms with 50,000 refs sharing HEAD. Three runs with distinct targets exceeded 500 ms. All fifteen page appends met 300 ms. [Measurements](m8-reference-performance.md#wide-graph-drawing-and-append-only-passage-indexing)
+
+On Linux x64, 1,040 unit/native tests and 271 desktop tests passed. The unit suite skipped 14 tests. The desktop suite skipped three opt-in scale tests, which ran separately. Typechecking, lint, the production build and unsigned package smoke passed. Five focused desktop checks passed with Git 2.38.0. The build used React 19.3.1 and TypeScript 7.0.2.
+
+The traversal test initially hit Node's synchronous output limit while collecting 50,000 ref IDs for its comparison. Native Git now enumerates its own roots with `rev-list --all`. The desktop pages matched every ordered commit ID and parent list in full Linux history (1,505,199 commits across 302 pages) and in the synthetic two-million-commit checkout (401 pages). On its 100,000 files, the ten clean and dirty status reads took 178.2–257.6 ms after watcher warm-up. An external edit appeared in 860.1 ms.
+
+## Packaged graph and installer acceptance
+
+On Linux x64, the packaged desktop at `2c44546` opened a 7,003-commit repository through the consent dialog. Its first ten commit IDs matched native Git. Those rows kept their IDs, lanes and positions across a full 5,000-commit append and the three-commit final page. Repository search opened the root before it was loaded. After the append, Enter selected it from loaded search, and Home and Enter opened HEAD. The same checks passed through both the FUSE and extract-and-run launches of the unsigned test AppImage. The virtualized grid now reports an unknown total while more history is available. A separate linked-checkout test reported 2,201 rows for 2,200 commits and one worktree. [Packaged graph check](../../scripts/check-packaged-history.mjs)
+
+With Git 2.38.0 and LFS 3.8.1, 1,025 unit/native tests passed and 26 were skipped. All 56 selected desktop tests passed on X11, including all six Canvas goldens. The standard fixture painted 2,000 commits in 220.1 ms and appended 5,000 in 141.8 ms. An earlier run that inherited the host Wayland session missed the search shortcut focus assertion. Both the shortcut and keyboard paging passed three consecutive times under explicitly selected X11. Build, typechecking and lint passed.
+
+Debian 13 and Fedora 43 x64 disposable containers installed and reinstalled the existing 0.1.0 test packages, upgraded through 0.2.0-beta.1 to 0.2.0 and removed them while retaining a user draft. Both lifecycle scripts now fail on a residual registration or a failed database query. A simulated container exit of 23 propagated through Debian CI logging. All three Gitea HTTPS/SSH tests passed and wrote their own report. The earlier desktop JSON and graph screenshot retained their SHA-256 digests.
+
+The minimum-Git CI matrix and the packaged graph check now include macOS ARM64 and Windows x64. Locally, PowerShell validated the published Windows ZIP checksum, extracted the expected executable and rejected a damaged ZIP and an existing fixture directory. Native macOS, Windows and Linux ARM64 execution still requires those runners. [Minimum Git compatibility decision](../decisions/0096-minimum-git-runtime-acceptance.md)
+
+## Snapshot publication on large reference sets
+
+In five paired full Linux benchmarks with 50,000 refs at HEAD, the updated renderer painted within 500 ms on all five openings. The preceding renderer met that budget three times. A separate series that only opened the graph still had one miss across six candidate openings. With 50,000 distinct targets, the candidate's median first paint was 705.5 ms and all three openings exceeded budget. All 27 appends across the shared, distinct and one-ref benchmarks met 300 ms. [Paired measurements and native query experiments](m8-reference-performance.md#preparing-the-snapshot-during-graph-layout)
+
+Three fresh profiles on the two-million-commit checkout painted in 292.9–307.2 ms. Its slowest 5,000-commit append took 239.8 ms. The packaged Linux x64 app retained all 17,000 ordered commit IDs and their parent lists across the first page and three appends on each 50,000-ref fixture. Both lists matched native Git. Typechecking, lint, 1,037 unit/native tests (14 skipped), 30 focused Electron tests and seven Git 2.38.0 reference/bridge checks passed. The unsigned test AppImage passed installer verification and launched through FUSE and extract-and-run.
+
+## Paging through complete histories
+
+On Linux x64 the retained Git walk previously stopped at 1,147,000 commits of the pinned Linux history. The following page exceeded the runner's lifetime output limit. At `ad22690` the runner renews the stdout allowance when it delivers a page. A native regression forces a lower allowance and checks every commit and parent across one retained walk. Separate regressions exercise one oversized page and cumulative stderr.
+
+| Fixture                              |   Commits | Desktop pages including the initial 2,000 | SHA-256 of ordered commit IDs and parents                          |
+| ------------------------------------ | --------: | ----------------------------------------: | ------------------------------------------------------------------ |
+| Full Linux history at `46fec1c3029b` | 1,505,199 |                                       302 | `eaab85397038b87b505b45e66e7e53b612d3a56a395ad1d5a1a386d7ece5e14f` |
+| Two-million-commit checkout          | 2,000,000 |                                       401 | `33e170b785447b13fde786c4d26232871c4a7e83d678f864310b4a8e1b9da260` |
+
+The Electron test requests each page through the sandbox bridge and compares the final count and digest with an independent native Git walk. Pages are consumed one at a time. The scale CI job now runs this check on both fixtures. The full Linux digest also matched on Git 2.38.0 in both Git-service and Electron runs. [Desktop traversal test](../../tests/e2e/history-traversal.test.ts)
+
+The interactive graph test opened 12,003 commits in a linear history with the branch upstream pointing at its root. Shift+H loaded three further pages, scrolled the root into view and selected it. Enter opened its details. A packaged Linux x64 run repeated the jump and opened the root details with X11 keyboard input. Across three appends, the store regression counted four reads of the first commit ID before the fix and one after. [Keyboard navigation decision](../decisions/0004-m1-history-and-interaction.md#keyboard-navigation-across-a-page-boundary)
+
+Three fresh desktop profiles on full Linux history with one ref painted in 326.9–350.0 ms. All nine 5,000-commit appends took 162.7–232.4 ms, and scrolling at 12,000 loaded rows took 16.7–16.8 ms p95. The two-million-commit checkout painted in 382.8 ms. The distinct-target 50,000-ref fixture painted in 1,101.9 ms, exceeding the 500 ms budget. Its three appends took 171.8–205.2 ms. With the desktop regression suite running, the shared-target fixture painted in 620.3–969.9 ms. After the suite exited, three fresh profiles per fixture painted in 503.3–540.0 ms with shared targets and 724.4–1,067.6 ms with distinct targets. All 18 appends in those last six runs met 300 ms.
+
+The Linux x64 build passed typechecking, lint and 1,036 unit/native tests (14 skipped). The complete default desktop suite passed 267 tests, including six Canvas goldens. It skipped six opt-in cases. Separate runs exercised those six cases against the scale fixtures and the isolated Gitea server. Three fresh profiles on the 100,000-file checkout returned all 30 watcher-warm clean and dirty working-state reads in 173.7–219.5 ms. External edits appeared in 854.9–858.2 ms. The unsigned DEB, RPM and AppImage test installers passed payload verification and launch checks. AppImage ran both through FUSE and in extract-and-run mode. With a temporary signing key and a loopback HTTPS feed, Electron downloaded the exact DEB and rejected altered content. All three isolated Gitea HTTPS/SSH checks passed. A packaged run also recovered a draft after restarting the app and its private GNOME keyring. The npm registry audit returned zero reported advisories across 655 dependencies.
+
+## AppImage updates that stall before the desktop opens
+
+On Linux x64, two stable FUSE replacements remained unconfirmed for a minute. One was waiting on profile I/O before window creation. The other had a paused JavaScript renderer. In the pre-window case the tester pressed Escape to keep waiting, checked that the same process and both image digests remained, then chose **Close OpenKraken** at the next prompt. The paused-renderer case also accepted Close through native keyboard input. Both runs restored the exact predecessor, reopened its profile, retained the signed release sequence, cleared the transaction and displayed the recovery notice. A beta extract-and-run replacement resumed while the native prompt was open. Its first desktop acknowledgement dismissed the prompt with all eight ordinary IPC slots occupied. The replacement stayed installed.
+
+The full-queue Electron regression initially received an error from a mounted desktop's first acknowledgement. The first mount now has one reserved admission. A second request issued under the same load still received the ordinary busy response. The packaged fixtures used temporary signing keys and a loopback HTTPS update feed. Main-thread hangs and failures before Electron is ready remain open. [Recovery behavior and acceptance cases](../decisions/0086-appimage-startup-exit-recovery.md#closing-an-update-that-stalls-before-the-desktop-mounts)
+
+The Linux x64 build passed typechecking, lint, 1,033 unit/native tests (14 skipped), all 23 startup, shutdown and update desktop tests, package fuse checks and packaged smoke. A separate replacement missing its renderer entry still restored the predecessor. During concurrent AppImage packaging, the standard 2,000-commit graph painted in 954.8 ms, exceeding the 500 ms budget. Three subsequent fresh profiles painted in 235.4, 225.3 and 234.8 ms. The complete 22-case desktop and graph selection passed on rerun. These samples do not establish the cause of the earlier delay.
+
+## Opening history with 50,000 refs sharing HEAD
+
+On Linux x64, the packaged app opened full Linux history with 50,000 refs pointing to HEAD and with 50,000 distinct targets. On each repository, all 17,000 ordered commit IDs and their parent lists matched native Git across the first page and three appends. Separate regressions cover a loose tip and a later packed tip outside the initial sample.
+
+At `fe825d2`, median first paint on the shared-target fixture fell from 536.0 to 489.7 ms across five paired full benchmarks. Three of five candidate openings met 500 ms. Fourteen of fifteen appends met 300 ms. The slowest took 713.4 ms. Full Linux history with one ref painted in 336.7 ms and the distinct-target fixture in 734.4 ms. [Measurements and native traces](m8-reference-performance.md#starting-history-from-a-shared-head)
+
+The two-million-commit checkout painted in 383.8 ms, and all three appends met 300 ms. Its ten watcher-warm clean and dirty reads took 178.6–213.4 ms. An external edit appeared in 858.4 ms. The Linux x64 build passed typechecking, lint, 1,028 unit/native tests (14 skipped), 34 focused desktop tests, package fuse checks and packaged smoke. Git 2.38.0 passed 68 focused native tests (12 skipped) and all 55 minimum-version desktop checks. The standard 2,000-commit fixture painted in 280.6 ms with Git 2.53.0 and 258.8 ms with Git 2.38.0.
+
+## Protected merge messages and interrupted submissions
+
+Linux x64 Electron tests killed the main process after a save acknowledgment and again while a provider merge request was waiting for a reply. GitHub, GitHub Enterprise and GitLab each recovered the edited options and both message fields. The account inventory opened without contacting the provider. The interrupted submission reopened with a status check and issued zero further merge requests. A local revision conflict and cancellation during encryption each kept the remote write count at zero. When encryption was unavailable, a separate confirmation sent exactly one merge.
+
+The packaged Linux x64 app also saved a merge draft with GNOME Keyring 50.0 in a private D-Bus session. A second keyring could not read it. After restarting the app and the original keyring, the account inventory displayed the message and uncertainty notice and discarded the draft. The fixture used a synthetic account without a provider token. It checked the Secret Service process identity in each session. The provider HTTP fixtures and this native keyring test cover different boundaries. Live provider and macOS/Windows keychain acceptance remain open. [Recovery semantics](../decisions/0130-provider-merge-drafts.md) · [Packaged keyring check](../../scripts/verify-linux-merge-keyring.mjs)
+
+With Git 2.53.0, the Linux x64 build passed 1,025 unit/native tests (14 skipped) and 268 desktop tests. The two opt-in scale tests ran separately. Typechecking, lint, package fuses and packaged smoke passed. The packaged application at `f087d6d` uses React 19.3.1 and was built with TypeScript 7.0.2. With Git 2.38.0, all seven focused merge tests passed, including process death with each provider.
+
+The 2,000-commit fixture painted in 230.2 ms. Full Linux history with a single ref took 868.5 ms. Its 50,000-ref variants took 845.7 ms with distinct targets and 550.8 ms with a shared target. Each exceeded the 500 ms budget. The two-million-commit checkout painted in 397.7 ms. Across the four fresh profiles, all twelve 5,000-commit appends met 300 ms (121.7–225.5 ms), and graph scrolling measured 16.7–16.8 ms p95. All ten watcher-warm status reads on the 100,000-file checkout met 300 ms (184.5–208.3 ms). An external edit became visible in 857.0 ms. OS caches were retained. [Individual samples](m8-opening-experiments.csv)
+
+## Commit search and request creation on Linux x64
+
+Commit search previously transferred focus to the graph when Enter arrived during Japanese text composition. The packaged build at `835cc35` used Chromium's composition input to enter `検索`. Focus remained in search when the input method received Enter. After the text was committed, pressing Enter selected the matching `検索対象` commit. The Electron regression also checks Escape during composition and a key held across the focus change. [Commit search keyboard behavior](../decisions/0004-m1-history-and-interaction.md#keyboard-input-during-commit-search)
+
+The first broad desktop run passed 260 cases and failed one GitLab creation case. The form showed an empty target branch. In an isolated reproduction, GitLab returned `main`, then an edit to the source owner arrived before React displayed the default. That edit saved the older empty target. The composer now applies user edits and provider defaults to the most recent fields. Three forced-overlap runs recovered the expected draft after process death. A separate test checked that a deliberately cleared target branch stayed empty on disk after the provider returned its default. [Request creation draft behavior](../decisions/0129-pull-creation-drafts.md)
+
+With Git 2.53.0, the final build passed 1,021 unit/native tests (14 skipped) and 263 desktop tests. The two opt-in benchmarks ran separately. With Git 2.38.0, it passed 1,009 unit/native tests (26 skipped) and all 55 desktop cases in the minimum-version acceptance suite. Typecheck, lint, package fuse verification and packaged smoke passed.
+
+The standard 2,000-commit fixture painted in 224.7 ms with Git 2.53 and 299.1 ms with Git 2.38. Fresh profiles on Git 2.53 painted in 850.4 ms with 50,000 distinct refs, 519.4 ms with 50,000 shared-target refs and 1,122.0 ms on the two-million-commit, 100,000-file checkout. All nine 5,000-commit appends met 300 ms (117.6–232.1 ms), and graph frame intervals were 16.7–16.8 ms p95. All ten watcher-warm clean and dirty status reads met 300 ms (179.4–217.4 ms). The external edit became visible in 857.7 ms. These Linux x64 runs used fresh profiles and retained OS caches. [Individual opening and paging samples](m8-opening-experiments.csv)
+
+## Linux x64 reference enumeration
+
+At `0907524`, repositories with many packed local branches check whether Git has any upstreams to report. In six paired opening-only runs, the median first paint on 50,000 distinct refs went from 851.1 to 823.6 ms. The median on 50,000 refs sharing a target went from 555.2 to 545.0 ms. All twelve first paints in the separate paging benchmark exceeded 500 ms. [Measurements and native timings](m8-reference-performance.md#upstream-fields-on-50000-local-branches)
+
+The full suite passed 1,021 unit/native tests with 14 skips, and all 38 focused Electron cases passed. In an initial Git 2.38 run, a test missed the start of a reference read because it recognized only the tracking-enabled format. After it recognized both formats, 89 focused cases passed on Git 2.38 with 12 skips, and all 60 reference-reader and history-prefetch cases passed on Git 2.53. The build, lint, Linux x64 package fuse checks and packaged smoke passed. The packaged app opened the 50,000-distinct-ref fixture and appended three pages. All 17,000 ordered commit IDs and parent lists matched native Git.
+
+## Linux desktop regression and large-repository checks
+
+The Linux x64 Electron suite passed 261 tests, including Gitea HTTPS/SSH, Git LFS, native shells, crash reporting, signed update checks and six Canvas image comparisons. The two opt-in scale tests ran separately. The standard 2,000-commit fixture painted in 257.1 ms. After the keyboard change, all 26 focused graph, reference and watcher tests passed. On 32,000 loaded rows, median synchronous End/Home dispatch took 0.10 ms in each of three runs. [Keyboard measurements](m8-reference-performance.md#keyboard-navigation-with-32000-loaded-commits)
+
+On the 100,000-file checkout, streaming Git's index listing reduced the median clean status read from 249.3 to 228.8 ms and the median dirty read from 260.7 to 214.6 ms. Twenty-nine of 30 new reads met the 300 ms gate. The slowest took 314.1 ms. [Status measurements](m8-reference-performance.md#working-state-fingerprint-on-100000-files)
+
+At `bb411a7`, two fresh-profile runs with 50,000 refs on full Linux history painted in 1,208.3 and 777.0 ms. The two-million-commit checkout painted in 1,141.6 and 401.0 ms. Three of the four exceeded 500 ms. All twelve 5,000-commit appends met 300 ms (122.5–235.5 ms), and scroll frame intervals were 16.7–16.8 ms p95. The OS caches stayed populated.
+
+The final build passed typechecking, lint, 1,019 unit/native tests (14 skipped), 24 focused working-tree Electron cases, Linux x64 package fuse verification and packaged smoke. All 58 focused native cases also passed with Git 2.38.0. The verified package uses React 19.3.1 and TypeScript 7.0.2 for the build.
+
+## Startup failures before the first window finishes loading
+
+A failed desktop module load could leave the primary process running with no usable window after the error was dismissed. A missing renderer document could also strand an unconfirmed AppImage replacement. The primary now starts its consent-checked reporter before loading the desktop, records a fixed failure category and exits with status 1 after dismissal. Closing the app during its first navigation exits normally. [Startup behavior and coverage](../decisions/0078-interrupted-session-and-javascript-reports.md#fatal-desktop-initialization-errors)
+
+With a local HTTPS receiver, Linux Electron sent one fixed-category summary for a failing startup after opt-in and zero on a fresh or revoked profile. The same profile reopened after each fatal exit. All 23 targeted startup, crash reporting, diagnostics, shutdown, update and repository-opening Electron cases passed. During development, quitting during the first document load produced `ERR_FAILED` before the window was destroyed. A regression now checks the normal exit code and absence of the fatal dialog.
+
+At `0b3c693`, stable FUSE and beta extract-and-run fixtures each installed a signed replacement whose initial HTML file was absent. Both recorded the startup error, relaunched the predecessor, verified its digest and signed release sequence, and displayed and dismissed the rollback notice. The fixtures used temporary keys and loopback HTTPS. The full Linux unit/native suite passed 1,017 tests with 14 skipped. Typecheck, build, lint, packaged fuse verification and packaged smoke passed. [AppImage recovery](../decisions/0086-appimage-startup-exit-recovery.md#replacement-with-a-missing-desktop-document)
+
+The damaged-bundle probe originally left an empty window running. At `4b717c2`, a missing entry module, an exception during its evaluation and a missing React mount point each produced exit status 1 after dismissal. All three profiles reopened. For each failure the local HTTPS receiver got one fixed-category report after opt-in and zero on fresh or revoked profiles. With a delayed theme read the healthy app waited, displayed the welcome screen and acknowledged startup after the theme read finished. Stable FUSE and beta extract-and-run rollback fixtures each restored the verified predecessor after a replacement lost its JavaScript entry asset. [Packaged recovery](../decisions/0086-appimage-startup-exit-recovery.md#replacement-with-a-missing-renderer-module)
+
+## Merge drafts while the dialog is open
+
+GitLab preserves an edited squash choice across a refresh, applies mandatory project policy and restores the choice if it becomes optional again. GitHub and GitHub Enterprise now ask before closing a draft whose only change was the merge method. Both edited workflows passed Linux Electron tests with simulated providers. The merge dialogs now restore acknowledged edits after process death. [GitHub](../decisions/0035-provider-pull-merge.md) · [GitLab](../decisions/0051-gitlab-direct-merge.md)
+
+## Repository opening, watcher startup and graph paging
+
+On Linux x64, the ordinary bare-repository working-state read fell from a median 324.4 ms to 12.6 ms across seven pairs. The app skips a whole-tree diff when there is no index, avoids a duplicate watcher ref scan on prompt subscription, and reads verified HEAD alongside repository metadata. On full Linux history with 50,000 distinct ref targets, the combined changes made the first append faster in all three benchmark pairs. First paint took longer in all three, and six of nine appends met the paging budget. In three subsequent fresh profiles, the same 50,000-ref repository painted in 805.1–900.2 ms against the 500 ms target. Eight of nine appends met 300 ms. [Measurements and individual runs](m8-reference-performance.md#opening-a-bare-repository-with-50000-distinct-refs)
+
+In the Linux x64 package at `d88934f`, the tester accepted a repository link and paged from 2,000 to 17,000 commits. All ordered IDs and parent lists from the four persisted pages matched native Git. The package passed fuse verification and smoke checks covering native folder selection, terminal input, repository links and renderer isolation. The build and full lint passed. On the minimum supported Git 2.38.0, all 76 focused native tests passed.
+
+The full Linux unit/native suite passed 1,017 tests with 14 skipped on rerun. In the first run, a simulated provider identity request failed in the cooldown-isolation test. The individual suite and 200 repetitions of that case passed. The cause remains undetermined. All 33 targeted Electron tests passed, including the six Canvas goldens, search, keyboard navigation, paging, watcher startup and worktrees. A subsequent first-push case opened an empty bare repository, pushed its first commit from a local checkout and observed the exact commit and branch in the graph without refreshing. All five watcher startup cases passed twice at `d417830`.
 
 ## Pull and merge request creation after restart
 
@@ -900,8 +1363,8 @@ Evidence: `/tmp/openkraken-supervisor-{red,green,native,hook,unit,e2e,types,buil
 ## Remaining work
 
 - Native supervision runtime acceptance on Windows/macOS, further crash/write scenarios beyond the Linux fetch/PTY/prompt fixtures above, native lock handling and durable write recovery. POSIX processes that intentionally detach or daemonize beyond the active command's stream lifetime are not contained.
-- GitHub and GitHub Enterprise review, inline-comment and reply drafts and GitHub/GitLab issue action drafts are implemented. Pull/merge-request creation drafts are recoverable. Merge message drafts remain open. Native Git editor, commit-form, working-file and conflict-editor recovery are implemented within the bounds above. Crash-report coverage before reporting initialization, live receiver configuration/acceptance, hung-startup and interrupted-update recovery, non-AppImage installation/restart, signed installers/distribution, security review and beta evidence remain open. Signed release checks/downloads, opt-in automatic checks, supported AppImage desktop installation/restart and startup-exit restoration, opt-in process/JavaScript summaries and interrupted-session recovery are implemented within the bounds above.
-- Native DMG/MSI acceptance, broader RPM/AppImage distribution acceptance, Linux arm64 and macOS/Windows installer runtime checks, and real release metadata. Linux x64 has local DEB, RPM and AppImage test builds, including an RPM signed with a disposable key. Debian 13 and Fedora 43 x64 version upgrades are verified within the bounds above. Production signing and distribution remain open.
+- GitHub and GitHub Enterprise review, inline-comment and reply drafts and GitHub/GitLab issue action drafts are implemented. Pull/merge-request creation drafts are recoverable. GitHub, GitHub Enterprise and GitLab merge message drafts support recovery and read-only status inspection after an interrupted merge. Native Git editor, commit-form, working-file and conflict-editor recovery are implemented within the bounds above. Crash-report coverage before reporting initialization, live receiver configuration/acceptance, further recovery when the main event loop is blocked or an installation is interrupted, non-AppImage installation/restart, signed installers/distribution, security review and beta evidence remain open. Signed release checks/downloads, opt-in automatic checks, supported AppImage desktop installation/restart and startup-exit restoration, opt-in process/JavaScript summaries and interrupted-session recovery are implemented within the bounds above.
+- Native DMG/MSI acceptance, broader RPM/AppImage distribution acceptance, Linux arm64 and macOS/Windows installer runtime checks, and real release metadata. Linux x64 has local DEB, RPM and AppImage test builds, including an RPM signed with a disposable key. Debian 13, Ubuntu 24.04 and Fedora 43 x64 version upgrades are verified within the bounds above. Production signing and distribution remain open.
 - Broader real-repository and cross-platform performance/regression gates, plus the unresolved intermittent command exit-143 investigation recorded in M7 progress.
 
 Interrupted operations retain an unknown activity outcome. Process cleanup does not prove that a remote write failed, reverse completed changes or authorize an automatic retry. Linux fixtures and an unsigned local bundle do not establish production release readiness.

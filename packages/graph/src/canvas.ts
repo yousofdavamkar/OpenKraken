@@ -52,7 +52,7 @@ export function paintGraph(
     dpr: number;
     matches?: ReadonlySet<string>;
     selected?: ReadonlySet<string>;
-    synthetic?: ReadonlySet<string>;
+    synthetic?: ReadonlySet<string> | ((rowIndex: number) => boolean);
     passages?: readonly (readonly GraphPassage[])[];
     colors?: readonly string[];
     background?: string;
@@ -66,11 +66,16 @@ export function paintGraph(
   if (ctx.canvas.height !== pixelHeight) ctx.canvas.height = pixelHeight;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
-  ctx.translate(-(options.scrollLeft ?? 0), 0);
+  const left = options.scrollLeft ?? 0;
+  const clipLeft = left - 2;
+  const clipRight = left + width + 2;
+  ctx.translate(-left, 0);
   ctx.lineWidth = 1.6;
   ctx.lineCap = 'round';
   const first = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT));
   const end = Math.min(rows.length, Math.ceil((scrollTop + height) / ROW_HEIGHT));
+  let bucket = -1;
+  let visiblePassages: GraphPassage[] = [];
   for (let i = first; i < end; i++) {
     const row = rows[i]!;
     const y = row.rowIndex * ROW_HEIGHT - scrollTop;
@@ -78,7 +83,16 @@ export function paintGraph(
     const segments = rowSegments(row, y, colors);
     const split = row.edges.findIndex((e) => !['end', 'pass'].includes(e.kind));
     const outgoing = segments.splice(split < 0 ? segments.length : split);
-    for (const p of options.passages?.[Math.floor(i / 500)] ?? []) {
+    const rowBucket = Math.floor(i / 500);
+    if (rowBucket !== bucket) {
+      bucket = rowBucket;
+      visiblePassages =
+        options.passages?.[bucket]?.filter((p) => {
+          const x = GRAPH_PADDING + p.column * LANE_WIDTH;
+          return x >= clipLeft && x <= clipRight && p.start < end && p.end > first;
+        }) ?? [];
+    }
+    for (const p of visiblePassages) {
       if (p.start <= i && p.end > i)
         segments.push({
           x1: GRAPH_PADDING + p.column * LANE_WIDTH,
@@ -92,10 +106,9 @@ export function paintGraph(
     segments.sort((a, b) => a.x1 - b.x1);
     segments.push(...outgoing);
     for (const segment of segments) {
-      const left = options.scrollLeft ?? 0;
       if (
-        Math.max(segment.x1, segment.x2) < left - 2 ||
-        Math.min(segment.x1, segment.x2) > left + width + 2
+        Math.max(segment.x1, segment.x2) < clipLeft ||
+        Math.min(segment.x1, segment.x2) > clipRight
       )
         continue;
       ctx.strokeStyle = segment.color;
@@ -118,7 +131,11 @@ export function paintGraph(
       0,
       Math.PI * 2,
     );
-    ctx.fillStyle = options.synthetic?.has(row.oid)
+    const synthetic =
+      typeof options.synthetic === 'function'
+        ? options.synthetic(i)
+        : options.synthetic?.has(row.oid);
+    ctx.fillStyle = synthetic
       ? (options.background ?? '#10151e')
       : colors[row.colorIndex % colors.length]!;
     ctx.strokeStyle = colors[row.colorIndex % colors.length]!;

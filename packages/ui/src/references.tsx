@@ -21,7 +21,11 @@ async function executeReference(repoId: string, options: ReferenceOptions) {
 }
 type Action =
   'createBranch' | 'createTag' | 'deleteTag' | 'renameBranch' | 'setUpstream' | 'deleteBranch';
-function ReferenceDialog({
+export type ReferenceReview = {
+  action: Exclude<Action, 'createBranch' | 'createTag'>;
+  reference: Ref;
+};
+export function ReferenceDialog({
   action,
   target,
   reference,
@@ -241,14 +245,16 @@ export function NewReferences() {
     </>
   );
 }
-export function ReferenceActions({ reference }: { reference: Ref }) {
+export function ReferenceActions({
+  reference,
+  onReview,
+}: {
+  reference: Ref;
+  onReview: (review: ReferenceReview) => void;
+}) {
   const { busy: active, syncing, snapshot } = useRepository();
   const busy = syncing ? undefined : active;
   const [error, setError] = useState<string>();
-  const [reviewed, setReviewed] = useState<Ref>();
-  const [branchAction, setBranchAction] = useState<'renameBranch' | 'setUpstream' | 'deleteBranch'>(
-    'renameBranch',
-  );
   if (reference.kind === 'local' && snapshot)
     return (
       <>
@@ -273,10 +279,8 @@ export function ReferenceActions({ reference }: { reference: Ref }) {
           disabled={!!busy}
           aria-label={`Rename branch ${reference.shortName}`}
           title="Rename"
-          onClick={() => {
-            setBranchAction('renameBranch');
-            setReviewed(reference);
-          }}
+          data-review-action="renameBranch"
+          onClick={() => onReview({ action: 'renameBranch', reference })}
         >
           Rename
         </button>
@@ -284,10 +288,8 @@ export function ReferenceActions({ reference }: { reference: Ref }) {
           disabled={!!busy}
           aria-label={`Set upstream ${reference.shortName}`}
           title="Upstream"
-          onClick={() => {
-            setBranchAction('setUpstream');
-            setReviewed(reference);
-          }}
+          data-review-action="setUpstream"
+          onClick={() => onReview({ action: 'setUpstream', reference })}
         >
           Upstream
         </button>
@@ -295,21 +297,11 @@ export function ReferenceActions({ reference }: { reference: Ref }) {
           disabled={!!busy || reference.isHead}
           aria-label={`Delete branch ${reference.shortName}`}
           title="Delete"
-          onClick={() => {
-            setBranchAction('deleteBranch');
-            setReviewed(reference);
-          }}
+          data-review-action="deleteBranch"
+          onClick={() => onReview({ action: 'deleteBranch', reference })}
         >
           Delete
         </button>
-        {reviewed && (
-          <ReferenceDialog
-            action={branchAction}
-            reference={reviewed}
-            target={reviewed.target}
-            close={() => setReviewed(undefined)}
-          />
-        )}
         {error && (
           <p role="alert" className="error">
             {error}
@@ -319,23 +311,14 @@ export function ReferenceActions({ reference }: { reference: Ref }) {
     );
   if (reference.kind !== 'tag') return null;
   return (
-    <>
-      <button
-        disabled={!!busy}
-        aria-label={`Delete tag ${reference.shortName}`}
-        title="Delete"
-        onClick={() => setReviewed(reference)}
-      >
-        Delete
-      </button>
-      {reviewed && (
-        <ReferenceDialog
-          action="deleteTag"
-          reference={reviewed}
-          target={reviewed.target}
-          close={() => setReviewed(undefined)}
-        />
-      )}
-    </>
+    <button
+      disabled={!!busy}
+      aria-label={`Delete tag ${reference.shortName}`}
+      title="Delete"
+      data-review-action="deleteTag"
+      onClick={() => onReview({ action: 'deleteTag', reference })}
+    >
+      Delete
+    </button>
   );
 }

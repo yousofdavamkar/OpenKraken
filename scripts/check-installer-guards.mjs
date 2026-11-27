@@ -71,12 +71,51 @@ try {
       },
     );
   }
-  if (original.target === 'dmg')
+  if (original.target === 'dmg') {
+    if (original.macBuildNumber !== undefined) {
+      await writeFile(
+        fixture,
+        JSON.stringify({ ...original, macBuildNumber: original.macBuildNumber === 1 ? 2 : 1 }),
+      );
+      await assert.rejects(
+        run(process.execPath, ['scripts/verify-installer.mjs', fixture]),
+        (error) => {
+          assert.match(
+            error.stderr,
+            /macOS bundle identity, version, executable or repository scheme differs/,
+          );
+          assert.doesNotMatch(error.stdout, /Packaged|verified/);
+          return true;
+        },
+      );
+    }
+    const fingerprint = 'AB'.repeat(20);
+    await writeFile(
+      fixture,
+      JSON.stringify({ ...original, signed: true, signingFingerprint: fingerprint }),
+    );
+    await assert.rejects(
+      run(process.execPath, [
+        'scripts/verify-installer.mjs',
+        fixture,
+        '--mac-identity',
+        fingerprint,
+      ]),
+      (error) => {
+        assert.match(
+          error.stderr,
+          /code object is not signed at all|failed to satisfy specified code requirement/,
+        );
+        assert.doesNotMatch(error.stdout, /Packaged|verified/);
+        return true;
+      },
+    );
     assert.deepEqual(
       await dmgChecks(),
       existingDmgChecks,
       'Rejected DMGs must detach and clean up',
     );
+  }
   console.log('Archive, native-helper and version mismatches rejected before desktop launch');
 } finally {
   await rm(fixture, { force: true });

@@ -27,3 +27,15 @@ At 10,000 or more refs the watcher copies the snapshot's ordered reference lines
 ## Delivering changes during initial layout
 
 The renderer’s bridge listener is active before the graph mounts. It retains the latest watcher mode and merges changed domains for the utility’s single current repository. Subscribing the matching repository view consumes that pending notification once, then delivers live events normally. Changing the focus-refresh preference keeps the subscription and its scheduled refreshes active. Reopening the already watched repository preserves its mode. An Electron test waits for the native watcher, creates a real branch while the initial layout is held, then checks that the released view displays both the mode and the new branch.
+
+## Comparing a primed snapshot during subscription startup
+
+A primed watcher already has a comparison point. It begins subscribing immediately and schedules a check using the existing 120 ms debounce for repository metadata. If subscription and the native self-test complete first, the post-subscription check takes the place of that scheduled read. If startup stalls, the scheduled check can report intervening changes. A final check reconciles changes made during binding, including when the watcher falls back to polling. A watcher without a baseline still captures one before subscribing.
+
+Native tests change a branch after the snapshot and delay or reject subscription. The slow case also adds a tag after the first notification. Both changes reach the observer. A Git trace from the 50,000-ref desktop fixture recorded one native watcher enumeration on ordinary startup, down from two.
+
+## Reconciling refs returned by a refresh
+
+Two watcher reads can both see a branch even though an intervening desktop refresh saw its deletion. Recreating the branch at the same tip then leaves the displayed list stale. The same sequence can occur when a branch moves and returns to its old tip.
+
+For a refresh on the observed repository, record the digest of the ref names, targets and tracking fields delivered by the Git service. If it differs from the last native read, schedule a check. Compare the displayed digest with the decoded names from a native read started after the snapshot. Request a ref refresh once for each observed difference. If another snapshot arrives during a read, check it again. This keeps the raw-byte comparison for native changes and limits the additional check to discrepancies.

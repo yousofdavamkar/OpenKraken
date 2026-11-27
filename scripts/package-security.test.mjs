@@ -3,10 +3,12 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
-import { verifyPackagedApplication } from './package-security.mjs';
+import { verifyPackagedApplication, verifyAsarUnpackedFile } from './package-security.mjs';
 
 const require = createRequire(import.meta.url);
-const { createPackage } = createRequire(require.resolve('@electron/packager'))('@electron/asar');
+const { createPackage, createPackageWithOptions } = createRequire(
+  require.resolve('@electron/packager'),
+)('@electron/asar');
 const application = {
   version: '0.2.0-beta.2',
   name: 'openkraken',
@@ -78,4 +80,53 @@ test('an export records unknown source and older archives can still be verified'
       /Invalid packaged application source/,
     );
   });
+});
+
+test('an unpacked helper must match the size and SHA-256 sealed in the ASAR', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-unpacked-helper-'));
+  try {
+    const source = join(root, 'source');
+    const name = 'helper.exe';
+    await mkdir(source);
+    await writeFile(join(source, name), 'signed helper');
+    await createPackageWithOptions(source, join(root, 'app.asar'), { unpack: '*.exe' });
+    await verifyAsarUnpackedFile(root, name);
+    for (const contents of ['changed bytes', 'different length']) {
+      await writeFile(join(root, 'app.asar.unpacked', name), contents);
+      await expect(verifyAsarUnpackedFile(root, name)).rejects.toThrow('ASAR integrity record');
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('accepts an older archive without the PowerShell script and requires the exact bytes when listed', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-ps-script-'));
+  try {
+    const name = 'dist/shell-integration/powershell.ps1';
+    const source = join(root, 'source');
+    await mkdir(join(source, 'dist/shell-integration'), { recursive: true });
+    const archive = join(root, 'app.asar');
+    await createPackage(source, archive);
+    expect(await verifyAsarUnpackedFile(root, name, { allowMissing: true })).toBe(false);
+    await expect(verifyAsarUnpackedFile(root, name)).rejects.toThrow();
+    const modern = join(root, 'modern');
+    await mkdir(modern);
+    await writeFile(join(source, name), 'Write-Output 1');
+    await createPackageWithOptions(source, join(modern, 'app.asar'), {
+      unpackDir: 'dist/shell-integration',
+    });
+    const script = join(modern, 'app.asar.unpacked', name);
+    expect(await verifyAsarUnpackedFile(modern, name, { allowMissing: true })).toBe(true);
+    await writeFile(script, 'Write-Output 2');
+    await expect(verifyAsarUnpackedFile(modern, name, { allowMissing: true })).rejects.toThrow(
+      'ASAR integrity record',
+    );
+    await rm(script);
+    await expect(verifyAsarUnpackedFile(modern, name, { allowMissing: true })).rejects.toThrow(
+      'Missing unpacked file',
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

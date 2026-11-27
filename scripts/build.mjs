@@ -12,7 +12,7 @@ const output = resolve(process.argv[2] ?? 'apps/desktop/dist');
 await buildAskpass(join(output, 'helpers'));
 await esbuild({
   entryPoints: {
-    main: 'apps/desktop/src/main.ts',
+    main: 'apps/desktop/src/bootstrap.ts',
     preload: 'apps/desktop/src/preload.ts',
     'git-service': 'apps/desktop/src/git-service.ts',
     'terminal-service': 'apps/desktop/src/terminal-service.ts',

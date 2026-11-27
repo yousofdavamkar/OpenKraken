@@ -14,7 +14,7 @@ Cache up to 17,000 delivered commits per repository under the app profile. Store
 
 A generation fingerprint covers format version, Git version, effective Git configuration, traversal starts, stash OIDs, replacement refs, shallow/graft/alternate metadata and commit-graph file metadata. Environment overrides for shallow boundaries and replacements disable caching. Persist only the fingerprint, never the effective configuration text. Each page has a schema, offset and digest covering its records and continuation metadata. Invalid pages are cache misses.
 
-On reopen, publish the small prefix first, then read continuation pages incrementally. Validate and hash decoded records in 100-record batches with event-loop yields so later pages cannot monopolize the Git service. The real retained Git traversal runs alongside it, revalidating and skipping cached OIDs/parents/stash markers before supplying later records. A topology mismatch invalidates the cache and asks for Refresh. Cached data can be displayed before this replay finishes because its generation and digest have already been validated. Missing or corrupt middle cache pages fall back to the live walk at the last contiguous prefix. The cache changes neither Git ordering nor graph continuation.
+On reopen, publish the small prefix first, then read continuation pages incrementally. Validate and hash decoded records in 100-record batches with event-loop yields so later pages cannot monopolize the Git service. The real retained Git traversal runs alongside it, revalidating and skipping cached OIDs/parents/stash markers before supplying later records. While the opening page is displayed, the native walk checks the rest of the cached topology. Matching cached records consume no additional buffer space. Once the walk catches up, ordinary page backpressure resumes. On a topology mismatch the cursor rejects further pages immediately, invalidates the cache and asks for Refresh, including while the native process exits. Cached data can be displayed before this replay finishes because its generation and digest have already been validated. Missing or corrupt middle cache pages fall back to the live walk at the last contiguous prefix. The cache changes neither Git ordering nor graph continuation.
 
 ## Performance envelope and verification
 
@@ -43,3 +43,24 @@ Serialize a page in batches of 100 commits and encode each batch as UTF-8. The d
 ## Persisting an extended window
 
 Each cache instance tracks the files it wrote and the pages its cursor accepted from disk. When paging extends the window, the writer can retain a file with the same offset, record count and continuation flag because the records in that instance are append-only. It checks the file’s device, inode, size, modification time and change time before skipping serialization. A changed or missing file is rebuilt from the retained commits on the next dirty flush. The next reader still validates the page schema and digest. A tail that the cursor declined contributes no reusable file.
+
+
+## Leaving a pending cache read
+
+A cancelled repository open releases its wait for the opening cache file and preserves the displayed cursor. A refresh, switch or service shutdown stops optional reads of later cache pages. The service still flushes any writes it owes. If the destination fails to open, the previous cursor can continue from Git. A late file open closes its descriptor, and a discarded page cannot append commits or invalidate the current history. Reads already in the operating system may settle after the request returns.
+
+A cancelled switch or a failed destination releases its wait on an outgoing write. The original cache owns that write until it finishes. Its displayed cursor can serve subsequent pages in the meantime. A later successful switch or shutdown flushes the accumulated pages. The native handoff test holds the prefix write open, pages the original repository after cancellation or failure, and then checks the persisted prefix and tail.
+
+## Restarting with a saved first page
+
+On an initial open with disk caching enabled, the service can read and validate the first cache page while Git enumerates refs and resolves the current graph. It starts this read only when there is no previous cache writer in the service. Before use it checks the cache path, the file’s current device, inode, size, modification and change times, and the fingerprint computed from this opening. A replaced file goes through the ordinary cache reader. A fingerprint mismatch or missing page falls back to the native history. Later pages still start loading only after the opening prefix is accepted. Cancelling the open abandons the pending read. [Restart measurements](../verification/m8-reference-performance.md#reading-the-cached-first-page-during-ref-enumeration)
+
+## Oversized commit messages
+
+The writer accounts for each encoded commit before adding it to a batch. It stops when a prefix exceeds 8 MiB or a tail exceeds 18 MiB, including JSON delimiters, escaped text and the digest footer. An oversized page ends the contiguous window. The writer drops its retained commits from that offset, removes that page and every later file, and caps subsequent appends at the same offset. Queued flushes observe the reduced limit. Earlier pages can still seed a restarted walk, and the live Git cursor continues serving history through the root. [Measurements and restart verification](../verification/m8-reference-performance.md#large-commit-messages-in-the-saved-history-window)
+
+## Scheduling a restart after refs change
+
+For a packed-refs file of at least 512 KiB, compare its modification time and the times of HEAD and its loose local branch, when present, with the saved prefix. A newer ref file or an absent usable prefix favors starting a live walk during ref enumeration and defers reading the saved page. Git still supplies the ordered roots. The computed fingerprint, the commit schema and the page digest determine whether to use cached commits. A timestamp-only change can trigger speculation and still reuse the saved page.
+
+When the expected key is known, the reader probes the first 96 bytes of pages larger than 64 KiB. An exact writer-format header with a different key ends that read. Matching and unrecognized headers continue through full validation. On POSIX, cache files are opened nonblocking before checking the file type so an unexpected pipe cannot hold up the snapshot. [Restart measurements](../verification/m8-reference-performance.md#restarting-after-a-branch-update-on-50000-refs)

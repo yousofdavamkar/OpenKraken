@@ -3,6 +3,7 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import {
   mkdir,
   mkdtemp,
+  open,
   readdir,
   readFile,
   rename,
@@ -15,6 +16,7 @@ import { readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Updates } from './src/updates.js';
+import * as transfer from './src/update-transfer.js';
 
 const keys = generateKeyPairSync('ed25519');
 const configuration = {
@@ -74,11 +76,69 @@ test.each([
     expect((await updater.save(verified.saveId!, choose)).phase).toBe('saved');
     expect(choose).toHaveBeenCalledWith(name);
     expect(await readFile(path, 'utf8')).toBe('fixture');
+    if (process.platform !== 'win32') {
+      expect((await stat(path)).mode & 0o777).toBe(format === 'AppImage' ? 0o700 : 0o600);
+      expect((await stat(join(root, 'updates/artifact.ready'))).mode & 0o111).toBe(0);
+    }
   } finally {
     await updater.close();
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test.skipIf(process.platform === 'win32').each([false, true])(
+  'keeps a verified installer available when the saved directory sync fails (late cancel %s)',
+  async (cancel) => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-save-confirmation-'));
+    const destination = join(root, 'OpenKraken.AppImage');
+    const send = vi.fn<typeof fetch>(
+      async (url) =>
+        new Response(String(url) === configuration.feed ? signed(release()) : 'fixture'),
+    );
+    const updater = new Updates(join(root, 'cache'), configuration, runtime, send);
+    try {
+      await updater.check();
+      const { saveId } = await updater.download('AppImage');
+      await writeFile(destination, 'old file');
+      const handle = await open(root, 'r');
+      const parent = await handle.stat();
+      const prototype: typeof handle = Object.getPrototypeOf(handle);
+      await handle.close();
+      const originalSync = prototype.sync;
+      let published = false;
+      const sync = vi.spyOn(prototype, 'sync').mockImplementation(async function (
+        this: typeof handle,
+      ) {
+        const info = await this.stat();
+        if (info.dev === parent.dev && info.ino === parent.ino) {
+          published = (await readFile(destination, 'utf8')) === 'fixture';
+          if (cancel) updater.cancel();
+          throw new Error('Directory sync failed');
+        }
+        await originalSync.call(this);
+      });
+      try {
+        expect(await updater.save(saveId!, async () => destination)).toMatchObject({
+          phase: 'verified',
+          error: 'save-unconfirmed',
+          saveId,
+        });
+        expect(published).toBe(true);
+      } finally {
+        sync.mockRestore();
+      }
+      expect(await readFile(destination, 'utf8')).toBe('fixture');
+      expect(await updater.save(saveId!, async () => destination)).toMatchObject({
+        phase: 'saved',
+        error: null,
+      });
+      expect(send).toHaveBeenCalledTimes(2);
+    } finally {
+      await updater.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test.each([
   'changed bytes',
@@ -853,6 +913,262 @@ function signed(value: unknown, key = keys.privateKey) {
     ).toString('base64'),
   });
 }
+
+test.skipIf(process.platform === 'win32').each(['sync failure', 'expiry', 'cancellation'])(
+  'withholds update approval after %s while publishing the cached installer',
+  async (scenario) => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-update-promotion-'));
+    const directory = join(root, 'updates');
+    const send = vi.fn<typeof fetch>(
+      async (url) =>
+        new Response(String(url) === configuration.feed ? signed(release()) : 'fixture'),
+    );
+    let clock = now;
+    const updater = new Updates(directory, configuration, runtime, send, () => clock);
+    try {
+      await updater.check();
+      const handle = await open(directory, 'r');
+      const prototype: typeof handle = Object.getPrototypeOf(handle);
+      await handle.close();
+      const originalSync = prototype.sync;
+      let attempts = 0;
+      const sync = vi.spyOn(prototype, 'sync').mockImplementation(async function (
+        this: typeof handle,
+      ) {
+        if ((await this.stat()).isDirectory()) {
+          attempts++;
+          expect(await readFile(join(directory, 'artifact.ready'), 'utf8')).toBe('fixture');
+          if (scenario === 'expiry') clock = release().expiresAt + 1;
+          else if (scenario === 'cancellation') updater.cancel();
+          else throw new Error('Cannot sync update directory');
+        }
+        await originalSync.call(this);
+      });
+      try {
+        const state = await updater.download('AppImage');
+        expect(attempts).toBe(1);
+        expect(state).toMatchObject({
+          phase: 'error',
+          error:
+            scenario === 'expiry'
+              ? 'invalid-release'
+              : scenario === 'cancellation'
+                ? 'cancelled'
+                : 'download-unconfirmed',
+          installId: null,
+        });
+        expect(state.saveId).toBeUndefined();
+        if (scenario === 'sync failure') {
+          await updater.check();
+          expect((await updater.download('AppImage')).error).toBe('download-unconfirmed');
+          expect(attempts).toBe(2);
+        }
+      } finally {
+        sync.mockRestore();
+      }
+      if (scenario !== 'expiry') {
+        await updater.check();
+        expect((await updater.download('AppImage')).phase).toBe('verified');
+        expect(send.mock.calls.filter(([url]) => String(url) !== configuration.feed)).toHaveLength(
+          1,
+        );
+      }
+    } finally {
+      await updater.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.each(['same release', 'check failed', 'new release', 'changed bytes', 'different format'])(
+  'rechecks a verified installer in the running app with %s',
+  async (scenario) => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-session-download-'));
+    const directory = join(root, 'updates');
+    const meta = release();
+    const deb = {
+      ...meta.artifacts[0]!,
+      format: 'deb',
+      name: 'OpenKraken.deb',
+      sha256: createHash('sha256').update('package').digest('hex'),
+    };
+    meta.artifacts.push(deb);
+    let offline = false;
+    const requests: string[] = [];
+    const updater = new Updates(directory, configuration, runtime, async (url) => {
+      if (String(url) === configuration.feed) {
+        if (offline) throw new Error('Feed offline');
+        return new Response(signed(meta));
+      }
+      requests.push(String(url));
+      return new Response(String(url).endsWith('.deb') ? 'package' : 'fixture');
+    });
+    try {
+      await updater.check();
+      const original = await updater.download('AppImage');
+      expect(original.phase).toBe('verified');
+      if (scenario === 'check failed') {
+        offline = true;
+        expect((await updater.check()).error).toBe('network');
+        offline = false;
+      }
+      if (scenario === 'new release') meta.sequence++;
+      if (scenario === 'changed bytes')
+        await writeFile(join(directory, 'artifact.ready'), 'damaged');
+      expect((await updater.check()).phase).toBe('available');
+      const stalePicker = vi.fn();
+      await updater.save(original.saveId!, stalePicker);
+      expect(stalePicker).not.toHaveBeenCalled();
+      const format = scenario === 'different format' ? 'deb' : 'AppImage';
+      const verified = await updater.download(format);
+      expect(verified).toMatchObject({ phase: 'verified', downloaded: 7 });
+      expect(verified.saveId).toBeTruthy();
+      expect(verified.saveId).not.toBe(original.saveId);
+      expect(requests).toHaveLength(['same release', 'check failed'].includes(scenario) ? 1 : 2);
+      const destination = join(root, 'verified.' + format);
+      expect((await updater.save(verified.saveId!, async () => destination)).phase).toBe('saved');
+      expect(await readFile(destination, 'utf8')).toBe(format === 'deb' ? 'package' : 'fixture');
+    } finally {
+      await updater.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.each([
+  'matching file',
+  'rejected check then retry',
+  'changed bytes',
+  'new release',
+  'partial file',
+])('restarts after a verified download with %s', async (scenario) => {
+  const root = await mkdtemp(join(tmpdir(), 'openkraken-restart-download-'));
+  const directory = join(root, 'updates');
+  let manifest = signed(release());
+  const artifactRequests: string[] = [];
+  const send: typeof fetch = async (url) => {
+    if (String(url) === configuration.feed) return new Response(manifest);
+    artifactRequests.push(String(url));
+    return new Response('fixture');
+  };
+  let updater = new Updates(directory, configuration, runtime, send);
+  try {
+    await updater.check();
+    const previous = await updater.download('AppImage');
+    expect(previous.phase).toBe('verified');
+    await updater.close();
+    const ready = join(directory, 'artifact.ready');
+    if (scenario === 'changed bytes') await writeFile(ready, 'changed');
+    if (scenario === 'new release') manifest = signed(release(8, '0.3.0'));
+    if (scenario === 'partial file') await rename(ready, join(directory, 'artifact.part'));
+    updater = new Updates(directory, configuration, runtime, send);
+    expect((await updater.started()).phase).toBe('idle');
+    expect((await updater.download('AppImage')).phase).toBe('idle');
+    const stalePicker = vi.fn();
+    await updater.save(previous.saveId!, stalePicker);
+    expect(stalePicker).not.toHaveBeenCalled();
+    if (scenario === 'rejected check then retry') {
+      manifest = signed(release(6));
+      expect((await updater.check()).error).toBe('rollback');
+      expect((await updater.download('AppImage')).phase).toBe('error');
+      manifest = signed(release());
+    }
+    expect((await updater.check()).phase).toBe('available');
+    const verified = await updater.download('AppImage');
+    expect(verified).toMatchObject({ phase: 'verified', downloaded: 7 });
+    expect(verified.saveId).not.toBe(previous.saveId);
+    expect(artifactRequests).toHaveLength(
+      ['matching file', 'rejected check then retry'].includes(scenario) ? 1 : 2,
+    );
+    const destination = join(root, 'recovered.AppImage');
+    expect((await updater.save(verified.saveId!, async () => destination)).phase).toBe('saved');
+    expect(await readFile(destination, 'utf8')).toBe('fixture');
+  } finally {
+    await updater.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test.each(['cancel mid-read', 'cancel after hashing', 'expire after hashing'])(
+  'can %s a recovered installer during verification',
+  async (scenario) => {
+    const root = await mkdtemp(join(tmpdir(), 'openkraken-recheck-'));
+    const directory = join(root, 'updates');
+    let clock = now;
+    const bytes = Buffer.alloc(256 * 1024, 42);
+    const metadata = release();
+    const artifact = metadata.artifacts[0]!;
+    artifact.size = bytes.length;
+    artifact.sha256 = createHash('sha256').update(bytes).digest('hex');
+    const manifest = signed(metadata);
+    const send = vi.fn<typeof fetch>(
+      async (url) => new Response(String(url) === configuration.feed ? manifest : bytes),
+    );
+    let updater = new Updates(directory, configuration, runtime, send, () => clock);
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    try {
+      await updater.check();
+      await updater.download('AppImage');
+      await updater.close();
+      updater = new Updates(directory, configuration, runtime, send, () => clock);
+      await updater.check();
+      let reached!: () => void;
+      const paused = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      const verify = transfer.verifyUpdateArtifact;
+      const pause = async () => {
+        reached();
+        await gate;
+      };
+      vi.spyOn(transfer, 'verifyUpdateArtifact').mockImplementationOnce(
+        async (body, artifact, signal, onChunk) => {
+          if (scenario === 'cancel mid-read') {
+            await verify(body, artifact, signal, async (chunk) => {
+              await onChunk?.(chunk);
+              await pause();
+            });
+          } else {
+            await verify(body, artifact, signal, onChunk);
+            await pause();
+          }
+        },
+      );
+      const recovering = updater.download('AppImage');
+      await paused;
+      const progress = await updater.read();
+      expect(progress.phase).toBe('verifying');
+      expect(progress.downloaded).toBeGreaterThan(0);
+      if (scenario === 'cancel mid-read') expect(progress.downloaded).toBeLessThan(bytes.length);
+      else expect(progress.downloaded).toBe(bytes.length);
+      const cancelled = scenario !== 'expire after hashing';
+      if (cancelled) updater.cancel();
+      else clock = metadata.expiresAt + 1;
+      finish();
+      const result = await recovering;
+      expect(result).toMatchObject({
+        phase: 'error',
+        error: cancelled ? 'cancelled' : 'invalid-release',
+        installId: null,
+      });
+      expect(result.saveId).toBeUndefined();
+      expect(send).toHaveBeenCalledTimes(3);
+      if (cancelled) {
+        expect((await updater.check()).phase).toBe('available');
+        expect((await updater.download('AppImage')).phase).toBe('verified');
+        expect(send).toHaveBeenCalledTimes(4);
+      }
+    } finally {
+      finish();
+      await updater.close();
+      vi.restoreAllMocks();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test('signed downloads are verified and rollback protection survives an app restart', async () => {
   const root = await mkdtemp(join(tmpdir(), 'openkraken-updates-'));

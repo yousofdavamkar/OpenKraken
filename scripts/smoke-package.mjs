@@ -7,6 +7,13 @@ import { mkdtemp, rm, mkdir, writeFile, readFile, lstat, symlink } from 'node:fs
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
+import { checkReleaseKeyboard } from '../tests/e2e/check-release-keyboard.ts';
+import {
+  advanceCachedFixture,
+  checkPackagedHistory,
+  checkReopenedHistory,
+  createPackagedHistoryFixture,
+} from './check-packaged-history.mjs';
 import { assertMsiSmokeProfile } from './msi-lifecycle.mjs';
 
 const msiProfile = process.env.OPENKRAKEN_MSI_PROFILE;
@@ -45,29 +52,52 @@ const executable =
   (process.platform === 'darwin'
     ? join(directory, 'OpenKraken.app/Contents/MacOS/openkraken')
     : join(directory, process.platform === 'win32' ? 'openkraken.exe' : 'openkraken'));
+const installedDeb = process.platform === 'linux' && process.argv.includes('--installed-deb');
 const profile = msiProfile ?? (await mkdtemp(join(tmpdir(), 'openkraken-package-')));
-const linkedRepository = join(profile, 'linked repository');
-await mkdir(linkedRepository, { recursive: !!msiProfile });
-await promisify(execFile)('git', ['init', '--initial-branch=main', linkedRepository]);
+const retainedConfig = installedDeb ? process.env.OPENKRAKEN_DEB_CONFIG_HOME : undefined;
+const desktopEnv = installedDeb ? { XDG_CONFIG_HOME: retainedConfig ?? profile } : {};
+const applicationProfile = installedDeb ? join(desktopEnv.XDG_CONFIG_HOME, 'OpenKraken') : profile;
+const history = process.argv.includes('--history');
+const linkedRepository = join(
+  history ? await mkdtemp(join(profile, 'history-')) : profile,
+  'linked repository',
+);
+if (history) createPackagedHistoryFixture(linkedRepository);
+else {
+  await mkdir(linkedRepository, { recursive: !!msiProfile });
+  await promisify(execFile)('git', ['init', '--initial-branch=main', linkedRepository]);
+}
 const repositoryUri = `openkraken://repo?path=${encodeURIComponent(linkedRepository)}`;
 const nativePicker = process.platform === 'linux' && !!process.env.OPENKRAKEN_XDOTOOL;
 const packageShell = process.env.OPENKRAKEN_PACKAGE_SHELL ?? '/bin/bash';
+const powerShell = basename(packageShell) === 'pwsh';
 if (nativePicker) {
-  if (!isAbsolute(packageShell) || !['bash', 'zsh'].includes(basename(packageShell)))
-    throw new Error('Packaged terminal smoke requires an absolute Bash or zsh executable');
+  if (!isAbsolute(packageShell) || !['bash', 'zsh', 'pwsh'].includes(basename(packageShell)))
+    throw new Error('Packaged terminal smoke requires an absolute Bash, zsh or pwsh executable');
   if (basename(packageShell) === 'zsh') {
     await writeFile(
       join(profile, '.zshenv'),
       'if [[ -n ${ZSH_TEST_MODULES-} ]]; then module_path=("$ZSH_TEST_MODULES"); fi\n',
     );
     await writeFile(join(profile, '.zshrc'), 'HISTFILE=/dev/null\nPROMPT="packaged> "\n');
+  } else if (powerShell) {
+    const config = join(profile, '.config', 'powershell');
+    await mkdir(config, { recursive: true });
+    await writeFile(
+      join(config, 'Microsoft.PowerShell_profile.ps1'),
+      "Set-PSReadLineOption -HistorySaveStyle SaveNothing -PredictionSource None\nfunction global:prompt { 'packaged> ' }\n",
+    );
   } else await writeFile(join(profile, '.bashrc'), 'HISTFILE=/dev/null\nPS1="packaged> "\n');
 }
+// Chromium creates its Linux singleton socket below TMPDIR. Installer staging and
+// user-data paths can exceed the Unix socket path limit.
+const runtimeTemp =
+  process.platform === 'linux' ? await mkdtemp('/tmp/openkraken-smoke-') : profile;
 const child = spawn(
   executable,
   [
     '--remote-debugging-port=0',
-    ...(msiProfile ? [] : [`--user-data-dir=${profile}`]),
+    ...(msiProfile || installedDeb ? [] : [`--user-data-dir=${profile}`]),
     repositoryUri,
     ...(nativePicker ? ['--ozone-platform=x11', '--xdg-portal-required-version=999'] : []),
   ],
@@ -75,15 +105,25 @@ const child = spawn(
     stdio: ['ignore', 'ignore', 'pipe'],
     env: {
       ...process.env,
-      ...(process.env.OPENKRAKEN_PACKAGE_EXECUTABLE ? { TMPDIR: profile } : {}),
+      ...(process.platform === 'linux' || process.env.OPENKRAKEN_PACKAGE_EXECUTABLE
+        ? { TMPDIR: runtimeTemp }
+        : {}),
       ...(nativePicker
         ? {
             SHELL: packageShell,
             HOME: profile,
+            ...(powerShell
+              ? {
+                  XDG_CONFIG_HOME: join(profile, '.config'),
+                  XDG_DATA_HOME: join(profile, '.local/share'),
+                  XDG_CACHE_HOME: join(profile, '.cache'),
+                }
+              : {}),
             ...(basename(packageShell) === 'zsh' ? { ZDOTDIR: profile } : {}),
             ZSH_TEST_MODULES: process.env.OPENKRAKEN_ZSH_MODULE_PATH ?? '',
           }
         : {}),
+      ...desktopEnv,
     },
   },
 );
@@ -166,18 +206,44 @@ try {
     !diagnostics.state.entries.some((entry) => entry.type === 'started')
   )
     throw new Error('Packaged local diagnostics failed to initialize');
+  const expectedVersion = process.env.OPENKRAKEN_EXPECTED_PACKAGE_VERSION;
+  if (
+    expectedVersion &&
+    diagnostics.state.entries.find((entry) => entry.type === 'started')?.version !== expectedVersion
+  )
+    throw new Error(`The running application did not report release ${expectedVersion}`);
+  if (retainedConfig) {
+    await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+    const appearance = page.getByRole('dialog', { name: 'Appearance', exact: true });
+    const theme = appearance.getByLabel('Color theme');
+    if (process.argv.includes('--save-upgrade-theme')) {
+      await expect(theme).toHaveValue('dark');
+      await theme.selectOption('light');
+      await appearance.getByRole('button', { name: 'Apply', exact: true }).click();
+      await expect(appearance.getByRole('status')).toHaveText('Appearance saved.');
+    }
+    await expect(theme).toHaveValue('light');
+    await appearance.getByRole('button', { name: 'Close', exact: true }).click();
+  }
+  await checkReleaseKeyboard(page);
+  console.log('Packaged release and diagnostics dialogs restored keyboard focus to the toolbar.');
   await page.getByRole('button', { name: 'Review repository link', exact: true }).click();
   const linkDialog = page.getByRole('dialog', { name: 'Open linked repository', exact: true });
   await expect(linkDialog).toContainText(linkedRepository);
-  await linkDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-  if (!msiProfile)
-    await expect(
-      page.getByRole('heading', { name: 'A clear view of your history.' }),
-    ).toBeVisible();
+  if (history) {
+    await linkDialog.getByRole('button', { name: 'Open repository', exact: true }).click();
+    await checkPackagedHistory(page, linkedRepository);
+  } else {
+    await linkDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    if (!msiProfile)
+      await expect(
+        page.getByRole('heading', { name: 'A clear view of your history.' }),
+      ).toBeVisible();
+  }
   const socketPath =
     process.platform === 'win32'
       ? `\\\\.\\pipe\\openkraken-${randomUUID()}`
-      : join(profile, 'prompt.sock');
+      : join(runtimeTemp, 'prompt.sock');
   const token = randomBytes(32).toString('hex');
   const server = createServer((socket) => {
     let frame = '';
@@ -238,18 +304,37 @@ try {
     await new Promise((resolve) => server.close(resolve));
   }
   await mkdir('test-results', { recursive: true });
-  if (process.platform === 'linux' && process.env.OPENKRAKEN_XDOTOOL) {
+  let changedTip;
+  if (nativePicker) {
     const repository = join(profile, 'terminal-repository');
     await mkdir(repository);
     await promisify(execFile)('git', ['init', repository]);
     const xdo = (...args) =>
       promisify(execFile)(process.env.OPENKRAKEN_XDOTOOL, args, { timeout: 10000 });
+    async function findWindow(...filters) {
+      let id;
+      await expect
+        .poll(
+          async () => {
+            try {
+              const { stdout } = await xdo('search', '--onlyvisible', ...filters);
+              id = stdout.trim().split('\n').at(-1);
+              return /^\d+$/.test(id);
+            } catch (error) {
+              // X11 can destroy a transient window while xdotool reads its attributes.
+              if ((error.code === 1 && !error.stderr) || error.stderr?.includes('BadWindow'))
+                return false;
+              throw error;
+            }
+          },
+          { timeout: 10000, message: 'Waiting for the native X11 window: ' + filters.join(' ') },
+        )
+        .toBe(true);
+      return id;
+    }
     const pickFolder = async (button, path) => {
       await page.getByRole('button', { name: button, exact: true }).click();
-      const windows = await xdo('search', '--sync', '--onlyvisible', '--name', '^Open repository$');
-      const picker = windows.stdout.trim().split('\n').at(-1);
-      if (!picker || !/^\d+$/.test(picker))
-        throw new Error('Native repository picker was not found');
+      const picker = await findWindow('--name', '^Open repository$');
       await xdo('windowfocus', '--sync', picker);
       await xdo('mousemove', '--window', picker, '500', '400', 'click', '1');
       await xdo('key', '--clearmodifiers', 'ctrl+l');
@@ -257,7 +342,7 @@ try {
       await xdo('type', '--clearmodifiers', '--delay', '1', path);
       await xdo('key', '--clearmodifiers', 'alt+o');
     };
-    await pickFolder('Open a repository', repository);
+    await pickFolder(history ? 'Open repository' : 'Open a repository', repository);
     await expect(
       page.getByRole('heading', { name: 'terminal-repository', exact: true }),
     ).toBeVisible();
@@ -279,23 +364,17 @@ try {
           ).length,
       )
       .toBe(2);
-    await input.pressSequentially(
-      'stty -echo -icanon; dd bs=1 count=1 2>/dev/null | od -An -t u1; stty sane',
-    );
+    const readByte = 'stty -echo -icanon; dd bs=1 count=1 2>/dev/null | od -An -t u1; stty sane';
+    await input.pressSequentially(powerShell ? `/bin/sh -c '${readByte}'` : readByte);
     await input.press('Enter');
     // An AppImage runtime can supervise Electron in a child process. Ask the
     // connected browser for its actual PID instead of assuming the launcher PID.
-    const mainWindow = (
-      await xdo('search', '--onlyvisible', '--pid', String(mainProcessId), '--name', '^OpenKraken$')
-    ).stdout
-      .trim()
-      .split('\n')
-      .at(-1);
+    const mainWindow = await findWindow('--pid', String(mainProcessId), '--name', '^OpenKraken$');
     await xdo('windowfocus', '--sync', mainWindow);
     await xdo('key', '--clearmodifiers', 'ctrl+p');
     await expect(page.getByRole('dialog', { name: 'Command palette' })).toHaveCount(0);
     await expect(panel.locator('.xterm-accessibility-tree')).toContainText('16');
-    await input.pressSequentially('false');
+    await input.pressSequentially(powerShell ? '/bin/false' : 'false');
     await input.press('Enter');
     await expect(integration).toHaveText('Ready for command · last exit 1');
     await page.screenshot({ path: 'test-results/packaged-terminal.png' });
@@ -338,6 +417,7 @@ try {
     console.log(
       `Packaged native terminal opened the repository, tracked ${basename(packageShell)} commands, received native keyboard input and exited cleanly.`,
     );
+    if (history) changedTip = await advanceCachedFixture(applicationProfile, linkedRepository);
   }
   if (process.platform !== 'darwin') {
     if (msiProfile) {
@@ -360,10 +440,19 @@ try {
           env: { ...process.env, OPENKRAKEN_REPOSITORY_URI: repositoryUri },
         },
       );
+    } else if (installedDeb) {
+      const env = { ...process.env, HOME: profile, TMPDIR: runtimeTemp, ...desktopEnv };
+      const { stdout } = await promisify(execFile)(
+        'xdg-mime',
+        ['query', 'default', 'x-scheme-handler/openkraken'],
+        { env, timeout: 15000 },
+      );
+      expect(stdout.trim()).toBe('openkraken.desktop');
+      await promisify(execFile)('gio', ['open', repositoryUri], { env, timeout: 15000 });
     } else {
       await promisify(execFile)(executable, [`--user-data-dir=${profile}`, repositoryUri], {
         timeout: 15000,
-        env: { ...process.env, TMPDIR: profile },
+        env: { ...process.env, TMPDIR: runtimeTemp },
       });
     }
     await page.getByRole('button', { name: 'Review repository link', exact: true }).click();
@@ -372,10 +461,13 @@ try {
     await expect(
       page.getByRole('heading', { name: 'linked repository', exact: true }),
     ).toBeVisible();
+    if (changedTip) await checkReopenedHistory(page, linkedRepository, changedTip);
     console.log(
       msiProfile
         ? 'Installed repository link delivered through the Windows URI handler and explicitly accepted.'
-        : 'Packaged cold-start and second-process repository links require explicit consent.',
+        : installedDeb
+          ? 'The installed Linux desktop handler delivered the repository link for explicit consent.'
+          : 'Packaged cold-start and second-process repository links require explicit consent.',
     );
   }
   await page.screenshot({ path: 'test-results/packaged-shell.png' });
@@ -386,7 +478,7 @@ try {
   await browser?.close();
   // CDP disconnect does not quit Electron. In extract-and-run mode the runtime
   // supervises a child; stop that child first so the runtime can finish and
-  // close inherited pipes. Its extraction directory is inside our temp profile.
+  // close inherited pipes before removing its runtime directory.
   if (mainProcessId && mainProcessId !== child.pid) {
     signalMainProcess('SIGTERM');
   } else child.kill();
@@ -412,8 +504,9 @@ try {
   });
   // The AppImage runtime can exit just before its FUSE mount is released.
   // Bound filesystem teardown retries separately from the unchanged app exit deadline.
-  if (!msiProfile)
-    await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  const cleanup = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 };
+  if (runtimeTemp !== profile) await rm(runtimeTemp, cleanup);
+  if (!msiProfile) await rm(profile, cleanup);
 }
 if (process.platform === 'win32') {
   expect(await windowsProtocolSnapshot()).toEqual(protocolBefore);

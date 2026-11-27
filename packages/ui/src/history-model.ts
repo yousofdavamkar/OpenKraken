@@ -20,13 +20,32 @@ export interface DisplayCommit extends Commit {
 const hasConflict = (status: Snapshot['status']) =>
   status.entries.some((entry) => entry.kind === 'conflict');
 
-export function sameWorkingRow(before: Snapshot['status'], after: Snapshot['status']) {
+export function sameWorkingPaths(before: Snapshot['status'], after: Snapshot['status']) {
   return (
     before.entries.length === after.entries.length &&
-    before.entries.every((entry, index) => entry.path === after.entries[index]!.path) &&
-    hasConflict(before) === hasConflict(after)
+    before.entries.every((entry, index) => entry.path === after.entries[index]!.path)
   );
 }
+export function workingRowKind(status: Snapshot['status']) {
+  return status.entries.length ? (hasConflict(status) ? 'conflict' : 'wip') : undefined;
+}
+
+export function workingRow(snapshot: Snapshot): DisplayCommit {
+  const conflict = hasConflict(snapshot.status);
+  return {
+    oid: `${conflict ? 'conflict' : 'wip'}:${snapshot.repository.id}`,
+    parents: snapshot.repository.head.oid ? [snapshot.repository.head.oid] : [],
+    author: { name: 'Working tree', email: '', time: 0, tzOffsetMin: 0 },
+    committer: { name: '', email: '', time: 0, tzOffsetMin: 0 },
+    summary: conflict
+      ? 'Resolve working-tree conflicts'
+      : `${snapshot.status.entries.length} uncommitted changes`,
+    body: snapshot.status.entries.map((e) => e.path).join('\n'),
+    isStash: false,
+    kind: conflict ? 'conflict' : 'wip',
+  };
+}
+
 export function projectCommits(
   commits: Commit[],
   snapshot: Snapshot,
@@ -34,7 +53,6 @@ export function projectCommits(
 ): DisplayCommit[] {
   const result: DisplayCommit[] = [];
   const dirty = snapshot.status.entries.length > 0;
-  const conflict = hasConflict(snapshot.status);
   const worktrees = new Map<string | undefined, DisplayCommit[]>();
   for (const entry of snapshot.worktrees?.entries ?? []) {
     if (entry.current || entry.bare) continue;
@@ -66,22 +84,10 @@ export function projectCommits(
     };
     worktrees.set(entry.head, [...(worktrees.get(entry.head) ?? []), row]);
   }
-  const synthetic = (): DisplayCommit => ({
-    oid: `${conflict ? 'conflict' : 'wip'}:${snapshot.repository.id}`,
-    parents: snapshot.repository.head.oid ? [snapshot.repository.head.oid] : [],
-    author: { name: 'Working tree', email: '', time: 0, tzOffsetMin: 0 },
-    committer: { name: '', email: '', time: 0, tzOffsetMin: 0 },
-    summary: conflict
-      ? 'Resolve working-tree conflicts'
-      : `${snapshot.status.entries.length} uncommitted changes`,
-    body: snapshot.status.entries.map((e) => e.path).join('\n'),
-    isStash: false,
-    kind: conflict ? 'conflict' : 'wip',
-  });
-  if (firstPage && !snapshot.repository.head.oid && dirty) result.push(synthetic());
+  if (firstPage && !snapshot.repository.head.oid && dirty) result.push(workingRow(snapshot));
   if (firstPage) result.push(...(worktrees.get(undefined) ?? []));
   for (const commit of commits) {
-    if (dirty && commit.oid === snapshot.repository.head.oid) result.push(synthetic());
+    if (dirty && commit.oid === snapshot.repository.head.oid) result.push(workingRow(snapshot));
     result.push(...(worktrees.get(commit.oid) ?? []));
     result.push({ ...commit, kind: 'commit' });
   }
@@ -90,17 +96,42 @@ export function projectCommits(
 export function refsByTarget(refs: readonly Ref[], view: GraphView = { hiddenRefs: [] }) {
   const isVisible = graphRefVisibility(view);
   const targets = new Map<string, Ref | Ref[]>();
-  for (const ref of refs) {
-    if (!isVisible(ref.name)) continue;
+  // Keep small or concentrated ref sets in the direct map. Once a large snapshot
+  // has 256 distinct targets, defer the remaining full-ID lookups by first byte.
+  const pending = new Map<string, Ref[]>();
+  function indexTarget(ref: Ref) {
     const oid = ref.peeled ?? ref.target;
     const bucket = targets.get(oid);
     if (!bucket) targets.set(oid, ref);
     else if (Array.isArray(bucket)) bucket.push(ref);
     else targets.set(oid, [bucket, ref]);
   }
+  for (const ref of refs) {
+    if (!isVisible(ref.name)) continue;
+    if (refs.length < 10000 || targets.size < 256) {
+      indexTarget(ref);
+      continue;
+    }
+    const prefix = (ref.peeled ?? ref.target).slice(0, 2);
+    const group = pending.get(prefix);
+    if (group) group.push(ref);
+    else pending.set(prefix, [ref]);
+  }
+  function indexPrefix(prefix: string, group: Ref[]) {
+    for (const ref of group) indexTarget(ref);
+    pending.delete(prefix);
+  }
   return {
-    size: targets.size,
+    get size() {
+      for (const [prefix, group] of pending) indexPrefix(prefix, group);
+      return targets.size;
+    },
     get(oid: string) {
+      if (pending.size) {
+        const prefix = oid.slice(0, 2);
+        const group = pending.get(prefix);
+        if (group) indexPrefix(prefix, group);
+      }
       const bucket = targets.get(oid);
       if (!bucket || Array.isArray(bucket)) return bucket;
       // Allocate a stable badge list only when this single target is displayed.
@@ -156,68 +187,92 @@ export function groupRefBadges(refs: readonly Ref[], limit = Infinity) {
 }
 export interface Selection {
   focus?: string;
+  focusIndex?: number;
   anchor?: string;
+  anchorIndex?: number;
   selected: string[];
 }
+// Positions survive appends. A refresh or a working-tree row can move the OID.
+export function locateRow(rows: readonly { oid: string }[], oid?: string, hint?: number) {
+  if (oid === undefined) return -1;
+  if (hint !== undefined && rows[hint]?.oid === oid) return hint;
+  return rows.findIndex((row) => row.oid === oid);
+}
+
 export function selectRow(
   rows: readonly { oid: string }[],
   selection: Selection,
   oid: string,
   mode: 'single' | 'toggle' | 'range' = 'single',
+  position?: number,
 ): Selection {
-  const index = rows.findIndex((r) => r.oid === oid);
+  const index = locateRow(rows, oid, position);
   if (index < 0) return selection;
   if (mode === 'range') {
     const anchor = Math.max(
       0,
-      rows.findIndex((r) => r.oid === (selection.anchor ?? selection.focus ?? oid)),
+      locateRow(
+        rows,
+        selection.anchor ?? selection.focus ?? oid,
+        selection.anchorIndex ?? selection.focusIndex ?? index,
+      ),
     );
     return {
       focus: oid,
+      focusIndex: index,
       anchor: rows[anchor]!.oid,
+      anchorIndex: anchor,
       selected: rows.slice(Math.min(anchor, index), Math.max(anchor, index) + 1).map((r) => r.oid),
     };
   }
   if (mode === 'toggle')
     return {
       focus: oid,
+      focusIndex: index,
       anchor: oid,
+      anchorIndex: index,
       selected: selection.selected.includes(oid)
         ? selection.selected.filter((id) => id !== oid)
         : [...selection.selected, oid],
     };
-  return { focus: oid, anchor: oid, selected: [oid] };
+  return singleSelection(oid, index);
 }
+
+export function singleSelection(oid: string, index: number): Selection {
+  return { focus: oid, focusIndex: index, anchor: oid, anchorIndex: index, selected: [oid] };
+}
+// Loaded positions stay numeric. A parent or ref tip can require another page.
 export function navigationTarget(
   rows: readonly DisplayCommit[],
-  focus: string | undefined,
+  focused: number,
   key: string,
   shift: boolean,
-  head?: string,
-  upstream?: string,
-): string | undefined {
+  options: { pageRows?: number; hasMore?: boolean; head?: string; upstream?: string } = {},
+): number | string | undefined {
   if (!rows.length) return;
-  const index = Math.max(
-    0,
-    rows.findIndex((r) => r.oid === focus),
-  );
-  if (key.toLowerCase() === 'h') return shift ? upstream : head;
-  if (key === 'Home') return rows[0]!.oid;
-  if (key === 'End') return rows.at(-1)!.oid;
+  if (key.toLowerCase() === 'h') return shift ? options.upstream : options.head;
+  if (key === 'Home') return 0;
+  if (key === 'End') return rows.length - 1;
+  const index = Math.max(0, focused);
   if (shift && key === 'ArrowDown') return rows[index]!.parents[0];
-  if (shift && key === 'ArrowUp')
-    return rows.slice(0, index).findLast((r) => r.parents.includes(rows[index]!.oid))?.oid;
+  if (shift && key === 'ArrowUp') {
+    const parent = rows[index]!.oid;
+    for (let i = index - 1; i >= 0; i--) if (rows[i]!.parents.includes(parent)) return i;
+    return;
+  }
   const delta =
     key === 'ArrowDown'
       ? 1
       : key === 'ArrowUp'
         ? -1
         : key === 'PageDown'
-          ? 20
+          ? (options.pageRows ?? 1)
           : key === 'PageUp'
-            ? -20
+            ? -(options.pageRows ?? 1)
             : 0;
-  return delta ? rows[Math.max(0, Math.min(rows.length - 1, index + delta))]!.oid : undefined;
+  if (!delta) return;
+  const target = Math.max(0, index + delta);
+  return options.hasMore && focused >= 0 ? target : Math.min(rows.length - 1, target);
 }
 
 /** Excluded ref shortcuts must not page through an unrelated history looking for a missing tip. */
@@ -228,14 +283,18 @@ export function refNavigationTargets(snapshot: Snapshot, rows: readonly { oid: s
     view.soloRef ? name === view.soloRef : !view.hiddenRefs.includes(name);
   const headRef =
     head.kind === 'branch' ? snapshot.refs.find((r) => r.name === head.ref) : undefined;
-  const upstream = snapshot.refs.find((r) => r.name === headRef?.upstream?.ref);
+  const upstreamRef = headRef?.upstream?.ref;
+  const upstream = upstreamRef ? snapshot.refs.find((r) => r.name === upstreamRef) : undefined;
+  let upstreamCommit: string | undefined;
+  if (upstream?.objectType === 'commit') upstreamCommit = upstream.target;
+  else if (upstream?.peeledType === 'commit') upstreamCommit = upstream.peeled;
   const loaded = (oid?: string) => !!oid && rows.some((r) => r.oid === oid);
   return {
     head:
-      loaded(head.oid) || (head.kind === 'branch' ? visible(head.ref) : !view.soloRef)
+      (head.kind === 'branch' ? visible(head.ref) : !view.soloRef) || loaded(head.oid)
         ? head.oid
         : undefined,
     upstream:
-      upstream && (visible(upstream.name) || loaded(upstream.target)) ? upstream.target : undefined,
+      upstream && (visible(upstream.name) || loaded(upstreamCommit)) ? upstreamCommit : undefined,
   };
 }

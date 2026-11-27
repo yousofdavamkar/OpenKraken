@@ -1,6 +1,12 @@
 import { expect, test } from 'vitest';
 import { GraphEngine, type GraphDocument } from './src/engine.js';
-import { allocateLanes, emptyCheckpoint, patchPassages, passageBuckets } from './src/index.js';
+import {
+  allocateLanes,
+  emptyCheckpoint,
+  patchPassages,
+  passageBuckets,
+  refreshPassageBuckets,
+} from './src/index.js';
 import { rowSegments, paintGraph } from './src/canvas.js';
 const documents = (count: number): GraphDocument[] =>
   Array.from({ length: count }, (_, i) => ({
@@ -89,9 +95,86 @@ test('canvas work and pixel buffer are bounded by viewport, including DPR and pa
       nodes++;
     },
   } as unknown as CanvasRenderingContext2D;
-  paintGraph(context, rows, { width: 120, height: 560, scrollTop: 2807, dpr: 2 });
+  const inspected: number[] = [];
+  const hollow = 108;
+  const fills: (string | CanvasGradient | CanvasPattern)[] = [];
+  context.fill = () => {
+    fills.push(context.fillStyle);
+  };
+  const viewport = { width: 120, height: 560, scrollTop: 2807, dpr: 2 };
+  paintGraph(context, rows, {
+    ...viewport,
+    synthetic: (index) => {
+      inspected.push(index);
+      return index === hollow;
+    },
+  });
+  expect(inspected).toEqual(Array.from({ length: 21 }, (_, i) => 100 + i));
+  expect(fills[8]).toBe('#10151e');
+  const expected = fills.splice(0);
+  nodes = 0;
+  paintGraph(context, rows, { ...viewport, synthetic: new Set([rows[hollow]!.oid]) });
+  expect(fills).toEqual(expected);
   expect(nodes).toBe(21);
   expect(context.canvas).toMatchObject({ width: 240, height: 1120 });
+});
+
+test('a horizontally scrolled canvas clips passages before styling and keeps crossing edges', () => {
+  const rows = allocateLanes(documents(502), emptyCheckpoint(), true).rows;
+  rows[499]!.edges = [
+    { from: 0, to: 4, kind: 'branch-out', colorIndex: 0, dashed: false, target: '501' },
+  ];
+  rows[500]!.edges = [];
+  const strokes: number[][] = [];
+  const context = {
+    canvas: { width: 0, height: 0 },
+    setTransform() {},
+    translate() {},
+    clearRect() {},
+    setLineDash() {},
+    beginPath() {},
+    moveTo(x: number, y: number) {
+      strokes.push([x, y]);
+    },
+    lineTo(x: number, y: number) {
+      strokes.at(-1)!.push(x, y);
+    },
+    bezierCurveTo(_a: number, _b: number, _c: number, _d: number, x: number, y: number) {
+      strokes.at(-1)!.push(x, y);
+    },
+    stroke() {},
+    fill() {},
+    arc() {},
+  } as unknown as CanvasRenderingContext2D;
+  let offscreenStyles = 0;
+  const passages = [4, 3, 0, 2, 1].map((column) => ({
+    start: 499,
+    end: column === 2 ? 500 : 501,
+    column,
+    target: '501',
+    dashed: false,
+    get colorIndex() {
+      if (column === 0 || column === 4) offscreenStyles++;
+      return column;
+    },
+  }));
+  paintGraph(context, rows, {
+    width: 36,
+    height: 28,
+    scrollTop: 499 * 28 + 7,
+    scrollLeft: 36,
+    dpr: 2,
+    passages: passageBuckets(passages),
+  });
+  expect(strokes).toEqual([
+    [34, -7, 34, 21],
+    [54, -7, 54, 21],
+    [74, -7, 74, 21],
+    [14, 7, 94, 21],
+    [34, 21, 34, 49],
+    [74, 21, 74, 49],
+  ]);
+  expect(offscreenStyles).toBe(0);
 });
 
 test('pin reserves lane zero for the first-parent chain across pages and converging branches', () => {
@@ -116,6 +199,28 @@ test('pin reserves lane zero for the first-parent chain across pages and converg
   expect([...first.rows, ...second.rows]).toEqual(all.rows);
   expect(all.rows[4]?.edges.filter((e) => e.kind === 'end').map((e) => e.from)).toEqual([0, 1]);
   expect(all.checkpoint.lanes).toEqual([]);
+});
+
+test('appended merge parents reuse later holes before wrapping to earlier lanes', () => {
+  const parents = Array.from({ length: 32 }, (_, i) => String(i));
+  const first = allocateLanes(
+    [
+      { oid: 'merge', parents },
+      { oid: '1', parents: [] },
+      { oid: '28', parents: [] },
+    ],
+    emptyCheckpoint(),
+    true,
+  );
+  const next = allocateLanes(
+    [{ oid: '24', parents: ['main', 'right', 'left', 'new'] }],
+    first.checkpoint,
+    true,
+  );
+  expect(next.rows[0]!.edges.map((edge) => edge.to)).toEqual([24, 24, 28, 1, 32]);
+  expect(first.checkpoint.lanes).toHaveLength(32);
+  expect(first.checkpoint.lanes[1]).toBeNull();
+  expect(next.checkpoint.maxColumns).toBe(33);
 });
 
 test('refresh reuses a stable prefix and converged suffix, then appends from the right state', () => {
@@ -335,6 +440,33 @@ test('compact worker spans preserve graph geometry across append and checkpoint 
   expect(patchPassages(spans, 500, 750, 750, []).every((p) => p.end <= 500)).toBe(true);
 });
 
+test('appending passages preserves completed buckets and extends a split bucket immutably', () => {
+  const span = (start: number, end: number, column: number) => ({
+    start,
+    end,
+    column,
+    colorIndex: column,
+    dashed: false,
+    target: String(column),
+  });
+  const first = [span(1, 750, 1), span(510, 730, 2)];
+  const next = [span(750, 1002, 1), span(760, 1501, 2)];
+  const before = passageBuckets(first);
+  const after = passageBuckets(next, before);
+
+  expect(after).toEqual(passageBuckets([...first, ...next]));
+  expect(after[0]).toBe(before[0]);
+  expect(after[1]).not.toBe(before[1]);
+  expect(before).toEqual(passageBuckets(first));
+  expect(passageBuckets([], after)).toBe(after);
+  const replacement = [span(500, 1000, 3)];
+  const refreshed = refreshPassageBuckets(after, 500, 1000, 1210, replacement);
+  expect(refreshed).toEqual(
+    passageBuckets(patchPassages([...first, ...next], 500, 1000, 1210, replacement)),
+  );
+  expect(refreshPassageBuckets(refreshed, 0, 1, 1, [])).toEqual([]);
+});
+
 test('search flushes any remaining cooperative indexing batches after a reset', () => {
   const engine = new GraphEngine(true),
     commits = documents(100);
@@ -350,3 +482,35 @@ test('search flushes any remaining cooperative indexing batches after a reset', 
     oids: [],
   });
 });
+
+test.each([false, true])(
+  'patches one pending or indexed search document and keeps the append frontier (indexed=%s)',
+  (indexed) => {
+    const engine = new GraphEngine(true);
+    const commits = documents(3);
+    const generation = 'current';
+    engine.handle({ id: 1, generation, method: 'reset', offset: 0, commits: commits.slice(0, 2) });
+    if (indexed) engine.indexPending();
+    const document = {
+      oid: '0',
+      summary: 'Tracked changes',
+      body: 'renamed-path',
+      author: { name: 'New author', email: '' },
+    };
+    const patch = { id: 2, generation, method: 'updateSearchDocument' as const, document };
+    expect(engine.handle({ ...patch, generation: 'expired' }).kind).toBe('error');
+    expect(engine.handle({ ...patch, document: { ...document, oid: 'missing' } }).kind).toBe(
+      'error',
+    );
+    expect(engine.handle(patch)).toMatchObject({ kind: 'documentUpdated', oid: '0' });
+    expect(engine.handle({ id: 3, generation, method: 'search', query: 'renamed' })).toMatchObject({
+      oids: ['0'],
+    });
+    expect(engine.handle({ id: 4, generation, method: 'search', query: 'Zoë' })).toMatchObject({
+      oids: ['1'],
+    });
+    expect(
+      engine.handle({ id: 5, generation, method: 'append', offset: 2, commits: commits.slice(2) }),
+    ).toMatchObject({ kind: 'layout', offset: 2 });
+  },
+);

@@ -1,8 +1,11 @@
-import { snapshotPartSchema, type Ref, type ServiceResult } from '@openkraken/ipc-contract';
+import { snapshotPartSchema, type ServiceResult } from '@openkraken/ipc-contract';
 
 /** Main keeps the validated refs private until the same opening supplies its complete snapshot. */
 export class SnapshotTransfer {
-  private refs?: (string | Ref)[];
+  private references?: Exclude<
+    ReturnType<typeof snapshotPartSchema.parse>,
+    { snapshotPart: 'complete' }
+  >;
   private receivedRefs = false;
   constructor(
     readonly id: string,
@@ -16,20 +19,24 @@ export class SnapshotTransfer {
   }): ServiceResult | undefined {
     if (message.id !== this.id || message.transferId !== this.transferId) return;
     const part = snapshotPartSchema.safeParse(message);
-    if (message.snapshotPart === 'refs') {
-      this.refs =
-        !this.receivedRefs && part.success && part.data.snapshotPart === 'refs'
-          ? part.data.refs
+    if (message.snapshotPart === 'refs' || message.snapshotPart === 'tagAliases') {
+      this.references =
+        !this.receivedRefs && part.success && part.data.snapshotPart !== 'complete'
+          ? part.data
           : undefined;
       this.receivedRefs = true;
       return;
     }
+    const references = this.references;
     if (
       part.success &&
       part.data.snapshotPart === 'complete' &&
-      this.refs?.length === part.data.refCount
+      references?.refs.length === part.data.refCount
     ) {
-      return { kind: 'compactSnapshot', snapshot: { ...part.data.snapshot, refs: this.refs } };
+      return {
+        kind: references.snapshotPart === 'tagAliases' ? 'tagAliasSnapshot' : 'compactSnapshot',
+        snapshot: { ...part.data.snapshot, refs: references.refs },
+      };
     }
     return {
       kind: 'error',

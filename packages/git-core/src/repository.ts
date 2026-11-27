@@ -4,7 +4,7 @@ import { lfsState } from './lfs.js';
 import { LfsSetup, type LfsSetupPlan } from './lfs-setup.js';
 import type { ProviderGitTarget, ProviderRemoteAuthorization } from '@openkraken/ipc-contract';
 import { createHash } from 'node:crypto';
-import { access, readdir, realpath, readFile, stat } from 'node:fs/promises';
+import { access, readdir, realpath, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
   Commit,
@@ -36,12 +36,13 @@ import type {
   WorktreeAction,
   GraphView,
   Repository,
+  Ref,
   Snapshot,
 } from '@openkraken/ipc-contract';
 import { GitError, runGit, type RunOptions } from './runner.js';
-import { HistoryParser, StatusParser, HISTORY_FORMAT } from './parsers.js';
-import { hasRepeatedPackedTargets, ReferenceReader } from './reference-reader.js';
-import { HistoryCache } from './history-cache.js';
+import { rawHistoryStream, StatusParser } from './parsers.js';
+import { samplePackedRefs, ReferenceReader, type PackedRefSample } from './reference-reader.js';
+import { HistoryCache, historyCacheKey, historyMetadataFingerprint } from './history-cache.js';
 import { RepositoryPreferences } from './preferences.js';
 import { HistoryCursor } from './history.js';
 import { Remotes, transportError } from './remotes.js';
@@ -345,29 +346,48 @@ export class RepositoryService {
     return this.queue(known.commonDir).run(
       false,
       async () => {
-        const [view, grouped] = await Promise.all([
+        this.cache?.stopReadingTails();
+        const [view, packedRefs] = await Promise.all([
           requestedView ?? this.preferences.load(id),
-          hasRepeatedPackedTargets(known.commonDir),
+          samplePackedRefs(known.commonDir),
         ]);
         const repository = refresh ? await this.open(known.path, signal) : known;
         const stop = new AbortController();
         const readSignal = signal ? AbortSignal.any([signal, stop.signal]) : stop.signal;
-        const refRead = this.referenceReader.read(repository.path, readSignal, grouped);
+        const probeStop = new AbortController();
+        const preferLive = !refresh && this.preferLiveHistory(repository);
+        let prefetch: Promise<HistoryCursor | undefined> | undefined;
+        const refRead = this.referenceReader.read(
+          repository.path,
+          readSignal,
+          packedRefs,
+          (objects) => {
+            if (preferLive)
+              prefetch = this.prefetchHistory(
+                repository,
+                view,
+                packedRefs,
+                preferLive,
+                AbortSignal.any([readSignal, probeStop.signal]),
+                objects,
+              ).catch(() => undefined);
+          },
+        );
         const worktreeRead = exists(join(repository.commonDir, 'worktrees')).then((present) =>
           present ? this.worktreeManager(id).manager.list(readSignal) : undefined,
         );
         const statusRead = this.readSnapshotStatus(repository, readSignal, observe?.status);
         const cacheReads = this.cacheFingerprintReads(repository, readSignal);
-        const cacheFlush = this.cache?.flush();
-        const probeStop = new AbortController();
-        const prefetch = refresh
-          ? Promise.resolve(undefined)
-          : this.prefetchHistory(
-              repository,
-              view,
-              grouped,
-              AbortSignal.any([readSignal, probeStop.signal]),
-            ).catch(() => undefined);
+        // On startup there is no outgoing cache writer. Check the file while Git reads refs,
+        // then compare its stamp and the snapshot fingerprint before adopting any commits.
+        const dataDir = this.dataDir;
+        const earlyPrefix =
+          preferLive && !this.cache && cacheReads.length && dataDir
+            ? preferLive.then((live) =>
+                live ? undefined : HistoryCache.prefetchPrefix(dataDir, repository.id, readSignal),
+              )
+            : undefined;
+        const cacheFlush = this.cache?.flushBeforeSnapshot(readSignal);
         const graphRead = Promise.all([refRead, worktreeRead, Promise.all(cacheReads)]).then(
           async ([refs, worktrees, cacheInputs]) => {
             // The normal snapshot can start now. Only reuse a walk already in progress.
@@ -382,6 +402,7 @@ export class RepositoryService {
               cacheFlush,
               readSignal,
               await prefetch,
+              earlyPrefix,
             );
           },
         );
@@ -464,42 +485,56 @@ export class RepositoryService {
       this.text(repository.path, ['--version'], signal),
       this.text(repository.path, ['config', '--null', '--list'], signal),
       ...['shallow', 'info/grafts', 'objects/info/alternates'].map((p) =>
-        readFile(join(repository.commonDir, p))
-          .then((b) => b.toString('base64'))
-          .catch(() => ''),
+        historyMetadataFingerprint(join(repository.commonDir, p), signal),
       ),
       ...['objects/info/commit-graph', 'objects/info/commit-graphs/commit-graph-chain'].map((p) =>
         stat(join(repository.commonDir, p))
-          .then((s) => `${s.size}:${s.mtimeMs}`)
-          .catch(() => ''),
+          .then((s) => (s.isFile() ? `${s.size}:${s.mtimeMs}` : undefined))
+          .catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? '' : undefined)),
       ),
     ];
+  }
+  // These filesystem hints only schedule work. The cache key and the ordered
+  // roots from Git still determine which history the service can publish.
+  private async preferLiveHistory(repository: Repository) {
+    const packed = await stat(join(repository.commonDir, 'packed-refs')).catch(() => undefined);
+    if (!packed || packed.size < 512 * 1024) return false;
+    if (!this.dataDir) return true;
+    const savedAt = await HistoryCache.prefixModifiedAt(this.dataDir, repository.id);
+    if (savedAt === undefined || packed.mtimeMs > savedAt) return true;
+    const paths = [join(repository.gitDir, 'HEAD')];
+    const head = repository.head;
+    if (head.kind === 'branch' && head.ref.startsWith('refs/heads/'))
+      paths.push(join(repository.commonDir, head.ref));
+    const heads = await Promise.all(paths.map((path) => stat(path).catch(() => undefined)));
+    return heads.some((info) => info && info.mtimeMs > savedAt);
   }
   private async prefetchHistory(
     repository: Repository,
     view: GraphView,
-    grouped: boolean,
+    sample: PackedRefSample,
+    preferLive: Promise<boolean>,
     signal: AbortSignal,
+    objects?: ReadonlyMap<string, Ref>,
   ) {
     if (
-      (grouped && !view.soloRef && view.hiddenRefs.length > 0) ||
+      (sample.repeatedTargets && !view.soloRef && view.hiddenRefs.length > 0) ||
       repository.isShallow ||
       process.env.GIT_REPLACE_REF_BASE !== undefined ||
       process.env.GIT_SHALLOW_FILE !== undefined ||
       process.env.GIT_GRAFT_FILE !== undefined
     )
       return;
-    // File size is only a scheduling hint. Git supplies every tentative root.
-    const packed = await stat(join(repository.commonDir, 'packed-refs')).catch(() => undefined);
-    if (!packed || packed.size < 512 * 1024) return;
-    if (
-      (await exists(join(repository.commonDir, 'info/grafts'))) ||
-      (this.dataDir && (await HistoryCache.hasPrefix(this.dataDir, repository.id)))
-    )
-      return;
+    if (!(await preferLive) || (await exists(join(repository.commonDir, 'info/grafts')))) return;
     if (signal.aborted) return;
     const head = repository.head;
-    if (head.kind === 'branch' && head.oid && view.soloRef === head.ref)
+    const unfiltered = !view.soloRef && view.hiddenRefs.length === 0;
+    // Only the native snapshot can confirm that no loose or later packed ref adds a root.
+    if (
+      head.oid &&
+      ((head.kind === 'branch' && view.soloRef === head.ref) ||
+        (unfiltered && sample.singleTarget === head.oid))
+    )
       return new HistoryCursor(
         this.git,
         repository.path,
@@ -508,31 +543,37 @@ export class RepositoryService {
         undefined,
         FIRST_PAGE_SIZE,
       );
-    const filtered = !!view.soloRef || view.hiddenRefs.length > 0;
-    const args = filtered
-      ? [
-          'for-each-ref',
-          '--format=%(objectname) %(refname)',
-          ...(view.soloRef ? ['--', view.soloRef] : []),
-        ]
-      : ['rev-parse', '--all'];
-    const { stdout } = await this.run(args, {
-      cwd: repository.path,
-      signal,
-      maxBytes: 8 * 1024 * 1024,
-    });
-    if (signal.aborted) return;
     const isVisible = graphRefVisibility(view);
     const starts = new Set<string>();
-    const lines = stdout.toString('utf8').split('\n');
-    if (lines.pop() !== '') return;
-    for (const line of lines) {
-      const separator = filtered ? line.indexOf(' ') : -1;
-      if (filtered && separator === -1) return;
-      if (filtered && !isVisible(line.slice(separator + 1))) continue;
-      starts.add(filtered ? line.slice(0, separator) : line);
+    if (unfiltered && objects) {
+      for (const ref of objects.values()) {
+        if (ref.objectType === 'commit') starts.add(ref.target);
+        else if (ref.peeledType === 'commit' && ref.peeled) starts.add(ref.peeled);
+      }
+    } else {
+      const args = unfiltered
+        ? ['rev-parse', '--all']
+        : [
+            'for-each-ref',
+            '--format=%(objectname) %(refname)',
+            ...(view.soloRef ? ['--', view.soloRef] : []),
+          ];
+      const { stdout } = await this.run(args, {
+        cwd: repository.path,
+        signal,
+        maxBytes: 8 * 1024 * 1024,
+      });
+      if (signal.aborted) return;
+      const lines = stdout.toString('utf8').split('\n');
+      if (lines.pop() !== '') return;
+      for (const line of lines) {
+        const separator = unfiltered ? -1 : line.indexOf(' ');
+        if (!unfiltered && separator === -1) return;
+        if (!unfiltered && !isVisible(line.slice(separator + 1))) continue;
+        starts.add(unfiltered ? line : line.slice(0, separator));
+      }
+      for (const oid of starts) if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid)) return;
     }
-    for (const oid of starts) if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid)) return;
     addVisibleHead(starts, head, view, isVisible);
     return new HistoryCursor(
       this.git,
@@ -548,10 +589,11 @@ export class RepositoryService {
     view: GraphView,
     refs: Snapshot['refs'],
     worktrees: Snapshot['worktrees'],
-    cacheInputs: string[],
+    cacheInputs: (string | undefined)[],
     cacheFlush: Promise<void> | undefined,
     signal: AbortSignal,
     candidate?: HistoryCursor,
+    earlyPrefix?: ReturnType<typeof HistoryCache.prefetchPrefix>,
   ) {
     // Keep missing ref preferences: a deleted solo ref must not silently reveal all history.
     const isVisible = graphRefVisibility(view);
@@ -579,8 +621,8 @@ export class RepositoryService {
     // Walk stash bases with normal history, but hide index/untracked parents.
     let stashCommits: Commit[] = [];
     if (hasStash) {
-      const stashes = new HistoryParser();
-      await this.run(['log', '-g', '--max-count=200', `--format=${HISTORY_FORMAT}`, 'refs/stash'], {
+      const { parser: stashes, formatArgs } = rawHistoryStream('log');
+      await this.run(['log', '-g', '--max-count=200', ...formatArgs, 'refs/stash'], {
         cwd: repository.path,
         signal,
         onStdout: (b) => stashes.push(b),
@@ -592,33 +634,26 @@ export class RepositoryService {
     }
     // The previous cache may be writing this prefix or trimming other repositories.
     await cacheFlush;
+    if (signal.aborted) throw new GitError('CANCELLED', 'Snapshot loading cancelled');
+    const ordered = [...starts];
     let cache: HistoryCache | undefined;
-    if (this.dataDir && cacheInputs.length) {
-      const [version, config, ...metadata] = cacheInputs;
-      const key = createHash('sha256')
-        .update(
-          JSON.stringify({
-            format: 2,
-            version,
-            config,
-            metadata,
-            starts: [...starts],
-            stashes: stashCommits.map((c) => c.oid),
-            replacements: refs.filter((r) => r.name.startsWith('refs/replace/')),
-          }),
-        )
-        .digest('hex');
+    if (this.dataDir && cacheInputs.length && !cacheInputs.includes(undefined)) {
+      const key = historyCacheKey(
+        cacheInputs,
+        ordered,
+        stashCommits.map((c) => c.oid),
+        refs.filter((r) => r.name.startsWith('refs/replace/')),
+      );
       cache = new HistoryCache(this.dataDir, repository.id, key);
     }
-    const seed = await cache?.load();
-    const ordered = [...starts];
+    const seed = await cache?.load(signal, earlyPrefix);
+    if (signal.aborted) throw new GitError('CANCELLED', 'Snapshot loading cancelled');
     if (candidate) {
       if (
         !seed &&
         !hasStash &&
         !refs.some((ref) => ref.name.startsWith('refs/replace/')) &&
-        candidate.starts.length === ordered.length &&
-        ordered.every((oid, i) => candidate.starts[i] === oid) &&
+        candidate.confirmRoots(ordered, refs) &&
         !(await exists(join(repository.commonDir, 'shallow'))) &&
         !(await exists(join(repository.commonDir, 'info/grafts')))
       ) {
@@ -662,12 +697,18 @@ export class RepositoryService {
       [0, 1],
     );
   }
-  async search(id: string, cursor: string, query: string, signal?: AbortSignal) {
-    const history = this.history(id, cursor);
-    const repo = this.repositories.get(id)!;
+  private async searchMessagesAndAuthors(
+    path: string,
+    starts: readonly string[],
+    query: string,
+    signal?: AbortSignal,
+  ) {
+    const stop = new AbortController();
+    const scanSignal = signal ? AbortSignal.any([signal, stop.signal]) : stop.signal;
+    const roots = starts.join('\n') + '\n';
     const find = async (filter: string) => {
-      const parser = new HistoryParser();
-      if (history.starts.length)
+      const { parser, formatArgs } = rawHistoryStream('log');
+      if (starts.length)
         await this.run(
           [
             'log',
@@ -676,22 +717,37 @@ export class RepositoryService {
             '--regexp-ignore-case',
             '--fixed-strings',
             filter,
-            `--format=${HISTORY_FORMAT}`,
+            ...formatArgs,
             '--stdin',
           ],
           {
-            cwd: repo.path,
-            signal,
-            stdin: history.starts.join('\n') + '\n',
+            cwd: path,
+            signal: scanSignal,
+            timeoutMs: 120_000,
+            stdin: roots,
             onStdout: (b) => parser.push(b),
           },
         );
       return parser.finish();
     };
-    const [messages, authors] = await Promise.all([
-      find(`--grep=${query}`),
-      find(`--author=${query}`),
-    ]);
+    const scans = [find(`--grep=${query}`), find(`--author=${query}`)] as const;
+    try {
+      return await Promise.all(scans);
+    } catch (error) {
+      stop.abort();
+      await Promise.allSettled(scans);
+      throw error;
+    }
+  }
+  async search(id: string, cursor: string, query: string, signal?: AbortSignal) {
+    const history = this.history(id, cursor);
+    const repo = this.repositories.get(id)!;
+    const [messages, authors] = await this.searchMessagesAndAuthors(
+      repo.path,
+      history.starts,
+      query,
+      signal,
+    );
     const queryLower = query.toLocaleLowerCase();
     const stashes = history.stashes.filter((c) =>
       [c.body, c.author.name, c.author.email].some((value) =>
@@ -715,8 +771,8 @@ export class RepositoryService {
         reachable = remaining.stdout.length === 0;
       }
       if (reachable && !exact) {
-        const parser = new HistoryParser();
-        await this.run(['log', '-1', `--format=${HISTORY_FORMAT}`, resolved, '--'], {
+        const { parser, formatArgs } = rawHistoryStream('log');
+        await this.run(['log', '-1', ...formatArgs, resolved, '--'], {
           cwd: repo.path,
           signal,
           onStdout: (b) => parser.push(b),
@@ -1343,6 +1399,7 @@ export class RepositoryService {
     return this.queue(work.repo.commonDir).run(true, () => work.undo(redo, signal), signal);
   }
   async dispose() {
+    this.cache?.stopReadingTails();
     this.worktreePrunes.clear();
     this.submoduleUpdates.clear();
     this.submoduleSyncPlans.clear();

@@ -7,7 +7,9 @@ import { getCurrentFuseWire, FuseV1Options, FuseState } from '@electron/fuses';
 import { readWindowsPayloadAccess } from './windows-payload.mjs';
 
 const require = createRequire(import.meta.url);
-const { extractFile } = createRequire(require.resolve('@electron/packager'))('@electron/asar');
+const { extractFile, listPackage, statFile } = createRequire(require.resolve('@electron/packager'))(
+  '@electron/asar',
+);
 
 // The locked Electron npm package publishes the checksums for its release archives.
 export function pinnedElectronRuntime() {
@@ -51,6 +53,32 @@ export function verifyPackagedApplication(directory, version, claimedSource) {
   )
     throw new Error('Packaged application source differs from installer manifest');
   return source ? { commit: source.commit, dirty: source.dirty } : null;
+}
+
+export async function verifyAsarUnpackedFile(resources, name, { allowMissing = false } = {}) {
+  const archive = join(resources, 'app.asar');
+  const path = join(resources, 'app.asar.unpacked', name);
+  const info = await lstat(path).catch((error) => {
+    if (allowMissing && error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (!info) {
+    const listed = listPackage(archive).some(
+      (entry) => entry.replaceAll('\\', '/').replace(/^\//, '') === name,
+    );
+    if (listed) throw new Error('Missing unpacked file listed in ASAR: ' + name);
+    return false;
+  }
+  const entry = statFile(archive, name);
+  if (
+    !entry.unpacked ||
+    !info.isFile() ||
+    entry.size !== info.size ||
+    entry.integrity?.algorithm !== 'SHA256' ||
+    entry.integrity.hash !== (await sha256(path))
+  )
+    throw new Error('Unpacked file differs from its ASAR integrity record: ' + name);
+  return true;
 }
 
 export const packageFuses = {

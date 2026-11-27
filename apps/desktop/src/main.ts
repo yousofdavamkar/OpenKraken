@@ -1,11 +1,13 @@
+import { MergeDrafts } from './merge-drafts.js';
 import { PullDrafts } from './pull-drafts.js';
 import { IssueDrafts } from './issue-drafts.js';
 import { ReviewDrafts } from './review-drafts.js';
 import { ActivityLog } from './activity-log.js';
-import { Diagnostics } from './diagnostics.js';
+import type { Diagnostics } from './diagnostics.js';
 import { installTimeoutMs, Updates } from './updates.js';
 import type { UpdateConfiguration } from './update-protocol.js';
-import { mkdirSync } from 'node:fs';
+import { pendingAppImageStartup } from './appimage-install.js';
+import { watchAppImageStartup } from './appimage-startup.js';
 import { appImageTarget } from './appimage-target.js';
 import {
   prepareUpdateRestart,
@@ -21,7 +23,7 @@ import { CommandMenu } from './command-menu.js';
 import { TerminalHost } from './terminal-host.js';
 import { AppSettings } from './app-settings.js';
 import { RepositoryTabStore } from './repository-tabs.js';
-import { CrashReports } from './crash-reports.js';
+import type { CrashReports } from './crash-reports.js';
 import { BitbucketProvider } from './bitbucket-provider.js';
 import {
   app,
@@ -82,7 +84,6 @@ import {
   electronSecretProtection,
 } from './provider-vault.js';
 const htmlPath = join(__dirname, 'renderer', 'index.html');
-declare const __OPENKRAKEN_SENTRY_DSN__: string | null;
 declare const __OPENKRAKEN_UPDATE_CONFIG__: UpdateConfiguration | null;
 let updates: Updates | undefined;
 let updateHandoff = false;
@@ -297,7 +298,9 @@ function callService(request: ServiceRequest, signal?: AbortSignal): Promise<Ser
           kind: 'error',
           code: 'SERVICE_TIMEOUT',
           message:
-            'The Git service did not respond in time. The operation may have partially completed. Inspect the repository or remote before retrying.',
+            request.method === 'search'
+              ? 'Full-history search timed out.'
+              : 'The Git service did not respond in time. The operation may have partially completed. Inspect the repository or remote before retrying.',
         });
       },
       request.method === 'clone' || request.method === 'resolveConflict'
@@ -307,6 +310,7 @@ function callService(request: ServiceRequest, signal?: AbortSignal): Promise<Ser
           : [
                 'fetch',
                 'pushPreview',
+                'search',
                 'push',
                 'deleteRemote',
                 'deleteRemotePreview',
@@ -342,7 +346,7 @@ function rendererFailure(reason: string) {
   diagnostics?.failure('renderer', reason);
   void crashReports?.capture('renderer', reason);
 }
-function createWindow() {
+function createWindow(checkEntry = false) {
   window = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -351,6 +355,10 @@ function createWindow() {
     title: 'OpenKraken',
     backgroundColor: nativeBackground(),
     webPreferences: { ...windowPreferences, preload: join(__dirname, 'preload.cjs') },
+  });
+  let closing = false;
+  window.on('close', () => {
+    closing = true;
   });
   commandMenu = new CommandMenu(window);
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -370,13 +378,16 @@ function createWindow() {
       nativeDrafts?.detach(true);
       void workingFileDrafts?.close(undefined, true).catch(() => {});
       event.preventDefault();
-    } else if (updateHandoff) {
-      installOnQuit = false;
-      void cancelPreparedRestart()
-        .then(() => updates?.abandonInstall())
-        .finally(() => {
-          updateHandoff = false;
-        });
+    } else {
+      closing = false;
+      if (updateHandoff) {
+        installOnQuit = false;
+        void cancelPreparedRestart()
+          .then(() => updates?.abandonInstall())
+          .finally(() => {
+            updateHandoff = false;
+          });
+      }
     }
   });
   const cancelProviderSignIn = () => {
@@ -408,50 +419,34 @@ function createWindow() {
     providers?.deviceCancel();
     providers?.gitlabCancel();
   });
-  void window.loadFile(htmlPath);
+  const opening = window;
+  return opening
+    .loadFile(htmlPath)
+    .then(async () => {
+      if (!checkEntry || closing || opening.isDestroyed()) return;
+      // A missing module or failed static import still lets Chromium finish loading the HTML.
+      const evaluated = await opening.webContents.executeJavaScriptInIsolatedWorld(1001, [
+        { code: 'document.querySelector("#root[data-openkraken-entry-loaded]") !== null' },
+      ]);
+      if (!evaluated) throw new Error('The renderer entry module did not start');
+    })
+    .catch((error: unknown) => {
+      // Closing or reloading the window can cancel its original navigation.
+      if (
+        !closing &&
+        !opening.isDestroyed() &&
+        (error as NodeJS.ErrnoException)?.code !== 'ERR_ABORTED'
+      )
+        throw error;
+    });
 }
-if (
-  __OPENKRAKEN_UPDATE_CONFIG__?.channel === 'beta' &&
-  !app.commandLine.hasSwitch('user-data-dir')
+export function startDesktop(
+  reports: CrashReports,
+  reportingReady: Promise<void>,
+  log: Diagnostics,
 ) {
-  const profile = join(app.getPath('appData'), 'OpenKraken Beta');
-  mkdirSync(profile, { recursive: true, mode: 0o700 });
-  app.setPath('userData', profile);
-  app.setPath('sessionData', profile);
-}
-if (!app.requestSingleInstanceLock()) app.quit();
-else {
-  const profile = app.getPath('userData');
-  const runtime = { version: app.getVersion(), platform: process.platform, arch: process.arch };
-  crashReports = new CrashReports(profile, __OPENKRAKEN_SENTRY_DSN__, runtime);
-  const reportingReady = crashReports.start();
-  // Observe failures without replacing Node/Electron's exception handling or
-  // inspecting the error object. Fatal exits are recovered through the marker.
-  process.on('uncaughtExceptionMonitor', (_error, origin) => {
-    diagnostics?.failure(
-      'main',
-      origin === 'unhandledRejection' ? 'unhandled-rejection' : 'unhandled-exception',
-    );
-    void crashReports?.capture(
-      'main',
-      origin === 'unhandledRejection' ? 'unhandled-rejection' : 'unhandled-exception',
-    );
-  });
-  app.on('child-process-gone', (_event, details) => {
-    const kind =
-      details.name === 'OpenKraken Git'
-        ? 'git'
-        : details.name === 'OpenKraken Terminal'
-          ? 'terminal'
-          : details.type === 'GPU'
-            ? 'gpu'
-            : null;
-    if (kind) {
-      diagnostics?.failure(kind, details.reason);
-      void crashReports?.capture(kind, details.reason);
-    }
-  });
-  diagnostics = new Diagnostics(join(profile, 'diagnostics'), runtime);
+  crashReports = reports;
+  diagnostics = log;
   // macOS may deliver a URL before ready. No path is opened until renderer consent.
   app.on('open-url', (event, url) => {
     event.preventDefault();
@@ -463,7 +458,9 @@ else {
     for (const argument of commandLine) repositoryLinks.receive(argument);
     focusForLink();
   });
-  app.whenReady().then(async () => {
+  let finishStartupWatch: (() => void) | undefined;
+  let closingUnconfirmedStartup = false;
+  const ready = app.whenReady().then(async () => {
     const target = await appImageTarget({
       packaged: app.isPackaged,
       platform: process.platform,
@@ -478,6 +475,36 @@ else {
       arch: process.arch,
       ...(target ? { appImage: target } : {}),
     });
+    if (target) {
+      finishStartupWatch = watchAppImageStartup(
+        () => pendingAppImageStartup(target, app.getVersion()),
+        async (signal) => {
+          const options: Electron.MessageBoxOptions = {
+            type: 'question',
+            title: 'OpenKraken update',
+            message: 'The updated desktop is taking longer than usual to open.',
+            detail:
+              'You can keep waiting or close this launch to let the updater check for recovery.',
+            buttons: ['&Keep waiting', '&Close OpenKraken'],
+            normalizeAccessKeys: true,
+            defaultId: 0,
+            cancelId: 0,
+            signal,
+          };
+          const { response } =
+            window && !window.isDestroyed()
+              ? await dialog.showMessageBox(window, options)
+              : await dialog.showMessageBox(options);
+          return response === 1;
+        },
+        () => {
+          // The user closed an unconfirmed startup whose renderer may not process a close event.
+          closingUnconfirmedStartup = true;
+          if (window && !window.isDestroyed()) window.destroy();
+          else app.quit();
+        },
+      );
+    }
     await reportingReady;
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) =>
       callback(false),
@@ -489,8 +516,11 @@ else {
       });
     });
     const executeRequest = async (request: DesktopRequest): Promise<ServiceResult> => {
-      if (request.method === 'updatesStarted')
+      if (request.method === 'updatesStarted') {
+        if (closingUnconfirmedStartup) return { kind: 'cancelled' };
+        finishStartupWatch?.();
         return { kind: 'updates', state: updatesStateSchema.parse(await updates!.started()) };
+      }
       if (request.method === 'updatesDismissRecovery') {
         try {
           return {
@@ -919,6 +949,8 @@ else {
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
           request.method === 'providerBitbucketPullRequest' ||
+          request.method === 'providerBitbucketPullMergeability' ||
+          request.method === 'providerBitbucketPullStatuses' ||
           request.method === 'providerBitbucketPullComments' ||
           request.method === 'providerBitbucketPullFiles' ||
           request.method === 'providerBitbucketPullDiff' ||
@@ -941,7 +973,12 @@ else {
           request.method === 'providerWriteMergeDiscussion' ||
           request.method === 'providerBitbucketWorkspaces' ||
           request.method === 'providerBitbucketRepositories' ||
+          request.method === 'providerInspectRepository' ||
+          request.method === 'providerCreateRepository' ||
           request.method === 'providerRepositories' ||
+          request.method === 'mergeDraftRead' ||
+          request.method === 'mergeDraftSave' ||
+          request.method === 'mergeDraftList' ||
           request.method === 'pullDraftRead' ||
           request.method === 'pullDraftSave' ||
           request.method === 'pullDraftList' ||
@@ -969,6 +1006,16 @@ else {
           const controller = new AbortController();
           providerRequests.set(request.id, controller);
 
+          if (
+            request.method === 'mergeDraftRead' ||
+            request.method === 'mergeDraftSave' ||
+            request.method === 'mergeDraftList'
+          ) {
+            return await providers.mergeDraft(
+              new MergeDrafts(app.getPath('userData'), electronSecretProtection(safeStorage)),
+              request,
+            );
+          }
           if (
             request.method === 'pullDraftRead' ||
             request.method === 'pullDraftSave' ||
@@ -1204,6 +1251,24 @@ else {
                 controller.signal,
               ),
             });
+          if (request.method === 'providerBitbucketPullMergeability')
+            return resultSchema.parse({
+              kind: 'providerBitbucketPullMergeability',
+              checks: await providers.bitbucketPullMergeability(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerBitbucketPullStatuses')
+            return resultSchema.parse({
+              kind: 'providerBitbucketPullStatuses',
+              page: await providers.bitbucketPullStatuses(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerBitbucketPullComments')
             return resultSchema.parse({
               kind: 'providerBitbucketPullComments',
@@ -1393,6 +1458,24 @@ else {
                 controller.signal,
               ),
             });
+          if (request.method === 'providerInspectRepository')
+            return resultSchema.parse({
+              kind: 'providerRepositoryFound',
+              repository: await providers.inspectRepository(
+                request.accountId,
+                request.target,
+                controller.signal,
+              ),
+            });
+          if (request.method === 'providerCreateRepository')
+            return resultSchema.parse({
+              kind: 'providerRepositoryCreated',
+              repository: await providers.createRepository(
+                request.accountId,
+                request.options,
+                controller.signal,
+              ),
+            });
           if (request.method === 'providerRepositories')
             return resultSchema.parse({
               kind: 'providerRepositories',
@@ -1550,6 +1633,8 @@ else {
           request.method === 'providerPullRequests' ||
           request.method === 'providerPullRequest' ||
           request.method === 'providerBitbucketPullRequest' ||
+          request.method === 'providerBitbucketPullMergeability' ||
+          request.method === 'providerBitbucketPullStatuses' ||
           request.method === 'providerBitbucketPullComments' ||
           request.method === 'providerBitbucketPullFiles' ||
           request.method === 'providerBitbucketPullDiff' ||
@@ -1572,7 +1657,12 @@ else {
           request.method === 'providerWriteMergeDiscussion' ||
           request.method === 'providerBitbucketWorkspaces' ||
           request.method === 'providerBitbucketRepositories' ||
+          request.method === 'providerInspectRepository' ||
+          request.method === 'providerCreateRepository' ||
           request.method === 'providerRepositories' ||
+          request.method === 'mergeDraftRead' ||
+          request.method === 'mergeDraftSave' ||
+          request.method === 'mergeDraftList' ||
           request.method === 'pullDraftRead' ||
           request.method === 'pullDraftSave' ||
           request.method === 'pullDraftList' ||
@@ -1625,6 +1715,7 @@ else {
         providerRequests.delete(request.id);
       }
     };
+    let firstMountPending = true;
     const handleRequest = async (request: DesktopRequest): Promise<ServiceResult> => {
       if (
         updateHandoff &&
@@ -1635,6 +1726,7 @@ else {
           'reviewDraftSave',
           'issueDraftSave',
           'pullDraftSave',
+          'mergeDraftSave',
           'nativeDraftWrite',
           'nativeDraftDismiss',
           'workingDraftWrite',
@@ -1658,8 +1750,11 @@ else {
         return executeRequest(request);
       if (inFlight.has(request.id))
         return { kind: 'error', code: 'DUPLICATE_REQUEST', message: 'Request is already running' };
-      if (inFlight.size >= 8)
+      // A mounted desktop must be able to acknowledge startup even if every ordinary slot is busy.
+      const firstMount = firstMountPending && request.method === 'updatesStarted';
+      if (inFlight.size >= 8 && !firstMount)
         return { kind: 'error', code: 'BUSY', message: 'Too many pending operations' };
+      if (firstMount) firstMountPending = false;
       inFlight.add(request.id);
       try {
         return await activity!.track(request, () => executeRequest(request));
@@ -1679,7 +1774,11 @@ else {
         const request = requestSchema.parse(raw);
         validateResponseFormat(format, request.method);
         const result = await diagnostics!.track(request, () => handleRequest(request));
-        if (result.kind === 'snapshot' || result.kind === 'compactSnapshot') {
+        if (
+          result.kind === 'snapshot' ||
+          result.kind === 'compactSnapshot' ||
+          result.kind === 'tagAliasSnapshot'
+        ) {
           terminalRepository = result.snapshot.repository;
           draftRepositories.delete(result.snapshot.repository.id);
           draftRepositories.set(result.snapshot.repository.id, result.snapshot.repository);
@@ -1697,7 +1796,10 @@ else {
         // Serialize after validation and before both renderer IPC and isolated-world copying.
         if (format === 'history-page' && result.kind === 'page') return encodeHistoryPage(result);
         if (format === 'snapshot-bodies') return encodeSnapshotBodies(result);
-        if (format === 'snapshot-transfer') return JSON.stringify(result);
+        if (format === 'snapshot-transfer')
+          return JSON.stringify(
+            result.kind === 'tagAliasSnapshot' ? expandGitServiceResult(result) : result,
+          );
         if (format === 'snapshot-json') return serializeLegacySnapshot(result);
         const expanded = expandGitServiceResult(result);
         return format === 'json' ? JSON.stringify(expanded) : expanded;
@@ -1720,14 +1822,17 @@ else {
         window.webContents.send(EVENT_CHANNEL, { type: 'activityChanged', completed });
     });
     await activity.read();
+    if (closingUnconfirmedStartup || quitState !== 'running') return;
     startService();
     // Native installers own protocol registration and its uninstall lifecycle.
     // Launching an extracted/portable bundle must not leave a stale registry command.
     windowsReady = true;
-    createWindow();
+    const loaded = createWindow(true);
+    if (finishStartupWatch) window!.once('closed', finishStartupWatch);
     app.on('activate', () => {
       if (!window) createWindow();
     });
+    await loaded;
   });
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
@@ -1735,6 +1840,7 @@ else {
   let quitState: 'running' | 'draining' | 'ready' = 'running';
   // Keep the service and caches alive if a renderer cancels the window close.
   app.on('will-quit', (event) => {
+    finishStartupWatch?.();
     if (quitState !== 'running') {
       if (quitState === 'draining') event.preventDefault();
       return;
@@ -1844,5 +1950,9 @@ else {
       })
       .finally(finishQuit);
     child?.postMessage({ shutdown: true });
+  });
+  return ready.catch((error: unknown) => {
+    finishStartupWatch?.();
+    throw error;
   });
 }

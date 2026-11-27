@@ -16,6 +16,16 @@ test('large reference sidebar stays bounded and filtered actions survive scrolli
       .join('\n') + '\n',
   );
   fixtureGit(repository, ['branch', 'Ångström']);
+  const mixed = [
+    'refs/heads/zz-group-edge',
+    'refs/remotes/upstream/group-edge',
+    ...Array.from({ length: 5 }, (_, index) => 'refs/tags/group-edge-' + index),
+  ];
+  fixtureGit(
+    repository,
+    ['update-ref', '--stdin'],
+    mixed.map((name) => `create ${name} ${commits[0]}`).join('\n') + '\n',
+  );
   const refCount = fixtureGit(repository, ['for-each-ref', '--format=.']).split('\n').length;
   const app = await electron.launch({
     args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
@@ -81,6 +91,19 @@ test('large reference sidebar stays bounded and filtered actions survive scrolli
     await expect(sidebar.getByRole('status')).toHaveText(
       `${refCount.toLocaleString()} matching references`,
     );
+    await filter.fill('group-edge');
+    await expect(sidebar.getByRole('status')).toHaveText('7 matching references');
+    const refList = sidebar.getByRole('list', { name: 'Reference list' });
+    // The tag section starts after two one-row sections and ends in a partial block.
+    await refList.evaluate((list) => list.scrollTo(0, list.scrollHeight));
+    const lastTag = sidebar
+      .getByRole('listitem')
+      .filter({ has: page.locator('[data-reference-name="refs/tags/group-edge-4"]') });
+    await expect(lastTag).toHaveAttribute('aria-posinset', '7');
+    await expect(lastTag).toHaveAttribute('aria-setsize', '7');
+    await refList.evaluate((list) => list.scrollTo(0, 0));
+    await expect(sidebar.getByRole('heading', { name: 'Branches', exact: true })).toBeVisible();
+    await expect(sidebar.getByRole('listitem').first()).toHaveAttribute('aria-posinset', '1');
     await filter.fill('  ÅNGSTRÖM  ');
     await expect(
       sidebar.getByRole('button', { name: 'Rename branch Ångström', exact: true }),
@@ -133,6 +156,124 @@ test('large reference sidebar stays bounded and filtered actions survive scrolli
     await expect(dialog).toHaveCount(0);
     await expect(page.getByTestId('head')).toHaveText('main-renamed');
     expect(fixtureGit(repository, ['symbolic-ref', '--short', 'HEAD'])).toBe('main-renamed');
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function createThresholdFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-ref-threshold-'));
+  const repository = createFixture(join(root, 'repo'));
+  const tip = fixtureGit(repository, ['rev-parse', 'HEAD']);
+  const existing = fixtureGit(repository, ['for-each-ref', '--format=%(refname)']).split('\n');
+  fixtureGit(
+    repository,
+    ['update-ref', '--stdin'],
+    Array.from(
+      { length: 99 - existing.length },
+      (_, index) => `create refs/tags/fixture-${index} ${tip}\n`,
+    ).join(''),
+  );
+  return { root, repository, tip };
+}
+
+test('a pending rename survives switching between grouped and virtualized references', async () => {
+  const { root, repository, tip } = createThresholdFixture();
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, repository);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    const rename = page.getByRole('button', { name: 'Rename branch main', exact: true });
+    await rename.click();
+    const dialog = page.getByRole('dialog', { name: 'Rename branch', exact: true });
+    const draft = dialog.getByRole('textbox', { name: 'Branch name', exact: true });
+    await draft.fill('keep-this-name');
+    fixtureGit(repository, ['branch', 'threshold']);
+    await expect(page.getByRole('heading', { name: 'References 100', exact: true })).toBeVisible();
+    await expect(draft).toHaveValue('keep-this-name');
+    await expect(draft).toBeFocused();
+    fixtureGit(repository, ['branch', '-D', 'threshold']);
+    await expect(page.getByRole('heading', { name: 'References 99', exact: true })).toBeVisible();
+    await expect(draft).toBeFocused();
+    await expect(draft).toHaveValue('keep-this-name');
+    await dialog.getByRole('button', { name: 'Rename branch', exact: true }).click();
+    await expect(page.getByTestId('head')).toHaveText('keep-this-name');
+    expect(fixtureGit(repository, ['rev-parse', 'refs/heads/keep-this-name'])).toBe(tip);
+    const renamed = page.getByRole('button', { name: 'Rename branch keep-this-name', exact: true });
+    await renamed.click();
+    fixtureGit(repository, ['branch', 'threshold']);
+    await expect(page.getByRole('heading', { name: 'References 100', exact: true })).toBeVisible();
+    await draft.press('Escape');
+    await expect(renamed).toBeFocused();
+
+    const threshold = page.getByRole('button', { name: 'Rename branch threshold', exact: true });
+    await threshold.click();
+    await draft.fill('removed-branch');
+    fixtureGit(repository, ['branch', '-D', 'threshold']);
+    await expect(dialog).toHaveCount(0);
+    fixtureGit(repository, ['branch', 'threshold']);
+    await expect(page.getByRole('heading', { name: 'References 100', exact: true })).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+
+    await threshold.click();
+    await draft.fill('obsolete-review');
+    const parent = fixtureGit(repository, ['rev-parse', 'HEAD^']);
+    fixtureGit(repository, ['update-ref', 'refs/heads/threshold', parent, tip]);
+    await expect(page.locator('[data-reference-name="refs/heads/threshold"]')).toHaveAttribute(
+      'title',
+      'refs/heads/threshold\n' + parent,
+    );
+    await dialog.getByRole('button', { name: 'Rename branch', exact: true }).click();
+    await expect(dialog.getByRole('alert')).toContainText('The branch changed');
+    await expect(draft).toHaveValue('obsolete-review');
+    expect(fixtureGit(repository, ['rev-parse', 'refs/heads/threshold'])).toBe(parent);
+    expect(fixtureGit(repository, ['branch', '--list', 'obsolete-review'])).toBe('');
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a reference filter retains keyboard focus and its query across the size threshold', async () => {
+  const { root, repository } = createThresholdFixture();
+  fixtureGit(repository, ['branch', 'threshold']);
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, repository);
+    await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+    const filter = page.getByRole('textbox', { name: 'Filter references', exact: true });
+    await filter.fill('threshold');
+    fixtureGit(repository, ['branch', '-D', 'threshold']);
+    await expect(page.getByRole('heading', { name: 'References 99', exact: true })).toBeVisible();
+    await expect(filter).toBeFocused();
+    await expect(filter).toHaveValue('threshold');
+    await expect(page.locator('.refs').getByRole('status')).toHaveText('0 matching references');
+    fixtureGit(repository, ['branch', 'threshold']);
+    await expect(page.getByRole('heading', { name: 'References 100', exact: true })).toBeVisible();
+    await expect(filter).toBeFocused();
+    await expect(
+      page.getByRole('button', { name: 'Rename branch threshold', exact: true }),
+    ).toBeVisible();
+    const other = createFixture(join(root, 'other'));
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, other);
+    await page.getByRole('button', { name: 'Open repository', exact: true }).click();
+    await expect(
+      page.getByRole('button', { name: 'Rename branch main', exact: true }),
+    ).toBeVisible();
+    await expect(filter).toHaveCount(0);
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

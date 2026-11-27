@@ -21,7 +21,7 @@ import { comparePayload, payloadManifest, sha256, verifyFuses } from './package-
 // This gate is only for our locally built test artifacts on an empty hosted VM.
 assertDisposableWindows();
 assert.ok(process.env.SystemRoot && isAbsolute(process.env.SystemRoot));
-assert.equal(process.argv.length, 4, 'Provide current and future MSI manifests');
+assert.ok(process.argv.length >= 4, 'Provide MSI manifests in increasing release order');
 const run = promisify(execFile);
 const system32 = join(process.env.SystemRoot, 'System32');
 const powershell = join(system32, 'WindowsPowerShell/v1.0/powershell.exe');
@@ -83,9 +83,17 @@ async function readState(identity) {
   return JSON.parse(stdout.trim());
 }
 
-const current = await readArtifact(process.argv[2]);
-const replacement = await readArtifact(process.argv[3]);
-assertMsiUpgradePair(current, replacement);
+const releases = [];
+for (const path of process.argv.slice(2)) releases.push(await readArtifact(path));
+const current = releases[0];
+const replacement = releases.at(-1);
+for (let index = 1; index < releases.length; index++)
+  assertMsiUpgradePair(releases[index - 1], releases[index]);
+assert.equal(
+  new Set(releases.map((item) => item.productCode.toUpperCase())).size,
+  releases.length,
+  'Each release requires its own product code',
+);
 const initial = await readState(current);
 assertEmptyMsiState(initial);
 const token = randomBytes(32).toString('hex');
@@ -166,8 +174,26 @@ try {
   await unlink(initial.shortcutPath);
   await installOperation('repair', ['/faums', current.productCode]);
   await verifyInstalled('repaired', current);
-  await installOperation('upgrade', ['/i', replacement.artifact]);
-  await verifyInstalled('upgraded', replacement);
+  for (let index = 1; index < releases.length; index++) {
+    const previous = releases[index - 1];
+    const next = releases[index];
+    await installOperation(`upgrade-${index}`, ['/i', next.artifact]);
+    await verifyInstalled(`upgraded-${index}`, next);
+    if (
+      previous.version.includes('-beta.') &&
+      previous.version.split('-')[0] === next.version.split('-')[0]
+    ) {
+      const name = `reject-downgrade-${index}`;
+      await assert.rejects(installOperation(name, ['/i', previous.artifact]), { code: 1603 });
+      const log = await readFile(join(evidence, `${name}.log`));
+      const encoding = log[0] === 0xff || log[1] === 0 ? 'utf16le' : 'utf8';
+      assert.match(
+        log.toString(encoding),
+        /A newer OpenKraken beta or the stable release is already installed/,
+      );
+      await verifyInstalled(`after-${name}`, next);
+    }
+  }
   await smoke('upgraded-desktop');
   await verifyInstalled('before-removal', replacement);
   await installOperation('uninstall', ['/x', replacement.productCode]);

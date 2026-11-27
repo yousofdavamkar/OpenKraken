@@ -1,6 +1,6 @@
 import { pressShortcut } from '../electron-shortcut.js';
 import { _electron as electron, expect, test } from '@playwright/test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createFixture, fixtureGit, fixtureKinds } from '../../packages/test-fixtures/src/index.js';
@@ -9,11 +9,13 @@ async function launch(
   kind: FixtureKind = 'merge',
   count?: number,
   prepare?: (path: string) => void,
+  git?: string,
 ) {
   const root = mkdtempSync(join(tmpdir(), 'openkraken-graph-e2e-'));
   const repository = createFixture(join(root, 'repo'), kind, count);
   prepare?.(repository);
   const app = await electron.launch({
+    env: git ? { ...process.env, OPENKRAKEN_GIT: git } : undefined,
     args: [resolve('apps/desktop'), `--user-data-dir=${join(root, 'profile')}`],
   });
   const page = await app.firstWindow();
@@ -106,6 +108,127 @@ test('Canvas search dims without moving rows; keyboard, ancestry, multi-select a
     await close();
   }
 });
+test('j and k move through graph rows and Shift follows ancestry', async () => {
+  const { page, close } = await launch('merge');
+  try {
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    const selected = grid.getByRole('row', { selected: true });
+    await grid.press('Home');
+    await grid.press('j');
+    await expect(selected).toHaveAttribute('aria-rowindex', '2');
+    // Dispatch to the grid without triggering the host OS shortcut (e.g. macOS Hide).
+    for (const modifier of ['ctrlKey', 'altKey', 'metaKey']) {
+      const unhandled = await grid.evaluate(
+        (element, modifier) =>
+          element.dispatchEvent(
+            new KeyboardEvent('keydown', {
+              key: 'h',
+              [modifier]: true,
+              bubbles: true,
+              cancelable: true,
+            }),
+          ),
+        modifier,
+      );
+      expect(unhandled).toBe(true);
+      await expect(selected).toHaveAttribute('aria-rowindex', '2');
+    }
+    await grid.press('k');
+    await expect(selected).toHaveAttribute('aria-rowindex', '1');
+    await grid.press('Shift+J');
+    await expect(selected).toContainText('Commit 2 — merge');
+    await grid.press('Shift+K');
+    await expect(selected).toContainText('Commit 4 — merge');
+    await grid.press('Alt+j');
+    await expect(selected).toHaveAttribute('aria-rowindex', '1');
+    const search = page.getByRole('textbox', { name: 'Search commits' });
+    await search.press('j');
+    await expect(search).toHaveValue('j');
+    await expect(selected).toHaveAttribute('aria-rowindex', '1');
+  } finally {
+    await close();
+  }
+});
+
+test('page keys follow the visible row count after resize and reach a short final page', async () => {
+  const { app, page, close } = await launch('linear', 2003);
+  try {
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    const selected = grid.getByRole('row', { selected: true });
+    const pageRows = () =>
+      grid.evaluate((element) =>
+        Math.floor(
+          element.clientHeight /
+            element.querySelector('[role=row]')!.getBoundingClientRect().height,
+        ),
+      );
+    await grid.press('Home');
+    const initial = await pageRows();
+    await grid.press('PageDown');
+    await expect(selected).toHaveAttribute('aria-rowindex', String(initial + 1));
+    await app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0]!;
+      const [width, height] = win.getContentSize();
+      win.setContentSize(width!, height! + 170);
+    });
+    await expect.poll(pageRows).not.toBe(initial);
+    const resized = await pageRows();
+    await grid.press('PageDown');
+    await expect(selected).toHaveAttribute('aria-rowindex', String(initial + resized + 1));
+    await grid.press('PageUp');
+    await expect(selected).toHaveAttribute('aria-rowindex', String(initial + 1));
+    // Prevent scrolling to End from prefetching the last page before the keypress.
+    await grid.evaluate((element) => {
+      Object.defineProperty(element, 'scrollTo', { configurable: true, value: () => {} });
+    });
+    await grid.press('End');
+    await expect(grid).not.toHaveAttribute('aria-activedescendant', /.+/);
+    await expect(page.getByTestId('commit-count')).toHaveText('2,000 commits · more available');
+    await grid.evaluate((element) => Reflect.deleteProperty(element, 'scrollTo'));
+    await grid.press('PageDown');
+    await expect(selected).toHaveAttribute('aria-rowindex', '2003');
+    await expect(grid).toHaveAttribute('aria-rowcount', '2003');
+  } finally {
+    await close();
+  }
+});
+
+test('deep keyboard focus and range selection follow commit IDs when working rows shift', async () => {
+  const { page, repository, close } = await launch('linear', 2200);
+  try {
+    await page.getByLabel('Refresh on focus', { exact: true }).uncheck();
+    await expect(page.getByText('Watching for changes', { exact: true })).toBeVisible();
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    await page.getByRole('button', { name: 'Load more commits', exact: true }).click();
+    await expect(grid).toHaveAttribute('aria-rowcount', '2200');
+    const [root, second, third] = fixtureGit(repository, ['rev-list', '--reverse', 'HEAD']).split(
+      '\n',
+    );
+    const selected = grid.getByRole('row', { selected: true });
+    await grid.press('End');
+    await expect(selected).toHaveAttribute('data-oid', root!);
+    const draft = join(repository, 'untracked.txt');
+    writeFileSync(draft, 'local change');
+    await expect(grid).toHaveAttribute('aria-rowcount', '2201');
+    await expect(selected).toHaveAttribute('aria-rowindex', '2201');
+    await grid.press('Enter');
+    const details = page.getByRole('region', { name: 'Commit details' });
+    await expect(details).toContainText(root!);
+    await page.getByRole('button', { name: 'Close details' }).click();
+    await grid.press('ArrowUp');
+    await expect(selected).toHaveAttribute('data-oid', second!);
+    rmSync(draft);
+    await expect(grid).toHaveAttribute('aria-rowcount', '2200');
+    await expect(selected).toHaveAttribute('aria-rowindex', '2199');
+    await grid.locator(`[data-oid="${third}"]`).click({ modifiers: ['Shift'] });
+    await expect(selected).toHaveCount(2);
+    await expect(grid.locator(`[data-oid="${second}"]`)).toHaveAttribute('aria-selected', 'true');
+    await expect(grid.locator(`[data-oid="${third}"]`)).toHaveAttribute('aria-selected', 'true');
+  } finally {
+    await close();
+  }
+});
+
 test('choosing the same search result reveals its virtualized row again', async () => {
   const { page, repository, close } = await launch('linear', 501);
   try {
@@ -136,6 +259,74 @@ test('choosing the same search result reveals its virtualized row again', async 
     await expect(grid).toHaveAttribute('aria-activedescendant', 'commit-row-0');
   } finally {
     await close();
+  }
+});
+
+test('keyboard cancellation stops both native search scans and leaves paging usable', async () => {
+  test.skip(process.platform === 'win32', 'The controlled Git executable uses a POSIX shell.');
+  const root = mkdtempSync(join(tmpdir(), 'openkraken-search-cancel-'));
+  const git = join(root, 'git-wrapper');
+  const gate = git + '.hold';
+  writeFileSync(gate, '');
+  writeFileSync(
+    git,
+    [
+      '#!/bin/sh',
+      'for arg do',
+      '  case "$arg" in',
+      '    --grep=*) marker=message ;;',
+      '    --author=*) marker=author ;;',
+      '    *) continue ;;',
+      '  esac',
+      '  echo $$ > "$0.$marker"',
+      '  while test -f "$0.hold"; do sleep 0.05; done',
+      '  break',
+      'done',
+      'exec git "$@"',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
+  try {
+    const { page, close } = await launch('linear', 2200, undefined, git);
+    try {
+      const query = page.getByRole('textbox', { name: 'Search commits' });
+      const search = page.getByRole('button', { name: 'Search all history', exact: true });
+      const cancel = page.getByRole('button', { name: 'Cancel search', exact: true });
+      await query.fill('Commit 1 — linear');
+      await search.press('Enter');
+      await expect(cancel).toBeFocused();
+      const markers = ['message', 'author'].map((scan) => git + '.' + scan);
+      await expect.poll(() => markers.every((marker) => existsSync(marker))).toBe(true);
+      const pids = markers.map((marker) => Number(readFileSync(marker, 'utf8')));
+      await page.getByRole('button', { name: 'Load more commits' }).click();
+      await expect(page.getByRole('grid')).toHaveAttribute('aria-rowcount', '2200');
+      await cancel.press('Enter');
+      await expect(search).toBeFocused();
+      await expect
+        .poll(() =>
+          pids.every((pid) => {
+            try {
+              process.kill(pid, 0);
+              return false;
+            } catch (error) {
+              return (error as NodeJS.ErrnoException).code === 'ESRCH';
+            }
+          }),
+        )
+        .toBe(true);
+      await expect(query).toHaveValue('Commit 1 — linear');
+      await expect(page.getByLabel('All history results')).toHaveCount(0);
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      rmSync(gate);
+      await search.press('Enter');
+      await expect(page.getByLabel('All history results').getByRole('button')).toHaveText(
+        /Commit 1 — linear/,
+      );
+    } finally {
+      await close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -252,6 +443,8 @@ test('external staging preserves an active search without resending the loaded g
           const [message] = args;
           if (message.method === 'refresh' || message.method === 'reset')
             performance.mark('test-graph-reload', { detail: message.commits.length });
+          if (message.method === 'updateSearchDocument')
+            performance.mark('test-graph-document', { detail: message.document.body });
           return Reflect.apply(send, worker, args);
         },
       });
@@ -262,6 +455,17 @@ test('external staging preserves an active search without resending the loaded g
     ).toBeEnabled();
     await expect(matches).toBeVisible();
     await expect(page.getByTestId('commit-count')).toHaveText('7,000 commits · more available');
+    fixtureGit(repository, ['mv', 'stage-me.txt', 'replacement.txt']);
+    await expect(page.getByText('0 loaded matches', { exact: true })).toBeVisible();
+    await page.getByRole('textbox', { name: 'Search commits' }).fill('replacement');
+    await expect(matches).toBeVisible();
+    expect(
+      await page.evaluate(() =>
+        performance
+          .getEntriesByName('test-graph-document')
+          .some((entry) => (entry as PerformanceMark).detail.includes('replacement.txt')),
+      ),
+    ).toBe(true);
     expect(
       await page.evaluate(() =>
         performance
@@ -422,21 +626,124 @@ test('an incomplete append layout keeps the displayed page and refresh recovers 
   }
 });
 
-test('one Down key moves past the last initially loaded commit', async () => {
-  const { page, close } = await launch('linear', 2003);
+test('a side lane stays painted across an append that splits a 500-row bucket', async () => {
+  const { page, close } = await launch('linear', 2200, (repo) => {
+    const ancestor = fixtureGit(repo, ['rev-parse', 'HEAD~2150']);
+    const merge = fixtureGit(repo, [
+      'commit-tree',
+      'HEAD^{tree}',
+      '-p',
+      'HEAD',
+      '-p',
+      ancestor,
+      '-m',
+      'Long side lane',
+    ]);
+    fixtureGit(repo, ['update-ref', 'refs/heads/main', merge]);
+    // The working-tree row shifts the first 2,000-commit boundary to graph row 2,001.
+    writeFileSync(join(repo, 'dirty.txt'), 'working change');
+  });
   try {
-    const grid = page.getByRole('grid');
-    // Stay at the top while End selects the last loaded row. Scrolling there would prefetch it.
-    await grid.evaluate((element) => {
-      Object.defineProperty(element, 'scrollTo', { configurable: true, value: () => {} });
-    });
-    await grid.focus();
-    await grid.press('End');
-    await expect(grid).not.toHaveAttribute('aria-activedescendant', /.+/);
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    const canvas = page.getByTestId('commit-graph');
+    const paintedLanes = async (row: number) => {
+      await grid.evaluate((element, index) => {
+        element.scrollTop = (index - 3) * 28;
+      }, row);
+      await expect(grid.locator(`[aria-rowindex="${row + 1}"]`)).toBeInViewport();
+      return canvas.evaluate(async (element, index) => {
+        await new Promise<void>((done) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => done())),
+        );
+        const context = (element as HTMLCanvasElement).getContext('2d')!;
+        const top = document.getElementById('commit-history')!.scrollTop;
+        const y = Math.floor((index * 28 + 14 - top) * devicePixelRatio);
+        return [14, 34].map((x) => {
+          const pixel = context.getImageData(Math.floor(x * devicePixelRatio), y, 1, 1);
+          return pixel.data[3]! > 0;
+        });
+      }, row);
+    };
+    expect(await paintedLanes(503)).toEqual([true, true]);
+    await page.getByRole('button', { name: 'Load more commits', exact: true }).click();
+    await expect(page.getByTestId('commit-count')).toHaveText('2,201 commits');
+    expect(await paintedLanes(503)).toEqual([true, true]);
+    expect(await paintedLanes(2000)).toEqual([true, true]);
+    expect(await paintedLanes(2001)).toEqual([true, true]);
+    // The first-parent chain joins the reserved second lane at the ancestor.
+    expect(await paintedLanes(2170)).toEqual([false, true]);
+  } finally {
+    await close();
+  }
+});
+
+for (const key of ['ArrowDown', 'j']) {
+  test(`one ${key} key moves past the last initially loaded commit`, async () => {
+    const { page, close } = await launch('linear', 2003);
+    try {
+      const grid = page.getByRole('grid');
+      await expect(grid).toHaveAttribute('aria-rowcount', '-1');
+      await expect(grid).toHaveAccessibleDescription('2,000 commits · more available');
+      // Stay at the top while End selects the last loaded row. Scrolling there would prefetch it.
+      await grid.evaluate((element) => {
+        Object.defineProperty(element, 'scrollTo', { configurable: true, value: () => {} });
+      });
+      await grid.focus();
+      await grid.press('End');
+      await expect(grid).not.toHaveAttribute('aria-activedescendant', /.+/);
+      await expect(page.getByTestId('commit-count')).toHaveText('2,000 commits · more available');
+      await grid.evaluate((element) => Reflect.deleteProperty(element, 'scrollTo'));
+      await grid.press(key);
+      await expect(grid.getByRole('row', { selected: true })).toContainText('Commit 3 — linear');
+      await expect(grid).toHaveAttribute('aria-rowcount', '2003');
+      await expect(grid.getByRole('row', { selected: true })).toHaveAttribute(
+        'aria-rowindex',
+        '2001',
+      );
+      await expect(grid).toHaveAccessibleDescription('2,003 commits');
+    } finally {
+      await close();
+    }
+  });
+}
+test('the upstream shortcut follows three native pages to the root commit', async () => {
+  const { page, repository, close } = await launch('linear', 12003, (repo) => {
+    const root = fixtureGit(repo, ['rev-list', '--max-parents=0', 'HEAD']);
+    fixtureGit(repo, ['branch', 'old-tip', root]);
+    fixtureGit(repo, ['branch', '--set-upstream-to=old-tip', 'main']);
+  });
+  try {
+    const grid = page.getByRole('grid', { name: 'Commit history' });
     await expect(page.getByTestId('commit-count')).toHaveText('2,000 commits · more available');
-    await grid.evaluate((element) => Reflect.deleteProperty(element, 'scrollTo'));
-    await grid.press('ArrowDown');
-    await expect(grid.getByRole('row', { selected: true })).toContainText('Commit 3 — linear');
+    await grid.press('Shift+H');
+    const selected = grid.getByRole('row', { selected: true });
+    await expect(selected).toHaveAttribute(
+      'data-oid',
+      fixtureGit(repository, ['rev-parse', 'old-tip']),
+    );
+    await expect(selected).toBeInViewport();
+    await expect(page.getByTestId('commit-count')).toHaveText('12,003 commits');
+    await grid.press('Enter');
+    await expect(page.getByRole('region', { name: 'Commit details' })).toContainText(
+      'Commit 1 — linear',
+    );
+  } finally {
+    await close();
+  }
+});
+test('the upstream shortcut pages to the commit behind an annotated tracking ref', async () => {
+  const { page, repository, close } = await launch('linear', 2003, (repo) => {
+    const root = fixtureGit(repo, ['rev-list', '--max-parents=0', 'HEAD']);
+    fixtureGit(repo, ['tag', '-a', 'upstream-release', '-m', 'Upstream release', root]);
+    fixtureGit(repo, ['config', 'branch.main.remote', '.']);
+    fixtureGit(repo, ['config', 'branch.main.merge', 'refs/tags/upstream-release']);
+  });
+  try {
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    await expect(page.getByTestId('commit-count')).toHaveText('2,000 commits · more available');
+    await grid.press('Shift+H');
+    const root = fixtureGit(repository, ['rev-parse', 'upstream-release^{commit}']);
+    await expect(grid.getByRole('row', { selected: true })).toHaveAttribute('data-oid', root);
     await expect(page.getByTestId('commit-count')).toHaveText('2,003 commits');
   } finally {
     await close();
@@ -568,6 +875,41 @@ for (const kind of fixtureKinds)
     }
   });
 
+test('nested release tags label and select history reachable only through the tag chain', async () => {
+  let oid = '';
+  const { page, close } = await launch('linear', 4, (path) => {
+    const tree = fixtureGit(path, ['rev-parse', 'HEAD^{tree}']);
+    oid = fixtureGit(path, ['commit-tree', tree, '-m', 'Archived release notes']);
+    fixtureGit(path, ['tag', '-a', 'inner', '-m', 'Inner', oid]);
+    fixtureGit(path, [
+      '-c',
+      'advice.nestedTag=false',
+      'tag',
+      '-a',
+      'release',
+      '-m',
+      'Release',
+      'inner',
+    ]);
+    fixtureGit(path, ['tag', '-d', 'inner']);
+  });
+  try {
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    const row = grid.locator(`[data-oid="${oid}"]`);
+    await expect(row).toContainText('Archived release notes');
+    await expect(row).toContainText('release');
+    await page.getByRole('button', { name: 'Solo refs/tags/release', exact: true }).click();
+    await expect(grid.getByRole('row')).toHaveCount(1);
+    await grid.press('Home');
+    await expect(row).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('textbox', { name: 'Search commits' }).fill(oid);
+    await page.getByRole('button', { name: 'Search all history' }).click();
+    await expect(page.getByLabel('All history results')).toContainText('Archived release notes');
+  } finally {
+    await close();
+  }
+});
+
 test('sidebar hide, solo and pin change graph roots and survive refresh', async () => {
   const { page, repository, close } = await launch('orphan');
   try {
@@ -602,6 +944,43 @@ test('sidebar hide, solo and pin change graph roots and survive refresh', async 
       page.getByRole('button', { name: 'Pin refs/heads/other', exact: true }),
     ).toHaveAttribute('aria-pressed', 'false');
     await page.screenshot({ path: 'test-results/graph-views.png' });
+  } finally {
+    await close();
+  }
+});
+
+test('commit search keeps IME composition and held keys from changing the graph selection', async () => {
+  const { page, close } = await launch('linear', 4, (repo) => {
+    fixtureGit(repo, ['commit', '--allow-empty', '-m', '検索対象']);
+    fixtureGit(repo, ['commit', '--allow-empty', '-m', 'Newest change']);
+  });
+  try {
+    const search = page.getByRole('textbox', { name: 'Search commits' });
+    const grid = page.getByRole('grid', { name: 'Commit history' });
+    const selected = grid.getByRole('row', { selected: true });
+    await search.fill('検索');
+    await expect(page.getByText('1 loaded matches', { exact: true })).toBeVisible();
+    for (const key of ['Enter', 'Escape']) {
+      await search.dispatchEvent('keydown', { key, isComposing: true });
+      await expect(search).toBeFocused();
+      await expect(search).toHaveValue('検索');
+      await expect(selected).toContainText('Newest change');
+    }
+    await search.dispatchEvent('keydown', { key: 'Enter', repeat: true });
+    await expect(search).toBeFocused();
+    await search.press('Enter');
+    await expect(grid).toBeFocused();
+    await expect(selected).toContainText('検索対象');
+    await grid.dispatchEvent('keydown', { key: 'Enter', repeat: true });
+    await expect(page.getByRole('region', { name: 'Commit details' })).toHaveCount(0);
+    await search.focus();
+    await search.press('Escape');
+    await expect(search).toHaveValue('');
+    await expect(grid).toBeFocused();
+    await grid.dispatchEvent('keydown', { key: 'Escape', repeat: true });
+    await expect(selected).toContainText('検索対象');
+    await grid.press('Escape');
+    await expect(selected).toHaveCount(0);
   } finally {
     await close();
   }

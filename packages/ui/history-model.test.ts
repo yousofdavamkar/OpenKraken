@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 import {
+  locateRow,
   navigationTarget,
   projectCommits,
   refsByTarget,
@@ -31,14 +32,56 @@ test('range, toggle and ancestry navigation preserve stable OID selection', () =
   const toggled = selectRow(rows, initial, 'root', 'toggle');
   expect(toggled.selected).toEqual(['merge', 'root']);
   expect(selectRow(rows, toggled, 'merge', 'toggle').selected).toEqual(['root']);
-  expect(navigationTarget(rows, 'merge', 'ArrowDown', true)).toBe('left');
-  expect(navigationTarget(rows, 'root', 'ArrowUp', true)).toBe('right');
-  expect(navigationTarget(rows, 'merge', 'ArrowUp', false)).toBe('merge');
-  expect(navigationTarget(rows, 'root', 'ArrowDown', false)).toBe('root');
-  expect(navigationTarget(rows, 'left', 'Home', false)).toBe('merge');
-  expect(navigationTarget(rows, 'left', 'End', false)).toBe('root');
-  expect(navigationTarget(rows, 'left', 'H', true, 'merge', 'right')).toBe('right');
-  expect(navigationTarget(rows, 'left', 'h', false, 'merge')).toBe('merge');
+  expect(navigationTarget(rows, 0, 'ArrowDown', true)).toBe('left');
+  expect(navigationTarget(rows, 3, 'ArrowUp', true)).toBe(2);
+  expect(navigationTarget(rows, 0, 'ArrowUp', false)).toBe(0);
+  expect(navigationTarget(rows, 3, 'ArrowDown', false)).toBe(3);
+  expect(navigationTarget(rows, 1, 'Home', false)).toBe(0);
+  expect(navigationTarget(rows, 1, 'End', false)).toBe(3);
+  expect(navigationTarget(rows, 1, 'H', true, { head: 'merge', upstream: 'right' })).toBe('right');
+  expect(navigationTarget(rows, 1, 'h', false, { head: 'merge' })).toBe('merge');
+});
+test('deep selection uses known positions and recovers by OID after a refresh moves rows', () => {
+  let reads = 0;
+  const history = Array<{ oid: string }>(32000).fill({
+    get oid() {
+      reads++;
+      return 'earlier';
+    },
+  });
+  history[31997] = { oid: 'anchor' };
+  history[31998] = { oid: 'middle' };
+  history[31999] = { oid: 'focus' };
+  const selected = selectRow(history, { selected: [] }, 'anchor', 'single', 31997);
+  const range = selectRow(history, selected, 'focus', 'range', 31999);
+  expect(range.selected).toEqual(['anchor', 'middle', 'focus']);
+  expect(locateRow(history, range.focus, range.focusIndex)).toBe(31999);
+  expect(reads).toBe(0);
+  const shifted = [{ oid: 'worktree' }, ...history];
+  expect(locateRow(shifted, range.focus, range.focusIndex)).toBe(32000);
+  expect(selectRow(shifted, range, 'middle', 'range', 31998).selected).toEqual([
+    'anchor',
+    'middle',
+  ]);
+  expect(locateRow(shifted, 'removed', range.focusIndex)).toBe(-1);
+});
+
+test('navigation at row 32,000 reads only the rows needed to locate its closest child', () => {
+  const history = Array<DisplayCommit>(32000).fill(rows[0]!);
+  history[31998] = rows[2]!;
+  history[31999] = rows[3]!;
+  const reads: string[] = [];
+  const observed = new Proxy(history, {
+    get(target, key, receiver) {
+      if (typeof key === 'string' && /^\d+$/.test(key)) reads.push(key);
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  expect(navigationTarget(observed, 31999, 'Home', false)).toBe(0);
+  expect(navigationTarget(observed, 31999, 'PageUp', false, { pageRows: 15 })).toBe(31984);
+  expect(reads).toEqual([]);
+  expect(navigationTarget(observed, 31999, 'ArrowUp', true)).toBe(31998);
+  expect(reads).toEqual(['31999', '31998']);
 });
 test('synthetic rows are inserted only on the page containing HEAD, including unborn conflicts', () => {
   const snapshot = {
@@ -87,13 +130,13 @@ test('local and remote badges sharing a name and target combine; tags stay separ
   ]);
 });
 
-test('HEAD and upstream shortcuts do not scan excluded histories, but still select loaded shared commits', () => {
+test('HEAD and upstream shortcuts follow visible or loaded commits, including peeled tracking tips', () => {
   const snapshot = {
     view: { hiddenRefs: ['refs/heads/main'] },
     repository: { head: { kind: 'branch', ref: 'refs/heads/main', oid: 'head' } },
     refs: [
       { name: 'refs/heads/main', target: 'head', upstream: { ref: 'refs/remotes/origin/main' } },
-      { name: 'refs/remotes/origin/main', target: 'remote' },
+      { name: 'refs/remotes/origin/main', target: 'remote', objectType: 'commit' },
     ],
   } as Snapshot;
   expect(refNavigationTargets(snapshot, [])).toEqual({ head: undefined, upstream: 'remote' });
@@ -103,6 +146,23 @@ test('HEAD and upstream shortcuts do not scan excluded histories, but still sele
     head: 'head',
     upstream: 'remote',
   });
+
+  const tracking = snapshot.refs[1]!;
+  tracking.objectType = 'tag';
+  tracking.peeled = 'base';
+  tracking.peeledType = 'commit';
+  snapshot.view = { hiddenRefs: [] };
+  expect(refNavigationTargets(snapshot, []).upstream).toBe('base');
+  snapshot.view.hiddenRefs = [tracking.name];
+  expect(refNavigationTargets(snapshot, []).upstream).toBeUndefined();
+  expect(refNavigationTargets(snapshot, [{ oid: 'base' }]).upstream).toBe('base');
+  snapshot.view.hiddenRefs = [];
+  tracking.peeledType = 'tree';
+  expect(refNavigationTargets(snapshot, []).upstream).toBeUndefined();
+  tracking.objectType = 'blob';
+  tracking.peeledType = '';
+  delete tracking.peeled;
+  expect(refNavigationTargets(snapshot, []).upstream).toBeUndefined();
 });
 
 test(
@@ -140,6 +200,46 @@ test(
     expect(elapsedMs).toBeLessThan(1000);
   },
 );
+
+test.each([40, 64])('large badge indexes distinguish colliding %i-character IDs', (width) => {
+  const refs: Ref[] = Array.from({ length: 10000 }, (_, i) => ({
+    name: `refs/heads/branch-${i}`,
+    shortName: `branch-${i}`,
+    kind: 'local',
+    target: (i % 2 ? 'ab' : 'cd') + i.toString(16).padStart(width - 2, '0'),
+    objectType: 'commit',
+    peeledType: '',
+    isHead: false,
+  }));
+  const tip = refs[1]!;
+  const alias: Ref = {
+    ...tip,
+    kind: 'tag',
+    name: 'refs/tags/release',
+    shortName: 'release',
+    target: 'e'.repeat(width),
+    objectType: 'tag',
+    peeled: tip.target,
+    peeledType: 'commit',
+  };
+  const remote: Ref = {
+    ...tip,
+    kind: 'remote',
+    name: 'refs/remotes/origin/tip',
+    shortName: 'origin/tip',
+  };
+  const source = [alias, ...refs, remote];
+  const index = refsByTarget(source, { hiddenRefs: [refs[2]!.name] });
+  expect(index.get('ab' + 'f'.repeat(width - 2))).toBeUndefined();
+  const badges = index.get(tip.target);
+  expect(badges).toEqual([alias, tip, remote]);
+  expect(index.get(alias.target)).toBeUndefined();
+  expect(index.get(refs[2]!.target)).toBeUndefined();
+  expect(index.get(refs.at(-2)!.target)).toEqual([refs.at(-2)]);
+  expect(index.size).toBe(9999);
+  expect(index.get(tip.target)).toBe(badges);
+  for (const ref of refs.slice(3)) expect(index.get(ref.target)).toEqual([ref]);
+});
 
 test('large hidden-ref lists preserve visible badge order and solo takes precedence', () => {
   const refs: Ref[] = Array.from({ length: 50000 }, (_, i) => ({

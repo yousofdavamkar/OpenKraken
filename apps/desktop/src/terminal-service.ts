@@ -56,6 +56,8 @@ parent.on('message', ({ data }) => {
         'shell-integration',
       );
       const args: string[] = [];
+      if (['pwsh', 'pwsh.exe'].includes(basename(shell).toLowerCase()))
+        args.push('-NoExit', '-File', join(integration, 'powershell.ps1'));
       if (process.platform !== 'win32' && basename(shell) === 'bash')
         args.push('--rcfile', join(integration, 'bash.bashrc'));
       if (process.platform !== 'win32' && basename(shell) === 'zsh') {

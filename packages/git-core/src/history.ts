@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { Commit } from '@openkraken/ipc-contract';
-import { HistoryParser, HISTORY_WALK_FORMAT } from './parsers.js';
+import type { Commit, Ref } from '@openkraken/ipc-contract';
+import { rawHistoryStream } from './parsers.js';
 import { GitError, runGit } from './runner.js';
 
 /** One retained rev-list, backpressured at page boundaries. No skip/refetch or full-history buffer. */
@@ -12,9 +12,25 @@ export interface HistorySeed {
   ) => Promise<void>;
   invalidate: () => void;
 }
+/** A late optional cache read may finish after its owner has moved on. */
+export function waitForHistoryCache<T>(read: Promise<T>, signal: AbortSignal) {
+  return new Promise<T | undefined>((resolve) => {
+    const done = (value?: T) => {
+      signal.removeEventListener('abort', abort);
+      resolve(value);
+    };
+    const abort = () => done();
+    if (signal.aborted) abort();
+    else signal.addEventListener('abort', abort, { once: true });
+    void read.then(done, abort);
+  });
+}
 export class HistoryCursor {
   readonly id = randomUUID();
-  readonly starts: string[];
+  private roots: readonly string[];
+  get starts() {
+    return this.roots;
+  }
   private buffer: Commit[] = [];
   private bufferedBytes = 0;
   private size(commit: Commit) {
@@ -49,30 +65,35 @@ export class HistoryCursor {
     prefetchUnreplaced?: number,
   ) {
     if (prefetchUnreplaced) this.demand = prefetchUnreplaced + 1;
-    this.starts = [...starts];
+    this.roots = [...starts];
     if (seed) {
       this.cached = [...seed.commits];
       this.cachedMore = seed.hasMore;
       this.buffer = [...seed.commits];
       this.bufferedBytes = seed.commits.reduce((n, c) => n + this.size(c), 0);
     }
+    const staleCache = (message: string) => {
+      const error = new GitError('STALE_CACHE', message);
+      this.error = error;
+      seed?.invalidate();
+      return error;
+    };
     let validated = 0;
-    const cacheReady = seed
-      ?.continuation?.((tail) => {
-        if (!this.controller.signal.aborted) {
-          const bytes = tail.commits.reduce((n, c) => n + this.size(c), 0);
-          if (this.bufferedBytes + bytes <= 64 * 1024 * 1024) {
-            this.cached.push(...tail.commits);
-            this.buffer.push(...tail.commits);
-            this.bufferedBytes += bytes;
-            this.cachedMore = tail.hasMore;
-            this.changed?.();
-            return true;
-          }
+    const cacheRead = seed?.continuation?.((tail) => {
+      if (!this.controller.signal.aborted) {
+        const bytes = tail.commits.reduce((n, c) => n + this.size(c), 0);
+        if (this.bufferedBytes + bytes <= 64 * 1024 * 1024) {
+          this.cached.push(...tail.commits);
+          this.buffer.push(...tail.commits);
+          this.bufferedBytes += bytes;
+          this.cachedMore = tail.hasMore;
+          this.changed?.();
+          return true;
         }
-        return false;
-      })
-      .catch(() => {});
+      }
+      return false;
+    });
+    const cacheReady = cacheRead && waitForHistoryCache(cacheRead, this.controller.signal);
     const byBase = new Map<string, Commit[]>();
     const stashIds = new Set(stashes.map((c) => c.oid));
     const emittedStashes = new Set<string>();
@@ -80,7 +101,7 @@ export class HistoryCursor {
       const base = stash.parents[0];
       if (base) byBase.set(base, [...(byBase.get(base) ?? []), stash]);
     }
-    const parser = new HistoryParser((commit) => {
+    const { parser, formatArgs } = rawHistoryStream('walk', (commit) => {
       // If a branch reaches a stash object, its real DAG takes precedence over the overlay.
       if (stashIds.has(commit.oid)) emittedStashes.add(commit.oid);
       const overlay = (byBase.get(commit.oid) ?? []).filter((c) => !emittedStashes.has(c.oid));
@@ -93,8 +114,7 @@ export class HistoryCursor {
           record.isStash !== expected.isStash ||
           record.parents.join(' ') !== expected.parents.join(' ')
         ) {
-          seed?.invalidate();
-          throw new GitError('STALE_CACHE', 'History cache changed; refresh to restart');
+          throw staleCache('History cache changed; refresh to restart');
         }
         return false;
       });
@@ -113,7 +133,7 @@ export class HistoryCursor {
               '--date-order',
               '--parents',
               '--no-abbrev-commit',
-              `--format=${HISTORY_WALK_FORMAT}`,
+              ...formatArgs,
               '--stdin',
             ],
             {
@@ -122,12 +142,18 @@ export class HistoryCursor {
               stdin: starts.join('\n') + '\n',
               signal: this.controller.signal,
               timeoutMs: 0,
-              maxBytes: 1024 * 1024 * 1024,
+              stdoutPages: { offset: () => this.offset, maxBytes: 1024 * 1024 * 1024 },
               onStdout: async (chunk) => {
                 await cacheReady;
+                if (this.controller.signal.aborted) return;
                 parser.push(chunk);
                 this.changed?.();
-                if (this.buffer.length >= this.demand && !this.controller.signal.aborted)
+                // Replaying cached records checks their topology without growing the buffer.
+                if (
+                  validated >= this.cached.length &&
+                  this.buffer.length >= this.demand &&
+                  !this.controller.signal.aborted
+                )
                   await new Promise<void>((resolve) => {
                     this.resume = resolve;
                   });
@@ -138,13 +164,8 @@ export class HistoryCursor {
     )
       .then(() => {
         parser.finish();
-        if (validated < this.cached.length) {
-          seed?.invalidate();
-          throw new GitError(
-            'STALE_CACHE',
-            'History cache is longer than Git history; refresh to restart',
-          );
-        }
+        if (validated < this.cached.length)
+          throw staleCache('History cache is longer than Git history; refresh to restart');
         this.done = true;
       })
       .catch((error) => {
@@ -153,6 +174,31 @@ export class HistoryCursor {
       .finally(() => {
         this.changed?.();
       });
+  }
+  /** Git peels annotated tips before walking. Confirm the same ordered commits before adoption. */
+  confirmRoots(ordered: readonly string[], refs: readonly Ref[]) {
+    if (this.roots.length < ordered.length) return false;
+    if (
+      this.roots.length === ordered.length &&
+      ordered.every((oid, index) => oid === this.roots[index])
+    )
+      return true;
+    const peeled = new Map<string, string>();
+    for (const ref of refs) {
+      if (ref.objectType === 'tag' && ref.peeledType === 'commit' && ref.peeled)
+        peeled.set(ref.target, ref.peeled);
+    }
+    if (!peeled.size) return false;
+    const seen = new Set<string>();
+    for (const root of this.roots) {
+      const commit = peeled.get(root) ?? root;
+      if (seen.has(commit)) continue;
+      if (ordered[seen.size] !== commit) return false;
+      seen.add(commit);
+    }
+    if (seen.size !== ordered.length) return false;
+    this.roots = [...ordered];
+    return true;
   }
   async page(expectedOffset: number, count: number, signal?: AbortSignal) {
     if (this.reading) throw new GitError('PAGE_BUSY', 'A history page is already loading');

@@ -44,7 +44,11 @@ export interface SnapshotBodies {
 
 /** Split the initial commit messages after main validates the complete snapshot. */
 export function encodeSnapshotBodies(result: ServiceResult): SnapshotBodies | string {
-  if (result.kind !== 'snapshot' && result.kind !== 'compactSnapshot')
+  if (
+    result.kind !== 'snapshot' &&
+    result.kind !== 'compactSnapshot' &&
+    result.kind !== 'tagAliasSnapshot'
+  )
     return JSON.stringify(result);
   const { commits, bodies } = separateBodies(result.snapshot.commits);
   return {
@@ -55,9 +59,10 @@ export function encodeSnapshotBodies(result: ServiceResult): SnapshotBodies | st
 
 export function decodeSnapshotBodies(reply: SnapshotBodies | string): ServiceResult {
   if (typeof reply === 'string') return JSON.parse(reply);
-  const result: Extract<ServiceResult, { kind: 'snapshot' | 'compactSnapshot' }> = JSON.parse(
-    reply.metadata,
-  );
+  const result: Extract<
+    ServiceResult,
+    { kind: 'snapshot' | 'compactSnapshot' | 'tagAliasSnapshot' }
+  > = JSON.parse(reply.metadata);
   const commits = result.snapshot.commits;
   if (commits.length !== reply.bodies.length) throw new Error('Incomplete snapshot commit bodies');
   for (let i = 0; i < commits.length; i++) commits[i]!.body = reply.bodies[i]!;

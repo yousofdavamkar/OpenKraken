@@ -3,6 +3,7 @@ import type { DiagnosticsState } from '@openkraken/ipc-contract';
 
 function DiagnosticsDialog({ onClose }: { onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
   const records = useRef<HTMLTextAreaElement>(null);
   const [state, setState] = useState<DiagnosticsState>();
   const [busy, setBusy] = useState(false);
@@ -25,14 +26,22 @@ function DiagnosticsDialog({ onClose }: { onClose: () => void }) {
   };
   useEffect(() => {
     dialog.current?.showModal();
+    closeButton.current?.focus();
     void load();
   }, []);
+  const dismiss = () => {
+    dialog.current?.close();
+    onClose();
+  };
   return (
     <dialog
       ref={dialog}
       className="reference-dialog diagnostics-dialog"
       aria-label="Local diagnostics"
-      onCancel={onClose}
+      onCancel={(event) => {
+        event.preventDefault();
+        dismiss();
+      }}
     >
       <h2>Local diagnostics</h2>
       <p>
@@ -80,7 +89,7 @@ function DiagnosticsDialog({ onClose }: { onClose: () => void }) {
         <button disabled={busy || !state || !!state.warning} onClick={() => void load(true)}>
           Clear logs
         </button>
-        <button autoFocus onClick={onClose}>
+        <button ref={closeButton} onClick={dismiss}>
           Close
         </button>
       </div>

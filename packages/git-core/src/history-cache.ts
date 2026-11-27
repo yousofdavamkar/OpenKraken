@@ -1,11 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { BigIntStats } from 'node:fs';
+import { constants, type BigIntStats } from 'node:fs';
 import { mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setImmediate as yieldTurn } from 'node:timers/promises';
 import { z } from 'zod';
-import { commitSchema, type Commit } from '@openkraken/ipc-contract';
-import type { HistorySeed } from './history.js';
+import { commitSchema, type Commit, type Ref } from '@openkraken/ipc-contract';
+import { waitForHistoryCache, type HistorySeed } from './history.js';
 const tailNames = ['tail-0.json', 'tail-1.json', 'tail-2.json'];
 const prefixName = 'prefix.json';
 const cacheNames = [prefixName, ...tailNames];
@@ -19,50 +19,125 @@ const pageSchema = z.object({
 function fileStamp(file: BigIntStats) {
   return [file.dev, file.ino, file.size, file.mtimeNs, file.ctimeNs].join('/');
 }
+// Missing metadata has the original empty cache key. An unreadable or changing
+// input makes the optional disk cache ineligible for this snapshot.
+export async function historyMetadataFingerprint(path: string, signal: AbortSignal) {
+  let file;
+  try {
+    file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? '' : undefined;
+  }
+  try {
+    const before = await file.stat({ bigint: true });
+    const size = Number(before.size);
+    if (!before.isFile() || !Number.isSafeInteger(size) || signal.aborted) return;
+    const chunk = Buffer.allocUnsafe(Math.min(size, 64 * 1024));
+    const hash = size > chunk.length ? createHash('sha256') : undefined;
+    for (let offset = 0; offset < size;) {
+      if (signal.aborted) return;
+      const start = hash ? 0 : offset;
+      const length = Math.min(chunk.length - start, size - offset);
+      const { bytesRead } = await file.read(chunk, start, length, offset);
+      if (!bytesRead) return;
+      hash?.update(chunk.subarray(0, bytesRead));
+      offset += bytesRead;
+    }
+    // A pseudo-file can report an empty or short size while still yielding bytes.
+    if ((await file.read(Buffer.allocUnsafe(1), 0, 1, size)).bytesRead) return;
+    if (fileStamp(before) !== fileStamp(await stat(path, { bigint: true }))) return;
+    // Preserve existing cache generations for ordinary small metadata files.
+    return hash ? 'sha256:' + hash.digest('hex') : chunk.toString('base64');
+  } catch {
+    return undefined;
+  } finally {
+    await file.close();
+  }
+}
+/** Preserve the format-2 JSON digest while encoding at most 1,024 history roots at a time. */
+export function historyCacheKey(
+  inputs: readonly (string | undefined)[],
+  starts: readonly string[],
+  stashes: readonly string[],
+  replacements: readonly Ref[],
+) {
+  const [version, config, ...metadata] = inputs;
+  const hash = createHash('sha256');
+  const header = JSON.stringify({ format: 2, version, config, metadata });
+  hash.update(header.slice(0, -1) + ',"starts":[');
+  for (let index = 0; index < starts.length; index += 1024) {
+    if (index) hash.update(',');
+    const batch = JSON.stringify(starts.slice(index, index + 1024));
+    hash.update(batch.slice(1, -1));
+  }
+  const tail = JSON.stringify({ stashes, replacements });
+  return hash.update('],' + tail.slice(1)).digest('hex');
+}
+function cacheDirectory(root: string, repoId: string) {
+  if (!/^[0-9a-f]{64}$/.test(repoId)) throw new Error('Invalid cache repository');
+  return join(root, 'history', repoId);
+}
+
 /** One bounded immutable-history window per repository, entirely under the app profile. */
 export class HistoryCache {
   private records: Commit[] = [];
+  private recordLimit = 17000;
   private persisted = new Map<
     string,
     { offset: number; count: number; hasMore: boolean; stamp: string }
   >();
   private firstCount = 0;
   private hasMore = true;
+  private tailRead = new AbortController();
   private ready = Promise.resolve();
   private writes = Promise.resolve();
   private timer?: ReturnType<typeof setTimeout>;
   private dirty = false;
   private disabled = false;
   private directory: string;
-  static async hasPrefix(root: string, repoId: string) {
-    return stat(join(root, 'history', repoId, prefixName)).then(
-      () => true,
-      () => false,
-    );
+  static async prefixModifiedAt(root: string, repoId: string) {
+    const info = await stat(join(cacheDirectory(root, repoId), prefixName)).catch(() => undefined);
+    return info?.isFile() && info.size > 0 && info.size <= 8 * 1024 * 1024
+      ? info.mtimeMs
+      : undefined;
   }
   constructor(
     private root: string,
     private repoId: string,
     private key: string,
   ) {
-    if (!/^[0-9a-f]{64}$/.test(repoId)) throw new Error('Invalid cache repository');
-    this.directory = join(root, 'history', repoId);
+    this.directory = cacheDirectory(root, repoId);
   }
-  private async read(name: string, maxBytes: number) {
+  private static async readPage(
+    path: string,
+    maxBytes: number,
+    signal?: AbortSignal,
+    key?: string,
+  ) {
     try {
-      const path = join(this.directory, name);
-      const file = await open(path, 'r');
+      const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
       let stamp: string, content: string;
       try {
+        if (signal?.aborted) return;
         const metadata = await file.stat({ bigint: true });
-        if (metadata.size > maxBytes) return;
+        if (!metadata.isFile() || metadata.size > maxBytes) return;
+        if (key !== undefined && metadata.size > 64 * 1024) {
+          // Our writer puts the 64-digit cache key first. Read positionally to
+          // leave the normal JSON reader at byte zero for matching or older files.
+          const header = Buffer.allocUnsafe(96);
+          const { bytesRead } = await file.read(header, 0, header.length, 0);
+          const stored = /^\{"key":"([a-f0-9]{64})","offset":/.exec(
+            header.toString('latin1', 0, bytesRead),
+          );
+          if (stored && stored[1] !== key) return;
+        }
         stamp = fileStamp(metadata);
-        content = await file.readFile('utf8');
+        content = await file.readFile({ encoding: 'utf8', signal });
       } finally {
         await file.close();
       }
       const result = pageSchema.safeParse(JSON.parse(content));
-      if (!result.success || result.data.key !== this.key) return;
+      if (!result.success || (key !== undefined && result.data.key !== key)) return;
       const page = result.data,
         commits: Commit[] = [];
       const hash = createHash('sha256')
@@ -71,6 +146,7 @@ export class HistoryCache {
       // Do not let validation of later disk pages monopolize the service while
       // the UI is requesting a prefix that has already been decoded.
       for (let i = 0; i < page.commits.length; i += 100) {
+        if (signal?.aborted) return;
         const batch = z.array(commitSchema).safeParse(page.commits.slice(i, i + 100));
         if (!batch.success) return;
         if (i) hash.update(',');
@@ -78,13 +154,41 @@ export class HistoryCache {
         commits.push(...batch.data);
         await yieldTurn();
       }
-      if (hash.update(']').digest('hex') === page.digest) return { ...page, commits, stamp };
+      if (hash.update(']').digest('hex') === page.digest) return { ...page, commits, stamp, path };
     } catch {
       /* A cache miss always falls back to the real Git stream. */
     }
   }
-  async load(): Promise<HistorySeed | undefined> {
-    const prefix = await this.read(prefixName, 8 * 1024 * 1024);
+  static prefetchPrefix(root: string, repoId: string, signal: AbortSignal) {
+    return HistoryCache.readPage(
+      join(cacheDirectory(root, repoId), prefixName),
+      8 * 1024 * 1024,
+      signal,
+    );
+  }
+  private async currentPrefix(
+    signal?: AbortSignal,
+    prefetched?: ReturnType<typeof HistoryCache.prefetchPrefix>,
+  ) {
+    const path = join(this.directory, prefixName);
+    if (prefetched) {
+      const prefix = await prefetched;
+      if (signal?.aborted) return;
+      if (
+        prefix?.path === path &&
+        (await stat(path, { bigint: true }).then(fileStamp, () => undefined)) === prefix.stamp
+      )
+        return prefix.key === this.key ? prefix : undefined;
+    }
+    return HistoryCache.readPage(path, 8 * 1024 * 1024, signal, this.key);
+  }
+  async load(
+    signal?: AbortSignal,
+    prefetched?: ReturnType<typeof HistoryCache.prefetchPrefix>,
+  ): Promise<HistorySeed | undefined> {
+    if (signal?.aborted) return;
+    const read = this.currentPrefix(signal, prefetched);
+    const prefix = signal ? await waitForHistoryCache(read, signal) : await read;
     if (!prefix || prefix.offset !== 0 || !prefix.commits.length || prefix.commits.length > 2000)
       return;
     this.persisted.set(prefixName, {
@@ -97,11 +201,18 @@ export class HistoryCache {
     this.firstCount = prefix.commits.length;
     this.hasMore = prefix.hasMore;
     const continuation: NonNullable<HistorySeed['continuation']> = (append) => {
-      this.ready = (async () => {
-        if (!prefix.hasMore) return;
+      const { signal } = this.tailRead;
+      const reading = (async () => {
+        if (!prefix.hasMore || signal.aborted) return;
         for (const name of tailNames) {
-          const tail = await this.read(name, 18 * 1024 * 1024);
+          const tail = await HistoryCache.readPage(
+            join(this.directory, name),
+            18 * 1024 * 1024,
+            signal,
+            this.key,
+          );
           if (
+            signal.aborted ||
             !tail ||
             tail.offset !== this.records.length ||
             !tail.commits.length ||
@@ -120,6 +231,7 @@ export class HistoryCache {
           if (!tail.hasMore) return;
         }
       })();
+      this.ready = waitForHistoryCache(reading, signal);
       return this.ready;
     };
     return {
@@ -135,11 +247,11 @@ export class HistoryCache {
     this.ready = this.ready.then(() => {
       // A reopened page may begin in the disk prefix and finish in the live walk.
       const start = this.records.length - offset;
-      const end = Math.min(commits.length, 17000 - offset);
+      const end = Math.min(commits.length, this.recordLimit - offset);
       if (this.disabled || offset < 0 || start < 0 || start >= end) return;
       if (!this.firstCount) this.firstCount = commits.length;
       this.records.push(...commits.slice(start, end));
-      this.hasMore = hasMore || offset + commits.length > 17000;
+      this.hasMore = hasMore || offset + commits.length > this.recordLimit;
       this.dirty = true;
       clearTimeout(this.timer);
       this.timer = setTimeout(() => {
@@ -157,6 +269,15 @@ export class HistoryCache {
       );
     });
     await this.writes;
+  }
+  stopReadingTails() {
+    this.tailRead.abort();
+  }
+  async flushBeforeSnapshot(signal: AbortSignal) {
+    const writing = this.flush();
+    // The current cache still owns the write if the destination is cancelled.
+    await waitForHistoryCache(writing, signal);
+    if (!signal.aborted) await writing;
   }
   async flush() {
     clearTimeout(this.timer);
@@ -186,6 +307,7 @@ export class HistoryCache {
             ] as const;
           }),
         ] as const) {
+          if (offset >= this.recordLimit) break;
           const path = join(this.directory, name);
           // Records only grow at the end. Reuse a matching range while its file still exists intact.
           const previous = this.persisted.get(name);
@@ -207,10 +329,21 @@ export class HistoryCache {
           let size = header.byteLength;
           const hash = createHash('sha256').update(JSON.stringify({ offset, hasMore })).update('[');
           for (let i = 0; i < commits.length; i += 100) {
-            const batch = JSON.stringify(commits.slice(i, i + 100)).slice(1, -1);
-            const chunk = Buffer.from((i ? ',' : '') + batch);
-            size += chunk.byteLength;
+            const batch: string[] = [];
+            for (let j = i; j < Math.min(i + 100, commits.length); j++) {
+              const commit = commits[j]!;
+              // JSON requires at least one byte per UTF-16 code unit in these fields.
+              if (commit.body.length + commit.summary.length > limit - size) {
+                size = limit + 1;
+                break;
+              }
+              const record = JSON.stringify(commit);
+              size += Buffer.byteLength(record) + (j ? 1 : 0);
+              if (size > limit) break;
+              batch.push(record);
+            }
             if (size > limit) break;
+            const chunk = Buffer.from((i ? ',' : '') + batch.join(','));
             hash.update(chunk);
             chunks.push(chunk);
             await yieldTurn();
@@ -220,8 +353,16 @@ export class HistoryCache {
           const footer = Buffer.from(`],"hasMore":${hasMore},"digest":"${checksum}"}`);
           size += footer.byteLength;
           if (size > limit) {
-            await rm(path, { force: true });
-            continue;
+            // Restart can replay only a contiguous prefix. This immutable page can
+            // only grow, so release it and retire every later file for this window.
+            for (const unreachable of cacheNames.slice(cacheNames.indexOf(name))) {
+              await rm(join(this.directory, unreachable), { force: true });
+              this.persisted.delete(unreachable);
+            }
+            this.recordLimit = offset;
+            this.records.length = offset;
+            this.hasMore = true;
+            break;
           }
           chunks.push(footer);
           const temp = `${path}.${randomUUID()}.tmp`;

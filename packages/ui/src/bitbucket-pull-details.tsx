@@ -1,3 +1,4 @@
+import { BitbucketMergeChecks, BitbucketStatuses } from './bitbucket-statuses.js';
 import { BitbucketComments } from './bitbucket-comments.js';
 import { BitbucketFiles } from './bitbucket-files.js';
 import { providerBitbucketRevisionSchema } from '@openkraken/ipc-contract';
@@ -120,13 +121,32 @@ export function BitbucketPullDetails({
   const [error, setError] = useState('');
   const [pending, setPending] = useState(true);
   const [attempt, setAttempt] = useState(0);
-  const [showFiles, setShowFiles] = useState(false);
-  const [showComments, setShowComments] = useState(false);
+  const [panel, setPanel] = useState<'files' | 'comments' | 'checks' | 'merge'>();
+  const showFiles = panel === 'files';
+  const showComments = panel === 'comments';
   const comparisonKey = JSON.stringify([detail?.repositoryId, detail?.source, detail?.destination]);
   const repositoryId = detail?.repositoryId;
   const sourceRepositoryId = detail?.source.repository?.id;
   const sourceCommit = detail?.source.commit;
   const destinationCommit = detail?.destination.commit;
+  const source = detail?.source;
+  const statusOptions = useMemo(
+    () =>
+      repositoryId && source
+        ? {
+            repository: target.repository,
+            number,
+            repositoryId,
+            source,
+          }
+        : undefined,
+    [target.repository, number, repositoryId, source],
+  );
+  const destination = detail?.destination;
+  const mergeOptions = useMemo(
+    () => (statusOptions && destination ? { ...statusOptions, destination } : undefined),
+    [statusOptions, destination],
+  );
   const context = useMemo(() => {
     const revision = providerBitbucketRevisionSchema.safeParse({
       repositoryId,
@@ -184,7 +204,7 @@ export function BitbucketPullDetails({
       return {
         resetChildren:
           detail?.repositoryId !== result.pullRequest.repositoryId ||
-          (showFiles &&
+          ((showFiles || panel === 'checks' || panel === 'merge') &&
             comparisonKey !==
               JSON.stringify([
                 result.pullRequest.repositoryId,
@@ -192,7 +212,17 @@ export function BitbucketPullDetails({
                 result.pullRequest.destination,
               ])),
         commit: () => {
-          setDetail(result.pullRequest);
+          setDetail((previous) =>
+            previous &&
+            JSON.stringify(previous.source) === JSON.stringify(result.pullRequest.source) &&
+            JSON.stringify(previous.destination) === JSON.stringify(result.pullRequest.destination)
+              ? {
+                  ...result.pullRequest,
+                  source: previous.source,
+                  destination: previous.destination,
+                }
+              : result.pullRequest,
+          );
           setError('');
         },
       };
@@ -245,8 +275,7 @@ export function BitbucketPullDetails({
           <p className="provider-url">{detail.url}</p>
           <button
             onClick={() => {
-              setShowFiles(!showFiles);
-              setShowComments(false);
+              setPanel(showFiles ? undefined : 'files');
             }}
           >
             {showFiles ? 'Hide files' : 'Show files'}
@@ -259,8 +288,7 @@ export function BitbucketPullDetails({
             ))}
           <button
             onClick={() => {
-              setShowComments(!showComments);
-              setShowFiles(false);
+              setPanel(showComments ? undefined : 'comments');
             }}
           >
             {showComments ? 'Hide comments' : 'Show comments'}
@@ -271,6 +299,32 @@ export function BitbucketPullDetails({
               target={target}
               number={number}
               repositoryId={detail.repositoryId}
+            />
+          )}
+          <button
+            aria-expanded={panel === 'checks'}
+            onClick={() => setPanel(panel === 'checks' ? undefined : 'checks')}
+          >
+            {panel === 'checks' ? 'Hide build checks' : 'Show build checks'}
+          </button>
+          {panel === 'checks' && statusOptions && (
+            <BitbucketStatuses
+              key={comparisonKey}
+              accountId={target.accountId}
+              options={statusOptions}
+            />
+          )}
+          <button
+            aria-expanded={panel === 'merge'}
+            onClick={() => setPanel(panel === 'merge' ? undefined : 'merge')}
+          >
+            {panel === 'merge' ? 'Hide merge checks' : 'Show merge checks'}
+          </button>
+          {panel === 'merge' && mergeOptions && (
+            <BitbucketMergeChecks
+              key={comparisonKey}
+              accountId={target.accountId}
+              options={mergeOptions}
             />
           )}
           <People

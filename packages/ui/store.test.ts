@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, expect, test, vi } from 'vitest';
 import { GraphEngine } from '../graph/src/engine.js';
-import type { GraphRequest } from '../graph/src/engine.js';
+import type { GraphDocument, GraphRequest } from '../graph/src/engine.js';
 import { encodeHistoryPage, encodeSnapshotBodies } from '@openkraken/ipc-contract';
 import type { Result, Snapshot } from '@openkraken/ipc-contract';
 const workers = vi.hoisted(() => ({ start: vi.fn(), close: vi.fn(), layout: vi.fn() }));
@@ -16,7 +16,7 @@ vi.mock('./src/graph-client.js', () => ({
     }
     async request(request: GraphRequest) {
       if (this.failed) throw new Error('Graph worker failed');
-      if (request.method === 'reset') workers.layout();
+      if (request.method === 'reset') await workers.layout(request.commits);
       return this.engine.handle({ ...request, id: 1 });
     }
   },
@@ -56,9 +56,9 @@ function fixture(cursor = crypto.randomUUID()): Snapshot {
     elapsedMs: 0,
   };
 }
-function deferred() {
-  let resolve!: (result: Result) => void;
-  const promise = new Promise<Result>((done) => {
+function deferred<T = Result>() {
+  let resolve!: (result: T) => void;
+  const promise = new Promise<T>((done) => {
     resolve = done;
   });
   return { promise, resolve };
@@ -120,6 +120,38 @@ test.each(['snapshot', 'layout'] as const)(
     expect(useRepository.getState().matches).toEqual([first.commits[0]!.oid]);
   },
 );
+
+test('a repository switch prepares its new rows while the displayed graph waits for layout', async () => {
+  const first = fixture();
+  await open(first);
+  const previous = useRepository.getState();
+  const next = fixture();
+  next.commits[0] = { ...next.commits[0]!, oid: 'f'.repeat(40), summary: 'Replacement' };
+  const dispatched = deferred<GraphDocument[]>();
+  const finish = deferred<void>();
+  workers.layout.mockImplementationOnce((rows: GraphDocument[]) => {
+    dispatched.resolve(rows);
+    return finish.promise;
+  });
+  const opening = open(next);
+  const rows = await dispatched.promise;
+  try {
+    expect(Object.isFrozen(rows)).toBe(true);
+    expect(Object.isFrozen(rows[0]!.parents)).toBe(true);
+    expect(useRepository.getState().snapshot).toBe(previous.snapshot);
+    expect(useRepository.getState().layout).toBe(previous.layout);
+    expect(useRepository.getState().selection).toBe(previous.selection);
+  } finally {
+    finish.resolve();
+    await opening;
+  }
+  const state = useRepository.getState();
+  expect(state.rows).toBe(rows);
+  expect(state.snapshot?.cursor).toBe(next.cursor);
+  expect(state.layout[0]?.oid).toBe(next.commits[0]!.oid);
+  await state.search('Replacement');
+  expect(useRepository.getState().matches).toEqual([next.commits[0]!.oid]);
+});
 
 test('refresh replaces a failed graph worker and restores the active query and selection', async () => {
   const first = fixture();
@@ -187,11 +219,39 @@ test('deep range selection preserves the loaded page and ignores a missing targe
   expect(state.rows).toBe(rows);
   expect(state.selection).toEqual({
     anchor: start,
+    anchorIndex: 4998,
     focus: last,
+    focusIndex: 5000,
     selected: commits.slice(-3).map((row) => row.oid),
   });
   select('missing', 'range');
   expect(useRepository.getState()).toBe(state);
+});
+test('a keyboard jump checks each appended page without revisiting earlier commit IDs', async () => {
+  const snapshot = fixture();
+  await open(snapshot);
+  const first = useRepository.getState().rows[0]!;
+  const readOid = vi.fn(() => first.oid);
+  const observed = Object.freeze({
+    ...first,
+    get oid() {
+      return readOid();
+    },
+  });
+  useRepository.setState({ rows: [observed] });
+  for (const [index, digit] of ['b', 'c', 'd'].entries()) {
+    request.mockResolvedValueOnce({
+      kind: 'page',
+      cursor: snapshot.cursor,
+      offset: index + 1,
+      commits: [{ ...snapshot.commits[0]!, oid: digit.repeat(40), parents: [] }],
+      hasMore: digit !== 'd',
+    });
+  }
+  readOid.mockClear();
+  await useRepository.getState().navigate('d'.repeat(40));
+  expect(useRepository.getState().selection.focus).toBe('d'.repeat(40));
+  expect(readOid).toHaveBeenCalledTimes(1);
 });
 test('a pending jump to unloaded history preserves a newer row selection', async () => {
   const snapshot = fixture();
@@ -214,6 +274,30 @@ test('a pending jump to unloaded history preserves a newer row selection', async
   expect(useRepository.getState().rows.at(-1)?.oid).toBe(target);
   expect(useRepository.getState().selection.focus).toBe(second.oid);
 });
+test.each([0, 2])(
+  'a viewport jump stops at the root with %i commits on the last page',
+  async (count) => {
+    const snapshot = fixture();
+    await open(snapshot);
+    const commits = ['b', 'c'].slice(0, count).map((digit) => ({
+      ...snapshot.commits[0]!,
+      oid: digit.repeat(40),
+      parents: [],
+    }));
+    request.mockResolvedValueOnce({
+      kind: 'page',
+      cursor: snapshot.cursor,
+      offset: 1,
+      commits,
+      hasMore: false,
+    });
+    await useRepository.getState().navigate(18);
+    const state = useRepository.getState();
+    expect(state.selection.focus).toBe(state.rows.at(-1)!.oid);
+    expect(state.selection.focusIndex).toBe(count);
+    expect(request).toHaveBeenCalledTimes(2);
+  },
+);
 test('the newest keyboard jump uses the page already in flight', async () => {
   const snapshot = fixture();
   await open(snapshot);
@@ -335,6 +419,134 @@ test.each(['complete', 'pending'])(
   },
 );
 
+test.each(['result', 'error'])(
+  'cancel search preserves an in-flight page and ignores a late %s during a retry',
+  async (reply) => {
+    const snapshot = fixture();
+    await open(snapshot);
+    const state = useRepository.getState;
+    await state().search('First');
+    const search = deferred(),
+      page = deferred(),
+      retry = deferred();
+    request.mockReturnValueOnce(search.promise).mockReturnValueOnce(page.promise);
+    const searching = state().searchAll();
+    const searchId = state().searching;
+    const paging = state().loadMore();
+    const pageId = state().paging;
+    await state().cancelSearch();
+    expect(window.openkraken.cancel).toHaveBeenCalledExactlyOnceWith(searchId);
+    expect(state()).toMatchObject({
+      query: 'First',
+      matches: [snapshot.commits[0]!.oid],
+      paging: pageId,
+    });
+    expect(state().searching).toBeUndefined();
+    request.mockReturnValueOnce(retry.promise);
+    const retrying = state().searchAll();
+    const retryId = state().searching;
+    const found = {
+      kind: 'search' as const,
+      cursor: snapshot.cursor,
+      commits: snapshot.commits,
+      truncated: false,
+    };
+    search.resolve(
+      reply === 'result' ? found : { kind: 'error', code: 'CANCELLED', message: 'Stopped' },
+    );
+    await searching;
+    expect(state().searchResults).toBeUndefined();
+    expect(state().error).toBeUndefined();
+    expect(state().searching).toBe(retryId);
+    await state().cancel();
+    expect(window.openkraken.cancel).toHaveBeenCalledTimes(2);
+    expect(window.openkraken.cancel).toHaveBeenLastCalledWith(pageId);
+    page.resolve({ kind: 'cancelled' });
+    await paging;
+    retry.resolve(found);
+    await retrying;
+    expect(state().searchResults).toEqual(snapshot.commits);
+  },
+);
+
+test.each(['cancel', 'edit', 'switch', 'refresh'] as const)(
+  'full-history search queued during a background snapshot handles %s',
+  async (action) => {
+    const snapshot = fixture();
+    await open(snapshot);
+    const state = useRepository.getState;
+    await state().search('First');
+    const update = deferred();
+    request.mockReturnValueOnce(update.promise);
+    const refreshing = state().run(
+      { id: crypto.randomUUID(), method: 'refresh', repoId: snapshot.repository.id },
+      true,
+    );
+    const searching = state().searchAll();
+    expect(state().searching).toBeDefined();
+    if (action === 'cancel') await state().cancelSearch();
+    if (action === 'edit') {
+      await state().search('Changed');
+      await state().search('First');
+    }
+    const next = fixture();
+    if (action === 'switch') next.repository.id = 'e'.repeat(64);
+    update.resolve({ kind: 'snapshot', snapshot: next });
+    request.mockResolvedValueOnce({
+      kind: 'search',
+      cursor: next.cursor,
+      commits: next.commits,
+      truncated: false,
+    });
+    await Promise.all([refreshing, searching]);
+    if (action === 'refresh') {
+      expect(request).toHaveBeenCalledTimes(3);
+      expect(request).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          method: 'search',
+          query: 'First',
+          cursor: next.cursor,
+          repoId: next.repository.id,
+        }),
+      );
+      expect(state().searchResults).toEqual(next.commits);
+    } else {
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(state().searchResults).toBeUndefined();
+    }
+    expect(window.openkraken.cancel).not.toHaveBeenCalled();
+    expect(state().searching).toBeUndefined();
+  },
+);
+
+test('a failed cancellation can be retried while the search is running', async () => {
+  const snapshot = fixture();
+  await open(snapshot);
+  const state = useRepository.getState;
+  await state().search('First');
+  const search = deferred();
+  request.mockReturnValueOnce(search.promise);
+  const searching = state().searchAll();
+  const id = state().searching;
+  vi.mocked(window.openkraken.cancel).mockRejectedValueOnce(new Error('Connection closed'));
+  await state().cancelSearch();
+  expect(state().searching).toBe(id);
+  expect(state().error).toContain('Connection closed');
+  await state().cancelSearch();
+  expect(state().searching).toBeUndefined();
+  search.resolve({ kind: 'cancelled' });
+  await searching;
+});
+
+function rejectRetiredSearchCancellation() {
+  const cancellations: string[] = [];
+  window.openkraken.cancel = async (id) => {
+    cancellations.push(id);
+    throw new Error('Retired request');
+  };
+  return cancellations;
+}
+
 test.each(['cancelled', 'snapshot'] as const)(
   'a picker returning %s retires search only on repository replacement',
   async (kind) => {
@@ -346,8 +558,9 @@ test.each(['cancelled', 'snapshot'] as const)(
     request.mockReturnValueOnce(read.promise).mockReturnValueOnce(picker.promise);
     const searching = useRepository.getState().searchAll();
     const searchId = useRepository.getState().searching;
+    const cancellations = rejectRetiredSearchCancellation();
     const switching = useRepository.getState().run({ id: crypto.randomUUID(), method: 'open' });
-    expect(window.openkraken.cancel).not.toHaveBeenCalled();
+    expect(cancellations).toEqual([]);
     picker.resolve(kind === 'snapshot' ? { kind, snapshot: fixture() } : { kind });
     await switching;
     read.resolve({
@@ -357,23 +570,28 @@ test.each(['cancelled', 'snapshot'] as const)(
       truncated: false,
     });
     await searching;
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(useRepository.getState().error).toBeUndefined();
     if (kind === 'cancelled') {
       expect(useRepository.getState().searchResults).toEqual(snapshot.commits);
-      expect(window.openkraken.cancel).not.toHaveBeenCalled();
+      expect(cancellations).toEqual([]);
     } else {
       expect(useRepository.getState().searchResults).toBeUndefined();
-      expect(window.openkraken.cancel).toHaveBeenCalledWith(searchId);
+      expect(cancellations).toEqual([searchId]);
     }
   },
 );
-test('late all-history search is discarded after query changes', async () => {
+test('editing a query discards late results even if cancelling the old search fails', async () => {
   const snapshot = fixture();
   await open(snapshot);
   await useRepository.getState().search('First');
   const pending = deferred();
   request.mockReturnValueOnce(pending.promise);
   const searching = useRepository.getState().searchAll();
+  const searchId = useRepository.getState().searching;
+  const cancellations = rejectRetiredSearchCancellation();
   await useRepository.getState().search('absent');
+  expect(cancellations).toEqual([searchId]);
   pending.resolve({
     kind: 'search',
     cursor: snapshot.cursor,
@@ -383,6 +601,8 @@ test('late all-history search is discarded after query changes', async () => {
   await searching;
   expect(useRepository.getState().searchResults).toBeUndefined();
   expect(useRepository.getState().matches).toEqual([]);
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(useRepository.getState().error).toBeUndefined();
 });
 test('wrong page offset fails before modifying visible history', async () => {
   const snapshot = fixture();
@@ -480,6 +700,7 @@ test('staging a displayed path updates status and keeps the graph and active sea
   expect(updated.layout).toBe(previous.layout);
   expect(updated.rows).toBe(previous.rows);
   expect(updated.matches).toBe(previous.matches);
+  useRepository.getState().setDetail(updated.rows[0]);
   const renamed = await refresh({
     ...snapshot.status,
     entries: [
@@ -487,6 +708,11 @@ test('staging a displayed path updates status and keeps the graph and active sea
     ],
   });
   expect(renamed.rows[0]?.body).toBe('other.txt');
+  expect(renamed.detail).toBe(renamed.rows[0]);
+  expect(renamed.layout).toBe(updated.layout);
+  expect(renamed.passages).toBe(updated.passages);
+  expect(renamed.selection).toBe(updated.selection);
+  expect(renamed.rows[1]).toBe(updated.rows[1]);
   expect(renamed.matches).toEqual([]);
   const conflicted = await refresh({
     ...snapshot.status,
@@ -494,6 +720,52 @@ test('staging a displayed path updates status and keeps the graph and active sea
   });
   expect(conflicted.rows[0]?.kind).toBe('conflict');
   expect(conflicted.matches).toEqual([`conflict:${snapshot.repository.id}`]);
+});
+
+test('a rename before HEAD is loaded becomes searchable when its page arrives', async () => {
+  const snapshot = fixture();
+  const head = 'b'.repeat(40);
+  snapshot.repository.head = { kind: 'branch', ref: 'refs/heads/main', oid: head };
+  const entry = {
+    path: 'old.txt',
+    pathBytes: Buffer.from('old.txt').toString('base64'),
+    kind: 'untracked' as const,
+    index: '?',
+    worktree: '?',
+    submodule: 'N...',
+  };
+  snapshot.status.entries.push(entry);
+  await open(snapshot);
+  await useRepository.getState().search('renamed');
+  const previous = useRepository.getState();
+  const renamed = {
+    ...entry,
+    path: 'renamed.txt',
+    pathBytes: Buffer.from('renamed.txt').toString('base64'),
+  };
+  request.mockResolvedValueOnce({
+    kind: 'workingState',
+    state: {
+      head: snapshot.repository.head,
+      revision: '0'.repeat(64),
+      status: { ...snapshot.status, entries: [renamed] },
+    },
+  });
+  await previous.refreshStatus();
+  const updated = useRepository.getState();
+  expect(updated.error).toBeUndefined();
+  expect(updated.rows).toBe(previous.rows);
+  expect(updated.snapshot?.status.entries).toEqual([renamed]);
+  expect(updated.matches).toEqual([]);
+  request.mockResolvedValueOnce({
+    kind: 'page',
+    cursor: snapshot.cursor,
+    offset: 1,
+    commits: [{ ...snapshot.commits[0]!, oid: head, parents: [] }],
+    hasMore: false,
+  });
+  await updated.loadMore();
+  expect(useRepository.getState().matches).toEqual([`wip:${snapshot.repository.id}`]);
 });
 
 test('status refresh preserves the append-only history cursor, loaded commits and selection', async () => {

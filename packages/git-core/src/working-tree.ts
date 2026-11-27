@@ -237,15 +237,23 @@ export class WorkingTree {
     return this.fingerprint(indexFile, signal);
   }
   private async fingerprint(indexFile?: string, signal?: AbortSignal) {
-    const [head, entries, diff] = await Promise.all([
+    const signature = createHash('sha256');
+    const [head, , diff] = await Promise.all([
       this.head(signal),
-      this.run(['ls-files', '--stage', '-v', '-z'], { indexFile, signal }),
+      this.run(['ls-files', '--stage', '-v', '-z'], {
+        indexFile,
+        signal,
+        onStdout: (chunk) => {
+          signature.update(chunk);
+        },
+      }),
       this.run(['diff', '--cached', '--raw', '-z', '--no-ext-diff', '--no-renames'], {
         indexFile,
         signal,
       }),
     ]);
-    return { head, signature: hash(Buffer.concat([entries.stdout, diff.stdout])) };
+    // Existing journals hash the index listing first, then the staged diff.
+    return { head, signature: signature.update(diff.stdout).digest('hex') };
   }
   private async saved(
     indexFile: string,

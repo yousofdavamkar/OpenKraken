@@ -76,8 +76,10 @@ export function allocateLanes(
       });
   };
   const targets = new Map<string, Set<number>>();
+  let occupied = 0;
   state.lanes.forEach((lane, column) => {
     if (lane) {
+      occupied++;
       const columns = targets.get(lane.target) ?? new Set<number>();
       columns.add(column);
       targets.set(lane.target, columns);
@@ -86,12 +88,14 @@ export function allocateLanes(
   const setLane = (column: number, lane: Lane | null) => {
     const old = state.lanes[column];
     if (old) {
+      occupied--;
       const columns = targets.get(old.target)!;
       columns.delete(column);
       if (!columns.size) targets.delete(old.target);
     }
     state.lanes[column] = lane;
     if (lane) {
+      occupied++;
       const columns = targets.get(lane.target) ?? new Set<number>();
       columns.add(column);
       targets.set(lane.target, columns);
@@ -103,9 +107,11 @@ export function allocateLanes(
     return column === Infinity ? -1 : column;
   };
   const reserve = (target: string, preferred = 0, dashed = false) => {
-    let column = state.lanes.findIndex((lane, i) => i >= preferred && !lane);
-    if (column < 0) column = state.lanes.findIndex((lane) => !lane);
-    if (column < 0) column = state.lanes.length;
+    let column = state.lanes.length;
+    if (occupied < column) {
+      column = state.lanes.indexOf(null, preferred);
+      if (column < 0) column = state.lanes.indexOf(null);
+    }
     setLane(column, { target, color: state.nextColor++ % 10, dashed });
     return column;
   };
@@ -187,7 +193,7 @@ export function allocateLanes(
 
 /** Clip old spans around the changed interval, preserving an unchanged prefix/suffix. */
 export function patchPassages(
-  previous: readonly GraphPassage[],
+  previous: Iterable<GraphPassage>,
   offset: number,
   end: number,
   totalRows: number,
@@ -206,10 +212,33 @@ export function patchPassages(
 }
 
 /** Each viewport consults only the overlapping 500-row buckets, regardless of history length. */
-export function passageBuckets(passages: readonly GraphPassage[]) {
-  const buckets: GraphPassage[][] = [];
-  for (const p of passages)
-    for (let i = Math.floor(p.start / 500); i <= Math.floor((p.end - 1) / 500); i++)
-      (buckets[i] ??= []).push(p);
+export function passageBuckets(passages: readonly GraphPassage[], previous: GraphPassage[][] = []) {
+  if (!passages.length) return previous;
+  const buckets = previous.slice();
+  for (const p of passages) {
+    for (let i = Math.floor(p.start / 500); i <= Math.floor((p.end - 1) / 500); i++) {
+      if (buckets[i] === previous[i]) buckets[i] = previous[i]?.slice() ?? [];
+      buckets[i]!.push(p);
+    }
+  }
   return buckets;
+}
+
+/** A long passage belongs to several buckets. Clip it only once during a refresh. */
+function* originalPassages(buckets: GraphPassage[][]) {
+  for (let i = 0; i < buckets.length; i++)
+    for (const p of buckets[i] ?? []) if (Math.floor(p.start / 500) === i) yield p;
+}
+
+export function refreshPassageBuckets(
+  previous: GraphPassage[][],
+  offset: number,
+  end: number,
+  totalRows: number,
+  replacement: readonly GraphPassage[],
+) {
+  if (offset === 0 && end === totalRows) return passageBuckets(replacement);
+  return passageBuckets(
+    patchPassages(originalPassages(previous), offset, end, totalRows, replacement),
+  );
 }

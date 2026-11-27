@@ -2,33 +2,24 @@ import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react
 import { defaultRangeExtractor, measureElement, useVirtualizer } from '@tanstack/react-virtual';
 import type { Ref, Snapshot } from '@openkraken/ipc-contract';
 import { RefControls } from './ref-controls.js';
-import { ReferenceActions } from './references.js';
+import { ReferenceActions, ReferenceDialog, type ReferenceReview } from './references.js';
 import { referenceDragProps } from './reference-drop.js';
+import { blockStart, blockLength, groupReferences, referenceGroups } from './reference-list.js';
 import { useRepository } from './store.js';
 
-const groups = [
-  ['local', 'Branches'],
-  ['remote', 'Remotes'],
-  ['tag', 'Tags'],
-  ['stash', 'Stashes'],
-  ['other', 'Other refs'],
-] as const;
-type ReferenceBlock = {
-  kind: Ref['kind'];
-  refs: Ref[];
-  title?: string;
-  total: number;
-  firstPosition: number;
-};
+// Estimates match the one-line rows and collapsible headings; measured heights replace them.
+const headingHeightEstimate = 28;
+const rowHeightEstimate = 26;
+type ReviewHandler = (review: ReferenceReview) => void;
 type Collapse = { collapsed: ReadonlySet<Ref['kind']>; toggle: (kind: Ref['kind']) => void };
-const refsPerBlock = 4;
-const headingHeightEstimate = 48;
 
 function ReferenceRow({
   reference,
   snapshot,
   busy,
+  onReview,
 }: {
+  onReview: ReviewHandler;
   reference: Ref;
   snapshot: Snapshot;
   busy: boolean;
@@ -55,7 +46,7 @@ function ReferenceRow({
       </div>
       <div className="ref-actions">
         <RefControls reference={reference} />
-        <ReferenceActions reference={reference} />
+        <ReferenceActions reference={reference} onReview={onReview} />
       </div>
     </div>
   );
@@ -72,8 +63,9 @@ function SectionHeading({
   count: number;
   collapse: Collapse;
 }) {
+  // The heading is named by its title; the toggle also reads out the count.
   return (
-    <h3 className="ref-section-heading">
+    <h3 className="ref-section-heading" aria-label={title}>
       <button
         type="button"
         aria-expanded={!collapse.collapsed.has(kind)}
@@ -89,75 +81,58 @@ function SectionHeading({
 function VirtualReferences({
   snapshot,
   busy,
+  reviewedName,
+  onFilterFocus,
+  onReview,
   collapse,
 }: {
   snapshot: Snapshot;
   busy: boolean;
+  reviewedName?: string;
+  onFilterFocus: () => void;
+  onReview: ReviewHandler;
   collapse: Collapse;
 }) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState<string>();
   const scroll = useRef<HTMLDivElement>(null);
-  const { blocks, count, listed } = useMemo(() => {
-    const search = query.trim().toLocaleLowerCase();
-    const buckets = new Map<Ref['kind'], Ref[]>(groups.map(([kind]) => [kind, []]));
-    for (const ref of snapshot.refs) {
-      if (!search || ref.name.toLocaleLowerCase().includes(search))
-        buckets.get(ref.kind)!.push(ref);
-    }
-    const blocks: ReferenceBlock[] = [];
-    let count = 0,
-      listed = 0;
-    for (const [kind, title] of groups) {
-      const matches = buckets.get(kind)!;
-      count += matches.length;
-      if (!matches.length) continue;
-      if (collapse.collapsed.has(kind)) {
-        // A collapsed section keeps its heading so it can be expanded again.
-        blocks.push({ kind, refs: [], title, total: matches.length, firstPosition: listed + 1 });
-        continue;
-      }
-      for (let start = 0; start < matches.length; start += refsPerBlock) {
-        const refs = matches.slice(start, start + refsPerBlock);
-        blocks.push({
-          kind,
-          refs,
-          title: start === 0 ? title : undefined,
-          total: matches.length,
-          firstPosition: listed + 1,
-        });
-        listed += refs.length;
-      }
-    }
-    return { blocks, count, listed };
-  }, [snapshot.refs, query, collapse.collapsed]);
-  const focusedBlock = useMemo(
-    () =>
-      focused ? blocks.findIndex((block) => block.refs.some((ref) => ref.name === focused)) : -1,
-    [blocks, focused],
+  const list = useMemo(
+    () => groupReferences(snapshot.refs, query, collapse.collapsed),
+    [snapshot.refs, query, collapse.collapsed],
   );
+  const retain = reviewedName ?? focused;
+  const focusedBlock = useMemo(() => (retain ? list.focusedBlock(retain) : -1), [list, retain]);
   const getItemKey = useCallback(
-    (index: number) => blocks[index]!.refs[0]?.name ?? `section:${blocks[index]!.kind}`,
-    [blocks],
+    (index: number) => {
+      const section = list.section(index)!;
+      return section.collapsed
+        ? `section:${section.kind}`
+        : list.refs[blockStart(section, index)]!.name;
+    },
+    [list],
   );
   const estimatedHeights = useRef(new Map<Ref['kind'], number>());
   const virtual = useVirtualizer({
-    count: blocks.length,
+    count: list.blocks,
     getScrollElement: () => scroll.current,
     getItemKey,
     estimateSize: (index) => {
-      const block = blocks[index]!;
+      const section = list.section(index)!;
       return (
-        (block.title ? headingHeightEstimate : 0) +
-        block.refs.length * (estimatedHeights.current.get(block.kind) ?? 120)
+        (index === section.firstBlock && section.title ? headingHeightEstimate : 0) +
+        blockLength(section, index) *
+          (estimatedHeights.current.get(section.kind) ?? rowHeightEstimate)
       );
     },
     measureElement: (element, entry, instance) => {
       const height = measureElement(element, entry, instance);
-      const block = blocks[instance.indexFromElement(element)];
-      if (block && height > 0) {
-        const refHeight = (height - (block.title ? headingHeightEstimate : 0)) / block.refs.length;
-        if (block.refs.length && refHeight > 0) estimatedHeights.current.set(block.kind, refHeight);
+      const index = instance.indexFromElement(element);
+      const section = list.section(index);
+      if (section && height > 0) {
+        const heading = index === section.firstBlock && section.title ? headingHeightEstimate : 0;
+        const refHeight = (height - heading) / blockLength(section, index);
+        if (!section.collapsed && refHeight > 0)
+          estimatedHeights.current.set(section.kind, refHeight);
       }
       return height;
     },
@@ -169,7 +144,7 @@ function VirtualReferences({
       ].sort((a, b) => a - b),
   });
   // One element measures all grid rows in a block. The controls share a parent
-  // so React keeps a focused dialog mounted when a ref moves to another block.
+  // so React can preserve focus when a ref moves to another block.
   const cells: ReactElement[] = [];
   let track = 1;
   let previousEnd = 0;
@@ -185,28 +160,31 @@ function VirtualReferences({
       );
     }
     const firstTrack = track;
-    const block = blocks[item.index]!;
-    if (block.title)
+    const section = list.section(item.index)!;
+    const start = blockStart(section, item.index);
+    const end = start + blockLength(section, item.index);
+    if (item.index === section.firstBlock && section.title)
       cells.push(
-        <div key={block.title} style={{ gridRow: track++ }}>
+        <div key={section.title} style={{ gridRow: track++ }}>
           <SectionHeading
-            kind={block.kind}
-            title={block.title}
-            count={block.total}
+            kind={section.kind}
+            title={section.title}
+            count={section.total}
             collapse={collapse}
           />
         </div>,
       );
-    for (const [index, reference] of block.refs.entries()) {
+    for (let index = start; index < end; index++) {
+      const reference = list.refs[index]!;
       cells.push(
         <div
           key={reference.name}
           style={{ gridRow: track++ }}
           role="listitem"
-          aria-posinset={block.firstPosition + index}
-          aria-setsize={listed}
+          aria-posinset={section.firstPosition + index - section.from}
+          aria-setsize={list.listed}
         >
-          <ReferenceRow reference={reference} snapshot={snapshot} busy={busy} />
+          <ReferenceRow reference={reference} snapshot={snapshot} busy={busy} onReview={onReview} />
         </div>,
       );
     }
@@ -227,6 +205,7 @@ function VirtualReferences({
         Filter references
         <input
           value={query}
+          onFocus={onFilterFocus}
           maxLength={1000}
           onChange={(event) => {
             setQuery(event.target.value);
@@ -235,7 +214,7 @@ function VirtualReferences({
         />
       </label>
       <p className="reference-match-count" role="status">
-        {count.toLocaleString()} matching references
+        {list.count.toLocaleString()} matching references
       </p>
       <div
         className="reference-scroll"
@@ -266,7 +245,38 @@ function VirtualReferences({
 }
 
 export function ReferenceSidebar() {
-  const { snapshot, busy: active, syncing, setView } = useRepository();
+  const { snapshot, busy, syncing } = useRepository();
+  return (
+    snapshot && (
+      <RepositorySidebar
+        key={snapshot.repository.id}
+        snapshot={snapshot}
+        busy={!!busy && !syncing}
+      />
+    )
+  );
+}
+
+function RepositorySidebar({ snapshot, busy }: { snapshot: Snapshot; busy: boolean }) {
+  const aside = useRef<HTMLElement>(null);
+  const [review, setReview] = useState<ReferenceReview>();
+  const present = useMemo(
+    () => !review || snapshot.refs.some((ref) => ref.name === review.reference.name),
+    [snapshot.refs, review],
+  );
+  if (!present) setReview(undefined);
+  function closeReview() {
+    aside.current?.querySelector<HTMLDialogElement>('dialog[open]')?.close();
+    if (review) {
+      const row = aside.current?.querySelector(
+        `[data-reference-name="${CSS.escape(review.reference.name)}"]`,
+      );
+      row
+        ?.querySelector<HTMLButtonElement>(`[data-review-action="${review.action}"]`)
+        ?.focus({ preventScroll: true });
+    }
+    setReview(undefined);
+  }
   const [collapsed, setCollapsed] = useState<ReadonlySet<Ref['kind']>>(new Set());
   const collapse: Collapse = {
     collapsed,
@@ -277,11 +287,11 @@ export function ReferenceSidebar() {
         return next;
       }),
   };
-  if (!snapshot) return null;
-  const busy = !!active && !syncing;
-  const large = snapshot.refs.length >= 100;
+  // Once the user enters the filter, keep it available across ref refreshes.
+  const [filterUsed, setFilterUsed] = useState(false);
+  const large = snapshot.refs.length >= 100 || filterUsed;
   return (
-    <aside className={`refs${large ? ' virtualized-refs' : ''}`}>
+    <aside ref={aside} className={`refs${large ? ' virtualized-refs' : ''}`}>
       <h2>
         References <span>{snapshot.refs.length}</span>
       </h2>
@@ -294,20 +304,25 @@ export function ReferenceSidebar() {
           )}
           {snapshot.view.soloRef && <p>Solo: {snapshot.view.soloRef}</p>}
           {snapshot.view.pinnedRef && <p>Pinned: {snapshot.view.pinnedRef}</p>}
-          <button disabled={busy} onClick={() => void setView({ hiddenRefs: [] })}>
+          <button
+            disabled={busy}
+            onClick={() => void useRepository.getState().setView({ hiddenRefs: [] })}
+          >
             Reset graph view
           </button>
         </div>
       )}
       {large ? (
         <VirtualReferences
-          key={snapshot.repository.id}
           snapshot={snapshot}
           busy={busy}
+          reviewedName={review?.reference.name}
+          onFilterFocus={() => setFilterUsed(true)}
+          onReview={setReview}
           collapse={collapse}
         />
       ) : (
-        groups.map(([kind, title]) => {
+        referenceGroups.map(([kind, title]) => {
           const refs = snapshot.refs.filter((ref) => ref.kind === kind);
           return refs.length ? (
             <section key={kind}>
@@ -319,12 +334,21 @@ export function ReferenceSidebar() {
                     reference={reference}
                     snapshot={snapshot}
                     busy={busy}
+                    onReview={setReview}
                   />
                 ))}
               </div>
             </section>
           ) : null;
         })
+      )}
+      {review && present && (
+        <ReferenceDialog
+          action={review.action}
+          reference={review.reference}
+          target={review.reference.target}
+          close={closeReview}
+        />
       )}
     </aside>
   );

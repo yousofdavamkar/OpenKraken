@@ -1,3 +1,4 @@
+import { observeSubmodules } from './submodule-observer.js';
 import { subscribeDesktopEvents } from './desktop-events.js';
 import { useEffect, useRef, useState } from 'react';
 import type {
@@ -16,6 +17,7 @@ const labels = {
   conflict: 'Index conflict',
   unavailable: 'Unavailable',
 };
+
 function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const updateButton = useRef<HTMLButtonElement>(null);
@@ -36,6 +38,16 @@ function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void 
   const [state, setState] = useState<SubmoduleState>();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
+  const [refreshError, setRefreshError] = useState('');
+  const observing = !!state && !pending && !review && !syncReview;
+  useEffect(() => {
+    if (!observing) return;
+    return observeSubmodules(
+      repoId,
+      (next) => setState((previous) => (previous?.revision === next.revision ? previous : next)),
+      setRefreshError,
+    );
+  }, [repoId, observing]);
   useEffect(
     () =>
       subscribeDesktopEvents((event) => {
@@ -62,6 +74,7 @@ function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void 
   const load = async () => {
     reviewed.current = false;
     syncReviewed.current = false;
+    setRefreshError('');
     setSyncReview(undefined);
     setReview(undefined);
     setNotice('');
@@ -249,6 +262,9 @@ function SubmoduleDialog({ repoId, close }: { repoId: string; close: () => void 
         checkouts are listed below their parent.
       </p>
       {error && <p role="alert">{error}</p>}
+      {observing && !error && refreshError && (
+        <p role="alert">Could not refresh submodules. {refreshError}</p>
+      )}
       {notice && <p role="status">{notice}</p>}
       {synchronizing && (
         <div>
@@ -451,7 +467,11 @@ export function SubmodulesControl() {
         Submodules
       </CommandButton>
       {open && snapshot && (
-        <SubmoduleDialog repoId={snapshot.repository.id} close={() => setOpen(false)} />
+        <SubmoduleDialog
+          key={snapshot.repository.id}
+          repoId={snapshot.repository.id}
+          close={() => setOpen(false)}
+        />
       )}
     </>
   );

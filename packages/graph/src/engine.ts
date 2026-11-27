@@ -7,6 +7,16 @@ export interface GraphDocument extends GraphCommit {
   author: { name: string; email: string };
   kind?: 'commit' | 'wip' | 'conflict' | 'worktree';
 }
+type SearchDocument = Pick<GraphDocument, 'oid' | 'summary' | 'body' | 'author'>;
+function searchFields(c: SearchDocument) {
+  return {
+    oid: c.oid,
+    summary: c.summary,
+    body: c.body,
+    name: c.author.name,
+    email: c.author.email,
+  };
+}
 export type GraphRequest =
   | {
       id: number;
@@ -25,6 +35,7 @@ export type GraphRequest =
       commits: GraphDocument[];
       pinnedOid?: string;
     }
+  | { id: number; generation: string; method: 'updateSearchDocument'; document: SearchDocument }
   | { id: number; generation: string; method: 'search'; query: string };
 export type GraphResponse =
   | {
@@ -38,6 +49,7 @@ export type GraphResponse =
       reusedTail: number;
       passages: GraphPassage[];
     }
+  | { id: number; generation: string; kind: 'documentUpdated'; oid: string }
   | { id: number; generation: string; kind: 'matches'; oids: string[] }
   | { id: number; generation: string; kind: 'error'; message: string };
 export class GraphEngine {
@@ -49,17 +61,9 @@ export class GraphEngine {
   private checkpoints: Checkpoint[] = [];
   private index = this.createIndex();
   private seen = new Set<string>();
-  private pending: GraphDocument[] = [];
+  private pending: SearchDocument[] = [];
   indexPending(limit = this.pending.length) {
-    this.index.addAll(
-      this.pending.splice(0, limit).map((c) => ({
-        oid: c.oid,
-        summary: c.summary,
-        body: c.body,
-        name: c.author.name,
-        email: c.author.email,
-      })),
-    );
+    this.index.addAll(this.pending.splice(0, limit).map(searchFields));
     return this.pending.length > 0;
   }
   private createIndex() {
@@ -169,6 +173,21 @@ export class GraphEngine {
         this.pending = [];
       }
       if (request.generation !== this.generation) throw new Error('Stale graph generation');
+      if (request.method === 'updateSearchDocument') {
+        const document = request.document;
+        if (this.index.has(document.oid)) this.index.replace(searchFields(document));
+        else {
+          const index = this.pending.findIndex((item) => item.oid === document.oid);
+          if (index < 0) throw new Error('Unknown graph search document');
+          this.pending[index] = document;
+        }
+        return {
+          id: request.id,
+          generation: this.generation,
+          kind: 'documentUpdated',
+          oid: document.oid,
+        };
+      }
       if (request.method === 'search') {
         this.indexPending();
         return {

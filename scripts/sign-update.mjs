@@ -3,10 +3,38 @@ import { constants } from 'node:fs';
 import { link, mkdtemp, open, readFile, rm, rmdir } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
+  updateArtifactSchema,
   updateEnvelopeLimit,
   updateSignatureContext,
   validateUpdateRelease,
 } from '../apps/desktop/src/update-protocol.ts';
+
+async function artifactInput(entry, directory, version) {
+  if (!entry || typeof entry !== 'object') throw new Error('Invalid artifact descriptor');
+  const keys = Object.keys(entry).sort().join(',');
+  if (keys === 'manifest' && typeof entry.manifest === 'string' && entry.manifest.length <= 4096) {
+    const manifestPath = resolve(directory, entry.manifest);
+    const receipt = JSON.parse(await readFile(manifestPath, 'utf8'));
+    if (receipt.schemaVersion !== 1 || receipt.version !== version)
+      throw new Error('Installer receipt version differs');
+    const expected = updateArtifactSchema.parse({
+      platform: receipt.platform,
+      arch: receipt.arch,
+      format: receipt.target,
+      name: receipt.artifact.file,
+      size: receipt.artifact.size,
+      sha256: receipt.artifact.sha256,
+    });
+    return { ...expected, path: join(dirname(manifestPath), expected.name), expected };
+  }
+  if (
+    keys !== 'arch,format,path,platform' ||
+    typeof entry.path !== 'string' ||
+    entry.path.length > 4096
+  )
+    throw new Error('Invalid artifact descriptor');
+  return { ...entry, path: resolve(directory, entry.path) };
+}
 
 // Offline release producer: it never uploads, installs, or reads keys from the environment.
 async function publish() {
@@ -20,21 +48,16 @@ async function publish() {
   if (!Array.isArray(descriptor.artifacts) || descriptor.artifacts.length > 16)
     throw new Error('Invalid artifact list');
   const artifacts = [];
-  for (const artifact of descriptor.artifacts) {
-    if (
-      typeof artifact !== 'object' ||
-      artifact === null ||
-      Object.keys(artifact).sort().join(',') !== 'arch,format,path,platform' ||
-      typeof artifact.path !== 'string' ||
-      artifact.path.length > 4096
-    )
-      throw new Error('Invalid artifact descriptor');
-    const path = resolve(dirname(descriptorPath), artifact.path);
+  for (const entry of descriptor.artifacts) {
+    const artifact = await artifactInput(entry, dirname(descriptorPath), descriptor.version);
+    const { path, expected } = artifact;
     const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       const before = await file.stat();
       if (!before.isFile() || before.size < 1 || before.size > 2 * 1024 ** 3)
         throw new Error('Invalid artifact file');
+      if (expected && before.size !== expected.size)
+        throw new Error('Installer receipt size differs');
       const hash = createHash('sha256');
       let size = 0;
       for await (const chunk of file.createReadStream({ autoClose: false })) {
@@ -50,13 +73,16 @@ async function publish() {
         after.ctimeMs !== before.ctimeMs
       )
         throw new Error('Artifact changed during signing');
+      const sha256 = hash.digest('hex');
+      if (expected && expected.sha256 !== sha256)
+        throw new Error('Installer receipt checksum differs');
       artifacts.push({
         platform: artifact.platform,
         arch: artifact.arch,
         format: artifact.format,
         name: basename(path),
         size,
-        sha256: hash.digest('hex'),
+        sha256,
       });
     } finally {
       await file.close();

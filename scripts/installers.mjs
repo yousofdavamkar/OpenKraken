@@ -1,9 +1,19 @@
+import { macIdentity, notarizeDiskImage, signMacBundle } from './mac-signing.mjs';
 import { authenticateRpm } from './rpm-signature.mjs';
 import { verifyLinuxPackage } from './linux-package.mjs';
 import { build, Platform, Arch } from 'electron-builder';
 import { buildAppImage } from './appimage.mjs';
 import { buildDmg, verifyMacBundle } from './dmg.mjs';
-import { buildMsi, readMsiMetadata, verifyMsiMetadata } from './msi.mjs';
+import { saveSignedInstaller } from './signed-installer.mjs';
+import {
+  authenticode,
+  buildMsi,
+  verifyWindowsArchiveSignatures,
+  readMsiMetadata,
+  verifyMsiMetadata,
+  windowsIdentity,
+  windowsTimestamp,
+} from './msi.mjs';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -22,10 +32,23 @@ const { values } = parseArgs({
     target: { type: 'string', default: { darwin: 'dmg', win32: 'msi' }[process.platform] ?? 'deb' },
     'test-metadata': { type: 'boolean', default: false },
     metadata: { type: 'string' },
+    'notary-profile': { type: 'string' },
+    'win-identity': { type: 'string' },
+    'win-timestamp-url': { type: 'string' },
+    'mac-identity': { type: 'string' },
     'rpm-key': { type: 'string' },
   },
 });
 const target = values.target;
+const identity = macIdentity(target, values['mac-identity']);
+const winIdentity = windowsIdentity(target, values['win-identity']);
+const timestampUrl = windowsTimestamp(winIdentity, values['win-timestamp-url']);
+const notaryProfile = values['notary-profile'];
+if (
+  notaryProfile !== undefined &&
+  (!identity || !notaryProfile.trim() || notaryProfile.startsWith('-'))
+)
+  throw new Error('--notary-profile requires a keychain profile name and a DMG --mac-identity');
 const rpmKey = values['rpm-key'];
 if (rpmKey !== undefined && (!rpmKey || target !== 'rpm'))
   throw new Error('--rpm-key requires an RPM target and a public certificate file');
@@ -77,12 +100,23 @@ const source = join(
 const original = await payloadManifest(source);
 const executableName = target === 'msi' ? 'openkraken.exe' : 'openkraken';
 await verifyFuses(target === 'dmg' ? source : join(source, executableName));
-const { version } = JSON.parse(await readFile('package.json', 'utf8'));
-if (target === 'dmg') await verifyMacBundle(source, version);
+const release = JSON.parse(await readFile('package.json', 'utf8'));
+const { version } = release;
+if (target === 'dmg') await verifyMacBundle(source, release);
+const signingMode = notaryProfile
+  ? 'notarized'
+  : identity || winIdentity || rpmKey
+    ? 'signed'
+    : 'unsigned';
+const outputMode = testMetadata
+  ? signingMode === 'unsigned'
+    ? 'test'
+    : 'test-' + signingMode
+  : signingMode;
 const output = join(
   root,
   `release/installers/${process.platform}-${process.arch}`,
-  testMetadata ? (rpmKey ? 'test-signed' : 'test') : rpmKey ? 'signed' : 'unsigned',
+  outputMode,
   target,
 );
 await mkdir(output, { recursive: true });
@@ -92,17 +126,43 @@ try {
   await cp(source, prepackaged, { recursive: true, verbatimSymlinks: true });
   comparePayload(original, await payloadManifest(prepackaged));
   const buildSource = verifyPackagedApplication(prepackaged, version);
+  let expectedPayload = original;
   let artifacts;
   let appdir;
   if (target === 'msi') {
-    artifacts = await buildMsi({ root, prepackaged, work, version, metadata, testMetadata });
+    if (winIdentity) {
+      const options = { requireTimestamp: !!timestampUrl };
+      await authenticode(join(prepackaged, 'openkraken.exe'), winIdentity, options);
+      await verifyWindowsArchiveSignatures(
+        join(prepackaged, 'resources'),
+        winIdentity,
+        options,
+        true,
+      );
+    }
+    artifacts = await buildMsi({
+      root,
+      prepackaged,
+      work,
+      version,
+      metadata,
+      testMetadata,
+      signed: !!winIdentity,
+    });
   } else if (target === 'dmg') {
+    if (identity) {
+      await signMacBundle(prepackaged, identity);
+      expectedPayload = await payloadManifest(prepackaged);
+      const archive = 'Contents/Resources/app.asar';
+      comparePayload(original[archive], expectedPayload[archive]);
+    }
     artifacts = [
       await buildDmg(
         prepackaged,
         work,
-        `OpenKraken-${version}-darwin-${process.arch}${testMetadata ? '-TEST-ONLY' : '-unsigned'}.dmg`,
-        version,
+        `OpenKraken-${version}-darwin-${process.arch}${testMetadata ? '-TEST-ONLY' : identity ? '' : '-unsigned'}.dmg`,
+        release,
+        identity,
       ),
     ];
   } else if (target === 'AppImage') {
@@ -187,7 +247,7 @@ try {
   if (appdir) {
     comparePayload(original, await payloadManifest(join(appdir, 'usr/lib/openkraken')));
   } else if (target === 'dmg' || target === 'msi') {
-    comparePayload(original, payload);
+    comparePayload(expectedPayload, payload);
   } else {
     // FPM adds this profile for Ubuntu's user namespace policy. Nothing else may
     // change, particularly the ASAR, fuses, native modules or helper permissions.
@@ -201,9 +261,13 @@ try {
   if (artifacts.length !== 1 || !artifacts[0].endsWith(`.${target}`))
     throw new Error('Expected exactly one installer artifact');
   const artifact = artifacts[0];
+  const notarySubmissionId = notaryProfile
+    ? await notarizeDiskImage(artifact, notaryProfile, identity)
+    : undefined;
+  if (winIdentity) await authenticode(artifact, winIdentity, { sign: true, timestampUrl });
   const signer = rpmKey
     ? await authenticateRpm(artifact, resolve(rpmKey), work, { sign: true })
-    : undefined;
+    : (identity ?? winIdentity);
   if (target === 'msi') verifyMsiMetadata(await readMsiMetadata(artifact), { version, metadata });
   const nativePackageVersion =
     target === 'deb' || target === 'rpm'
@@ -219,8 +283,11 @@ try {
     metadata,
     signed: !!signer,
     ...(signer && { signingFingerprint: signer }),
+    ...(winIdentity && { timestamped: !!timestampUrl }),
+    ...(notarySubmissionId && { notarySubmissionId }),
     source: buildSource,
     nativePackageVersion,
+    ...(target === 'dmg' && { macBuildNumber: release.macBuildNumber }),
     artifact: {
       file: basename(artifact),
       size: (await stat(artifact)).size,
@@ -228,13 +295,17 @@ try {
     },
     payload,
   };
-  await cp(artifact, join(output, basename(artifact)));
-  await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+  let file = basename(artifact);
+  if (signer) file = await saveSignedInstaller(output, artifact, manifest);
+  else {
+    await cp(artifact, join(output, file));
+    await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+  }
   console.log(
-    `${signer ? 'Signed' : 'Unsigned'} ${testMetadata ? 'TEST-ONLY ' : ''}installer: ${join(output, basename(artifact))}`,
+    `${signer ? 'Signed' : 'Unsigned'} ${testMetadata ? 'TEST-ONLY ' : ''}installer: ${join(output, file)}`,
   );
   console.log(
-    `Verify and smoke-test with: node scripts/verify-installer.mjs ${join(output, 'manifest.json')}${signer ? ' --rpm-key <trusted-certificate-file>' : ''}`,
+    `Verify and smoke-test with: node scripts/verify-installer.mjs ${join(output, 'manifest.json')}${identity ? ' --mac-identity <trusted-fingerprint>' : winIdentity ? ' --win-identity <trusted-fingerprint>' : rpmKey ? ' --rpm-key <trusted-certificate-file>' : ''}${notarySubmissionId ? ' --require-notarization' : ''}`,
   );
 } finally {
   await rm(work, { recursive: true, force: true });

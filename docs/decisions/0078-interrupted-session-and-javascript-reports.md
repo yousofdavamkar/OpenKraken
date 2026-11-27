@@ -33,3 +33,18 @@ The Linux Electron fixture throws a main-process exception on the first tick aft
 Electron can notify the main process when a preload script throws before the renderer can use its bridge. The primary window registers a `preload-error` listener before loading the document. It records the existing renderer exception category in local diagnostics and passes only that category to the consent-checked reporter. The script path and exception object stay outside both records.
 
 The Electron test registers a sandboxed preload script that throws during window startup. The loopback HTTPS receiver gets one renderer exception summary on an opted-in restart and none on a fresh profile or after revocation. The test checks the envelope for private strings from the script path and exception.
+
+## Fatal desktop initialization errors
+
+The packaged entry selects the channel profile, obtains the single-instance lock and starts consent validation before loading the diagnostics and desktop modules. Loading the desktop synchronously keeps its macOS URL listener in the initial turn. Main exception and child-process monitors can now see failures during desktop module evaluation. Secondary instances quit before creating a reporter or session marker.
+
+A synchronous failure loading the desktop, or a rejection during ready-time initialization through the first window's document load, displays a fixed startup error. After dismissal, the primary exits with status 1. It allows up to six seconds for the existing consent-checked report attempt and local cleanup. When initialized, local diagnostics record the fixed process and reason even with reporting off. Exception text, document paths and stacks are excluded. The saved consent revision and reporting destination still govern transmission. A document navigation canceled by closing or reloading the window is expected. The app can quit normally while the first document is loading.
+
+Linux Electron tests trigger a child-process event before the desktop module finishes loading, throw during that module's evaluation and redirect the initial navigation to a missing local document. The two fatal fixtures assert the exit status, removal of the reporting marker, bounded local diagnostic contents and successful reuse of the profile. A separate fixture quits during the first navigation. Native failures before the bootstrap can execute, immediate process death before the marker is durable, and a failure after an application script has scheduled rendering are separate cases.
+
+
+## Renderer entry evaluation
+
+Chromium can finish loading a local HTML document even when its entry module is missing or throws. After the first document load, the desktop queries the React mount point in an isolated world. The entry module marks that element once its imports have evaluated, the React root exists and the initial render has been scheduled to follow the theme read. A missing marker enters the same fatal startup path as a missing document.
+
+The update acknowledgement comes later, from the mounted application. A delayed theme read can therefore leave the document temporarily empty while the replacement remains unconfirmed. The Electron fixtures cover a missing module, a module-level exception, a missing mount point and a theme read that resumes. They do not exercise an indefinitely pending theme read.

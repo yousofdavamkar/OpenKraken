@@ -280,3 +280,30 @@ test('layout requests send the fields used by graph allocation and search', asyn
     await settled;
   }
 });
+
+test('a search document update must acknowledge the row sent to the worker', async () => {
+  const client = new GraphClient();
+  try {
+    const document = {
+      oid: 'wip:repo',
+      summary: 'Dirty',
+      body: 'new.txt',
+      author: { name: 'Working tree', email: '' },
+    };
+    const request = { method: 'updateSearchDocument' as const, generation: 'active', document };
+    const accepted = client.request(request);
+    expect(worker.postMessage).toHaveBeenLastCalledWith({ ...request, id: 1 });
+    worker.onmessage!({
+      data: { id: 1, generation: 'active', kind: 'documentUpdated', oid: document.oid },
+    });
+    await expect(accepted).resolves.toMatchObject({ oid: document.oid });
+    const rejected = client.request(request);
+    worker.onmessage!({
+      data: { id: 2, generation: 'active', kind: 'documentUpdated', oid: 'different' },
+    });
+    await expect(rejected).rejects.toThrow('Incomplete graph layout');
+    expect(client.failed).toBe(true);
+  } finally {
+    client.close();
+  }
+});

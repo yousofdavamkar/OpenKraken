@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
@@ -22,11 +22,10 @@ beforeAll(() => {
 });
 afterAll(() => rm(root, { recursive: true, force: true }));
 
-// Both authoritative formats read tracking state and the worktree's HEAD marker.
+// Every direct or complete snapshot format includes the worktree's HEAD marker,
+// even when Git has already confirmed the tracking fields are empty.
 function readsSnapshotRefs(args: string[]) {
-  return (
-    args[0] === 'for-each-ref' && args.some((arg) => arg.includes('%(upstream:track)%00%(HEAD)'))
-  );
+  return args[0] === 'for-each-ref' && args.some((arg) => arg.endsWith('%00%(HEAD)%00'));
 }
 
 function gate() {
@@ -52,6 +51,11 @@ test.each([
   'reordered',
   'replace',
   'annotated',
+  'distinct annotated tip',
+  'nested annotations',
+  'moved annotation',
+  'reordered annotations',
+  'tree annotation',
   'failed walk',
 ] as const)(
   'the first and appended pages match a normal native walk with %s roots',
@@ -63,6 +67,19 @@ test.each([
     if (kind === 'detached') fixtureGit(path, ['update-ref', '--no-deref', 'HEAD', orphan]);
     if (kind === 'replace') fixtureGit(path, ['replace', 'HEAD~2050', orphan]);
     if (kind === 'annotated') fixtureGit(path, ['tag', '-a', 'annotation', '-m', 'Annotation']);
+    if (kind === 'distinct annotated tip')
+      fixtureGit(path, ['tag', '-a', 'independent', orphan, '-m', 'Independent commit']);
+    if (kind === 'tree annotation') fixtureGit(path, ['tag', '-a', 'tree', tree, '-m', 'Tree']);
+    if (kind === 'nested annotations' || kind === 'moved annotation') {
+      fixtureGit(path, ['tag', '-a', 'inner', orphan, '-m', 'Inner']);
+      fixtureGit(path, ['tag', '-a', 'outer', 'inner', '-m', 'Outer']);
+      fixtureGit(path, ['tag', '-a', 'other', orphan, '-m', 'Same commit, different tag']);
+      fixtureGit(path, ['tag', '-d', 'inner']);
+    }
+    if (kind === 'reordered annotations') {
+      fixtureGit(path, ['tag', '-a', 'left', orphan, '-m', 'Independent tip']);
+      fixtureGit(path, ['tag', '-a', 'right', 'HEAD~2', '-m', 'Older tip']);
+    }
     if (kind === 'reordered') {
       fixtureGit(path, ['update-ref', 'refs/heads/a', 'HEAD~2']);
       fixtureGit(path, ['update-ref', 'refs/heads/b', orphan]);
@@ -86,6 +103,19 @@ test.each([
     const snapshot = service.snapshot(repo.id, undefined, false);
     try {
       await vi.waitFor(() => expect(early).toHaveBeenCalledOnce(), { timeout: 5000 });
+      if (kind === 'reordered annotations') {
+        const left = fixtureGit(path, ['rev-parse', 'refs/tags/left']);
+        const right = fixtureGit(path, ['rev-parse', 'refs/tags/right']);
+        fixtureGit(
+          path,
+          ['update-ref', '--stdin'],
+          `update refs/tags/left ${right}\nupdate refs/tags/right ${left}\n`,
+        );
+      }
+      if (kind === 'moved annotation') {
+        fixtureGit(path, ['tag', '-f', 'outer', 'HEAD~2']);
+        fixtureGit(path, ['tag', '-d', 'other']);
+      }
       if (kind === 'moved') fixtureGit(path, ['update-ref', 'refs/heads/new', orphan]);
       if (kind === 'reordered') {
         fixtureGit(path, ['update-ref', 'refs/heads/a', orphan]);
@@ -94,12 +124,30 @@ test.each([
       full.resolve();
       const first = await snapshot;
       expect(ordinary).toHaveBeenCalledTimes(
-        ['unchanged', 'loose', 'detached'].includes(kind) ? 0 : 1,
+        [
+          'unchanged',
+          'loose',
+          'detached',
+          'annotated',
+          'distinct annotated tip',
+          'nested annotations',
+        ].includes(kind)
+          ? 0
+          : 1,
       );
       const tail = await service.page(repo.id, first.cursor, 2000, 5000);
       expect(first.commits).toHaveLength(2000);
       expect(tail.offset).toBe(2000);
       expect(tail.hasMore).toBe(false);
+      if (kind === 'distinct annotated tip' || kind === 'nested annotations') {
+        const match = await service.search(repo.id, first.cursor, orphan);
+        expect(match.commits.map((commit) => commit.oid)).toEqual([orphan]);
+        expect(
+          run.mock.calls.some(
+            ([, args]) => args.includes('--max-count=1') && args[0] === 'rev-list',
+          ),
+        ).toBe(false);
+      }
       const reference = await service.snapshot(repo.id);
       expect(first.commits).toEqual(reference.commits);
       expect(tail.commits).toEqual(
@@ -151,6 +199,105 @@ test('a slow optional ref read yields to the normal snapshot, and a warm prefix 
     run.mockRestore();
     await Promise.all([warm.dispose(), service.dispose()]);
   }
+});
+
+test.each(['loose branch', 'packed refs', 'detached HEAD'])(
+  'a newer %s can start the live walk before a stale saved profile finishes opening',
+  async (change) => {
+    const path = await clone('stale-' + change);
+    const profile = { dataDir: join(root, 'profile-' + change) };
+    const first = new RepositoryService('git', profile);
+    const original = await first.open(path);
+    try {
+      await first.snapshot(original.id);
+    } finally {
+      await first.dispose();
+    }
+    const tip = fixtureGit(path, ['commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'New tip']);
+    const ref = change === 'packed refs' ? 'refs/heads/independent' : 'HEAD';
+    fixtureGit(path, [
+      'update-ref',
+      ...(change === 'detached HEAD' ? ['--no-deref'] : []),
+      ref,
+      tip,
+    ]);
+    if (change === 'packed refs') fixtureGit(path, ['pack-refs', '--all']);
+    const changedFile =
+      change === 'packed refs'
+        ? 'packed-refs'
+        : change === 'detached HEAD'
+          ? 'HEAD'
+          : fixtureGit(path, ['symbolic-ref', 'HEAD']);
+    // Make the ordering deterministic even on low-resolution filesystems.
+    const newer = new Date(Date.now() + 2000);
+    await utimes(join(path, changedFile), newer, newer);
+    const service = new RepositoryService('git', profile);
+    const stop = gate();
+    const walk = vi.fn();
+    const native = runner.runGit;
+    const spy = vi.spyOn(runner, 'runGit').mockImplementation(async (binary, args, options) => {
+      if (readsSnapshotRefs(args)) await stop.promise;
+      if (args[0] === 'rev-list' && options?.env?.GIT_NO_REPLACE_OBJECTS) walk();
+      return native(binary, args, options);
+    });
+    try {
+      const repo = await service.open(path);
+      const opening = service.snapshot(repo.id, undefined, false);
+      let snapshot;
+      try {
+        await vi.waitFor(() => expect(walk).toHaveBeenCalledOnce(), { timeout: 2000 });
+      } finally {
+        stop.resolve();
+        snapshot = await opening;
+      }
+      const next = await service.page(repo.id, snapshot.cursor, snapshot.commits.length, 5000);
+      expect(
+        [...snapshot.commits, ...next.commits].map((c) => [c.oid, ...c.parents].join(' ')),
+      ).toEqual(
+        fixtureGit(path, ['rev-list', '--date-order', '--parents', '--all', 'HEAD']).split('\n'),
+      );
+      expect(next.hasMore).toBe(false);
+    } finally {
+      stop.resolve();
+      spy.mockRestore();
+      await service.dispose();
+    }
+  },
+);
+
+test('rewriting packed refs without changing a root preserves an existing cache window', async () => {
+  const path = await clone('restamped');
+  const profile = { dataDir: join(root, 'restamped-profile') };
+  const open = async () => {
+    const service = new RepositoryService('git', profile);
+    try {
+      const repo = await service.open(path);
+      const snapshot = await service.snapshot(repo.id, undefined, false);
+      const tail = await service.page(repo.id, snapshot.cursor, snapshot.commits.length, 5000);
+      expect(tail.hasMore).toBe(false);
+      return { id: repo.id, commits: [...snapshot.commits, ...tail.commits] };
+    } finally {
+      await service.dispose();
+    }
+  };
+  const first = await open();
+  const cache = join(profile.dataDir, 'history', first.id);
+  const files = ['prefix.json', 'tail-0.json'].map((name) => join(cache, name));
+  const evidence = () =>
+    Promise.all(
+      files.map(async (path) => {
+        const { ino, mtimeNs } = await stat(path, { bigint: true });
+        return { ino, mtimeNs, bytes: await readFile(path) };
+      }),
+    );
+  const before = await evidence();
+  const newer = new Date(Date.now() + 2000);
+  await utimes(join(path, 'packed-refs'), newer, newer);
+  const next = await open();
+  expect(next.commits.map((c) => [c.oid, ...c.parents].join(' '))).toEqual(
+    fixtureGit(path, ['rev-list', '--date-order', '--parents', '--all']).split('\n'),
+  );
+  expect(await evidence()).toEqual(before);
 });
 
 test('a failed authoritative ref read closes the unpublished cursor', async () => {
@@ -334,3 +481,121 @@ test('an empty replacement namespace follows Git across the first page and appen
     await service.dispose();
   }
 });
+
+test.each(['none', 'loose', 'packed'] as const)(
+  'a packed sample pointing to HEAD preserves history with an additional root (%s)',
+  async (extraRoot) => {
+    const path = await clone('shared-head-' + extraRoot);
+    fixtureGit(path, ['update-ref', '-d', 'refs/remotes/origin/main']);
+    fixtureGit(path, ['pack-refs', '--all']);
+    if (extraRoot !== 'none') {
+      const tree = fixtureGit(path, ['rev-parse', 'HEAD^{tree}']);
+      const independent = fixtureGit(path, ['commit-tree', tree, '-m', 'Independent root']);
+      // The tag sorts after the bounded packed sample.
+      fixtureGit(path, ['update-ref', 'refs/tags/zzz-independent', independent]);
+      if (extraRoot === 'packed') fixtureGit(path, ['pack-refs', '--all']);
+    }
+    const service = new RepositoryService('git');
+    const repo = await service.open(path);
+    const native = runner.runGit;
+    const started = gate();
+    const calls = vi.spyOn(runner, 'runGit').mockImplementation(async (git, args, options) => {
+      if (readsSnapshotRefs(args)) await started.promise;
+      if (args[0] === 'rev-list' && options?.env?.GIT_NO_REPLACE_OBJECTS) started.resolve();
+      return native(git, args, options);
+    });
+    const snapshot = service.snapshot(repo.id, undefined, false);
+    try {
+      await vi.waitFor(
+        () => expect(calls.mock.calls.some(([, args]) => args[0] === 'rev-list')).toBe(true),
+        { timeout: 5000 },
+      );
+      const first = await snapshot;
+      const next = await service.page(repo.id, first.cursor, first.commits.length, 5000);
+      expect(next.hasMore).toBe(false);
+      const records = [...first.commits, ...next.commits].map((c) =>
+        [c.oid, ...c.parents].join(' '),
+      );
+      expect(records).toEqual(
+        fixtureGit(path, ['rev-list', '--date-order', '--parents', '--all']).split('\n'),
+      );
+      expect(
+        calls.mock.calls.some(([, args]) => args[0] === 'rev-parse' && args[1] === '--all'),
+      ).toBe(false);
+      expect(calls.mock.calls.filter(([, args]) => args[0] === 'rev-list')).toHaveLength(
+        extraRoot === 'none' ? 1 : 2,
+      );
+    } finally {
+      started.resolve();
+      await snapshot.catch(() => {});
+      calls.mockRestore();
+      await service.dispose();
+    }
+  },
+);
+
+test.each([false, true])(
+  'an annotated alias sample preserves ordered roots with a later independent tip (%s)',
+  async (laterTip) => {
+    const path = await clone('tag-sample-' + laterTip);
+    const tree = fixtureGit(path, ['rev-parse', 'HEAD^{tree}']);
+    const orphan = fixtureGit(path, [
+      'commit-tree',
+      tree,
+      '-m',
+      'Reachable only through annotations',
+    ]);
+    fixtureGit(path, ['tag', '-a', '000-00-tree', tree, '-m', 'Non-commit annotation']);
+    fixtureGit(path, ['tag', '-a', 'inner', orphan, '-m', 'Inner']);
+    fixtureGit(path, ['tag', '-a', 'outer', 'inner', '-m', 'Outer']);
+    const tag = fixtureGit(path, ['rev-parse', 'outer']);
+    fixtureGit(
+      path,
+      ['update-ref', '--stdin'],
+      Array.from(
+        { length: 160 },
+        (_, i) => 'create refs/tags/000-alias-' + i + ' ' + tag + '\n',
+      ).join(''),
+    );
+    fixtureGit(path, ['tag', '-d', 'inner', 'outer']);
+    if (laterTip) {
+      const independent = fixtureGit(path, ['commit-tree', tree, '-m', 'Outside the sample']);
+      fixtureGit(path, ['update-ref', 'refs/tags/zzz-independent', independent]);
+    }
+    fixtureGit(path, ['pack-refs', '--all']);
+    const service = new RepositoryService('git');
+    const repo = await service.open(path);
+    const native = runner.runGit;
+    const walk = gate();
+    const calls = vi.spyOn(runner, 'runGit').mockImplementation(async (git, args, options) => {
+      if (readsSnapshotRefs(args)) await walk.promise;
+      if (args[0] === 'rev-list' && options?.env?.GIT_NO_REPLACE_OBJECTS) walk.resolve();
+      return native(git, args, options);
+    });
+    const opening = service.snapshot(repo.id, undefined, false);
+    try {
+      await vi.waitFor(
+        () => expect(calls.mock.calls.some(([, args]) => args[0] === 'rev-list')).toBe(true),
+        { timeout: 5000 },
+      );
+      const first = await opening;
+      const tail = await service.page(repo.id, first.cursor, first.commits.length, 5000);
+      expect(
+        [...first.commits, ...tail.commits].map((c) => [c.oid, ...c.parents].join(' ')),
+      ).toEqual(fixtureGit(path, ['rev-list', '--date-order', '--parents', '--all']).split('\n'));
+      expect(
+        (await service.search(repo.id, first.cursor, orphan)).commits.map((c) => c.oid),
+      ).toEqual([orphan]);
+      expect(calls.mock.calls.filter(([, args]) => args.includes('--count=128'))).toHaveLength(1);
+      expect(calls.mock.calls.some(([, args]) => args.includes('--no-walk=unsorted'))).toBe(false);
+      expect(
+        calls.mock.calls.filter(([, args]) => args[0] === 'rev-list' && args.includes('--parents')),
+      ).toHaveLength(laterTip ? 2 : 1);
+    } finally {
+      walk.resolve();
+      await opening.catch(() => {});
+      calls.mockRestore();
+      await service.dispose();
+    }
+  },
+);

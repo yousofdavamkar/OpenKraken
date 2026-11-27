@@ -1,11 +1,24 @@
 import { afterEach, expect, test } from 'vitest';
 import { execFile } from 'node:child_process';
-import { chmod, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { comparePayload, payloadManifest } from './package-security.mjs';
+import { comparePayload, payloadManifest, sha256 } from './package-security.mjs';
+import { saveSignedInstaller } from './signed-installer.mjs';
 import { verifyMacBundle } from './dmg.mjs';
+import { macBundleVersions, macPackagerOptions } from './mac-bundle-versions.mjs';
+import { isMacCode, macIdentity, verifyDmgReceipt, verifyMacSignature } from './mac-signing.mjs';
 
 const run = promisify(execFile);
 const temporary = [];
@@ -19,6 +32,32 @@ async function fixture() {
   temporary.push(directory);
   return directory;
 }
+
+test('macOS keeps one numeric release version across successive beta and final builds', () => {
+  const releases = ['0.2.0-beta.1', '0.2.0-beta.2', '0.2.0'];
+  expect(
+    releases.map((version, index) => macBundleVersions({ version, macBuildNumber: 2 + index })),
+  ).toEqual([2, 3, 4].map((number) => ({ appVersion: '0.2.0', buildVersion: String(number) })));
+  expect(macBundleVersions({ version: '0.1.0' })).toEqual({
+    appVersion: '0.1.0',
+    buildVersion: '0.1.0',
+  });
+  for (const macBuildNumber of [undefined, null, '3', 0, -1, 3.5, 2 ** 53])
+    expect(() => macBundleVersions({ version: releases[0], macBuildNumber })).toThrow();
+  expect(() => macBundleVersions({ version: '0.2.0-preview.1', macBuildNumber: 2 })).toThrow();
+});
+
+test('beta packaging restores the runtime release before the ASAR is hashed', async () => {
+  const release = { version: '0.2.0-beta.2', macBuildNumber: 3 };
+  const options = macPackagerOptions(release);
+  const buildPath = await fixture();
+  const path = join(buildPath, 'package.json');
+  const app = { name: 'openkraken', version: options.appVersion, main: 'dist/main.cjs' };
+  await writeFile(path, JSON.stringify(app));
+  for (const hook of options.beforeAsar) await hook({ buildPath });
+  expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ ...app, version: release.version });
+  expect(macPackagerOptions({ ...release, version: '0.2.0' }).beforeAsar).toBeUndefined();
+});
 
 test.skipIf(process.platform !== 'linux')(
   'DMG creation refuses a non-macOS host before touching a bundle',
@@ -103,6 +142,7 @@ test.skipIf(process.platform !== 'darwin').each([
   ['CFBundleIdentifier', 'wrong.product'],
   ['CFBundleExecutable', 'wrong-executable'],
   ['CFBundleShortVersionString', '9.9.9'],
+  ['CFBundleVersion', '1'],
   ['CFBundleURLSchemes', 'wrong-scheme'],
 ])('macOS rejects altered bundle metadata: %s', async (field, value) => {
   const directory = await fixture();
@@ -111,7 +151,8 @@ test.skipIf(process.platform !== 'darwin').each([
   const info = {
     CFBundleIdentifier: 'org.openkraken.desktop',
     CFBundleExecutable: 'openkraken',
-    CFBundleShortVersionString: '0.1.0',
+    CFBundleShortVersionString: '0.2.0',
+    CFBundleVersion: '2',
     CFBundlePackageType: 'APPL',
     CFBundleURLTypes: [{ CFBundleURLSchemes: ['openkraken'] }],
   };
@@ -121,7 +162,135 @@ test.skipIf(process.platform !== 'darwin').each([
   await writeFile(plist, JSON.stringify(info));
   await run('/usr/bin/plutil', ['-convert', 'xml1', plist]);
   expect(await readFile(plist, 'utf8')).toContain('<plist');
-  await expect(verifyMacBundle(bundle, '0.1.0')).rejects.toThrow(
-    'macOS bundle identity, version, executable or repository scheme differs',
-  );
+  await expect(
+    verifyMacBundle(bundle, { version: '0.2.0-beta.1', macBuildNumber: 2 }),
+  ).rejects.toThrow('macOS bundle identity, version, executable or repository scheme differs');
 });
+
+test('a signed DMG receipt requires the same certificate selected independently', () => {
+  const key = 'ab'.repeat(20);
+  const identity = macIdentity('dmg', key);
+  expect(identity).toBe(key.toUpperCase());
+  const receipt = { signed: true, signingFingerprint: identity };
+  verifyDmgReceipt(receipt, identity);
+  verifyDmgReceipt({ signed: false }, undefined);
+  for (const value of ['', '-', 'Developer ID Application', key.slice(1), key + '0'])
+    expect(() => macIdentity('dmg', value)).toThrow('--mac-identity');
+  expect(() => macIdentity('msi', key)).toThrow('--mac-identity');
+  for (const [candidate, trusted] of [
+    [receipt, undefined],
+    [receipt, 'CD'.repeat(20)],
+    [{ signed: false }, identity],
+    [{ ...receipt, signed: false }, undefined],
+    [{ signed: true }, identity],
+    [{}, undefined],
+  ])
+    expect(() => verifyDmgReceipt(candidate, trusted)).toThrow('DMG signing receipt');
+});
+
+test('macOS signing selects Mach-O code and bundles and preserves binary resources', async () => {
+  const directory = await fixture();
+  const app = join(directory, 'OpenKraken.app');
+  await mkdir(app);
+  expect(isMacCode(app)).toBe(true);
+  expect(isMacCode(directory)).toBe(false);
+  for (const [filename, header, code] of [
+    ['askpass', 'cffaedfe', true],
+    ['pty.node', 'cafebabe', true],
+    ['app.asar', '04000000', false],
+    ['resource.pak', '05000000', false],
+    ['empty', '', false],
+  ]) {
+    const path = join(app, filename);
+    await writeFile(path, Buffer.from(header, 'hex'));
+    expect(isMacCode(path)).toBe(code);
+  }
+});
+
+test.skipIf(process.platform !== 'darwin')(
+  'ad-hoc code fails the Developer ID requirement',
+  async () => {
+    const directory = await fixture();
+    const path = join(directory, 'tool');
+    await cp('/usr/bin/true', path);
+    await run('/usr/bin/codesign', [
+      '--force',
+      '--sign',
+      '-',
+      '--identifier',
+      'org.openkraken.desktop',
+      path,
+    ]);
+    await run('/usr/bin/codesign', ['--verify', '--strict', path]);
+    await expect(
+      verifyMacSignature(path, 'AB'.repeat(20), 'org.openkraken.desktop'),
+    ).rejects.toMatchObject({
+      stderr: expect.stringMatching(
+        /failed to satisfy specified code requirement|does not satisfy its designated Requirement/i,
+      ),
+    });
+  },
+);
+
+test.each(['dmg', 'msi', 'rpm'])(
+  'preserves the published %s if a signed build no longer matches its receipt',
+  async (extension) => {
+    const directory = await fixture();
+    const output = join(directory, 'output');
+    const source = join(directory, 'OpenKraken.' + extension);
+    await mkdir(output);
+    await writeFile(source, 'original');
+    const artifact = { size: 8, sha256: await sha256(source) };
+    const file = await saveSignedInstaller(output, source, { artifact });
+    const previous = await readFile(join(output, 'manifest.json'), 'utf8');
+    for (const [contents, size] of [
+      ['modified', 8],
+      ['short', 8],
+      ['original', 7],
+    ]) {
+      await writeFile(source, contents);
+      await expect(
+        saveSignedInstaller(output, source, { artifact: { ...artifact, size } }),
+      ).rejects.toThrow('receipt');
+      expect(await readFile(join(output, file), 'utf8')).toBe('original');
+      expect(await readFile(join(output, 'manifest.json'), 'utf8')).toBe(previous);
+      expect((await readdir(output)).sort()).toEqual([file, 'manifest.json'].sort());
+    }
+  },
+);
+
+test.each(['dmg', 'msi', 'rpm'])(
+  'concurrent signed %s saves retain the bytes referenced by each receipt',
+  async (extension) => {
+    const directory = await fixture();
+    const output = join(directory, 'output');
+    await mkdir(output);
+    const builds = await Promise.all(
+      ['first', 'second'].map(async (value) => {
+        const build = join(directory, value);
+        await mkdir(build);
+        const path = join(build, `OpenKraken.${extension}`);
+        await writeFile(path, value);
+        return {
+          path,
+          value,
+          manifest: { artifact: { size: Buffer.byteLength(value), sha256: await sha256(path) } },
+        };
+      }),
+    );
+    const files = await Promise.all(
+      builds.map(({ path, manifest }) => saveSignedInstaller(output, path, manifest)),
+    );
+    expect(new Set(files).size).toBe(2);
+    const receipt = JSON.parse(await readFile(join(output, 'manifest.json'), 'utf8'));
+    expect(files).toContain(receipt.artifact.file);
+    expect(await sha256(join(output, receipt.artifact.file))).toBe(receipt.artifact.sha256);
+    await expect(
+      saveSignedInstaller(output, join(directory, 'missing.dmg'), builds[0].manifest),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(JSON.parse(await readFile(join(output, 'manifest.json'), 'utf8'))).toEqual(receipt);
+    expect((await readdir(output)).sort()).toEqual([...files, 'manifest.json'].sort());
+    for (const [index, file] of files.entries())
+      expect(await readFile(join(output, file), 'utf8')).toBe(builds[index].value);
+  },
+);

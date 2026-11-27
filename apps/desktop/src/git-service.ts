@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   encodeGitServiceResult,
   encodeSnapshotRefs,
+  encodeAliasedTagRefs,
   serviceRequestSchema,
   shutdownSchema,
   cancelSchema,
@@ -631,6 +632,8 @@ async function executeGit(
       clearTimeout(watchStart);
       watcher = initialWatcher;
       await previous?.close();
+    } else if (watcher?.repo.id === snapshot.repository.id) {
+      watcher.observeRefSnapshot(snapshot.refs);
     }
     return {
       kind: 'snapshot',
@@ -698,11 +701,15 @@ parent.on('message', (event) => {
   let ordinaryRefs: Ref[] | undefined;
   const sendRefs = (source: Ref[]) => {
     const refs = encodeSnapshotRefs(source);
-    if (!refs) {
-      ordinaryRefs = source;
-      return;
+    if (refs) parent.postMessage({ id: request.id, transferId, snapshotPart: 'refs', refs });
+    else {
+      const aliases = encodeAliasedTagRefs(source);
+      if (!aliases) {
+        ordinaryRefs = source;
+        return;
+      }
+      parent.postMessage({ id: request.id, transferId, snapshotPart: 'tagAliases', refs: aliases });
     }
-    parent.postMessage({ id: request.id, transferId, snapshotPart: 'refs', refs });
     sentRefs = source;
   };
   execute(request, controller.signal, transferId ? sendRefs : undefined)

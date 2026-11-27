@@ -11,8 +11,9 @@ import {
   verifyFuses,
   verifyPackagedApplication,
 } from './package-security.mjs';
+import { macIdentity, verifyDmgReceipt } from './mac-signing.mjs';
 import { verifyDmg } from './dmg.mjs';
-import { verifyMsi } from './msi.mjs';
+import { verifyMsi, windowsIdentity } from './msi.mjs';
 
 // RPM may omit implicit parent directory entries. Create those with safe modes,
 // while -p below preserves all explicitly archived permissions for inspection.
@@ -22,7 +23,13 @@ process.umask(0o022);
 // SHA-256 detects corruption; this adjacent manifest is not a release signature.
 const { positionals, values } = parseArgs({
   allowPositionals: true,
-  options: { 'rpm-key': { type: 'string' } },
+  options: {
+    'require-notarization': { type: 'boolean' },
+    'win-identity': { type: 'string' },
+    'require-timestamp': { type: 'boolean', default: false },
+    'mac-identity': { type: 'string' },
+    'rpm-key': { type: 'string' },
+  },
 });
 if (positionals.length !== 1) throw new Error('Provide one installer manifest');
 const rpmKey = values['rpm-key'];
@@ -44,6 +51,13 @@ if (
   !manifest.artifact.file.endsWith(`.${manifest.target}`)
 )
   throw new Error('Expected a native platform installer manifest');
+const winIdentity = windowsIdentity(manifest.target, values['win-identity']);
+if (values['require-timestamp'] && !winIdentity)
+  throw new Error('--require-timestamp requires --win-identity');
+const identity = macIdentity(manifest.target, values['mac-identity']);
+if (values['require-notarization'] && manifest.target !== 'dmg')
+  throw new Error('--require-notarization requires a DMG');
+if (manifest.target === 'dmg') verifyDmgReceipt(manifest, identity, values['require-notarization']);
 if (rpmKey !== undefined && (!rpmKey || manifest.target !== 'rpm'))
   throw new Error('--rpm-key requires an RPM target and a public certificate file');
 if (
@@ -59,11 +73,11 @@ async function verifyChecksum(file) {
     throw new Error('Installer checksum or size mismatch');
 }
 const source = join(dirname(manifestPath), manifest.artifact.file);
-if (!rpmKey) await verifyChecksum(source);
+if (!rpmKey && !['dmg', 'msi'].includes(manifest.target)) await verifyChecksum(source);
 if (manifest.target === 'dmg') {
-  await verifyDmg(source, manifest);
+  await verifyDmg(source, manifest, identity);
 } else if (manifest.target === 'msi') {
-  await verifyMsi(source, manifest);
+  await verifyMsi(source, manifest, winIdentity, values['require-timestamp']);
 } else {
   await verifyLinuxInstaller();
 }
@@ -157,7 +171,7 @@ async function verifyLinuxInstaller() {
     )
       throw new Error('Desktop launcher does not match the sandboxed application');
     console.log('Installer payload, launch entry and Electron fuses verified');
-    const smoke = spawn(process.execPath, ['scripts/smoke-package.mjs'], {
+    const smoke = spawn(process.execPath, ['scripts/smoke-package.mjs', '--history'], {
       stdio: 'inherit',
       env: {
         ...process.env,

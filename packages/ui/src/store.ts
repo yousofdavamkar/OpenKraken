@@ -14,19 +14,45 @@ import {
   decodeSnapshotBodies,
   expandGitServiceResult,
 } from '@openkraken/ipc-contract';
-import { patchPassages } from '@openkraken/graph';
+import { passageBuckets, refreshPassageBuckets } from '@openkraken/graph';
 import type { GraphRow, GraphPassage } from '@openkraken/graph';
 import { GraphClient } from './graph-client.js';
-import { projectCommits, sameWorkingRow, selectRow } from './history-model.js';
+import {
+  projectCommits,
+  sameWorkingPaths,
+  workingRow,
+  workingRowKind,
+  selectRow,
+  singleSelection,
+} from './history-model.js';
 import type { DisplayCommit, Selection } from './history-model.js';
 declare global {
   interface Window {
     openkraken: DesktopApi;
   }
 }
+function rowPositions(rows: DisplayCommit[]) {
+  const positions = new Map<string, number>();
+  rows.forEach((row, index) => positions.set(row.oid, index));
+  return positions;
+}
+
 let client: GraphClient | undefined;
 const graph = () => (client ??= new GraphClient());
 let querySequence = 0;
+let cancellingSearch: string | undefined;
+let queuedSearch: string | undefined;
+function stopHistorySearch(id: string) {
+  if (queuedSearch === id) {
+    queuedSearch = undefined;
+    return;
+  }
+  return window.openkraken.cancel(id);
+}
+function retireHistorySearch(id: string) {
+  // The visible query or snapshot has changed. Its owner already ignores the old reply.
+  void stopHistorySearch(id)?.catch(() => {});
+}
 let navigationSequence = 0;
 interface State {
   snapshot?: Snapshot;
@@ -35,7 +61,7 @@ interface State {
   refreshStatus: (background?: boolean, updateWorktrees?: boolean) => Promise<void>;
   rows: DisplayCommit[];
   layout: GraphRow[];
-  passages: GraphPassage[];
+  passages: GraphPassage[][];
   maxColumns: number;
   busy?: string;
   syncing?: string;
@@ -54,7 +80,8 @@ interface State {
   loadMore: (count?: number) => Promise<void>;
   search: (query: string) => Promise<void>;
   searchAll: () => Promise<void>;
-  select: (oid: string, mode?: 'single' | 'toggle' | 'range') => void;
+  cancelSearch: () => Promise<void>;
+  select: (oid: string, mode?: 'single' | 'toggle' | 'range', position?: number) => void;
   navigate: (target: string | number) => Promise<void>;
   setDetail: (commit?: Commit | DisplayCommit) => void;
 }
@@ -105,22 +132,42 @@ export const useRepository = create<State>()(
           fullRefresh = true;
           return;
         }
-        // HEAD and the worktree revision were checked above. Staging a path can
-        // change its status without changing the synthetic row or its search text.
-        if (
-          (worktrees === snapshot.worktrees ||
-            JSON.stringify(worktrees) === JSON.stringify(snapshot.worktrees)) &&
-          sameWorkingRow(snapshot.status, result.state.status)
-        ) {
+        const next = { ...snapshot, status: result.state.status, worktrees };
+        const sameWorktrees =
+          worktrees === snapshot.worktrees ||
+          JSON.stringify(worktrees) === JSON.stringify(snapshot.worktrees);
+        const kind = workingRowKind(result.state.status);
+        if (sameWorktrees && kind === workingRowKind(snapshot.status)) {
+          // A different list of dirty paths changes search and detail text. The
+          // working node still has the same ID, parents and position.
+          const index =
+            kind && !sameWorkingPaths(snapshot.status, result.state.status)
+              ? previous.rows.findIndex((row) => row.kind === kind)
+              : -1;
+          const row = index >= 0 ? workingRow(next) : undefined;
+          if (row) {
+            const { oid, summary, body, author } = row;
+            const reply = await graph().request({
+              method: 'updateSearchDocument',
+              generation: snapshot.cursor,
+              document: { oid, summary, body, author },
+            });
+            if (reply.kind !== 'documentUpdated') throw new Error('Invalid graph response');
+          }
+          if (get().busy !== id || get().snapshot?.cursor !== snapshot.cursor) return;
           const statusChanged =
-            JSON.stringify(snapshot.status) !== JSON.stringify(result.state.status);
+            !!row || JSON.stringify(snapshot.status) !== JSON.stringify(result.state.status);
           set((s) => {
-            if (statusChanged) s.snapshot = { ...snapshot, status: result.state.status };
+            if (statusChanged) s.snapshot = next;
             s.workingState = result.state;
+            if (row) {
+              s.rows[index] = row;
+              if (s.detail?.oid === row.oid) s.detail = row;
+            }
           });
+          if (row && get().query) await updateLoadedMatches();
           return;
         }
-        const next = { ...snapshot, status: result.state.status, worktrees };
         const rows = projectCommits(next.commits, next, true);
         const layout = await graph().request({
           method: 'refresh',
@@ -137,7 +184,7 @@ export const useRepository = create<State>()(
           ...previous.layout.slice(rows.length - layout.reusedTail, rows.length),
         ];
         freeze(nextLayout, true);
-        const passages = patchPassages(
+        const passages = refreshPassageBuckets(
           previous.passages,
           layout.offset,
           layout.offset + layout.rows.length,
@@ -154,12 +201,16 @@ export const useRepository = create<State>()(
           s.layout = nextLayout;
           s.passages = passages;
           s.maxColumns = layout.maxColumns;
-          const available = new Set(rows.map((r) => r.oid));
+          const available = rowPositions(rows);
           s.selection.selected = s.selection.selected.filter((oid) => available.has(oid));
           if (s.selection.focus && !available.has(s.selection.focus))
             s.selection.focus = rows[0]?.oid;
           if (s.selection.anchor && !available.has(s.selection.anchor))
             s.selection.anchor = s.selection.focus;
+          s.selection.focusIndex = s.selection.focus ? available.get(s.selection.focus) : undefined;
+          s.selection.anchorIndex = s.selection.anchor
+            ? available.get(s.selection.anchor)
+            : undefined;
         });
         if (get().query) await updateLoadedMatches();
       } catch (error) {
@@ -230,7 +281,7 @@ export const useRepository = create<State>()(
           const existing =
             sameRepository && !previous.paging && !client?.failed ? client : undefined;
           const target = existing ?? (candidate ??= new GraphClient());
-          const layout = await target.request({
+          const pendingLayout = target.request({
             ...(existing
               ? ({ method: 'refresh', baseGeneration: previous.snapshot!.cursor } as const)
               : ({ method: 'reset' } as const)),
@@ -239,6 +290,11 @@ export const useRepository = create<State>()(
             commits: rows,
             pinnedOid: result.snapshot.pinnedOid,
           });
+          // The graph worker owns a clone. Prepare immutable store data while it lays out the page.
+          freeze(result.snapshot, true);
+          freeze(rows, true);
+          const available = rowPositions(rows);
+          const layout = await pendingLayout;
           if (layout.kind !== 'layout') throw new Error('Invalid graph response');
           if (get().busy !== request.id) return;
           performance.mark('repository-layout-response');
@@ -249,7 +305,7 @@ export const useRepository = create<State>()(
             ...previous.layout.slice(rows.length - layout.reusedTail, rows.length),
           ];
           freeze(nextLayout, true);
-          const nextPassages = patchPassages(
+          const nextPassages = refreshPassageBuckets(
             previous.passages,
             layout.offset,
             layout.offset + layout.rows.length,
@@ -259,6 +315,8 @@ export const useRepository = create<State>()(
           freeze(nextPassages, true);
           const query = sameRepository ? get().query : '';
           const previousSearch = get().searching;
+          const retainedSearch =
+            sameRepository && previousSearch === queuedSearch ? previousSearch : undefined;
           if (target === candidate) {
             client?.close();
             client = target;
@@ -285,10 +343,9 @@ export const useRepository = create<State>()(
             s.query = query;
             s.matches = undefined;
             s.searchResults = undefined;
-            s.searching = undefined;
+            s.searching = retainedSearch;
             s.paging = undefined;
             s.detail = undefined;
-            const available = new Set(rows.map((r) => r.oid));
             const focus =
               sameRepository && s.selection.focus && available.has(s.selection.focus)
                 ? s.selection.focus
@@ -302,13 +359,16 @@ export const useRepository = create<State>()(
                 : focus;
             s.selection = {
               focus,
+              focusIndex: focus ? available.get(focus) : undefined,
               anchor,
+              anchorIndex: anchor ? available.get(anchor) : undefined,
               selected: selected.length ? selected : focus ? [focus] : [],
             };
           });
-          if (previousSearch) void window.openkraken.cancel(previousSearch);
+          if (previousSearch && previousSearch !== retainedSearch)
+            retireHistorySearch(previousSearch);
           performance.mark('repository-state-published');
-          if (query) await get().search(query);
+          if (query) await updateLoadedMatches();
         } else if (result.kind === 'error') throw new Error(result.message);
       } catch (error) {
         set((s) => {
@@ -375,7 +435,7 @@ export const useRepository = create<State>()(
         };
         const nextRows = [...current.rows, ...rows],
           nextLayout = [...current.layout, ...layout.rows];
-        const nextPassages = [...current.passages, ...layout.passages];
+        const nextPassages = passageBuckets(layout.passages, current.passages);
         freeze(nextPassages, true);
         freeze(nextSnapshot, true);
         freeze(nextRows, true);
@@ -410,28 +470,34 @@ export const useRepository = create<State>()(
         s.searchResults = undefined;
         s.searching = undefined;
       });
-      if (previous) void window.openkraken.cancel(previous);
+      if (previous) retireHistorySearch(previous);
       await updateLoadedMatches();
     },
     searchAll: async () => {
-      if (get().syncing) await waitForBackground();
-      const { snapshot, query } = get();
-      if (!snapshot || !query.trim() || get().searching) return;
-      const id = crypto.randomUUID(),
-        sequence = querySequence;
+      const { snapshot, query, searching, syncing } = get();
+      if (!snapshot || !query.trim() || searching) return;
+      const id = crypto.randomUUID();
+      if (syncing) queuedSearch = id;
       set((s) => {
         s.searching = id;
         s.error = undefined;
       });
       try {
+        if (syncing) {
+          await waitForBackground();
+          if (queuedSearch !== id) return;
+          queuedSearch = undefined;
+        }
+        const current = get().snapshot;
+        if (get().searching !== id || current?.repository.id !== snapshot.repository.id) return;
         const result = await window.openkraken.request({
           id,
           method: 'search',
-          repoId: snapshot.repository.id,
-          cursor: snapshot.cursor,
+          repoId: current.repository.id,
+          cursor: current.cursor,
           query,
         });
-        if (sequence !== querySequence || get().snapshot?.cursor !== snapshot.cursor) return;
+        if (get().searching !== id || cancellingSearch === id) return;
         if (result.kind === 'error') throw new Error(result.message);
         if (result.kind === 'search')
           set((s) => {
@@ -439,7 +505,7 @@ export const useRepository = create<State>()(
             s.searchTruncated = result.truncated;
           });
       } catch (error) {
-        if (sequence === querySequence)
+        if (get().searching === id && cancellingSearch !== id)
           set((s) => {
             s.error = String(error);
           });
@@ -449,9 +515,22 @@ export const useRepository = create<State>()(
         });
       }
     },
-    select: (oid, mode) => {
+    cancelSearch: async () => {
+      const id = get().searching;
+      if (!id || cancellingSearch === id) return;
+      cancellingSearch = id;
+      try {
+        await stopHistorySearch(id);
+        if (get().searching === id) set({ searching: undefined });
+      } catch (error) {
+        if (get().searching === id) set({ error: String(error) });
+      } finally {
+        if (cancellingSearch === id) cancellingSearch = undefined;
+      }
+    },
+    select: (oid, mode, position) => {
       const { rows, selection } = get();
-      const next = selectRow(rows, selection, oid, mode);
+      const next = selectRow(rows, selection, oid, mode, position);
       if (next === selection) return;
       set((s) => {
         s.selection = next;
@@ -461,16 +540,31 @@ export const useRepository = create<State>()(
       const sequence = ++navigationSequence;
       const { snapshot, selection } = get();
       const cursor = snapshot?.cursor;
+      let checked = 0;
       while (
         get().snapshot?.cursor === cursor &&
         get().selection === selection &&
         sequence === navigationSequence
       ) {
         const { rows, busy, paging, snapshot: current } = get();
-        const row =
-          typeof target === 'number' ? rows[target] : rows.find((row) => row.oid === target);
+        // A page-key jump can reach a final Git page shorter than the viewport.
+        let position = -1;
+        if (typeof target === 'number')
+          position = current?.hasMore ? target : Math.min(target, rows.length - 1);
+        if (typeof target === 'string') {
+          for (let i = checked; i < rows.length; i++) {
+            if (rows[i]!.oid === target) {
+              position = i;
+              break;
+            }
+          }
+        }
+        const row = rows[position];
         if (row) {
-          get().select(row.oid);
+          const nextSelection = singleSelection(row.oid, position);
+          set((s) => {
+            s.selection = nextSelection;
+          });
           return;
         }
         if (!current?.hasMore || busy) return;
@@ -486,7 +580,10 @@ export const useRepository = create<State>()(
         } else {
           await get().loadMore();
         }
-        if (get().rows.length === rows.length) return;
+        const updated = get().rows;
+        if (updated.length === rows.length && get().snapshot?.hasMore) return;
+        // Appends retain earlier row objects. A working-state refresh can reproject them.
+        checked = updated[rows.length - 1] === rows.at(-1) ? rows.length : 0;
       }
     },
     setDetail: (detail) =>
@@ -494,8 +591,7 @@ export const useRepository = create<State>()(
         s.detail = detail;
       }),
     cancel: async () => {
-      for (const id of [get().busy, get().paging, get().searching])
-        if (id) await window.openkraken.cancel(id);
+      for (const id of [get().busy, get().paging]) if (id) await window.openkraken.cancel(id);
     },
   })),
 );

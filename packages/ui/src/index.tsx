@@ -51,7 +51,6 @@ function App() {
     busy: active,
     syncing,
     paging,
-    searching,
     detail,
     setDetail,
     error,
@@ -206,7 +205,7 @@ function App() {
               Refresh
             </CommandButton>
           )}
-          {(busy || paging || searching) && <button onClick={() => void cancel()}>Cancel</button>}
+          {(busy || paging) && <button onClick={() => void cancel()}>Cancel</button>}
         </div>
       </div>
       {clone && <CloneDialog close={() => setClone(false)} />}
@@ -259,7 +258,7 @@ function App() {
             <section className="history">
               <div className="panel-title">
                 <h2>History</h2>
-                <span data-testid="commit-count">
+                <span id="history-commit-count" data-testid="commit-count">
                   {snapshot.commits.length.toLocaleString()} commits
                   {snapshot.hasMore ? ' · more available' : ''}
                 </span>
@@ -351,12 +350,18 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
     );
   }
 }
-void themeReady.then(() => {
-  createRoot(document.getElementById('root')!).render(
-    <ErrorBoundary>
-      <CommandProvider>
-        <App />
-      </CommandProvider>
-    </ErrorBoundary>,
-  );
-});
+const container = document.getElementById('root');
+if (container) {
+  const root = createRoot(container);
+  void themeReady.then(() => {
+    root.render(
+      <ErrorBoundary>
+        <CommandProvider>
+          <App />
+        </CommandProvider>
+      </ErrorBoundary>,
+    );
+  });
+  // The desktop checks this after document load. Theme reads can finish later.
+  container.setAttribute('data-openkraken-entry-loaded', '');
+}

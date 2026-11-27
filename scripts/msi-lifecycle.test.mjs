@@ -22,6 +22,7 @@ const runtime = {
   },
 };
 const emptyState = () => ({
+  betaRevisions: {},
   products: [],
   applicationExists: false,
   profileExists: false,
@@ -252,3 +253,33 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
   },
   35000,
 );
+
+test.each([
+  ['0.1.0', '0.2.0-beta.0', true],
+  ['0.2.0-beta.9', '0.2.0-beta.10', true],
+  ['0.2.0-beta.2147483647', '0.2.0', true],
+  ['0.2.0-beta.10', '0.2.0-beta.9', false],
+  ['0.2.0-beta.9', '0.2.0-beta.9', false],
+  ['0.2.0', '0.2.0-beta.2147483647', false],
+])('native upgrade fixture orders %s and %s', (first, second, newer) => {
+  const pair = () =>
+    assertMsiUpgradePair(
+      { ...identity, version: first, asarSha256: '1'.repeat(64) },
+      { productCode: identity.componentCode, version: second, asarSha256: '2'.repeat(64) },
+    );
+  if (newer) pair();
+  else expect(pair).toThrow('MSI upgrade needs');
+});
+test('beta installation and removal check the revision stored outside ProductVersion', () => {
+  const beta = { ...identity, version: '0.1.0-beta.0' };
+  const state = installedState();
+  expect(() => assertInstalledMsiState(state, emptyState(), beta)).toThrow('beta revision');
+  state.betaRevisions = { '0.1.0': '0' };
+  assertInstalledMsiState(state, emptyState(), beta);
+  expect(() => assertInstalledMsiState(state, emptyState(), identity)).toThrow('beta revision');
+  const stale = { ...emptyState(), betaRevisions: state.betaRevisions };
+  expect(() => assertEmptyMsiState(stale)).toThrow('existing');
+  expect(() => assertRemovedMsiState({ ...stale, profileExists: true }, emptyState())).toThrow(
+    'beta revision',
+  );
+});

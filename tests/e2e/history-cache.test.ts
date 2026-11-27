@@ -77,3 +77,76 @@ test('external grafts replace the displayed topology across restarts and preserv
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('moving a late ref invalidates the cached graph when the ordered root count stays the same', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ok-cache-roots-'));
+  try {
+    const repo = createFixture(join(root, 'repo'), 'linear', 1100);
+    const tips = fixtureGit(repo, ['rev-list', 'HEAD']).split('\n');
+    const ref = (index: number) => 'refs/tags/window-' + String(index).padStart(4, '0');
+    fixtureGit(
+      repo,
+      ['update-ref', '--stdin'],
+      tips.map((oid, i) => `create ${ref(i)} ${oid}\n`).join(''),
+    );
+    const orderedRoots = () => [
+      ...new Set(
+        fixtureGit(repo, ['for-each-ref', '--format=%(objectname) %(*objectname)'])
+          .split('\n')
+          .map((row) => {
+            const [oid, peeled] = row.split(' ');
+            return peeled || oid;
+          }),
+      ),
+    ];
+    const before = orderedRoots();
+    const old = tips[1050]!;
+    expect(before.indexOf(old)).toBeGreaterThanOrEqual(1024);
+
+    const profile = join(root, 'profile');
+    const prefix = join(
+      profile,
+      'history',
+      createHash('sha256')
+        .update(await realpath(repo))
+        .digest('hex'),
+      'prefix.json',
+    );
+    const openAndCompareHistory = async () => {
+      const expected = fixtureGit(repo, ['rev-list', '--date-order', '--parents', '--all']).split(
+        '\n',
+      );
+      const app = await electron.launch({
+        args: [resolve('apps/desktop'), '--user-data-dir=' + profile],
+      });
+      try {
+        const page = await app.firstWindow();
+        await app.evaluate(({ dialog }, path) => {
+          dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+        }, repo);
+        await page.getByRole('button', { name: 'Open a repository', exact: true }).click();
+        await expect(page.getByTestId('commit-count')).toHaveText(
+          expected.length.toLocaleString('en-US') + ' commits',
+        );
+      } finally {
+        await app.close();
+      }
+      const saved = JSON.parse(await readFile(prefix, 'utf8'));
+      expect(
+        saved.commits.map((c: { oid: string; parents: string[] }) =>
+          [c.oid, ...c.parents].join(' '),
+        ),
+      ).toEqual(expected);
+      expect(saved.key).toMatch(/^[0-9a-f]{64}$/);
+      return saved.key;
+    };
+    const previousKey = await openAndCompareHistory();
+    const tree = fixtureGit(repo, ['rev-parse', 'HEAD^{tree}']);
+    const next = fixtureGit(repo, ['commit-tree', tree, '-m', 'Independent history']);
+    fixtureGit(repo, ['update-ref', ref(1050), next, old]);
+    expect(orderedRoots()).toEqual(before.map((oid) => (oid === old ? next : oid)));
+    expect(await openAndCompareHistory()).not.toBe(previousKey);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -1,16 +1,94 @@
 import { afterAll, expect, test, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { constants } from 'node:fs';
+import { setTimeout as delay } from 'node:timers/promises';
+import { createHash } from 'node:crypto';
 import type { Snapshot } from '@openkraken/ipc-contract';
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { createFixture, fixtureGit } from '../test-fixtures/src/index.js';
 import { RepositoryService } from './src/repository.js';
-import { HistoryCache } from './src/history-cache.js';
+import { HistoryCache, historyCacheKey, historyMetadataFingerprint } from './src/history-cache.js';
 import { HistoryCursor } from './src/history.js';
 import * as runner from './src/runner.js';
 const root = await mkdtemp(join(tmpdir(), 'openkraken-history-cache-'));
 afterAll(() => rm(root, { recursive: true, force: true }));
+test.skipIf(process.platform === 'win32')(
+  'a named pipe cannot stall a saved history read',
+  async () => {
+    const directory = join(root, 'pipe-profile');
+    const id = 'a'.repeat(64);
+    const cachePath = join(directory, 'history', id);
+    await mkdir(cachePath, { recursive: true });
+    const path = join(cachePath, 'prefix.json');
+    execFileSync('mkfifo', [path]);
+    const reading = new HistoryCache(directory, id, 'unused').load();
+    const timeout = new AbortController();
+    try {
+      expect(
+        await Promise.race([reading, delay(2000, 'waiting', { signal: timeout.signal })]),
+      ).toBeUndefined();
+    } finally {
+      timeout.abort();
+      // Release a blocked reader if this assertion ever regresses.
+      const peer = await open(path, constants.O_RDWR | constants.O_NONBLOCK);
+      try {
+        await reading;
+      } finally {
+        await peer.close();
+      }
+    }
+  },
+);
+test.each([0, 1, 1023, 1024, 1025, 2048, 50000])(
+  'preserves the persisted format-2 key for %i ordered roots',
+  (count) => {
+    const version = 'git version 2.38.0';
+    const config = 'refs/heads/"猫"\n';
+    const metadata = ['absent', '', 'sha256:' + 'a'.repeat(64)];
+    const starts = Array.from({ length: count }, (_, index) =>
+      index.toString(16).padStart(index % 2 ? 64 : 40, '0'),
+    );
+    const stashes = ['b'.repeat(40)];
+    const replacementName = 'refs/replace/' + 'c'.repeat(40);
+    const replacements: Snapshot['refs'] = [
+      {
+        name: replacementName,
+        shortName: replacementName,
+        kind: 'other',
+        target: 'd'.repeat(40),
+        isHead: false,
+        objectType: 'commit',
+        peeledType: '',
+      },
+    ];
+    const previous = createHash('sha256')
+      .update(
+        JSON.stringify({
+          format: 2,
+          version,
+          config,
+          metadata,
+          starts,
+          stashes,
+          replacements,
+        }),
+      )
+      .digest('hex');
+    expect(historyCacheKey([version, config, ...metadata], starts, stashes, replacements)).toBe(
+      previous,
+    );
+    if (count > 1) {
+      [starts[0]!, starts[count - 1]!] = [starts[count - 1]!, starts[0]!];
+      expect(
+        historyCacheKey([version, config, ...metadata], starts, stashes, replacements),
+      ).not.toBe(previous);
+    }
+  },
+);
+
 test('cached windows paint without waiting for Git and join the real stream without duplicates', async () => {
   const path = createFixture(join(root, 'large'), 'linear', 19000),
     dataDir = join(root, 'profile');
@@ -246,6 +324,32 @@ test.each(['GIT_SHALLOW_FILE', 'GIT_NO_REPLACE_OBJECTS', 'GIT_REPLACE_REF_BASE']
     expect(displayed(await open())).toEqual(ordinary);
   },
 );
+test('an early prefix follows the final graph key and the current on-disk file', async () => {
+  const service = new RepositoryService('git');
+  const repo = await service.open(createFixture(join(root, 'early-prefix'), 'linear', 4));
+  const { commits } = await service.snapshot(repo.id);
+  await service.dispose();
+  const profile = join(root, 'early-profile');
+  const writePrefix = async (key: string, count: number) => {
+    const cache = new HistoryCache(profile, repo.id, key);
+    cache.record(0, commits.slice(0, count), true);
+    await cache.flush();
+  };
+  const signal = new AbortController().signal;
+  await writePrefix('original', 2);
+  const early = HistoryCache.prefetchPrefix(profile, repo.id, signal);
+  await early;
+  const load = (key: string) => new HistoryCache(profile, repo.id, key).load(signal, early);
+  expect((await load('original'))?.commits).toEqual(commits.slice(0, 2));
+  expect(await load('different')).toBeUndefined();
+  await writePrefix('original', 3);
+  expect((await load('original'))?.commits).toEqual(commits.slice(0, 3));
+  await writePrefix('different', 1);
+  expect(await load('original')).toBeUndefined();
+  expect((await load('different'))?.commits).toEqual(commits.slice(0, 1));
+  await rm(join(profile, 'history', repo.id, 'prefix.json'));
+  expect(await load('original')).toBeUndefined();
+});
 test('damaged records miss safely; cache quotas and invalidation do not affect repositories', async () => {
   const service = new RepositoryService('git');
   const snapshot = await service.snapshot(
@@ -273,6 +377,43 @@ test('damaged records miss safely; cache quotas and invalidation do not affect r
   await last.flush();
   expect(await last.load()).toBeUndefined();
 });
+test.each(['changed commit', 'extra commit'])(
+  'cached tail with %s is rejected while the opening page is displayed',
+  async (difference) => {
+    const path = createFixture(join(root, 'cached-' + difference), 'linear', 7009);
+    const service = new RepositoryService('git');
+    const snapshot = await service.snapshot((await service.open(path)).id);
+    const firstTail = await service.page(snapshot.repository.id, snapshot.cursor, 2000, 5000);
+    const lastTail = await service.page(snapshot.repository.id, snapshot.cursor, 7000, 5000);
+    await service.dispose();
+    const commits = structuredClone(lastTail.commits);
+    const changed = { ...commits.at(-1)!, oid: 'f'.repeat(40) };
+    if (difference === 'extra commit') commits.push(changed);
+    else commits[commits.length - 1] = changed;
+    let invalidate!: () => void;
+    const invalidated = new Promise<void>((resolve) => {
+      invalidate = resolve;
+    });
+    const cursor = new HistoryCursor('git', path, [snapshot.repository.head.oid!], [], {
+      commits: snapshot.commits,
+      hasMore: true,
+      continuation: async (append) => {
+        append(firstTail);
+        append({ commits, hasMore: false });
+      },
+      invalidate,
+    });
+    try {
+      const first = await cursor.page(0, 2000);
+      expect(first.commits).toHaveLength(2000);
+      await invalidated;
+      await expect(cursor.page(2000, 1)).rejects.toMatchObject({ code: 'STALE_CACHE' });
+    } finally {
+      await cursor.close();
+    }
+  },
+);
+
 test('a divergent seeded prefix rejects continuation and invalidates the cache', async () => {
   const path = createFixture(join(root, 'mismatch'), 'linear', 20),
     service = new RepositoryService('git');
@@ -326,6 +467,83 @@ test('an oversized UTF-8 history page stops encoding later batches and removes i
     await service.dispose();
   }
 });
+
+test('an oversized commit stops a cache write before the next commit in the same batch', async () => {
+  const path = createFixture(join(root, 'oversized-first'), 'linear', 2);
+  const profile = join(root, 'oversized-first-profile');
+  const service = new RepositoryService('git');
+  try {
+    const repo = await service.open(path);
+    const { commits } = await service.snapshot(repo.id);
+    const cache = new HistoryCache(profile, repo.id, 'oversized-first');
+    const readNext = vi.fn(() => commits[1]!.body);
+    cache.record(
+      0,
+      [
+        { ...commits[0]!, body: '\x01'.repeat(2 * 1024 * 1024) },
+        {
+          ...commits[1]!,
+          get body() {
+            return readNext();
+          },
+        },
+      ],
+      false,
+    );
+    await cache.flush();
+    expect(readNext).not.toHaveBeenCalled();
+    await expect(readFile(join(profile, 'history', repo.id, 'prefix.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  } finally {
+    await service.dispose();
+  }
+});
+
+test.each(['prefix', 'tail'])(
+  'keeps only pages before an oversized %s on later appends',
+  async (part) => {
+    const path = createFixture(join(root, 'oversized-range-' + part), 'linear', 8);
+    const profile = join(root, 'oversized-range-profile-' + part);
+    const service = new RepositoryService('git');
+    try {
+      const repo = await service.open(path);
+      const { commits } = await service.snapshot(repo.id);
+      const directory = join(profile, 'history', repo.id);
+      const old = new HistoryCache(profile, repo.id, 'old');
+      old.record(0, commits.slice(0, 2), true);
+      old.record(2, commits.slice(2), false);
+      await old.flush();
+      expect(await readdir(directory)).toContain('tail-0.json');
+      const cache = new HistoryCache(profile, repo.id, 'new');
+      const body = '\x01'.repeat(2 * 1024 * 1024);
+      const offset = part === 'prefix' ? 0 : 2;
+      if (offset) cache.record(0, commits.slice(0, offset), true);
+      cache.record(
+        offset,
+        commits.slice(offset, offset + 2).map((commit) => ({ ...commit, body })),
+        true,
+      );
+      const retiring = cache.flush();
+      cache.record(offset + 2, commits.slice(offset + 2, offset + 3), true);
+      await Promise.all([retiring, cache.flush()]);
+      cache.record(offset + 3, commits.slice(offset + 3), false);
+      await cache.flush();
+      expect(await readdir(directory)).toEqual(offset ? ['prefix.json'] : []);
+      const restarted = new HistoryCache(profile, repo.id, 'new');
+      const seed = await restarted.load();
+      expect(seed?.commits).toEqual(offset ? commits.slice(0, offset) : undefined);
+      if (seed) {
+        expect(seed.hasMore).toBe(true);
+        const append = vi.fn(() => true);
+        await seed.continuation?.(append);
+        expect(append).not.toHaveBeenCalled();
+      }
+    } finally {
+      await service.dispose();
+    }
+  },
+);
 
 test('appending rewrites only changed cache pages and repairs lost or edited prefixes', async () => {
   const path = createFixture(join(root, 'incremental'), 'linear', 10);
@@ -397,4 +615,75 @@ test('a tail declined by the cursor cannot stand in for a live page of the same 
   const append = vi.fn(() => true);
   await next!.continuation!(append);
   expect(append).toHaveBeenCalledExactlyOnceWith({ commits: commits.slice(4), hasMore: true });
+});
+
+test.each(['info/grafts', 'objects/info/commit-graph'])(
+  'unreadable %s leaves the saved window intact and opens live history',
+  async (metadata) => {
+    const fixture = await mkdtemp(join(root, 'unreadable-metadata-'));
+    const path = createFixture(join(fixture, 'repo'), 'linear', 8);
+    fixtureGit(path, ['config', 'core.commitGraph', 'false']);
+    const dataDir = join(fixture, 'profile');
+    const openHistory = async () => {
+      const service = new RepositoryService('git', { dataDir });
+      try {
+        return await service.snapshot((await service.open(path)).id);
+      } finally {
+        await service.dispose();
+      }
+    };
+    const original = await openHistory();
+    const prefix = join(dataDir, 'history', original.repository.id, 'prefix.json');
+    const saved = await readFile(prefix);
+    fixtureGit(path, ['commit', '--allow-empty', '-m', 'New tip']);
+    await mkdir(join(path, '.git', metadata));
+    const current = await openHistory();
+    expect(current.commits.map((commit) => commit.oid)).toEqual(
+      fixtureGit(path, ['rev-list', '--date-order', '--all']).split('\n'),
+    );
+    expect((await readFile(prefix)).equals(saved)).toBe(true);
+    await rm(join(path, '.git', metadata), { recursive: true });
+    const restored = await openHistory();
+    expect(restored.commits).toEqual(current.commits);
+    expect((await readFile(prefix)).equals(saved)).toBe(false);
+  },
+);
+
+test('history metadata retains small cache keys and hashes every byte of larger files', async () => {
+  const path = join(root, 'metadata-boundaries');
+  const signal = new AbortController().signal;
+  expect(await historyMetadataFingerprint(root, signal)).toBeUndefined();
+  expect(await historyMetadataFingerprint(path, signal)).toBe('');
+  for (const length of [0, 1, 65536, 65537, 2 * 65536 + 37]) {
+    const bytes = Buffer.alloc(length, 0xff);
+    if (length) bytes[length - 1] = 0x01;
+    await writeFile(path, bytes);
+    const expected =
+      length <= 65536
+        ? bytes.toString('base64')
+        : 'sha256:' + createHash('sha256').update(bytes).digest('hex');
+    expect(await historyMetadataFingerprint(path, signal)).toBe(expected);
+  }
+  expect(await historyMetadataFingerprint(path, AbortSignal.abort())).toBeUndefined();
+});
+
+test('a changed graft beyond the first metadata chunk invalidates the saved graph', async () => {
+  const path = createFixture(join(root, 'large-grafts'), 'linear', 32);
+  const dataDir = join(root, 'large-graft-profile');
+  const boundaries = [4, 8].map((depth) => fixtureGit(path, ['rev-parse', 'HEAD~' + depth]));
+  const comments = '# original history\n'.repeat(4096);
+  for (const [index, boundary] of boundaries.entries()) {
+    await writeFile(join(path, '.git', 'info', 'grafts'), comments + boundary + '\n');
+    const native = fixtureGit(path, ['rev-list', '--parents', '--date-order', '--all']).split('\n');
+    expect(native).toHaveLength(index === 0 ? 5 : 9);
+    const service = new RepositoryService('git', { dataDir });
+    try {
+      const graph = await service.snapshot((await service.open(path)).id);
+      expect(graph.commits.map((commit) => [commit.oid, ...commit.parents].join(' '))).toEqual(
+        native,
+      );
+    } finally {
+      await service.dispose();
+    }
+  }
 });

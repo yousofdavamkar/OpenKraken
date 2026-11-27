@@ -145,6 +145,19 @@ export const providerNamespaceSchema = z
   .refine((value) =>
     value.split('/').every((part) => providerRepositoryPathComponentSchema.safeParse(part).success),
   );
+export const providerCreateRepositorySchema = z.strictObject({
+  owner: providerRepositoryPathComponentSchema,
+  name: providerRepositoryNameSchema,
+  description: z.string().max(350),
+  visibility: z.enum(['private', 'public']),
+  readme: z.boolean(),
+});
+export const personalRepositoryTargetSchema = providerCreateRepositorySchema.pick({
+  owner: true,
+  name: true,
+});
+export type PersonalRepositoryTarget = z.infer<typeof personalRepositoryTargetSchema>;
+export type ProviderCreateRepository = z.infer<typeof providerCreateRepositorySchema>;
 export const providerRepositoryPageNumberSchema = z.number().int().min(1).max(100);
 export const providerBitbucketWorkspaceSchema = z
   .object({
@@ -398,6 +411,61 @@ export const providerBitbucketCommentsOptionsSchema = providerPullOptionsSchema
     page: providerRepositoryPageNumberSchema,
   })
   .strict();
+export const providerBitbucketStatusesOptionsSchema = providerBitbucketCommentsOptionsSchema.extend(
+  {
+    source: providerBitbucketEndpointSchema,
+  },
+);
+export const providerBitbucketMergeabilityOptionsSchema = providerBitbucketStatusesOptionsSchema
+  .omit({ page: true })
+  .extend({
+    destination: providerBitbucketEndpointSchema,
+  });
+export const providerBitbucketMergeCheckSchema = z
+  .object({
+    type: z.enum([
+      'pullrequest_state_check',
+      'current_user_permission_check',
+      'git_mergeability_check',
+      'standard_merge_check',
+      'custom_pre_merge_check',
+      'custom_on_merge_check',
+      'merge_queue_check',
+    ]),
+    status: z.enum(['PASSED', 'FAILED', 'PENDING', 'SKIPPED', 'UNKNOWN']),
+    required: z.boolean(),
+    blocking: z.boolean(),
+    name: z.string().max(1024).nullable(),
+    detail: z.string().max(16384).nullable(),
+  })
+  .strict();
+export const providerBitbucketMergeChecksSchema = z
+  .array(providerBitbucketMergeCheckSchema)
+  .max(1000);
+export type ProviderBitbucketMergeabilityOptions = z.infer<
+  typeof providerBitbucketMergeabilityOptionsSchema
+>;
+export const providerBitbucketStatusSchema = z
+  .object({
+    key: z.string().min(1).max(512),
+    state: z.enum(['INPROGRESS', 'SUCCESSFUL', 'FAILED', 'STOPPED']),
+    name: z.string().max(1024),
+    description: z.string().max(16384),
+    refname: z.string().max(1024).nullable(),
+    updatedAt: providerDateSchema.nullable(),
+  })
+  .strict();
+export const providerBitbucketStatusesPageSchema = z
+  .object({
+    statuses: z.array(providerBitbucketStatusSchema).max(100),
+    nextPage: providerRepositoryPageNumberSchema.nullable(),
+    limited: z.boolean(),
+  })
+  .strict();
+export type ProviderBitbucketStatusesOptions = z.infer<
+  typeof providerBitbucketStatusesOptionsSchema
+>;
+export type ProviderBitbucketStatusesPage = z.infer<typeof providerBitbucketStatusesPageSchema>;
 const providerBitbucketLineSchema = z
   .number()
   .int()

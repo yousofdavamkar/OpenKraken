@@ -49,6 +49,16 @@ test('submodule view shows recursive state, refreshes stale selections and opens
     await expect(dialog.getByRole('alert')).toContainText('Submodules changed');
     await dialog.getByRole('button', { name: 'Refresh submodules', exact: true }).click();
     await expect(initialized).toContainText('1 changed file');
+    const refresh = dialog.getByRole('button', { name: 'Refresh submodules', exact: true });
+    await refresh.focus();
+    writeFileSync(join(path, 'modules/child/second.txt'), 'another change in the child');
+    await expect(initialized).toContainText('2 changed files', { timeout: 15000 });
+    await expect(refresh).toBeFocused();
+    rmSync(join(path, 'modules/child/draft.txt'));
+    rmSync(join(path, 'modules/child/second.txt'));
+    await expect(initialized).toContainText('Clean', { timeout: 15000 });
+    writeFileSync(join(path, 'modules/child/draft.txt'), 'new child draft');
+    await expect(initialized).toContainText('1 changed file', { timeout: 15000 });
     await page.screenshot({ path: 'test-results/submodules.png' });
     await initialized.getByRole('button', { name: 'Open submodule', exact: true }).click();
     await expect(dialog).toHaveCount(0);

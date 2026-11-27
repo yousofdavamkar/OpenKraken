@@ -2,7 +2,11 @@ name: CI
 on: [push, pull_request]
 jobs:
   scale-performance:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     env:
       LINUX_HISTORY_REVISION: 46fec1c3029b552ec63b2d01af9d43a386f043ea
@@ -20,7 +24,8 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: sudo apt-get update && sudo apt-get install -y build-essential xvfb
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential xvfb
       - run: pnpm install --frozen-lockfile
       - run: mkdir -p test-results/performance
       - name: Build once before measuring
@@ -33,16 +38,13 @@ jobs:
           cp "$RUNNER_TEMP/openkraken-scale/fixture.json" test-results/performance/fixture.json
       - name: Large synthetic history gates, three fresh profiles
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.fixture.outcome == 'success' }}
-        run: |
-          OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/openkraken-scale/repository" GIT_NO_LAZY_FETCH=1 \
-            xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --reporter=list \
-            --output=test-results/performance/graph > test-results/performance/graph.log 2>&1
+        run: bash scripts/run-scale-test.sh graph "$RUNNER_TEMP/openkraken-scale/repository" test-results/performance/graph
       - name: Watcher-warm status gates, three fresh profiles
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.fixture.outcome == 'success' }}
-        run: |
-          OPENKRAKEN_STATUS_BENCH_FIXTURE="$RUNNER_TEMP/openkraken-scale/fixture.json" \
-            xvfb-run -a pnpm exec playwright test tests/e2e/status-benchmark.test.ts --repeat-each=3 --reporter=list \
-            --output=test-results/performance/status > test-results/performance/status.log 2>&1
+        run: bash scripts/run-scale-test.sh status "$RUNNER_TEMP/openkraken-scale/fixture.json" test-results/performance/status
+      - name: Compare every synthetic history page with native Git
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.fixture.outcome == 'success' }}
+        run: bash scripts/run-scale-test.sh traversal "$RUNNER_TEMP/openkraken-scale/repository" test-results/performance/synthetic-traversal
       - name: Generate and verify 50,000-reference fixtures
         id: references
         if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
@@ -54,22 +56,13 @@ jobs:
           done
       - name: 50,000 references with distinct targets, three fresh profiles
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.references.outcome == 'success' }}
-        run: |
-          OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/refs-distinct/repository.git" GIT_NO_LAZY_FETCH=1 \
-            xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --workers=1 --reporter=list \
-            --output=test-results/performance/refs-distinct > test-results/performance/refs-distinct.log 2>&1
+        run: bash scripts/run-scale-test.sh graph "$RUNNER_TEMP/refs-distinct/repository.git" test-results/performance/refs-distinct
       - name: 50,000 references across 500 targets, three fresh profiles
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.references.outcome == 'success' }}
-        run: |
-          OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/refs-grouped/repository.git" GIT_NO_LAZY_FETCH=1 \
-            xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --workers=1 --reporter=list \
-            --output=test-results/performance/refs-grouped > test-results/performance/refs-grouped.log 2>&1
+        run: bash scripts/run-scale-test.sh graph "$RUNNER_TEMP/refs-grouped/repository.git" test-results/performance/refs-grouped
       - name: 50,000 references with shared targets, three fresh profiles
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.references.outcome == 'success' }}
-        run: |
-          OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/refs-shared/repository.git" GIT_NO_LAZY_FETCH=1 \
-            xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --workers=1 --reporter=list \
-            --output=test-results/performance/refs-shared > test-results/performance/refs-shared.log 2>&1
+        run: bash scripts/run-scale-test.sh graph "$RUNNER_TEMP/refs-shared/repository.git" test-results/performance/refs-shared
       - name: Initialize the full Linux history fixture
         id: linux_init
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
@@ -80,7 +73,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/linux-history.git/objects/pack
-          key: linux-history-tree-filter-v1-${{ env.LINUX_HISTORY_REVISION }}
+          key: linux-history-tree-filter-v1-${{ matrix.os }}-${{ env.LINUX_HISTORY_REVISION }}
       - name: Prepare and verify pinned Linux history
         id: linux_history
         if: ${{ !cancelled() && steps.linux_init.outcome == 'success' }}
@@ -108,28 +101,74 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/linux-history.git/objects/pack
-          key: linux-history-tree-filter-v1-${{ env.LINUX_HISTORY_REVISION }}
+          key: linux-history-tree-filter-v1-${{ matrix.os }}-${{ env.LINUX_HISTORY_REVISION }}
       - name: Full Linux history gates, three fresh profiles
         if: ${{ !cancelled() && steps.linux_history.outcome == 'success' }}
+        run: bash scripts/run-scale-test.sh graph "$RUNNER_TEMP/linux-history.git" test-results/performance/linux-history
+      - name: Compare every Linux history page with native Git
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.linux_history.outcome == 'success' }}
+        run: bash scripts/run-scale-test.sh traversal "$RUNNER_TEMP/linux-history.git" test-results/performance/linux-traversal
+      - name: Generate 50,000 distinct references over full Linux history
+        id: linux_distinct
+        if: ${{ !cancelled() && steps.linux_history.outcome == 'success' }}
         run: |
-          OPENKRAKEN_BENCH_REPO="$RUNNER_TEMP/linux-history.git" GIT_NO_LAZY_FETCH=1 \
-            xvfb-run -a pnpm exec playwright test tests/e2e/benchmark.test.ts --repeat-each=3 --workers=1 --reporter=list \
-            --output=test-results/performance/linux-history > test-results/performance/linux-history.log 2>&1
+          node scripts/create-reference-performance-fixture.mjs "$RUNNER_TEMP/linux-history.git" \
+            "$RUNNER_TEMP/linux-refs-distinct" distinct > test-results/performance/linux-refs-distinct-fixture.log 2>&1
+          cp "$RUNNER_TEMP/linux-refs-distinct/fixture.json" test-results/performance/linux-refs-distinct-fixture.json
+      - name: Full Linux history with 50,000 distinct targets, three fresh profiles
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.linux_distinct.outcome == 'success' }}
+        run: bash scripts/run-scale-test.sh graph "$RUNNER_TEMP/linux-refs-distinct/repository.git" test-results/performance/linux-refs-distinct
+      - name: Compare every page of the 50,000-reference Linux fixture with native Git
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.linux_distinct.outcome == 'success' }}
+        run: bash scripts/run-scale-test.sh traversal "$RUNNER_TEMP/linux-refs-distinct/repository.git" test-results/performance/linux-refs-distinct-traversal
+      - name: Check restarted opening and traversal with 50,000 distinct targets
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.linux_distinct.outcome == 'success' }}
+        env:
+          OPENKRAKEN_BENCH_WARM: '1'
+        run: |
+          failed=0
+          for suite in graph traversal; do
+            bash scripts/run-scale-test.sh "$suite" "$RUNNER_TEMP/linux-refs-distinct/repository.git" \
+              "test-results/performance/linux-refs-distinct-restarted-$suite" || failed=1
+          done
+          exit "$failed"
+      - name: Check fresh and restarted openings and full traversal with annotated refs
+        if: ${{ !cancelled() && steps.linux_history.outcome == 'success' }}
+        run: |
+          failed=0
+          for mode in one-annotation nested-aliases; do
+            fixture="$RUNNER_TEMP/linux-refs-$mode"
+            output="test-results/performance/linux-refs-$mode"
+            if ! node scripts/create-reference-performance-fixture.mjs "$RUNNER_TEMP/linux-history.git" "$fixture" "$mode" > "$output-fixture.log" 2>&1; then
+              cat "$output-fixture.log" >&2
+              failed=1
+              continue
+            fi
+            cp "$fixture/fixture.json" "$output-fixture.json"
+            alias_ref=""
+            if [[ "$mode" == nested-aliases ]]; then alias_ref=refs/tags/release-49998; fi
+            for suite in graph traversal; do
+              OPENKRAKEN_BENCH_ALIAS_REF="$alias_ref" bash scripts/run-scale-test.sh "$suite" "$fixture/repository.git" "$output-$suite" || failed=1
+            done
+            OPENKRAKEN_BENCH_ALIAS_REF="$alias_ref" OPENKRAKEN_BENCH_WARM=1 \
+              bash scripts/run-scale-test.sh graph "$fixture/repository.git" "$output-restarted" || failed=1
+            if [[ "$mode" == one-annotation ]]; then
+              OPENKRAKEN_BENCH_WARM=1 bash scripts/run-scale-test.sh traversal "$fixture/repository.git" "$output-restarted-traversal" || failed=1
+            fi
+          done
+          exit "$failed"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: evidence-scale-performance-linux
+          name: evidence-scale-performance-${{ matrix.os }}
           path: test-results/performance/
   minimum-git:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
-    defaults:
-      run:
-        shell: bash
     env:
       OPENKRAKEN_LFS_TEST: '1'
     steps:
@@ -143,14 +182,53 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Build the minimum supported Git in an isolated prefix
+      - if: runner.os == 'Linux'
+        name: Install minimum Git build prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential curl xz-utils libcurl4-openssl-dev libexpat1-dev zlib1g-dev git-lfs xvfb
+      - if: runner.os != 'Windows'
+        name: Build Git 2.38.0 in an isolated prefix
+        shell: bash
+        run: |
           bash scripts/build-minimum-git.sh "$RUNNER_TEMP/git-2.38.0"
           echo "$RUNNER_TEMP/git-2.38.0/bin" >> "$GITHUB_PATH"
           echo "OPENKRAKEN_GIT=$RUNNER_TEMP/git-2.38.0/bin/git" >> "$GITHUB_ENV"
-      - name: Verify selected Git and LFS
+      - if: runner.os == 'Windows'
+        name: Extract the verified Git for Windows 2.38.0 fixture
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'MinGit-2.38.0-64-bit.zip'
+          $prefix = Join-Path $env:RUNNER_TEMP 'git-2.38.0'
+          if (Test-Path $prefix) { throw 'Minimum Git fixture path already exists' }
+          Invoke-WebRequest 'https://github.com/git-for-windows/git/releases/download/v2.38.0.windows.1/MinGit-2.38.0-64-bit.zip' -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne '52c9b2a4b10a0a25b1be9466f60a5d5ca5330d5eb8c1661a8fac4bf2677a0e46') {
+            throw 'Git for Windows fixture checksum mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $prefix
+          $bin = Join-Path $prefix 'cmd'
+          # MinGit omits LFS. Some runners expose LFS only inside the system Git installation.
+          if (!(Get-Command git-lfs.exe -ErrorAction SilentlyContinue)) {
+            $gitExec = git --exec-path
+            $lfs = @("$gitExec/git-lfs.exe", "$gitExec/../../bin/git-lfs.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (!$lfs) { throw 'System Git LFS executable is missing' }
+            Copy-Item -LiteralPath $lfs -Destination $bin
+          }
+          $bin >> $env:GITHUB_PATH
+          "OPENKRAKEN_GIT=$(Join-Path $bin 'git.exe')" >> $env:GITHUB_ENV
+      - if: runner.os == 'Windows'
+        name: Verify selected Git for Windows and LFS
+        shell: pwsh
+        run: |
+          if ((Get-Command git.exe).Source -ne $env:OPENKRAKEN_GIT) { throw 'Unexpected Git on PATH' }
+          if ((git --version) -ne 'git version 2.38.0.windows.1') { throw 'Unexpected Git version' }
+          New-Item -ItemType Directory -Force test-results | Out-Null
+          git --version | Tee-Object test-results/minimum-git-version.log
+          git lfs version | Tee-Object -Append test-results/minimum-git-version.log
+          exit $LASTEXITCODE
+      - if: runner.os != 'Windows'
+        name: Verify selected Git and LFS
+        shell: bash
         run: |
           test "$(git --version)" = 'git version 2.38.0'
           test "$(command -v git)" = "$OPENKRAKEN_GIT"
@@ -158,11 +236,18 @@ jobs:
           git --version | tee test-results/minimum-git-version.log
           git lfs version | tee -a test-results/minimum-git-version.log
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test | tee test-results/minimum-git-unit.log
+      - if: runner.os != 'Windows'
+        shell: bash
+        run: pnpm test | tee test-results/minimum-git-unit.log
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pnpm test | Tee-Object test-results/minimum-git-unit.log
+          exit $LASTEXITCODE
       - run: pnpm build
       - name: Minimum Git desktop acceptance
         run: >-
-          xvfb-run -a pnpm exec playwright test
+          ${{ runner.os == 'Linux' && 'xvfb-run -a pnpm' || 'pnpm' }} exec playwright test
           tests/e2e/desktop.test.ts tests/e2e/graph.test.ts
           tests/e2e/references.test.ts tests/e2e/reference-sidebar.test.ts
           tests/e2e/operations.test.ts tests/e2e/submodules.test.ts
@@ -180,7 +265,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -195,12 +280,17 @@ jobs:
           cache: pnpm
       - if: runner.os == 'Linux'
         name: Native terminal build and picker automation
-        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool git-lfs rpm gnupg2 libarchive-tools fuse3 fish zsh
+        run: sudo apt-get update && sudo apt-get install -y build-essential xdotool git-lfs rpm gnupg2 libarchive-tools fuse3 fish zsh dbus-daemon libglib2.0-bin gnome-keyring podman slirp4netns
       - if: runner.os == 'Linux'
         name: Verify native shell prerequisites
         run: |
           fish --version
           zsh --version
+      - name: Locate the native PowerShell executable
+        shell: pwsh
+        run: |
+          $exe = (Get-Process -Id $PID).Path
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "OPENKRAKEN_POWERSHELL=$exe"
       - name: Verify native Git LFS prerequisite
         run: git lfs version
       - run: pnpm install --frozen-lockfile
@@ -216,8 +306,9 @@ jobs:
         name: Gitea HTTPS and SSH acceptance
         env:
           OPENKRAKEN_GITEA_TEST: '1'
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/gitea/e2e.json
         run: >-
-          xvfb-run -a pnpm exec playwright test
+          xvfb-run -a pnpm exec playwright test --output=test-results/gitea
           tests/e2e/gitea.test.ts
           tests/e2e/provider-push.test.ts
           tests/e2e/provider-delete.test.ts
@@ -228,15 +319,23 @@ jobs:
       - if: runner.os == 'Linux'
         env:
           OPENKRAKEN_XDOTOOL: xdotool
-        run: xvfb-run -a pnpm smoke:package
+        run: xvfb-run -a pnpm smoke:package --history
+      - if: runner.os == 'Linux'
+        name: Packaged merge draft recovery with a private GNOME keyring
+        run: xvfb-run -a node scripts/verify-linux-merge-keyring.mjs
       - if: runner.os == 'Linux'
         name: Packaged zsh shell integration
         env:
           OPENKRAKEN_XDOTOOL: xdotool
           OPENKRAKEN_PACKAGE_SHELL: /usr/bin/zsh
         run: xvfb-run -a pnpm smoke:package
+      - if: runner.os == 'Linux'
+        name: Packaged PowerShell integration
+        env:
+          OPENKRAKEN_XDOTOOL: xdotool
+        run: OPENKRAKEN_PACKAGE_SHELL="$(command -v pwsh)" xvfb-run -a pnpm smoke:package
       - if: runner.os != 'Linux'
-        run: pnpm smoke:package
+        run: pnpm smoke:package --history
       - if: runner.os == 'macOS'
         name: Build and verify unsigned DMG copy-install
         timeout-minutes: 15
@@ -244,6 +343,13 @@ jobs:
           pnpm installer --test-metadata --target dmg
           manifest="release/installers/darwin-$(node -p 'process.arch')/test/dmg/manifest.json"
           node scripts/check-installer-guards.mjs "$manifest"
+          pnpm smoke:installer "$manifest"
+      - if: runner.os == 'macOS'
+        name: Build beta DMG and launch its installed app
+        timeout-minutes: 15
+        run: |
+          node scripts/check-installer-upgrade.mjs dmg --beta
+          manifest=$(node -p 'require("./release/installer-upgrade-dmg-beta.json").manifestPath')
           pnpm smoke:installer "$manifest"
       - if: runner.os == 'Windows'
         name: Build and verify unsigned MSI payload
@@ -256,16 +362,27 @@ jobs:
           pnpm smoke:installer release/installers/win32-x64/test/msi/manifest.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - if: runner.os == 'Windows'
-        name: MSI install, repair, version upgrade, URI dispatch and removal
-        timeout-minutes: 20
+        name: Sign and verify MSI and installed executables with a disposable certificate
+        timeout-minutes: 15
+        env:
+          OPENKRAKEN_DISPOSABLE_INSTALL_TEST: '1'
+        run: ./scripts/check-msi-signing.ps1
+      - if: runner.os == 'Windows'
+        name: MSI install, repair, beta upgrades, stable promotion, downgrade rejection and removal
+        timeout-minutes: 40
         env:
           OPENKRAKEN_DISPOSABLE_INSTALL_TEST: '1'
         run: |
+          node scripts/check-installer-upgrade.mjs msi --beta
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-installer-upgrade.mjs msi --beta 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/check-installer-upgrade.mjs msi
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $upgradeManifest = node -p 'require("./release/installer-upgrade-msi.json").manifestPath'
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node scripts/check-msi-lifecycle.mjs release/installers/win32-x64/test/msi/manifest.json "$upgradeManifest"
+          $beta = (Get-Content -Raw release/installer-upgrade-msi-beta.json | ConvertFrom-Json).manifestPath
+          $nextBeta = (Get-Content -Raw release/installer-upgrade-msi-beta-2.json | ConvertFrom-Json).manifestPath
+          $stable = (Get-Content -Raw release/installer-upgrade-msi.json | ConvertFrom-Json).manifestPath
+          node scripts/check-msi-lifecycle.mjs release/installers/win32-x64/test/msi/manifest.json "$beta" "$nextBeta" "$stable"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - if: runner.os == 'Linux'
         name: Build unsigned Linux test installers
@@ -291,6 +408,11 @@ jobs:
           xvfb-run -a node scripts/verify-update-restart.mjs --sync-error-after-rename
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --stalled-commit
           xvfb-run -a node scripts/verify-update-restart.mjs --failed-startup
+          xvfb-run -a node scripts/verify-update-restart.mjs --close-slow-main
+          xvfb-run -a node scripts/verify-update-restart.mjs --close-slow-renderer
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --beta --resume-slow-renderer
+          xvfb-run -a node scripts/verify-update-restart.mjs --missing-renderer-document
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --beta --missing-renderer-module
           xvfb-run -a node scripts/verify-update-restart.mjs --rollback-sync-error
           xvfb-run -a node scripts/verify-update-restart.mjs --pending-notice
           xvfb-run -a node scripts/verify-update-restart.mjs --delayed-descendant
@@ -298,7 +420,7 @@ jobs:
           xvfb-run -a node scripts/verify-update-restart.mjs --interrupt-before-rename
           xvfb-run -a node scripts/verify-update-restart.mjs --interrupt-after-rename
           xvfb-run -a node scripts/verify-update-restart.mjs --helper-unavailable
-          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --recover-download
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --beta --failed-startup
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --beta --late-startup-confirmation
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/verify-update-restart.mjs --failed-startup
@@ -318,25 +440,23 @@ jobs:
             xvfb-run -a pnpm smoke:installer "$upgrade_manifest"
           done
           xvfb-run -a pnpm smoke:installer "$INSTALLER_ROOT/AppImage/manifest.json"
-          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a pnpm smoke:installer "$INSTALLER_ROOT/AppImage/manifest.json"
+          staging="$RUNNER_TEMP/appimage-extraction-test-with-a-long-profile-directory"
+          mkdir -p "$staging"
+          TMPDIR="$staging" APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a pnpm smoke:installer "$INSTALLER_ROOT/AppImage/manifest.json"
       - if: runner.os == 'Linux'
-        name: Debian install, version upgrade and removal in a disposable container
+        name: Debian DEB upgrade, installed desktop and URI handler
+        shell: bash
         timeout-minutes: 15
         run: |
-          artifact=$(node -p 'require("./" + process.env.INSTALLER_ROOT + "/deb/manifest.json").artifact.file')
-          upgrade_dir=$(node -p 'require("node:path").dirname(require("./release/installer-upgrade-deb.json").manifestPath)')
-          upgrade_artifact=$(node -p 'require(require("./release/installer-upgrade-deb.json").manifestPath).artifact.file')
-          beta_dir=$(node -p 'require("node:path").dirname(require("./release/installer-upgrade-deb-beta.json").manifestPath)')
-          beta_artifact=$(node -p 'require(require("./release/installer-upgrade-deb-beta.json").manifestPath).artifact.file')
           mkdir -p test-results
-          docker run --rm \
-            --env OPENKRAKEN_DISPOSABLE_INSTALL_TEST=1 \
-            --volume "$PWD/$INSTALLER_ROOT/deb:/artifacts:ro" \
-            --volume "$beta_dir:/beta:ro" \
-            --volume "$upgrade_dir:/upgrade:ro" \
-            --volume "$PWD/scripts/check-deb-lifecycle.sh:/check.sh:ro" \
-            docker.io/library/debian@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4 \
-            timeout 12m bash /check.sh "/artifacts/$artifact" "/upgrade/$upgrade_artifact" "/beta/$beta_artifact" 2>&1 | tee test-results/deb-lifecycle.log
+          bash scripts/run-deb-lifecycle.sh debian 2>&1 | tee test-results/deb-lifecycle.log
+      - if: runner.os == 'Linux'
+        name: Ubuntu DEB upgrade, installed desktop and URI handler
+        shell: bash
+        timeout-minutes: 15
+        run: |
+          mkdir -p test-results
+          bash scripts/run-deb-lifecycle.sh ubuntu 2>&1 | tee test-results/ubuntu-deb-lifecycle.log
       - if: runner.os == 'Linux'
         name: Fedora RPM install, upgrade and removal in a disposable container
         timeout-minutes: 15
@@ -376,9 +496,9 @@ jobs:
           platform=$(node -p 'process.platform + "-" + process.arch')
           display=()
           case "$RUNNER_OS" in
-            Linux) targets=(deb rpm deb-beta rpm-beta); display=(xvfb-run -a) ;;
-            macOS) targets=(dmg) ;;
-            Windows) targets=(msi) ;;
+            Linux) targets=(deb rpm AppImage deb-beta rpm-beta); display=(xvfb-run -a) ;;
+            macOS) targets=(dmg dmg-beta) ;;
+            Windows) targets=(msi msi-beta) ;;
           esac
           for target in "${targets[@]}"; do
             if [[ "$target" == *-beta ]]; then

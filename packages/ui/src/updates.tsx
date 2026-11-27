@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { UpdateState } from '@openkraken/ipc-contract';
 
 const failures: Record<NonNullable<UpdateState['error']>, string> = {
+  'download-unconfirmed':
+    'The filesystem could not confirm the download. Check for updates again to retry.',
+  'save-unconfirmed':
+    'The installer was written. The filesystem could not confirm the save. You can save it again.',
   save: 'The installer could not be saved. Choose a writable location and keep the installer extension.',
   network: 'The update server could not be reached securely. Try checking again.',
   'invalid-release': 'The release signature or validity period could not be verified.',
@@ -36,6 +40,8 @@ function updateStatus(state?: UpdateState): string {
       return `Version ${state.version} has no download for this platform.`;
     case 'available':
       return `Version ${state.version} is available.`;
+    case 'verifying':
+      return `Verifying saved installer for version ${state.version}…`;
     case 'downloading':
       return `Downloading version ${state.version}…`;
     case 'verified':
@@ -59,6 +65,7 @@ function UpdatesDialog({
   onState: (state: UpdateState) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
   const [state, setState] = useState<UpdateState>();
   const [error, setError] = useState('');
   const [dispatching, setDispatching] = useState(false);
@@ -93,7 +100,7 @@ function UpdatesDialog({
     };
   }, [onState]);
   const saveAutomatic = async (enabled: boolean) => {
-    if (!state) return;
+    if (!state || savingAutomatic) return;
     preferenceChange.current++;
     setPendingAutomatic(enabled);
     setError('');
@@ -128,6 +135,12 @@ function UpdatesDialog({
       | 'updatesDismissRecovery',
     format?: UpdateState['selected'],
   ) => {
+    // The invoked action can disappear as soon as the transfer changes phase.
+    if (
+      document.activeElement instanceof HTMLButtonElement &&
+      dialog.current?.contains(document.activeElement)
+    )
+      closeButton.current?.focus();
     setDispatching(true);
     setError('');
     try {
@@ -162,14 +175,22 @@ function UpdatesDialog({
       setDispatching(false);
     }
   };
-  const running = state && ['checking', 'downloading', 'preparing', 'saving'].includes(state.phase);
+  const running =
+    state && ['checking', 'downloading', 'verifying', 'preparing', 'saving'].includes(state.phase);
   const status = updateStatus(state);
+  const dismiss = () => {
+    dialog.current?.close();
+    onClose();
+  };
   return (
     <dialog
       ref={dialog}
       className="reference-dialog updates-dialog"
       aria-label="App updates"
-      onCancel={onClose}
+      onCancel={(event) => {
+        event.preventDefault();
+        dismiss();
+      }}
     >
       <h2>App updates</h2>
       {state?.channel === 'beta' && <p>Beta channel · This build receives prerelease updates.</p>}
@@ -183,8 +204,8 @@ function UpdatesDialog({
             <input
               type="checkbox"
               checked={pendingAutomatic ?? state.automatic.enabled}
+              aria-disabled={savingAutomatic || undefined}
               disabled={
-                savingAutomatic ||
                 !!state.automatic.warning ||
                 state.error === 'storage' ||
                 ['preparing', 'restart-ready', 'installed'].includes(state.phase)
@@ -216,9 +237,9 @@ function UpdatesDialog({
         </div>
       )}
       {error && <p role="alert">{error}</p>}
-      {state?.phase === 'downloading' && (
+      {(state?.phase === 'downloading' || state?.phase === 'verifying') && (
         <progress
-          aria-label="Download progress"
+          aria-label={state.phase === 'verifying' ? 'Verification progress' : 'Download progress'}
           value={state.downloaded}
           max={state.artifacts.find((artifact) => artifact.format === state.selected)?.size ?? 1}
         />
@@ -265,7 +286,7 @@ function UpdatesDialog({
             Check for updates
           </button>
         )}
-        <button autoFocus onClick={onClose}>
+        <button ref={closeButton} autoFocus onClick={dismiss}>
           Close
         </button>
       </div>
@@ -304,9 +325,14 @@ export function UpdatesControl() {
     state?.recovery === 'restored'
       ? 'An update failed to start; the previous version was restored'
       : state?.version &&
-          ['available', 'downloading', 'verified', 'preparing', 'restart-ready'].includes(
-            state.phase,
-          )
+          [
+            'available',
+            'downloading',
+            'verifying',
+            'verified',
+            'preparing',
+            'restart-ready',
+          ].includes(state.phase)
         ? `OpenKraken ${state.version} is available`
         : undefined;
   return (

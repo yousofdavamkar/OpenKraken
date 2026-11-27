@@ -1,3 +1,5 @@
+import { mergeDraftRequests, mergeDraftResults } from './merge-drafts.js';
+export * from './merge-drafts.js';
 import { pullDraftRequests, pullDraftResults } from './pull-drafts.js';
 export * from './pull-drafts.js';
 import type { HistoryPageReply, SnapshotBodies } from './page-transfer.js';
@@ -56,6 +58,10 @@ export * from './appearance.js';
 export * from './theme-colors.js';
 export * from './commands.js';
 import {
+  providerBitbucketMergeabilityOptionsSchema,
+  providerBitbucketMergeChecksSchema,
+  providerBitbucketStatusesOptionsSchema,
+  providerBitbucketStatusesPageSchema,
   providerBitbucketCommentsOptionsSchema,
   providerBitbucketCommentsPageSchema,
 } from './providers.js';
@@ -143,6 +149,9 @@ import {
   providerBitbucketRepositoriesOptionsSchema,
   providerRepositoryPageNumberSchema,
   providerRepositoryPageSchema,
+  providerRepositorySchema,
+  providerCreateRepositorySchema,
+  personalRepositoryTargetSchema,
   providerConnectSchema,
   gitlabStartSchema,
   gitlabChallengeSchema,
@@ -1359,6 +1368,7 @@ export const requestSchema = z.discriminatedUnion('method', [
   ...reviewDraftRequests,
   ...issueDraftRequests,
   ...pullDraftRequests,
+  ...mergeDraftRequests,
   z
     .object({
       id: requestId,
@@ -1761,6 +1771,22 @@ export const requestSchema = z.discriminatedUnion('method', [
   z
     .object({
       id: requestId,
+      method: z.literal('providerBitbucketPullMergeability'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerBitbucketMergeabilityOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
+      method: z.literal('providerBitbucketPullStatuses'),
+      accountId: z.string().regex(/^[0-9a-f]{64}$/),
+      options: providerBitbucketStatusesOptionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: requestId,
       method: z.literal('providerBitbucketPullComments'),
       accountId: z.string().regex(/^[0-9a-f]{64}$/),
       options: providerBitbucketCommentsOptionsSchema,
@@ -1838,6 +1864,18 @@ export const requestSchema = z.discriminatedUnion('method', [
       options: providerBitbucketRepositoriesOptionsSchema,
     })
     .strict(),
+  z.strictObject({
+    id: requestId,
+    method: z.literal('providerInspectRepository'),
+    accountId: z.string().regex(/^[0-9a-f]{64}$/),
+    target: personalRepositoryTargetSchema,
+  }),
+  z.strictObject({
+    id: requestId,
+    method: z.literal('providerCreateRepository'),
+    accountId: z.string().regex(/^[0-9a-f]{64}$/),
+    options: providerCreateRepositorySchema,
+  }),
   z
     .object({
       id: requestId,
@@ -2079,6 +2117,7 @@ export const resultSchema = z.discriminatedUnion('kind', [
   ...reviewDraftResults,
   ...issueDraftResults,
   ...pullDraftResults,
+  ...mergeDraftResults,
   z.object({ kind: z.literal('commitDraft'), state: commitDraftStateSchema }).strict(),
   z.object({ kind: z.literal('activity'), state: activityStateSchema }).strict(),
   z.object({ kind: z.literal('repositoryTabs'), state: repositoryTabsStateSchema }).strict(),
@@ -2260,6 +2299,18 @@ export const resultSchema = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({
+      kind: z.literal('providerBitbucketPullMergeability'),
+      checks: providerBitbucketMergeChecksSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('providerBitbucketPullStatuses'),
+      page: providerBitbucketStatusesPageSchema,
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal('providerBitbucketPullComments'),
       page: providerBitbucketCommentsPageSchema,
     })
@@ -2301,6 +2352,14 @@ export const resultSchema = z.discriminatedUnion('kind', [
       page: providerBitbucketWorkspacePageSchema,
     })
     .strict(),
+  z.strictObject({
+    kind: z.literal('providerRepositoryFound'),
+    repository: providerRepositorySchema,
+  }),
+  z.strictObject({
+    kind: z.literal('providerRepositoryCreated'),
+    repository: providerRepositorySchema,
+  }),
   z
     .object({ kind: z.literal('providerRepositories'), page: providerRepositoryPageSchema })
     .strict(),
@@ -2398,7 +2457,73 @@ const compactSnapshotResult = z.object({
   kind: z.literal('compactSnapshot'),
   snapshot: snapshotSchema.extend({ refs: compactRefsSchema }),
 });
+const tagPrefix = 'refs/tags/';
+function plainAnnotatedTag(ref: Ref) {
+  return (
+    ref.kind === 'tag' &&
+    ref.name === tagPrefix + ref.shortName &&
+    ref.objectType === 'tag' &&
+    ref.peeled !== undefined &&
+    ['commit', 'tree', 'blob'].includes(ref.peeledType) &&
+    ref.isHead === false &&
+    ref.upstream === undefined
+  );
+}
+const aliasedTagRefsSchema = z.array(z.unknown()).transform((rows, ctx) => {
+  let acceptsAlias = false;
+  const refs: (Ref | string)[] = [];
+  for (const [index, row] of rows.entries()) {
+    if (typeof row === 'string') {
+      if (acceptsAlias && row.startsWith(tagPrefix) && row.length > tagPrefix.length) {
+        refs.push(row);
+        continue;
+      }
+    } else {
+      const full = refSchema.safeParse(row);
+      if (full.success) {
+        acceptsAlias = plainAnnotatedTag(full.data);
+        refs.push(full.data);
+        continue;
+      }
+    }
+    ctx.addIssue({ code: 'custom', path: [index], message: 'Invalid annotated tag alias' });
+    return z.NEVER;
+  }
+  return refs;
+});
+
+export function encodeAliasedTagRefs(source: Ref[]) {
+  if (source.length < compactRefThreshold) return;
+  let previous: Ref | undefined;
+  let aliases = 0;
+  const rows = source.map((ref) => {
+    if (plainAnnotatedTag(ref)) {
+      if (
+        previous &&
+        ref.target === previous.target &&
+        ref.peeled === previous.peeled &&
+        ref.peeledType === previous.peeledType &&
+        ref.shortName.length
+      ) {
+        aliases++;
+        return ref.name;
+      }
+      previous = ref;
+    } else previous = undefined;
+    return ref;
+  });
+  if (aliases * 2 >= source.length) return rows;
+}
+
 export const snapshotPartSchema = z.discriminatedUnion('snapshotPart', [
+  z
+    .object({
+      id: requestId,
+      transferId: requestId,
+      snapshotPart: z.literal('tagAliases'),
+      refs: aliasedTagRefsSchema,
+    })
+    .strict(),
   z
     .object({
       id: requestId,
@@ -2454,7 +2579,13 @@ export type Snapshot = z.infer<typeof snapshotSchema>;
 export type Request = z.infer<typeof requestSchema>;
 export type ServiceRequest = z.infer<typeof serviceRequestSchema>;
 export type Result = z.infer<typeof resultSchema>;
-export type ServiceResult = z.infer<typeof serviceResponseSchema>['result'];
+// Only a validated, completed staged opening can produce a tag-alias snapshot.
+export type ServiceResult =
+  | z.infer<typeof serviceResponseSchema>['result']
+  | {
+      kind: 'tagAliasSnapshot';
+      snapshot: Omit<Snapshot, 'refs'> & { refs: (Ref | string)[] };
+    };
 export {
   encodeHistoryPage,
   decodeHistoryPage,

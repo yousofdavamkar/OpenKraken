@@ -1,9 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { passageBuckets } from '@openkraken/graph';
 import { paintGraph, ROW_HEIGHT, LANE_WIDTH, GRAPH_PADDING } from '@openkraken/graph/canvas';
-import { navigationTarget, refsByTarget, refNavigationTargets } from './history-model.js';
+import {
+  locateRow,
+  navigationTarget,
+  refsByTarget,
+  refNavigationTargets,
+} from './history-model.js';
 import { AuthorAvatar, useVisibleAvatars } from './avatars.js';
 import { CommandButton } from './commands.js';
 import { useRepository } from './store.js';
@@ -83,13 +87,8 @@ export function History() {
     overscan: 10,
   });
   useVisibleAvatars(virtual.getVirtualItems().map((item) => rows[item.index]!.author.email));
-  const buckets = useMemo(() => passageBuckets(passages), [passages]);
   const selected = useMemo(() => new Set(selection.selected), [selection.selected]);
   const matching = useMemo(() => (matches ? new Set(matches) : undefined), [matches]);
-  const synthetic = useMemo(
-    () => new Set(rows.filter((r) => r.kind !== 'commit').map((r) => r.oid)),
-    [rows],
-  );
   const commitRefs = useMemo(
     () => (snapshot ? refsByTarget(snapshot.refs, snapshot.view) : undefined),
     [snapshot?.refs, snapshot?.view],
@@ -114,8 +113,8 @@ export function History() {
       dpr: devicePixelRatio,
       matches: matching,
       selected,
-      synthetic,
-      passages: buckets,
+      synthetic: (index) => rows[index]!.kind !== 'commit',
+      passages,
       colors: graphColors,
       background: theme.colors.background,
     });
@@ -127,8 +126,8 @@ export function History() {
     scroll.top,
     matching,
     selected,
-    synthetic,
-    buckets,
+    rows,
+    passages,
     graphColors,
     theme.colors.background,
   ]);
@@ -151,8 +150,8 @@ export function History() {
     };
   }, [snapshot?.cursor]);
   const focused = useMemo(
-    () => (selection.focus ? rows.findIndex((row) => row.oid === selection.focus) : -1),
-    [rows, selection.focus],
+    () => locateRow(rows, selection.focus, selection.focusIndex),
+    [rows, selection.focus, selection.focusIndex],
   );
   useEffect(() => {
     if (focused >= 0) virtual.scrollToIndex(focused, { align: 'auto' });
@@ -161,10 +160,12 @@ export function History() {
     if (index < 0) return;
     // A repeated selection keeps the same focus ID, so the focus effect will not scroll.
     if (index === focused) virtual.scrollToIndex(index, { align: 'auto' });
-    state.select(rows[index]!.oid);
+    state.select(rows[index]!.oid, 'single', index);
   }
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (!snapshot) return;
+    if (!snapshot || event.nativeEvent.isComposing) return;
+    // Search hands focus here on Enter or Escape while the key may still be held.
+    if (event.repeat && (event.key === 'Enter' || event.key === 'Escape')) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
       event.preventDefault();
       useRepository.setState({ selection: { ...selection, selected: rows.map((r) => r.oid) } });
@@ -177,32 +178,22 @@ export function History() {
     }
     if (event.key === 'Enter') {
       event.preventDefault();
-      state.setDetail(rows.find((r) => r.oid === selection.focus));
+      state.setDetail(rows[focused]);
       return;
     }
-    if (
-      event.key === 'ArrowDown' &&
-      !event.shiftKey &&
-      snapshot.hasMore &&
-      rows.length > 0 &&
-      selection.focus === rows.at(-1)!.oid
-    ) {
-      event.preventDefault();
-      void state.navigate(rows.length);
-      return;
-    }
+    if (event.key.length === 1 && (event.altKey || event.ctrlKey || event.metaKey)) return;
+    let navigationKey = event.key;
+    if (navigationKey.toLowerCase() === 'j') navigationKey = 'ArrowDown';
+    if (navigationKey.toLowerCase() === 'k') navigationKey = 'ArrowUp';
     const refs = event.key.toLowerCase() === 'h' ? refNavigationTargets(snapshot, rows) : undefined;
-    const target = navigationTarget(
-      rows,
-      selection.focus,
-      event.key,
-      event.shiftKey,
-      refs?.head,
-      refs?.upstream,
-    );
-    if (target) {
+    const target = navigationTarget(rows, focused, navigationKey, event.shiftKey, {
+      ...refs,
+      pageRows: Math.max(1, Math.floor(bounds.height / ROW_HEIGHT)),
+      hasMore: snapshot.hasMore,
+    });
+    if (target !== undefined) {
       event.preventDefault();
-      if (target === selection.focus && focused >= 0)
+      if ((target === focused || target === selection.focus) && focused >= 0)
         virtual.scrollToIndex(focused, { align: 'auto' });
       void state.navigate(target);
     }
@@ -228,6 +219,7 @@ export function History() {
           maxLength={200}
           onChange={(event) => void state.search(event.target.value)}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || event.repeat) return;
             if (event.key === 'Escape') {
               void state.search('');
               viewport.current?.focus();
@@ -242,8 +234,14 @@ export function History() {
           {query.trim() ? `${matches?.length ?? 0} loaded matches` : ''}
         </span>
         {query.trim() && (
-          <button disabled={!!searching || !!busy} onClick={() => void state.searchAll()}>
-            Search all history
+          <button
+            disabled={!!busy && !searching}
+            onClick={() => void (searching ? state.cancelSearch() : state.searchAll())}
+            onKeyDown={(event) => {
+              if (event.repeat && event.key === 'Enter') event.preventDefault();
+            }}
+          >
+            {searching ? 'Cancel search' : 'Search all history'}
           </button>
         )}
       </div>
@@ -297,7 +295,8 @@ export function History() {
           role="grid"
           aria-label="Commit history"
           tabIndex={0}
-          aria-rowcount={rows.length}
+          aria-describedby="history-commit-count"
+          aria-rowcount={snapshot?.hasMore ? -1 : rows.length}
           aria-colcount={6}
           aria-multiselectable="true"
           aria-activedescendant={activeVisible ? `commit-row-${focused}` : undefined}
@@ -351,6 +350,7 @@ export function History() {
                         : event.ctrlKey || event.metaKey
                           ? 'toggle'
                           : 'single',
+                      item.index,
                     );
                     viewport.current?.focus({ preventScroll: true });
                   }}

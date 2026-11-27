@@ -8,7 +8,9 @@ import { generateKeyPairSync } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { chmod, cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:https';
+import { once } from 'node:events';
 import { basename, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -19,6 +21,8 @@ import { packageFuses, pinnedElectronRuntime, sha256, verifyFuses } from './pack
 if (process.platform !== 'linux') throw new Error('Linux AppImage acceptance requires Linux');
 await mkdir('release', { recursive: true });
 const root = await mkdtemp(resolve('release/update-restart-check-'));
+// Chromium puts its Unix-domain singleton socket under TMPDIR, even in extract-and-run mode.
+const runtimeTemp = await mkdtemp(join(tmpdir(), 'ok-img-'));
 let server, child, browser, mainPid;
 let completed = false;
 let launchOutput = '';
@@ -29,13 +33,24 @@ const lateConfirmation = process.argv.includes('--late-startup-confirmation');
 const delayedStartup = lateExit || lateConfirmation;
 const rollbackSyncError = process.argv.includes('--rollback-sync-error');
 const pendingNotice = process.argv.includes('--pending-notice');
+const missingDocument = process.argv.includes('--missing-renderer-document');
+const missingModule = process.argv.includes('--missing-renderer-module');
+const closeSlowMain = process.argv.includes('--close-slow-main');
+const closeSlowRenderer = process.argv.includes('--close-slow-renderer');
+const resumeSlowRenderer = process.argv.includes('--resume-slow-renderer');
+const slowStartup = closeSlowRenderer || resumeSlowRenderer || closeSlowMain;
+const damagedRenderer = missingDocument || missingModule;
 const failStartup =
+  closeSlowRenderer ||
+  closeSlowMain ||
+  damagedRenderer ||
   process.argv.includes('--failed-startup') ||
   delayedDescendant ||
   lateExit ||
   rollbackSyncError ||
   pendingNotice;
 const installFolder = rollbackSyncError ? join(root, 'install') : root;
+const recoverDownload = process.argv.includes('--recover-download');
 const helperUnavailable = process.argv.includes('--helper-unavailable');
 const unchangedImage = process.argv.includes('--unchanged-image');
 const migrateFeed = process.argv.includes('--migrate-feed');
@@ -50,7 +65,9 @@ assert.ok(
   [
     failStartup,
     lateConfirmation,
+    resumeSlowRenderer,
     helperUnavailable,
+    recoverDownload,
     unchangedImage,
     beforeRename,
     afterRename,
@@ -92,9 +109,11 @@ try {
   const images = [];
   let envelope, nextEnvelope;
   let newFeedChecks = 0;
+  const requests = [];
   server = createServer(
     { key: await readFile(key), cert: await readFile(cert) },
     (request, response) => {
+      requests.push(request.url);
       if (request.url === '/release.json' && envelope) response.end(envelope);
       else if (request.url === '/next/release.json' && nextEnvelope) {
         newFeedChecks++;
@@ -194,10 +213,34 @@ try {
     const staging = join(root, version, 'staging');
     await mkdir(staging, { recursive: true });
     await cp(runtime, join(staging, 'dist'), { recursive: true });
+    if (damagedRenderer && version === replacementVersion) {
+      const renderer = join(staging, 'dist/renderer');
+      const document = join(renderer, 'index.html');
+      if (missingModule) {
+        const entries = [
+          ...(await readFile(document, 'utf8')).matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g),
+        ];
+        assert.equal(entries.length, 1);
+        await rm(join(renderer, entries[0][1]));
+      } else await rm(document);
+    }
     // Test trust and dialog responses are compiled into disposable fixture apps.
     // Production has no TLS bypass, test key or runtime test switch.
     const banner = `
       const fixtureElectron = require('electron');
+      if (${slowStartup && version === replacementVersion}) setTimeout(() => fixtureElectron.app.exit(124), 180000).unref();
+      if (${closeSlowMain && version === replacementVersion}) {
+        const files = require('node:fs/promises');
+        const original = files.lstat;
+        files.lstat = (...args) => {
+          if (require('node:path').basename(String(args[0])) === 'activity.json') {
+            if (fixtureElectron.BrowserWindow.getAllWindows().length) throw Error('Expected startup before window creation');
+            require('node:fs').writeFileSync(${JSON.stringify(heldStartup)}, String(process.pid));
+            return new Promise(() => {});
+          }
+          return original(...args);
+        };
+      }
       if (${helperUnavailable}) {
         const fixtureChildProcess = require('node:child_process');
         const fixtureSpawn = fixtureChildProcess.spawn;
@@ -288,7 +331,7 @@ try {
           require('node:fs').writeFileSync(${JSON.stringify(descendantMarker)}, JSON.stringify({ pid: descendant.pid, started: Date.now() }));
           descendant.unref();
         }
-        process.exit(23);
+        if (!${damagedRenderer || closeSlowRenderer || closeSlowMain}) process.exit(23);
       }
       if (fixtureReturning && ${delayedDescendant}) {
         const descendant = JSON.parse(require('node:fs').readFileSync(${JSON.stringify(descendantMarker)}, 'utf8'));
@@ -303,12 +346,43 @@ try {
       fixtureElectron.app.relaunch = (options) => { require('node:fs').writeFileSync(${JSON.stringify(join(root, 'relaunch.json'))}, JSON.stringify(options)); return fixtureRelaunch(options); };
       const fixtureTls = require('node:tls');
       fixtureTls.setDefaultCACertificates([...fixtureTls.getCACertificates('default'), ${JSON.stringify(await readFile(cert, 'utf8'))}]);
-      fixtureElectron.dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
+      const nativeMessageBox = fixtureElectron.dialog.showMessageBox.bind(fixtureElectron.dialog);
+      fixtureElectron.dialog.showMessageBox = async (...args) => {
+        if (${slowStartup && version === replacementVersion} && args.at(-1).title === 'OpenKraken update') {
+          const result = await nativeMessageBox(...args);
+          require('node:fs').writeFileSync(${JSON.stringify(join(root, 'startup-choice'))}, String(result.response));
+          return result;
+        }
+        return { response: 1, checkboxChecked: false };
+      };
       fixtureElectron.dialog.showMessageBoxSync = () => 0;
       fixtureElectron.dialog.showErrorBox = (title) => require('node:fs').writeFileSync(${JSON.stringify(join(root, 'install-error'))}, title);
+      let startupPickers = 0;
+      if (${resumeSlowRenderer && version === replacementVersion}) {
+        fixtureElectron.dialog.showOpenDialog = () => { startupPickers++; return new Promise(() => {}); };
+      }
       let fixtureCancelBeforeQuit = ${!helperUnavailable && version === initialVersion} && !fixtureReturning;
       const fixtureHandle = fixtureElectron.ipcMain.handle.bind(fixtureElectron.ipcMain);
       fixtureElectron.ipcMain.handle = (channel, listener) => fixtureHandle(channel, async (...args) => {
+        if (${(closeSlowRenderer || resumeSlowRenderer) && version === replacementVersion} && args[1]?.method === 'appearancePreferences') {
+          const fs = require('node:fs');
+          if (${closeSlowRenderer}) {
+            const debuggerSession = args[0].sender.debugger;
+            debuggerSession.attach();
+            await debuggerSession.sendCommand('Debugger.enable');
+            const paused = new Promise(resolve => {
+              debuggerSession.on('message', (_event, method) => { if (method === 'Debugger.paused') resolve(); });
+            });
+            void debuggerSession.sendCommand('Runtime.evaluate', { expression: 'debugger;' }).catch(() => {});
+            await paused;
+          }
+          if (${resumeSlowRenderer}) {
+            await args[0].sender.executeJavaScript("for(let i=0;i<8;i++) void window.openkraken.request({id:crypto.randomUUID(),method:'open'}); void 0;");
+            while (startupPickers !== 8) await new Promise(resolve => setTimeout(resolve, 20));
+          }
+          fs.writeFileSync(${JSON.stringify(heldStartup)}, String(process.pid));
+          while (!fs.existsSync(${JSON.stringify(resumeStartup)})) await new Promise(resolve => setTimeout(resolve, 100));
+        }
         let result = await listener(...args);
         if (fixtureCancelBeforeQuit && args[1]?.method === 'updatesInstall' && result.state?.phase === 'restart-ready') {
           fixtureCancelBeforeQuit = false;
@@ -323,7 +397,7 @@ try {
       });
     `;
     await build({
-      entryPoints: ['apps/desktop/src/main.ts'],
+      entryPoints: ['apps/desktop/src/bootstrap.ts'],
       outfile: join(staging, 'dist/main.cjs'),
       bundle: true,
       platform: 'node',
@@ -421,54 +495,103 @@ try {
     await mkdir(profile);
     args.push(`--user-data-dir=${profile}`);
   }
-  child = spawn(target, args, {
-    detached: true,
-    stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...process.env, TMPDIR: root, XDG_CONFIG_HOME: configHome },
-  });
-  const endpoint = await new Promise((resolve, reject) => {
-    let output = '';
-    const timer = setTimeout(() => reject(new Error(`AppImage did not start: ${output}`)), 15000);
-    createInterface({ input: child.stderr }).on('line', (line) => {
-      output = (output + '\n' + line).slice(-4096);
-      launchOutput = (launchOutput + '\n' + line).slice(-8192);
-      const match = /DevTools listening on (ws:\/\/.*)/.exec(line);
-      if (match) {
-        clearTimeout(timer);
-        resolve(match[1]);
-      }
-    });
-    child.once('error', (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.once('exit', (code) => {
-      clearTimeout(timer);
-      reject(new Error(`AppImage exited ${code}: ${output}`));
-    });
-  });
-  browser = await chromium.connectOverCDP(endpoint);
-  const session = await browser.newBrowserCDPSession();
-  mainPid = (await session.send('SystemInfo.getProcessInfo')).processInfo.find(
-    (entry) => entry.type === 'browser',
-  ).id;
-  await session.detach();
-  const context = browser.contexts()[0];
-  const page = context.pages()[0] ?? (await context.waitForEvent('page'));
-  await page.getByRole('button', { name: 'Updates', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'App updates' });
-  if (beta) await expect(dialog.getByText(/Beta channel/)).toBeVisible();
-  if (migrateFeed) {
-    const consent = dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' });
-    await consent.check();
-    await expect(consent).toBeEnabled();
-    await expect(consent).toBeChecked();
+  async function selectUpdate(dialog) {
+    await dialog.getByRole('button', { name: 'Check for updates' }).click();
+    await dialog.getByRole('button', { name: 'Download AppImage' }).click();
+    await expect(
+      dialog.getByRole('button', { name: 'Install and restart', exact: true }),
+    ).toBeVisible({ timeout: 30000 });
   }
-  await dialog.getByRole('button', { name: 'Check for updates' }).click();
-  await dialog.getByRole('button', { name: 'Download AppImage' }).click();
-  await expect(
-    dialog.getByRole('button', { name: 'Install and restart', exact: true }),
-  ).toBeVisible({ timeout: 30000 });
+  async function launchAndSelectUpdate() {
+    child = spawn(target, args, {
+      detached: true,
+      stdio: ['ignore', 'ignore', 'pipe'],
+      env: { ...process.env, TMPDIR: runtimeTemp, XDG_CONFIG_HOME: configHome },
+    });
+    const endpoint = await new Promise((resolve, reject) => {
+      let output = '';
+      const timer = setTimeout(() => reject(new Error(`AppImage did not start: ${output}`)), 15000);
+      createInterface({ input: child.stderr }).on('line', (line) => {
+        output = (output + '\n' + line).slice(-4096);
+        launchOutput = (launchOutput + '\n' + line).slice(-8192);
+        const match = /DevTools listening on (ws:\/\/.*)/.exec(line);
+        if (match) {
+          clearTimeout(timer);
+          resolve(match[1]);
+        }
+      });
+      child.once('error', (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.once('exit', (code) => {
+        clearTimeout(timer);
+        reject(new Error(`AppImage exited ${code}: ${output}`));
+      });
+    });
+    browser = await chromium.connectOverCDP(endpoint);
+    const session = await browser.newBrowserCDPSession();
+    mainPid = (await session.send('SystemInfo.getProcessInfo')).processInfo.find(
+      (entry) => entry.type === 'browser',
+    ).id;
+    await session.detach();
+    const context = browser.contexts()[0];
+    const page = context.pages()[0] ?? (await context.waitForEvent('page'));
+    await page.getByRole('button', { name: 'Updates', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'App updates' });
+    if (beta) await expect(dialog.getByText(/Beta channel/)).toBeVisible();
+    if (migrateFeed) {
+      const consent = dialog.getByRole('checkbox', { name: 'Automatically check every 10 hours' });
+      await consent.check();
+      await expect(consent).toBeEnabled();
+      await expect(consent).toBeChecked();
+    }
+    await selectUpdate(dialog);
+    return { page, dialog };
+  }
+  let previousInstallId;
+  if (recoverDownload) {
+    const before = requests.length;
+    const { page } = await launchAndSelectUpdate();
+    const { state } = await page.evaluate(() =>
+      window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesRead' }),
+    );
+    previousInstallId = state.installId;
+    assert.ok(previousInstallId);
+    assert.deepEqual(requests.slice(before), ['/release.json', '/' + basename(artifact)]);
+    const exited = once(child, 'exit', { signal: AbortSignal.timeout(30000) });
+    process.kill(mainPid, 'SIGKILL');
+    await exited;
+    mainPid = undefined;
+    await browser.close();
+    assert.equal(await sha256(target), originalDigest);
+  }
+  const beforeSelection = requests.length;
+  const { page, dialog } = await launchAndSelectUpdate();
+  if (recoverDownload) {
+    assert.deepEqual(requests.slice(beforeSelection), ['/release.json']);
+    const { state } = await page.evaluate(
+      (installId) =>
+        window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesInstall', installId }),
+      previousInstallId,
+    );
+    assert.equal(state.phase, 'verified');
+    assert.ok(state.installId && state.installId !== previousInstallId);
+    const beforeRecheck = requests.length;
+    await selectUpdate(dialog);
+    assert.deepEqual(requests.slice(beforeRecheck), ['/release.json']);
+    const afterRecheck = await page.evaluate(
+      (installId) =>
+        window.openkraken.request({ id: crypto.randomUUID(), method: 'updatesInstall', installId }),
+      state.installId,
+    );
+    assert.equal(afterRecheck.state.phase, 'verified');
+    assert.ok(afterRecheck.state.installId && afterRecheck.state.installId !== state.installId);
+    await assert.rejects(stat(target + '.openkraken-update'), { code: 'ENOENT' });
+    console.log(
+      'Restart and same-session recheck each fetched only signed metadata and required fresh install approval.',
+    );
+  }
   if (unchangedImage) {
     await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
     await expect(dialog).toContainText('This release contains the installed AppImage.', {
@@ -583,6 +706,43 @@ try {
       window.removeEventListener('beforeunload', Reflect.get(window, 'fixtureUnload')),
     );
     await dialog.getByRole('button', { name: 'Install and restart', exact: true }).click();
+    if (slowStartup) {
+      const replacementPid = Number(await waitForFile(heldStartup));
+      const xdotool = process.env.OPENKRAKEN_XDOTOOL ?? 'xdotool';
+      const keys = closeSlowMain ? ['Escape', 'alt+c'] : [resumeSlowRenderer ? null : 'alt+c'];
+      const choice = join(root, 'startup-choice');
+      for (const key of keys) {
+        const { stdout } = await promisify(execFile)(
+          xdotool,
+          ['search', '--sync', '--onlyvisible', '--name', '^OpenKraken update$'],
+          { timeout: 90000 },
+        );
+        const [nativeDialog] = stdout.trim().split('\n');
+        assert.equal(
+          (await promisify(execFile)(xdotool, ['getwindowpid', nativeDialog])).stdout.trim(),
+          String(replacementPid),
+        );
+        assert.deepEqual(JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')), [
+          initialVersion,
+          replacementVersion,
+        ]);
+        assert.equal(await sha256(target), receipts[1].artifacts[0].sha256);
+        assert.equal(await sha256(target + '.openkraken-update/previous.AppImage'), originalDigest);
+        if (key) {
+          await promisify(execFile)(xdotool, ['windowfocus', '--sync', nativeDialog, 'key', key], {
+            timeout: 5000,
+          });
+        } else await writeFile(resumeStartup, 'resume');
+        assert.equal(await waitForFile(choice), key === 'alt+c' ? '1' : '0');
+        if (key === 'Escape') await rm(choice);
+      }
+      console.log(
+        resumeSlowRenderer
+          ? 'Renderer startup dismissed the native recovery dialog with all eight ordinary request slots occupied.'
+          : 'The native dialog accepted Close OpenKraken during ' +
+              (closeSlowMain ? 'pre-window initialization.' : 'a paused renderer.'),
+      );
+    }
     if (delayedStartup) {
       const replacementPid = Number(await waitForFile(heldStartup));
       await delay(61000);
@@ -620,7 +780,7 @@ try {
       child = spawn(target, [`--user-data-dir=${profile}`], {
         detached: true,
         stdio: 'ignore',
-        env: { ...process.env, TMPDIR: root, XDG_CONFIG_HOME: configHome },
+        env: { ...process.env, TMPDIR: runtimeTemp, XDG_CONFIG_HOME: configHome },
       });
     }
     let started = JSON.parse(await waitForFile(marker, slowCommit ? 60000 : 30000));
@@ -653,7 +813,7 @@ try {
       child = spawn(target, [`--user-data-dir=${profile}`], {
         detached: true,
         stdio: 'ignore',
-        env: { ...process.env, TMPDIR: root, XDG_CONFIG_HOME: configHome },
+        env: { ...process.env, TMPDIR: runtimeTemp, XDG_CONFIG_HOME: configHome },
       });
       started = JSON.parse(await waitForFile(marker));
       console.log(
@@ -667,6 +827,11 @@ try {
     }
     if (slowCommit)
       assert.equal(await readFile(join(root, 'slow-commit'), 'utf8'), 'rename resumed');
+    if (damagedRenderer)
+      assert.equal(
+        await readFile(join(root, 'install-error'), 'utf8'),
+        'OpenKraken could not start',
+      );
     if (delayedDescendant)
       assert.equal(
         await readFile(join(root, 'descendant-stopped'), 'utf8'),
@@ -686,13 +851,15 @@ try {
     );
     assert.deepEqual(
       JSON.parse(await readFile(join(root, 'boot.json'), 'utf8')),
-      rollbackSyncError
-        ? [initialVersion, replacementVersion, initialVersion, initialVersion]
-        : predecessorInstalled
-          ? [initialVersion, initialVersion]
-          : failStartup
-            ? [initialVersion, replacementVersion, initialVersion]
-            : [initialVersion, replacementVersion],
+      recoverDownload
+        ? [initialVersion, initialVersion, replacementVersion]
+        : rollbackSyncError
+          ? [initialVersion, replacementVersion, initialVersion, initialVersion]
+          : predecessorInstalled
+            ? [initialVersion, initialVersion]
+            : failStartup
+              ? [initialVersion, replacementVersion, initialVersion]
+              : [initialVersion, replacementVersion],
     );
     assert.equal(
       JSON.parse(await readFile(join(profile, 'updates/trusted-release.json'), 'utf8')).sequence,
@@ -816,6 +983,7 @@ try {
   if (server) await new Promise((resolve) => server.close(resolve));
   await delay(300);
   if (rollbackSyncError) await chmod(installFolder, 0o700).catch(() => {});
+  await rm(runtimeTemp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (completed) await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   else console.error('Retained disposable failure fixture:', root);
 }
