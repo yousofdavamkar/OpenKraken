@@ -808,8 +808,13 @@ export function startDesktop(
         }
         if (request.method === 'repositoryTabsRead')
           return { kind: 'repositoryTabs', state: await tabStore().read() };
-        if (request.method === 'repositoryTabClose')
+        if (request.method === 'repositoryTabClose') {
+          // Remember a saved tab's path for this session so Reopen closed tab can restore it.
+          const saved = await tabStore().pathOf(request.repoId);
+          if (saved && !openedRepositories.has(request.repoId))
+            openedRepositories.set(request.repoId, saved);
           return { kind: 'repositoryTabs', state: await tabStore().close(request.repoId) };
+        }
         if (request.method === 'activityRead' || request.method === 'activityClear')
           return {
             kind: 'activity',
