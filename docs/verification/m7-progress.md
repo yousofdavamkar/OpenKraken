@@ -14,6 +14,12 @@ New, close, next, previous and reopen-closed tab are palette commands with nativ
 
 Packaged-installer smoke testing for the first release showed that several tabs could cover the title bar tools. The tab strip now shrinks and scrolls instead. A test opens six long-named tabs and clicks every title bar control; it failed before the change and passes after it.
 
+## Resizable history columns
+
+Parity row 2.14 is partly met. The Branch / tag, Commit, Author and Date columns resize by pointer or keyboard, and their widths persist per repository. Reordering columns is not implemented. [Resizable history columns](../decisions/0135-resizable-history-columns.md)
+
+Three unit tests cover the default layout, clamping, per-repository round trips and damaged or unavailable storage. An Electron test drags the Author handle, resizes with the arrow keys and clamps the Date column. It checks that a second repository keeps the defaults, and that the widths return after a restart. Home and double-click reset a column. The six Canvas goldens and 37 graph and history tests still pass.
+
 ## PowerShell terminal integration
 
 Linux x64 Electron tests using PowerShell 7.6.9 and PSReadLine 2.4.5 exercised the default prompt, a profile that displays the previous pipeline status, and a read-only prompt. Before the change the custom prompt appeared with shell integration unavailable. After the change native exit codes 23 and 7, a successful command and a cmdlet error reached the toolbar. The following command saw the original failure and native exit code. The read-only profile retained a usable shell. The Linux package accepted native Ctrl+P input and exited normally. [PowerShell startup and signing](../decisions/0132-powershell-terminal-integration.md)

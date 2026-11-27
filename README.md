@@ -158,6 +158,8 @@ Search loaded history with **Ctrl/Cmd+F**. Token-prefix matches cover commit mes
 | Ctrl/Cmd+A / Escape                  | Select loaded rows / clear selection |
 | Enter / double-click                 | Open commit details                  |
 
+Drag the edge of the Branch / tag, Commit, Author or Date column heading to resize it, or focus the handle and use the arrow keys. Widths are kept per repository, and Home or a double-click restores the default. See [ADR 0135](docs/decisions/0135-resizable-history-columns.md).
+
 Enable **Author photos** to request Gravatar images for visible authors. This is off by default; enabling it sends hashed email addresses to Gravatar. Photos are cached locally and remain available offline. Disabling the option cancels requests and restores initials.
 
 ## M1 status and limits
