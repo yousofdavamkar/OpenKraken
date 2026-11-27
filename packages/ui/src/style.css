@@ -2039,9 +2039,12 @@ header.titlebar {
 .repo-tabs {
   display: flex;
   align-items: flex-end;
+  /* Tabs give way to the title bar tools and scroll when they do not fit. */
+  flex: 0 1 auto;
   min-width: 0;
-  flex-shrink: 1;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
 .repo-tab {
   display: flex;
@@ -2073,7 +2076,7 @@ header.titlebar {
   align-items: center;
   justify-content: flex-end;
   gap: 2px;
-  flex: 1;
+  flex: 1 0 auto;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
@@ -2894,6 +2897,8 @@ aside.refs h3.ref-section-heading::before {
   padding-left: 4px;
 }
 .repo-tab {
+  flex: 0 1 auto;
+  min-width: 96px;
   padding: 0 4px 0 0;
   gap: 0;
 }

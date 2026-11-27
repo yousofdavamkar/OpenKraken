@@ -401,7 +401,11 @@ try {
     const shortcut = join(profile, 'selected-checkout');
     await symlink(selected, shortcut, 'dir');
     await pickFolder('Open repository', shortcut);
-    await expect(page.locator('.repo-heading p')).toHaveAttribute('title', selected);
+    await expect(
+      page
+        .getByRole('toolbar', { name: 'Repository actions', exact: true })
+        .getByRole('heading', { level: 1 }),
+    ).toHaveAttribute('title', selected);
     const { stdout: selectedHead } = await promisify(execFile)('git', [
       '-C',
       selected,

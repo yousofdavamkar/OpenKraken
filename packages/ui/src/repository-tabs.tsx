@@ -47,6 +47,12 @@ export function RepositoryTabs({ busy, openNew }: { busy: boolean; openNew: () =
     };
   }, []);
   useEffect(() => {
+    if (!active) return;
+    document
+      .querySelector(`.repo-tab-select[aria-current="page"]`)
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [active, tabs]);
+  useEffect(() => {
     if (!active || !activePath) return;
     setTabs((current) =>
       current.some((tab) => tab.repoId === active)
